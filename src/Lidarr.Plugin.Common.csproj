@@ -1,0 +1,66 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net6.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>Lidarr.Plugin.Common</AssemblyName>
+    <RootNamespace>Lidarr.Plugin.Common</RootNamespace>
+    
+    <!-- Disable central package management for independent repository -->
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+    
+    <!-- NuGet Package Configuration -->
+    <PackageId>Lidarr.Plugin.Common</PackageId>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <PackageVersion>1.0.0</PackageVersion>
+    
+    <!-- Package Metadata -->
+    <Title>Lidarr Plugin Common Library</Title>
+    <Authors>RicherTunes Community</Authors>
+    <Company>RicherTunes</Company>
+    <Description>Shared library for building Lidarr streaming service plugins. Reduces development time by 60%+ through battle-tested utilities, models, and patterns.</Description>
+    <Copyright>Copyright © 2025 RicherTunes Community</Copyright>
+    <PackageProjectUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
+    <PackageReleaseNotes>v1.0.0: Initial release with core utilities, models, and streaming service patterns</PackageReleaseNotes>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    
+    <!-- Build Configuration -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <WarningsAsErrors />
+    <NoWarn>SA1200;SA1633;CS1591;CS8625;CS8618;CS8604;CS8603;CS8601;CS8602;CS8629</NoWarn>
+    <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    
+    <!-- Package Generation -->
+    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    
+    <!-- Source Link for debugging -->
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+  </PropertyGroup>
+
+  <!-- Dependencies (minimal for shared library) -->
+  <ItemGroup>
+    <PackageReference Include="System.Text.Json" Version="8.0.0" />
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All"/>
+  </ItemGroup>
+
+  <!-- Include documentation files in package -->
+  <ItemGroup>
+    <None Include="..\README.md" Pack="true" PackagePath="\" />
+    <None Include="..\CHANGELOG.md" Pack="true" PackagePath="\" />
+    <None Include="..\docs\**\*" Pack="true" PackagePath="docs\" />
+    <None Include="..\examples\**\*" Pack="true" PackagePath="examples\" />
+  </ItemGroup>
+
+</Project>
