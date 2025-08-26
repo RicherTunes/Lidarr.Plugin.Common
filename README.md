@@ -87,7 +87,7 @@ var request = new StreamingApiRequestBuilder(baseUrl)
 ## 🎯 **Supported Streaming Services**
 
 ### **✅ Production Ready**
-- **[Qobuzarr](https://github.com/RicherTunes/Qobuzarr)** - Qobuz integration with 2,000+ users
+- **[Qobuzarr](https://github.com/RicherTunes/Qobuzarr)** - Qobuz integration
 
 ### **🚀 In Development**  
 - **[Tidalarr](https://github.com/TidalAuthor/Tidalarr)** - Tidal integration (74% code reduction confirmed)
