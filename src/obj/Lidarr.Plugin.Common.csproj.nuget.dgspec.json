@@ -1,26 +1,30 @@
 {
   "format": 1,
   "restore": {
-    "I:\\Arr-Plugins\\Lidarr\\Tidalarr\\ext\\Lidarr.Plugin.Common\\src\\Lidarr.Plugin.Common.csproj": {}
+    "I:\\Arr-Plugins\\Lidarr\\Qobuzarr\\ext\\Lidarr.Plugin.Common\\src\\Lidarr.Plugin.Common.csproj": {}
   },
   "projects": {
-    "I:\\Arr-Plugins\\Lidarr\\Tidalarr\\ext\\Lidarr.Plugin.Common\\src\\Lidarr.Plugin.Common.csproj": {
-      "version": "1.0.0",
+    "I:\\Arr-Plugins\\Lidarr\\Qobuzarr\\ext\\Lidarr.Plugin.Common\\src\\Lidarr.Plugin.Common.csproj": {
+      "version": "1.1.0",
       "restore": {
-        "projectUniqueName": "I:\\Arr-Plugins\\Lidarr\\Tidalarr\\ext\\Lidarr.Plugin.Common\\src\\Lidarr.Plugin.Common.csproj",
+        "projectUniqueName": "I:\\Arr-Plugins\\Lidarr\\Qobuzarr\\ext\\Lidarr.Plugin.Common\\src\\Lidarr.Plugin.Common.csproj",
         "projectName": "Lidarr.Plugin.Common",
-        "projectPath": "I:\\Arr-Plugins\\Lidarr\\Tidalarr\\ext\\Lidarr.Plugin.Common\\src\\Lidarr.Plugin.Common.csproj",
+        "projectPath": "I:\\Arr-Plugins\\Lidarr\\Qobuzarr\\ext\\Lidarr.Plugin.Common\\src\\Lidarr.Plugin.Common.csproj",
         "packagesPath": "C:\\Users\\alex\\.nuget\\packages\\",
-        "outputPath": "I:\\Arr-Plugins\\Lidarr\\Tidalarr\\ext\\Lidarr.Plugin.Common\\src\\obj\\",
+        "outputPath": "I:\\Arr-Plugins\\Lidarr\\Qobuzarr\\ext\\Lidarr.Plugin.Common\\src\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
+          "I:\\Arr-Plugins\\Lidarr\\Qobuzarr\\NuGet.Config",
           "C:\\Users\\alex\\AppData\\Roaming\\NuGet\\NuGet.Config"
         ],
         "originalTargetFrameworks": [
           "net6.0"
         ],
         "sources": {
-          "https://api.nuget.org/v3/index.json": {}
+          "https://api.nuget.org/v3/index.json": {},
+          "https://pkgs.dev.azure.com/Lidarr/Lidarr/_packaging/Taglib/nuget/v3/index.json": {},
+          "https://pkgs.dev.azure.com/Servarr/Servarr/_packaging/FluentMigrator/nuget/v3/index.json": {},
+          "https://pkgs.dev.azure.com/Servarr/Servarr/_packaging/SQLite/nuget/v3/index.json": {}
         },
         "frameworks": {
           "net6.0": {
@@ -39,6 +43,26 @@
         "net6.0": {
           "targetAlias": "net6.0",
           "dependencies": {
+            "FluentValidation": {
+              "target": "Package",
+              "version": "[11.9.2, )"
+            },
+            "Microsoft.Extensions.Caching.Memory": {
+              "target": "Package",
+              "version": "[8.0.1, )"
+            },
+            "Microsoft.Extensions.Configuration": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Microsoft.Extensions.Configuration.EnvironmentVariables": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Microsoft.Extensions.Configuration.Json": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
             "Microsoft.Extensions.DependencyInjection": {
               "target": "Package",
               "version": "[8.0.0, )"
@@ -47,10 +71,22 @@
               "target": "Package",
               "version": "[8.0.0, )"
             },
+            "Microsoft.Extensions.Logging": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
+            "Microsoft.Extensions.Logging.Console": {
+              "target": "Package",
+              "version": "[8.0.0, )"
+            },
             "Microsoft.SourceLink.GitHub": {
               "suppressParent": "All",
               "target": "Package",
               "version": "[1.1.1, )"
+            },
+            "Newtonsoft.Json": {
+              "target": "Package",
+              "version": "[13.0.3, )"
             },
             "Polly": {
               "target": "Package",
@@ -59,6 +95,14 @@
             "Polly.Extensions.Http": {
               "target": "Package",
               "version": "[3.0.0, )"
+            },
+            "Spectre.Console": {
+              "target": "Package",
+              "version": "[0.48.0, )"
+            },
+            "System.CommandLine": {
+              "target": "Package",
+              "version": "[2.0.0-beta4.22272.1, )"
             },
             "System.Text.Json": {
               "target": "Package",
