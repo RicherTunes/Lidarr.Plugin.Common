@@ -1,0 +1,15 @@
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\bin\Debug\net6.0\Lidarr.Plugin.Common.deps.json
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\bin\Debug\net6.0\Lidarr.Plugin.Common.dll
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\bin\Debug\net6.0\Lidarr.Plugin.Common.pdb
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\bin\Debug\net6.0\Lidarr.Plugin.Common.xml
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\Lidarr.Plugin.Common.csproj.AssemblyReference.cache
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\Lidarr.Plugin.Common.GeneratedMSBuildEditorConfig.editorconfig
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\Lidarr.Plugin.Common.AssemblyInfoInputs.cache
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\Lidarr.Plugin.Common.AssemblyInfo.cs
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\Lidarr.Plugin.Common.csproj.CoreCompileInputs.cache
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\Lidarr.Plugin.Common.sourcelink.json
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\Lidarr.Plugin.Common.dll
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\refint\Lidarr.Plugin.Common.dll
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\Lidarr.Plugin.Common.xml
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\Lidarr.Plugin.Common.pdb
+I:\Arr-Plugins\Lidarr\Tidalarr\ext\Lidarr.Plugin.Common\src\obj\Debug\net6.0\ref\Lidarr.Plugin.Common.dll
