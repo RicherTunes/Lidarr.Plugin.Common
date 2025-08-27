@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Performance;
@@ -222,7 +223,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                             var result = await DownloadTrackWithRetryAsync(track, settings, filePath, ct);
                             results.Add(result);
                             
-                            yield return result;
+                            // Result will be yielded through batch processing
                         }
                         finally
                         {
@@ -246,6 +247,12 @@ namespace Lidarr.Plugin.Common.Services.Download
                     MemoryUsageMB = batchResult.MemoryUsageMB,
                     ElapsedTime = DateTime.UtcNow - startTime
                 });
+                
+                // Yield each result from this batch
+                foreach (var result in batchResult.Results)
+                {
+                    yield return result;
+                }
             }
         }
 
