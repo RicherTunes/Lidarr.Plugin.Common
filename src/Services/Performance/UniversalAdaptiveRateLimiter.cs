@@ -11,7 +11,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
     /// <summary>
     /// Interface for adaptive rate limiting across multiple streaming services
     /// </summary>
-    public interface IUniversalAdaptiveRateLimiter
+    public interface IUniversalAdaptiveRateLimiter : IDisposable
     {
         /// <summary>
         /// Wait if needed before making a request to prevent rate limiting
