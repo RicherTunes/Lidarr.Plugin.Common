@@ -19,6 +19,7 @@ namespace Lidarr.Plugin.Common.Base
             IncludeSingles = false;
             IncludeCompilations = false;
             EarlyReleaseDayLimit = 0;
+            OrganizeByArtist = true;
         }
 
         /// <summary>
@@ -80,6 +81,11 @@ namespace Lidarr.Plugin.Common.Base
         /// Connection timeout for API requests (in seconds).
         /// </summary>
         public virtual int ConnectionTimeout { get; set; }
+
+        /// <summary>
+        /// Organize downloads by artist/album folder structure.
+        /// </summary>
+        public virtual bool OrganizeByArtist { get; set; }
 
         /// <summary>
         /// Include albums up to this many days before official release.
