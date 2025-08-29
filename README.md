@@ -25,6 +25,14 @@
 dotnet add package Lidarr.Plugin.Common
 ```
 
+### **Optional CLI Framework**
+```bash
+# Enable CLI framework (includes System.CommandLine beta dependency)
+# Only enable if you need CLI functionality for testing/development
+dotnet build -p:IncludeCLIFramework=true
+```
+⚠️ **Note**: CLI framework includes pre-release dependencies. Recommended for development/testing only.
+
 ### **Immediate 60%+ Code Reduction**
 ```csharp
 using Lidarr.Plugin.Common.Utilities;
