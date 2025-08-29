@@ -3,6 +3,7 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentValidation.Results;
@@ -102,9 +103,9 @@ namespace Lidarr.Plugin.Common.Base
         protected abstract Task<StreamingTrack> GetTrackAsync(string trackId);
 
         /// <summary>
-        /// Download a single track to the specified path
+        /// Service implements: Get stream URL for track (service-specific implementation required)
         /// </summary>
-        protected abstract Task<StreamingDownloadResult> DownloadTrackAsync(StreamingTrack track, string outputPath, CancellationToken cancellationToken = default);
+        protected abstract Task<string> GetStreamUrlAsync(string trackId, string quality);
 
         /// <summary>
         /// Validate service-specific download settings
@@ -395,17 +396,241 @@ namespace Lidarr.Plugin.Common.Base
 
         private async Task ProcessTrackDownload(StreamingAlbum album, int trackNumber, string albumPath, CancellationToken cancellationToken)
         {
-            // This is a simplified simulation - real implementation would:
-            // 1. Get actual track details from album
-            // 2. Call DownloadTrackAsync with real track data
-            // 3. Handle track-specific errors and retries
+            try
+            {
+                // Services must provide track details separately since album doesn't contain full track list
+                // This is a placeholder that services would override with proper track enumeration
+                Logger?.LogInformation("Processing track {TrackNumber} from album {AlbumTitle}", trackNumber, album.Title);
+                
+                // In a service-specific implementation, you would:
+                // 1. Get track list from the service API
+                // 2. Find the specific track by number
+                // 3. Download using DownloadTrackAsync
+                
+                // For now, skip the placeholder implementation
+                await Task.Delay(100, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                Logger?.LogError(ex, "Track download exception: Track {TrackNumber} from album {AlbumTitle}", trackNumber, album.Title);
+            }
+        }
+
+        /// <summary>
+        /// Framework provides: Real track download implementation (common across all services)
+        /// </summary>
+        protected virtual async Task<StreamingDownloadResult> DownloadTrackAsync(StreamingTrack track, string outputFilePath, CancellationToken cancellationToken)
+        {
+            try
+            {
+                Logger?.LogInformation("Downloading track: {Artist} - {Title}", track.Artist, track.Title);
+
+                // Service-specific: Get download URL
+                var streamUrl = await GetStreamUrlAsync(track.Id, GetDefaultQuality());
+                if (string.IsNullOrEmpty(streamUrl))
+                {
+                    return new StreamingDownloadResult { Success = false, ErrorMessage = "Could not obtain stream URL" };
+                }
+
+                // Framework provides: Complete file download
+                return await DownloadAudioFileAsync(streamUrl, outputFilePath, track, null, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                Logger?.LogError(ex, "Track download failed: {TrackTitle}", track.Title);
+                return new StreamingDownloadResult { Success = false, ErrorMessage = ex.Message };
+            }
+        }
+
+        /// <summary>
+        /// Framework provides: Complete audio file download with progress tracking
+        /// Adapts the working AudioFileDownloader pattern for common use
+        /// </summary>
+        protected async Task<StreamingDownloadResult> DownloadAudioFileAsync(
+            string streamUrl,
+            string outputFilePath,
+            StreamingTrack metadata,
+            IProgress<double>? progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            const int MaxRetries = 3;
+            const int BufferSize = 8192;
             
-            await Task.Delay(1000, cancellationToken); // Simulate download time
+            Exception? lastException = null;
             
-            // In real implementation:
-            // var track = await GetTrackAsync(trackId);
-            // var outputPath = GenerateTrackPath(track, album, albumPath);
-            // var result = await DownloadTrackAsync(track, outputPath, cancellationToken);
+            for (int attempt = 1; attempt <= MaxRetries; attempt++)
+            {
+                try
+                {
+                    Logger?.LogDebug("Download attempt {Attempt}/{MaxRetries}: {Title}", attempt, MaxRetries, metadata.Title);
+
+                    // Ensure output directory exists
+                    var outputDirectory = Path.GetDirectoryName(outputFilePath);
+                    if (!string.IsNullOrEmpty(outputDirectory))
+                    {
+                        Directory.CreateDirectory(outputDirectory);
+                    }
+
+                    // Download file with progress tracking
+                    using var httpClient = new HttpClient();
+                    httpClient.Timeout = TimeSpan.FromMinutes(10);
+
+                    using var response = await httpClient.GetAsync(streamUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    response.EnsureSuccessStatusCode();
+
+                    var totalBytes = response.Content.Headers.ContentLength ?? 0;
+                    var downloadedBytes = 0L;
+
+                    // Use temporary file for atomic download
+                    var tempFilePath = outputFilePath + ".tmp";
+
+                    using (var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken))
+                    using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
+                    {
+                        var buffer = new byte[BufferSize];
+                        int bytesRead;
+
+                        while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                        {
+                            await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken);
+                            downloadedBytes += bytesRead;
+
+                            // Report progress
+                            if (progress != null && totalBytes > 0)
+                            {
+                                var progressPercent = (double)downloadedBytes / totalBytes * 100;
+                                progress.Report(progressPercent);
+                            }
+                        }
+                    }
+
+                    // Apply metadata tags to the temporary file
+                    await ApplyMetadataTagsAsync(tempFilePath, metadata);
+
+                    // Atomic move to final location
+                    if (File.Exists(outputFilePath))
+                    {
+                        File.Delete(outputFilePath);
+                    }
+                    File.Move(tempFilePath, outputFilePath);
+
+                    Logger?.LogInformation("Track download completed: {FilePath} ({Size:N0} bytes)", outputFilePath, downloadedBytes);
+
+                    return new StreamingDownloadResult
+                    {
+                        Success = true,
+                        FilePath = outputFilePath,
+                        FileSize = downloadedBytes
+                    };
+                }
+                catch (OperationCanceledException)
+                {
+                    Logger?.LogWarning("Download cancelled: {Title}", metadata.Title);
+                    return new StreamingDownloadResult { Success = false, ErrorMessage = "Download cancelled" };
+                }
+                catch (Exception ex)
+                {
+                    lastException = ex;
+                    Logger?.LogWarning(ex, "Download attempt {Attempt} failed: {Title}", attempt, metadata.Title);
+                    
+                    if (attempt < MaxRetries)
+                    {
+                        await Task.Delay(1000 * attempt, cancellationToken); // Exponential backoff
+                    }
+                }
+            }
+
+            Logger?.LogError(lastException, "All download attempts failed: {Title}", metadata.Title);
+            return new StreamingDownloadResult { Success = false, ErrorMessage = lastException?.Message ?? "Download failed after all retries" };
+        }
+
+        /// <summary>
+        /// Framework provides: Metadata tagging using TagLibSharp (common implementation)
+        /// </summary>
+        private async Task ApplyMetadataTagsAsync(string filePath, StreamingTrack metadata)
+        {
+            try
+            {
+                await Task.Run(() =>
+                {
+                    using var file = TagLib.File.Create(filePath);
+                    
+                    if (!string.IsNullOrEmpty(metadata.Title))
+                        file.Tag.Title = metadata.Title;
+                    
+                    if (metadata.Artist?.Name != null)
+                        file.Tag.Performers = new[] { metadata.Artist.Name };
+                        
+                    if (metadata.Album?.Title != null)
+                        file.Tag.Album = metadata.Album.Title;
+                    
+                    if (metadata.TrackNumber.HasValue && metadata.TrackNumber > 0)
+                        file.Tag.Track = (uint)metadata.TrackNumber.Value;
+                        
+                    if (metadata.Album?.ReleaseDate.HasValue == true)
+                        file.Tag.Year = (uint)metadata.Album.ReleaseDate.Value.Year;
+                    
+                    // Use first genre if available
+                    if (metadata.Album?.Genres?.Any() == true)
+                        file.Tag.Genres = new[] { metadata.Album.Genres.First() };
+
+                    file.Save();
+                });
+
+                Logger?.LogDebug("Metadata applied: {Title}", metadata.Title);
+            }
+            catch (Exception ex)
+            {
+                // Don't fail download for metadata issues
+                Logger?.LogWarning(ex, "Failed to apply metadata to {FilePath}", filePath);
+            }
+        }
+
+        /// <summary>
+        /// Framework provides: Clean filename generation
+        /// </summary>
+        protected virtual string GenerateTrackFileName(StreamingTrack track, StreamingAlbum album)
+        {
+            var trackNumber = (track.TrackNumber ?? 0) > 0 ? track.TrackNumber.Value.ToString("D2") : "00";
+            var artist = SanitizeFileName(track.Artist?.Name ?? album.Artist?.Name ?? "Unknown Artist");
+            var title = SanitizeFileName(track.Title ?? "Unknown Title");
+            
+            return $"{trackNumber} - {artist} - {title}.flac";
+        }
+
+        /// <summary>
+        /// Framework provides: File name sanitization for cross-platform compatibility
+        /// </summary>
+        private static string SanitizeFileName(string fileName)
+        {
+            if (string.IsNullOrEmpty(fileName)) return "Unknown";
+            
+            var invalidChars = Path.GetInvalidFileNameChars();
+            var sanitized = fileName;
+            
+            foreach (var invalidChar in invalidChars)
+            {
+                sanitized = sanitized.Replace(invalidChar, '_');
+            }
+            
+            // Additional cleanup for common problematic characters
+            sanitized = sanitized
+                .Replace(":", " -")
+                .Replace("?", "")
+                .Replace("*", "")
+                .Replace("\"", "'")
+                .Replace("|", "-");
+            
+            return sanitized.Trim();
+        }
+
+        /// <summary>
+        /// Service implements: Get default quality identifier (service-specific)
+        /// </summary>
+        protected virtual string GetDefaultQuality()
+        {
+            // Default implementation - services override with their format
+            return "highest";
         }
 
         private string GenerateAlbumPath(StreamingAlbum album, string basePath)

@@ -79,6 +79,11 @@
     <PackageReference Include="Spectre.Console" Version="0.48.0" />
   </ItemGroup>
 
+  <!-- Audio Processing Dependencies -->
+  <ItemGroup>
+    <PackageReference Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
+  </ItemGroup>
+
   <!-- Include documentation files in package -->
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="\" />
