@@ -78,10 +78,12 @@
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All"/>
   </ItemGroup>
 
-  <!-- CLI Framework Dependencies (opt-in for development) -->
+  <!-- CLI Framework Dependencies - Optional for development/testing only -->
+  <!-- Production consumers: exclude pre-release dependencies by default -->
+  <!-- Development teams: enable with -p:IncludeCLIFramework=true -->
   <ItemGroup Condition="'$(IncludeCLIFramework)' == 'true'">
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
-    <PackageReference Include="Spectre.Console" Version="0.48.0" />
+    <PackageReference Include="Spectre.Console" Version="0.50.0" />
   </ItemGroup>
 
   <!-- Audio Processing Dependencies -->
