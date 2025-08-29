@@ -53,6 +53,8 @@
   <!-- Exclude disabled files from compilation -->
   <ItemGroup>
     <Compile Remove="**\*.disabled\**\*.cs" />
+    <!-- Exclude CLI framework files unless explicitly included -->
+    <Compile Remove="CLI\**\*.cs" Condition="'$(IncludeCLIFramework)' != 'true'" />
   </ItemGroup>
 
   <!-- Core Dependencies -->
@@ -73,10 +75,10 @@
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All"/>
   </ItemGroup>
 
-  <!-- CLI Framework Dependencies -->
-  <ItemGroup>
+  <!-- CLI Framework Dependencies - Optional for plugins that need CLI functionality -->
+  <ItemGroup Condition="'$(IncludeCLIFramework)' == 'true'">
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
-    <PackageReference Include="Spectre.Console" Version="0.48.0" />
+    <PackageReference Include="Spectre.Console" Version="0.50.0" />
   </ItemGroup>
 
   <!-- Audio Processing Dependencies -->
