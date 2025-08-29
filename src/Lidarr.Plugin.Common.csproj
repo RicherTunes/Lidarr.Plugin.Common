@@ -53,8 +53,11 @@
   <!-- Exclude disabled files from compilation -->
   <ItemGroup>
     <Compile Remove="**\*.disabled\**\*.cs" />
-    <!-- Exclude CLI framework files unless explicitly enabled -->
-    <Compile Remove="CLI\**\*.cs" Condition="'$(IncludeCLIFramework)' != 'true'" />
+  </ItemGroup>
+
+  <!-- Exclude CLI framework files when not explicitly included -->
+  <ItemGroup Condition="'$(IncludeCLIFramework)' != 'true'">
+    <Compile Remove="CLI\**\*.cs" />
   </ItemGroup>
 
   <!-- Core Dependencies -->
