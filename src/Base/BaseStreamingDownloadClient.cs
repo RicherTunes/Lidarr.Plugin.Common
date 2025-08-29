@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentValidation.Results;
 using Microsoft.Extensions.Logging;
+using TagLib;
 using Lidarr.Plugin.Common.Base;
 using Lidarr.Plugin.Common.Models;
 using Lidarr.Plugin.Common.Services.Performance;
@@ -508,11 +509,11 @@ namespace Lidarr.Plugin.Common.Base
                     await ApplyMetadataTagsAsync(tempFilePath, metadata);
 
                     // Atomic move to final location
-                    if (File.Exists(outputFilePath))
+                    if (System.IO.File.Exists(outputFilePath))
                     {
-                        File.Delete(outputFilePath);
+                        System.IO.File.Delete(outputFilePath);
                     }
-                    File.Move(tempFilePath, outputFilePath);
+                    System.IO.File.Move(tempFilePath, outputFilePath);
 
                     Logger?.LogInformation("Track download completed: {FilePath} ({Size:N0} bytes)", outputFilePath, downloadedBytes);
 
