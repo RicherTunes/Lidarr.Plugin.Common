@@ -25,6 +25,21 @@
 dotnet add package Lidarr.Plugin.Common
 ```
 
+### **Optional CLI Framework (Production-Ready Default)**
+```bash
+# Default: Production-ready build (no pre-release dependencies)
+dotnet build
+
+# Development/Testing: Enable CLI functionality when needed
+dotnet build -p:IncludeCLIFramework=true
+```
+
+**🎯 Production-First Design:**
+- **Production Default**: Clean, stable dependencies only
+- **Development Opt-in**: CLI features available when explicitly enabled
+- **External Friendly**: No surprise pre-release packages
+- **Long-term Sustainable**: Scales cleanly as library grows
+
 ### **Immediate 60%+ Code Reduction**
 ```csharp
 using Lidarr.Plugin.Common.Utilities;
