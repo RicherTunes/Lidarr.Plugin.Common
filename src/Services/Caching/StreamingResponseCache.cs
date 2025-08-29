@@ -16,9 +16,15 @@ namespace Lidarr.Plugin.Common.Services.Caching
         private readonly object _cleanupLock = new object();
         private DateTime _lastCleanup = DateTime.UtcNow;
         
-        protected StreamingResponseCache()
+        protected TimeSpan DefaultCacheDuration { get; set; } = TimeSpan.FromMinutes(15);
+        protected int MaxCacheSize { get; set; } = 1000;
+        protected TimeSpan CleanupInterval { get; set; } = TimeSpan.FromMinutes(5);
+        protected Microsoft.Extensions.Logging.ILogger Logger { get; set; }
+
+        protected StreamingResponseCache(Microsoft.Extensions.Logging.ILogger logger = null)
         {
             _cache = new ConcurrentDictionary<string, CacheItem>();
+            Logger = logger;
         }
 
         /// <inheritdoc/>
@@ -127,6 +133,73 @@ namespace Lidarr.Plugin.Common.Services.Caching
         protected abstract string GetServiceName();
 
         /// <summary>
+        /// Called when cache hit occurs. Override for custom handling.
+        /// </summary>
+        protected virtual void OnCacheHit(string cacheKey) { }
+
+        /// <summary>
+        /// Called when cache miss occurs. Override for custom handling.
+        /// </summary>
+        protected virtual void OnCacheMiss(string cacheKey) { }
+
+        /// <summary>
+        /// Called when cache eviction occurs. Override for custom handling.
+        /// </summary>
+        protected virtual void OnCacheEviction(string cacheKey, TimeSpan age) { }
+
+        /// <summary>
+        /// Called when an endpoint is cleared. Override for custom handling.
+        /// </summary>
+        protected virtual void OnEndpointCleared(string endpoint, int itemsRemoved) { }
+
+        /// <summary>
+        /// Override to filter sensitive parameters from cache keys.
+        /// </summary>
+        protected virtual bool ShouldFilterParameter(string parameterName, object parameterValue)
+        {
+            return IsSensitiveParameter(parameterName);
+        }
+
+        /// <summary>
+        /// Get cache statistics. Override for custom statistics.
+        /// </summary>
+        protected virtual object GetStatistics()
+        {
+            return new 
+            {
+                TotalEntries = _cache.Count,
+                HitRatio = 0.0,
+                TotalHits = 0L,
+                TotalMisses = 0L,
+                MemoryUsageEstimate = 0L,
+                OldestEntryAge = TimeSpan.Zero
+            };
+        }
+
+        /// <summary>
+        /// Invalidate entries by prefix. Override for custom logic.
+        /// </summary>
+        protected virtual void InvalidateByPrefix(string prefix)
+        {
+            var keysToRemove = _cache.Keys
+                .Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            foreach (var key in keysToRemove)
+            {
+                _cache.TryRemove(key, out _);
+            }
+        }
+
+        /// <summary>
+        /// Count entries by prefix. Override for custom logic.
+        /// </summary>
+        protected virtual int CountEntriesByPrefix(string prefix)
+        {
+            return _cache.Keys.Count(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        }
+
+        /// <summary>
         /// Determines if a parameter is sensitive and should be excluded from cache keys.
         /// </summary>
         protected virtual bool IsSensitiveParameter(string parameterName)
@@ -162,10 +235,6 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// </summary>
         protected virtual void OnCacheCleared() { }
 
-        /// <summary>
-        /// Called when an endpoint's cache entries are cleared.
-        /// </summary>
-        protected virtual void OnEndpointCleared(string endpoint, int itemsRemoved) { }
 
         private void CleanupExpiredItems()
         {

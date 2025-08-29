@@ -55,7 +55,10 @@ namespace Lidarr.Plugin.Common.Services.Registration
         /// Registers core plugin services (indexer, download client, settings).
         /// Must be implemented by derived classes.
         /// </summary>
-        protected abstract void RegisterCoreServices();
+        protected virtual void RegisterCoreServices()
+        {
+            // Override in derived classes to register service-specific core services
+        }
 
         /// <summary>
         /// Registers authentication-related services.
