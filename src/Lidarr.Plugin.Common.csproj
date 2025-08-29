@@ -53,8 +53,8 @@
   <!-- Exclude disabled files from compilation -->
   <ItemGroup>
     <Compile Remove="**\*.disabled\**\*.cs" />
-    <!-- Exclude CLI framework files when disabled for external consumers -->
-    <Compile Remove="CLI\**\*.cs" Condition="'$(IncludeCLIFramework)' == 'false'" />
+    <!-- Exclude CLI framework files unless explicitly enabled -->
+    <Compile Remove="CLI\**\*.cs" Condition="'$(IncludeCLIFramework)' != 'true'" />
   </ItemGroup>
 
   <!-- Core Dependencies -->
@@ -75,8 +75,10 @@
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All"/>
   </ItemGroup>
 
-  <!-- CLI Framework Dependencies - Conditional for external consumers, but default enabled for internal development -->
-  <ItemGroup Condition="'$(IncludeCLIFramework)' != 'false'">
+  <!-- CLI Framework Dependencies - Optional for development/testing only -->
+  <!-- Production consumers: exclude pre-release dependencies by default -->
+  <!-- Development teams: enable with -p:IncludeCLIFramework=true -->
+  <ItemGroup Condition="'$(IncludeCLIFramework)' == 'true'">
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
     <PackageReference Include="Spectre.Console" Version="0.50.0" />
   </ItemGroup>
