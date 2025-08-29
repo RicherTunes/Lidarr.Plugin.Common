@@ -25,19 +25,20 @@
 dotnet add package Lidarr.Plugin.Common
 ```
 
-### **CLI Framework (Hybrid Approach)**
+### **Optional CLI Framework (Production-Ready Default)**
 ```bash
-# Default: CLI framework is ENABLED for development teams
-# All Qobuzarr/Tidalarr development gets CLI functionality automatically
+# Default: Production-ready build (no pre-release dependencies)
+dotnet build
 
-# External consumers: Disable CLI to avoid pre-release dependencies
-dotnet build -p:IncludeCLIFramework=false
+# Development/Testing: Enable CLI functionality when needed
+dotnet build -p:IncludeCLIFramework=true
 ```
 
-**🎯 Optimal Design:**
-- **Internal Development**: CLI enabled by default (`!= 'false'` logic)
-- **External Adoption**: Easy opt-out for production-only consumers
-- **Best of Both Worlds**: Developer productivity + external compatibility
+**🎯 Production-First Design:**
+- **Production Default**: Clean, stable dependencies only
+- **Development Opt-in**: CLI features available when explicitly enabled
+- **External Friendly**: No surprise pre-release packages
+- **Long-term Sustainable**: Scales cleanly as library grows
 
 ### **Immediate 60%+ Code Reduction**
 ```csharp
