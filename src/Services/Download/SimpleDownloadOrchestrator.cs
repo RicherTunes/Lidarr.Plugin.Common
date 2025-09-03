@@ -111,15 +111,41 @@ namespace Lidarr.Plugin.Common.Services.Download
                 var resumePath = tempPath + ".resume.json";
 
                 long existingBytes = 0;
+                string? etag = null; DateTimeOffset? lastModified = null;
                 if (File.Exists(tempPath))
                 {
                     try { existingBytes = new FileInfo(tempPath).Length; } catch { existingBytes = 0; }
+                    // Try to read previous checkpoint for validators
+                    try
+                    {
+                        if (File.Exists(resumePath))
+                        {
+                            var json = File.ReadAllText(resumePath);
+                            var state = System.Text.Json.JsonSerializer.Deserialize<ResumeState>(json);
+                            if (state != null)
+                            {
+                                etag = state.ETag;
+                                if (state.LastModifiedUtc.HasValue)
+                                    lastModified = new DateTimeOffset(state.LastModifiedUtc.Value, TimeSpan.Zero);
+                            }
+                        }
+                    }
+                    catch { }
                 }
 
                 using var req = new HttpRequestMessage(HttpMethod.Get, url);
                 if (existingBytes > 0)
                 {
                     req.Headers.Range = new RangeHeaderValue(existingBytes, null);
+                    // Use validators to ensure the server resumes the same representation
+                    if (!string.IsNullOrEmpty(etag))
+                    {
+                        req.Headers.TryAddWithoutValidation("If-Range", etag);
+                    }
+                    else if (lastModified.HasValue)
+                    {
+                        req.Headers.TryAddWithoutValidation("If-Range", lastModified.Value.ToString("R"));
+                    }
                 }
 
                 using var resp = await _httpClient.ExecuteWithResilienceAsync(req).ConfigureAwait(false);
@@ -127,6 +153,14 @@ namespace Lidarr.Plugin.Common.Services.Download
 
                 var totalHeader = resp.Content.Headers.ContentLength;
                 var isPartial = resp.StatusCode == System.Net.HttpStatusCode.PartialContent;
+                // Capture validators on successful response
+                try
+                {
+                    if (resp.Headers.ETag != null) etag = resp.Headers.ETag.Tag;
+                    if (resp.Content?.Headers?.LastModified.HasValue == true)
+                        lastModified = resp.Content.Headers.LastModified;
+                }
+                catch { }
                 var totalExpected = isPartial && totalHeader.HasValue ? existingBytes + totalHeader.Value : (totalHeader ?? 0);
 
                 // If server did not honor range, restart cleanly
@@ -151,7 +185,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                         downloaded += read;
 
                         // Opportunistic checkpoint (simple byte count)
-                        TryWriteResumeCheckpoint(resumePath, downloaded, totalExpected);
+                        TryWriteResumeCheckpoint(resumePath, downloaded, totalExpected, etag, lastModified?.UtcDateTime);
                     }
                     await fs.FlushAsync().ConfigureAwait(false);
                     try { fs.Flush(true); } catch { }
@@ -186,14 +220,16 @@ namespace Lidarr.Plugin.Common.Services.Download
             }
         }
 
-        private static void TryWriteResumeCheckpoint(string resumePath, long downloaded, long totalExpected)
+        private static void TryWriteResumeCheckpoint(string resumePath, long downloaded, long totalExpected, string? etag, DateTime? lastModifiedUtc)
         {
             try
             {
                 var json = System.Text.Json.JsonSerializer.Serialize(new ResumeState
                 {
                     DownloadedBytes = downloaded,
-                    TotalExpectedBytes = totalExpected
+                    TotalExpectedBytes = totalExpected,
+                    ETag = etag,
+                    LastModifiedUtc = lastModifiedUtc
                 });
                 File.WriteAllText(resumePath, json);
             }
@@ -204,6 +240,8 @@ namespace Lidarr.Plugin.Common.Services.Download
         {
             public long DownloadedBytes { get; set; }
             public long TotalExpectedBytes { get; set; }
+            public string? ETag { get; set; }
+            public DateTime? LastModifiedUtc { get; set; }
         }
 
         public Task<List<StreamingQuality>> GetAvailableQualitiesAsync(string contentId)
