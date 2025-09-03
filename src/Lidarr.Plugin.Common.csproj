@@ -13,10 +13,10 @@
     
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <Version>1.1.0</Version>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
-    <PackageVersion>1.1.0</PackageVersion>
+    <Version>1.1.1</Version>
+    <AssemblyVersion>1.1.1.0</AssemblyVersion>
+    <FileVersion>1.1.1.0</FileVersion>
+    <PackageVersion>1.1.1</PackageVersion>
     
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
@@ -28,7 +28,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.1.0: Major enhancement - Added OAuth/PKCE authentication, universal rate limiting, batch memory management, download orchestration framework, and compilation album detection</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.1.1: Context-specific sanitizers, resilient HTTP (Retry-After + per-host concurrency), OAuth auto-refresh handler, atomic/resumable downloads, and universal IDs.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     
