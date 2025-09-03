@@ -9,6 +9,7 @@ namespace Lidarr.Plugin.Common.Security
     /// Prevents injection attacks and ensures safe data handling
     /// UNIVERSAL: All plugins handle user input and API responses
     /// </summary>
+    [Obsolete("Use Sanitize.UrlComponent/PathSegment/DisplayText/IsSafePath for context-specific handling.")]
     public static class InputSanitizer
     {
         private static readonly Regex SqlInjectionPattern = new(@"(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|UNION|SCRIPT)\b)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
@@ -18,6 +19,7 @@ namespace Lidarr.Plugin.Common.Security
         /// <summary>
         /// Sanitizes search query input to prevent injection attacks
         /// </summary>
+        [Obsolete("Avoid generic sanitization of queries. When building URLs use Sanitize.UrlComponent, and avoid HTML-encoding search terms.")]
         public static string SanitizeSearchQuery(string query)
         {
             if (string.IsNullOrWhiteSpace(query))
@@ -28,16 +30,14 @@ namespace Lidarr.Plugin.Common.Security
             query = ScriptInjectionPattern.Replace(query, "");
             query = PathTraversalPattern.Replace(query, "");
 
-            // HTML encode for safety
-            query = System.Net.WebUtility.HtmlEncode(query);
-
-            // Trim and limit length
-            return query.Trim().Substring(0, Math.Min(query.Length, 500));
+            // Do not HTML-encode here; callers should encode at render-time only.
+            return query.Trim();
         }
 
         /// <summary>
         /// Sanitizes file path to prevent directory traversal
         /// </summary>
+        [Obsolete("Use Sanitize.PathSegment for file name parts and perform path join safely.")]
         public static string SanitizeFilePath(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath))
@@ -59,6 +59,7 @@ namespace Lidarr.Plugin.Common.Security
         /// <summary>
         /// Sanitizes API parameter to prevent injection
         /// </summary>
+        [Obsolete("Use Sanitize.UrlComponent for query parameter/URL component encoding.")]
         public static string SanitizeApiParameter(string parameter)
         {
             if (string.IsNullOrWhiteSpace(parameter))
@@ -71,6 +72,7 @@ namespace Lidarr.Plugin.Common.Security
         /// <summary>
         /// Validates that string doesn't contain suspicious patterns
         /// </summary>
+        [Obsolete("Use Sanitize.IsSafePath for path traversal checks or validate per-context.")]
         public static bool IsSafeInput(string input)
         {
             if (string.IsNullOrWhiteSpace(input))
@@ -84,6 +86,7 @@ namespace Lidarr.Plugin.Common.Security
         /// <summary>
         /// Sanitizes metadata fields to prevent malicious content
         /// </summary>
+        [Obsolete("Use Sanitize.DisplayText for HTML display contexts; otherwise avoid altering metadata.")]
         public static string SanitizeMetadata(string metadata)
         {
             if (string.IsNullOrWhiteSpace(metadata))

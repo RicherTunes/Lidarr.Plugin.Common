@@ -65,19 +65,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.1.1] - 2025-09-03
 
-### Planned for v1.1.0
-- Advanced ML optimization patterns abstraction
-- Real-time collaboration between plugins
-- Enhanced performance analytics
-- Cross-service content matching utilities
+### Added
+- Context-specific sanitizers: `Sanitize.UrlComponent`, `Sanitize.PathSegment`, `Sanitize.DisplayText`, `Sanitize.IsSafePath`.
+- HTTP resilience: `HttpClientExtensions.ExecuteWithResilienceAsync` with 429/Retry-After awareness, jittered backoff, retry budget, and per-host concurrency gating.
+- OAuth token refresh: `OAuthDelegatingHandler` for Bearer injection and single-flight refresh on 401.
+- Atomic/resumable downloads: Base download client now writes to `.partial`, flushes to disk, and performs atomic move; resumes when server supports ranges.
+- Universal IDs on models: `StreamingAlbum.MusicBrainzId`, `StreamingAlbum.ExternalIds`, `StreamingTrack.MusicBrainzId`, `StreamingTrack.ExternalIds`.
 
-### Planned for v1.2.0
-- Enterprise monitoring features
-- Advanced caching strategies
-- Plugin marketplace integration
-- Community contribution framework
+### Changed
+- `BaseStreamingIndexer` now uses a shared `HttpClient` + resilient pipeline to avoid socket exhaustion and improve stability.
+- `InputSanitizer` methods marked `[Obsolete]` in favor of context-specific `Sanitize` helpers.
+
+### Notes
+- No breaking changes: obsolete APIs remain for compatibility.
+- Submodule usage continues to work; package metadata remains enabled for future NuGet distribution.
+
+## [1.1.0] - 2025-08-30
+
+### Added
+- OAuth/PKCE authentication base and token management utilities.
+- Base streaming indexer and download client frameworks.
+- Performance and memory management helpers (batch manager, monitors).
+
+### Notes
+- Prepared the library for packaging with source link and symbols.
 
 ---
 

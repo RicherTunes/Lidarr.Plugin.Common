@@ -9,6 +9,8 @@ using Lidarr.Plugin.Common.Models;
 using Lidarr.Plugin.Common.Services.Http;
 using Lidarr.Plugin.Common.Services.Performance;
 using Lidarr.Plugin.Common.Utilities;
+using System.Net;
+using System.Net.Http;
 
 namespace Lidarr.Plugin.Common.Base
 {
@@ -55,6 +57,20 @@ namespace Lidarr.Plugin.Common.Base
         private readonly object _initializationLock = new object();
         private bool _isInitialized = false;
         private bool _disposed = false;
+
+        private static readonly HttpClient SharedHttpClient = new HttpClient(new SocketsHttpHandler
+        {
+            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+        })
+        {
+            Timeout = TimeSpan.FromSeconds(100)
+        };
+
+        /// <summary>
+        /// Provides the HttpClient used for API calls. Override to inject custom handlers (e.g., OAuthDelegatingHandler).
+        /// Defaults to a shared, decompression-enabled client.
+        /// </summary>
+        protected virtual HttpClient GetHttpClient() => SharedHttpClient;
 
         #endregion
 
@@ -279,13 +295,11 @@ namespace Lidarr.Plugin.Common.Base
         /// </summary>
         protected async Task<string> ExecuteRequestAsync(System.Net.Http.HttpRequestMessage request)
         {
-            using var httpClient = new System.Net.Http.HttpClient();
-            
-            var response = await RetryUtilities.ExecuteWithRetryAsync(
-                async () => await httpClient.SendAsync(request),
-                maxRetries: 3,
-                initialDelayMs: 1000,
-                operationName: $"{ServiceName} API call"
+            using var response = await GetHttpClient().ExecuteWithResilienceAsync(
+                request,
+                maxRetries: 5,
+                retryBudget: TimeSpan.FromSeconds(60),
+                maxConcurrencyPerHost: 6
             );
 
             response.EnsureSuccessStatusCode();
