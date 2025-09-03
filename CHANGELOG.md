@@ -97,6 +97,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Notes
 - All changes are additive and backward compatible. Submodule consumers can adopt incrementally.
 
+## [1.1.3] - 2025-09-03
+
+### Added
+- BaseStreamingIndexer: optional streaming search APIs (`SearchAlbumsStreamAsync`, `SearchTracksStreamAsync`) and `FetchPagedAsync<T>` helper.
+- BaseStreamingIndexer: `SearchStreamAsync` wrapper and enhanced dedup (title+artist+year).
+- BaseStreamingDownloadClient: overridable retry hook with `Retry-After` support and jittered backoff; configurable max retries.
+
+### Notes
+- All additions are non-breaking. Existing list-based APIs continue to work.
+
 ## [1.1.0] - 2025-08-30
 
 ### Added

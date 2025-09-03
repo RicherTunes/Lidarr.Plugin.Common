@@ -11,6 +11,8 @@ using Lidarr.Plugin.Common.Services.Performance;
 using Lidarr.Plugin.Common.Utilities;
 using System.Net;
 using System.Net.Http;
+using System.Threading;
+using System.Runtime.CompilerServices;
 
 namespace Lidarr.Plugin.Common.Base
 {
@@ -100,9 +102,39 @@ namespace Lidarr.Plugin.Common.Base
         protected abstract Task<List<StreamingAlbum>> SearchAlbumsAsync(string searchTerm);
 
         /// <summary>
+        /// Optional streaming variant for album search. Default wraps the list-based implementation.
+        /// </summary>
+        protected virtual async IAsyncEnumerable<StreamingAlbum> SearchAlbumsStreamAsync(
+            string searchTerm,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var list = await SearchAlbumsAsync(searchTerm).ConfigureAwait(false);
+            foreach (var item in list)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return item;
+            }
+        }
+
+        /// <summary>
         /// Search for tracks on the streaming service
         /// </summary>
         protected abstract Task<List<StreamingTrack>> SearchTracksAsync(string searchTerm);
+
+        /// <summary>
+        /// Optional streaming variant for track search. Default wraps the list-based implementation.
+        /// </summary>
+        protected virtual async IAsyncEnumerable<StreamingTrack> SearchTracksStreamAsync(
+            string searchTerm,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var list = await SearchTracksAsync(searchTerm).ConfigureAwait(false);
+            foreach (var item in list)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return item;
+            }
+        }
 
         /// <summary>
         /// Get album details including tracks
@@ -143,9 +175,9 @@ namespace Lidarr.Plugin.Common.Base
             if (results == null || !results.Any())
                 return new List<StreamingAlbum>();
 
-            // Basic deduplication by title + artist
+            // Enhanced deduplication by title + artist + year
             var deduplicated = results
-                .GroupBy(album => $"{album.Title?.ToLowerInvariant()}|{album.Artist?.Name?.ToLowerInvariant() ?? ""}")
+                .GroupBy(album => $"{album.Title?.Trim().ToLowerInvariant()}|{album.Artist?.Name?.Trim().ToLowerInvariant() ?? ""}|{album.ReleaseDate?.Year}")
                 .Select(group => group.First())
                 .ToList();
 
@@ -305,6 +337,51 @@ namespace Lidarr.Plugin.Common.Base
             response.EnsureSuccessStatusCode();
             return await response.Content.ReadAsStringAsync();
         }
+
+        /// <summary>
+        /// Helper to page through API results by offset. Provide a fetcher that returns an empty list to terminate.
+        /// </summary>
+        protected async IAsyncEnumerable<T> FetchPagedAsync<T>(
+            Func<int, Task<IReadOnlyList<T>>> fetchPageAsync,
+            int pageSize,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            if (fetchPageAsync == null) yield break;
+            var offset = 0;
+            while (true)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                var page = await fetchPageAsync(offset).ConfigureAwait(false);
+                if (page == null || page.Count == 0) yield break;
+                foreach (var item in page)
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    yield return item;
+                }
+                offset += Math.Max(1, pageSize);
+            }
+        }
+
+        /// <summary>
+        /// Streaming search across the service (optional). Default wraps the list-based search.
+        /// </summary>
+        public virtual async IAsyncEnumerable<StreamingAlbum> SearchStreamAsync(
+            string query,
+            [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            var list = await SearchAsync(query).ConfigureAwait(false);
+            foreach (var item in list)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                yield return item;
+            }
+        }
+
+        /// <summary>
+        /// Initialize with cancellation support. Default forwards to InitializeAsync().
+        /// </summary>
+        public virtual Task<ValidationResult> InitializeAsync(CancellationToken cancellationToken)
+            => InitializeAsync();
 
         #endregion
 
