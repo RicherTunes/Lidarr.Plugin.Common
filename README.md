@@ -25,6 +25,15 @@
 dotnet add package Lidarr.Plugin.Common
 ```
 
+If a package feed isn’t available yet, you can consume this repo as a git submodule and reference the project directly:
+```bash
+# Add as submodule (in your plugin repo)
+git submodule add https://github.com/RicherTunes/Lidarr.Plugin.Common.git extern/Lidarr.Plugin.Common
+
+# In your plugin .csproj, add a ProjectReference
+# <ProjectReference Include="extern/Lidarr.Plugin.Common/src/Lidarr.Plugin.Common.csproj" />
+```
+
 ### **Optional CLI Framework (Production-Ready Default)**
 ```bash
 # Default: Production-ready build (no pre-release dependencies)
@@ -45,12 +54,14 @@ dotnet build -p:IncludeCLIFramework=true
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Common.Services;
 using Lidarr.Plugin.Common.Models;
+using Lidarr.Plugin.Common.Services.Http;
+using Microsoft.Extensions.Logging;
 
 // ✅ File naming (20+ LOC saved)
 var safeName = FileNameSanitizer.SanitizeFileName(trackTitle);
 
-// ✅ HTTP with retry (50+ LOC saved)  
-var response = await httpClient.ExecuteWithRetryAsync(request);
+// ✅ HTTP with resilient retries + Retry-After + per-host gating
+var response = await httpClient.ExecuteWithResilienceAsync(request);
 
 // ✅ Quality management (40+ LOC saved)
 var best = QualityMapper.FindBestMatch(qualities, StreamingQualityTier.Lossless);
@@ -58,10 +69,20 @@ var best = QualityMapper.FindBestMatch(qualities, StreamingQualityTier.Lossless)
 // ✅ Request building (80+ LOC saved)
 var request = new StreamingApiRequestBuilder(baseUrl)
     .Endpoint("search/albums")
-    .Query("q", searchTerm)
+    .Query("q", searchTerm) // builder handles URL encoding
     .BearerToken(authToken)
     .WithStreamingDefaults()
     .Build();
+
+// ✅ Optional: Auto-refresh tokens on 401 via delegating handler
+var tokenProvider = /* your IStreamingTokenProvider implementation */;
+var logger = /* your ILogger instance */;
+var handler = new OAuthDelegatingHandler(tokenProvider, logger)
+{
+    InnerHandler = new SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate }
+};
+using var httpClient = new HttpClient(handler);
+var resilient = await httpClient.ExecuteWithResilienceAsync(request);
 ```
 
 **Result: Focus on your streaming service's unique features, not infrastructure! 🎵**
@@ -72,8 +93,24 @@ var request = new StreamingApiRequestBuilder(baseUrl)
 
 ### **🛠️ Core Utilities**
 - **`FileNameSanitizer`** - Cross-platform file naming with security
-- **`HttpClientExtensions`** - HTTP utilities with retry logic and parameter masking
-- **`RetryUtilities`** - Exponential backoff, circuit breaker, rate limiter
+- **`Sanitize`** - Context-specific encoding: `UrlComponent`, `PathSegment`, `DisplayText`, `IsSafePath`
+- **`HttpClientExtensions`** - HTTP utilities with resilient retries, `Retry-After` handling, parameter masking, per-host concurrency
+- **`RetryUtilities`** - Exponential backoff, circuit breaker, simple rate limiter
+
+#### Sanitize Usage Tips
+```csharp
+// URL components (when not using the request builder)
+var q = Sanitize.UrlComponent(rawSearchTerm);
+var url = $"{baseUrl}/search?q={q}";
+
+// Safe path segments for filenames/folders
+var artistFolder = Sanitize.PathSegment(album.Artist?.Name);
+var albumFolder = Sanitize.PathSegment(album.Title);
+var fullPath = Path.Combine(root, artistFolder, albumFolder);
+
+// Display text in HTML/console
+var safeDisplay = Sanitize.DisplayText(userFacingText);
+```
 
 ### **📋 Universal Models**  
 - **`StreamingArtist`** - Universal artist model for cross-service compatibility
@@ -90,7 +127,8 @@ var request = new StreamingApiRequestBuilder(baseUrl)
 ### **🔐 Authentication & Security**
 - **`IStreamingAuthenticationService`** - Generic auth service contracts
 - **`BaseStreamingAuthenticationService`** - Complete auth framework
-- **Built-in security** - Parameter masking, input validation, credential protection
+- **`OAuthDelegatingHandler`** - Injects Bearer tokens and performs single-flight refresh on 401
+- **Built-in security** - Parameter masking, input validation; avoid over-sanitizing user/API text
 
 ### **🧪 Testing Support**  
 - **`MockFactories`** - Realistic test data generators
@@ -121,7 +159,7 @@ var request = new StreamingApiRequestBuilder(baseUrl)
 
 ### **Design Principles**
 - **Composition over inheritance** - Avoid complex base class hierarchies
-- **Security-first** - Input validation, credential masking, injection protection  
+- **Security-first** - Parameter masking and context-specific encoding (no HTML encode of search terms)  
 - **Performance-optimized** - Caching, retry logic, rate limiting built-in
 - **Cross-service compatibility** - Universal models and quality tiers
 - **Professional quality** - Battle-tested patterns from production plugins

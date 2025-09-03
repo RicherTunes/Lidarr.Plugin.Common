@@ -123,6 +123,16 @@ namespace Lidarr.Plugin.Common.Models
         public string Upc { get; set; }
 
         /// <summary>
+        /// MusicBrainz album ID (if known).
+        /// </summary>
+        public string MusicBrainzId { get; set; }
+
+        /// <summary>
+        /// Cross-service external IDs (e.g., {"qobuz":"123", "tidal":"456"}).
+        /// </summary>
+        public Dictionary<string, string> ExternalIds { get; } = new Dictionary<string, string>();
+
+        /// <summary>
         /// Available audio qualities.
         /// </summary>
         public List<StreamingQuality> AvailableQualities { get; set; } = new List<StreamingQuality>();
@@ -254,6 +264,16 @@ namespace Lidarr.Plugin.Common.Models
         /// ISRC code.
         /// </summary>
         public string Isrc { get; set; }
+
+        /// <summary>
+        /// MusicBrainz track ID (if known).
+        /// </summary>
+        public string MusicBrainzId { get; set; }
+
+        /// <summary>
+        /// Cross-service external IDs (e.g., {"qobuz":"trk-123", "tidal":"789"}).
+        /// </summary>
+        public Dictionary<string, string> ExternalIds { get; } = new Dictionary<string, string>();
 
         /// <summary>
         /// Featured artists.

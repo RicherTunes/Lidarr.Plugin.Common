@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using FluentValidation.Results;
@@ -472,48 +473,71 @@ namespace Lidarr.Plugin.Common.Base
                         Directory.CreateDirectory(outputDirectory);
                     }
 
-                    // Download file with progress tracking
-                    using var httpClient = new HttpClient();
-                    httpClient.Timeout = TimeSpan.FromMinutes(10);
+                    // Use a temporary file for atomic write and optional resume
+                    var tempFilePath = outputFilePath + ".partial";
 
-                    using var response = await httpClient.GetAsync(streamUrl, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    long existingBytes = 0;
+                    if (File.Exists(tempFilePath))
+                    {
+                        try { existingBytes = new FileInfo(tempFilePath).Length; }
+                        catch { existingBytes = 0; }
+                    }
+
+                    using var httpClient = new HttpClient { Timeout = TimeSpan.FromMinutes(10) };
+
+                    // Build request to support resume when possible
+                    using var req = new HttpRequestMessage(HttpMethod.Get, streamUrl);
+                    if (existingBytes > 0)
+                    {
+                        req.Headers.Range = new RangeHeaderValue(existingBytes, null);
+                    }
+
+                    using var response = await httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
                     response.EnsureSuccessStatusCode();
 
-                    var totalBytes = response.Content.Headers.ContentLength ?? 0;
-                    var downloadedBytes = 0L;
+                    var totalBytesHeader = response.Content.Headers.ContentLength;
+                    var isPartial = response.StatusCode == System.Net.HttpStatusCode.PartialContent;
+                    var totalExpected = isPartial && totalBytesHeader.HasValue ? existingBytes + totalBytesHeader.Value : (totalBytesHeader ?? 0);
 
-                    // Use temporary file for atomic download
-                    var tempFilePath = outputFilePath + ".tmp";
+                    var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
+                    var downloadedBytes = existingBytes;
 
                     using (var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken))
-                    using (var fileStream = new FileStream(tempFilePath, FileMode.Create, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
+                    using (var fileStream = new FileStream(tempFilePath, fileMode, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
                     {
                         var buffer = new byte[BufferSize];
                         int bytesRead;
 
-                        while ((bytesRead = await contentStream.ReadAsync(buffer, 0, buffer.Length, cancellationToken)) > 0)
+                        while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
                         {
-                            await fileStream.WriteAsync(buffer, 0, bytesRead, cancellationToken);
+                            await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
                             downloadedBytes += bytesRead;
 
-                            // Report progress
-                            if (progress != null && totalBytes > 0)
+                            if (progress != null && totalExpected > 0)
                             {
-                                var progressPercent = (double)downloadedBytes / totalBytes * 100;
+                                var progressPercent = (double)downloadedBytes / totalExpected * 100d;
                                 progress.Report(progressPercent);
                             }
                         }
+
+                        // Flush to disk for atomicity
+                        await fileStream.FlushAsync(cancellationToken);
+                        try { fileStream.Flush(true); } catch { /* best effort */ }
                     }
 
-                    // Apply metadata tags to the temporary file
+                    // Apply metadata to the temp file before moving
                     await ApplyMetadataTagsAsync(tempFilePath, metadata);
 
-                    // Atomic move to final location
-                    if (System.IO.File.Exists(outputFilePath))
+                    // Atomic move to final location (overwrite if exists)
+                    try
                     {
-                        System.IO.File.Delete(outputFilePath);
+                        File.Move(tempFilePath, outputFilePath, overwrite: true);
                     }
-                    System.IO.File.Move(tempFilePath, outputFilePath);
+                    catch
+                    {
+                        if (File.Exists(outputFilePath)) File.Delete(outputFilePath);
+                        File.Move(tempFilePath, outputFilePath);
+                    }
 
                     Logger?.LogInformation("Track download completed: {FilePath} ({Size:N0} bytes)", outputFilePath, downloadedBytes);
 
