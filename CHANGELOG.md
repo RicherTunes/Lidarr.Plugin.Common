@@ -82,6 +82,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - No breaking changes: obsolete APIs remain for compatibility.
 - Submodule usage continues to work; package metadata remains enabled for future NuGet distribution.
 
+## [1.1.2] - 2025-09-03
+
+### Added
+- Preview detection: threshold-based duration (default ≤90s), extended URL patterns, and tunable overload with extra patterns.
+- Validation: `ValidateFileSignature` (FLAC/OGG/MP4/M4A/WAV) and an extended `ValidateDownloadedFile` overload.
+- Hashing/Signing: `ComputeSHA256`, `ComputeHmacSha256`, and `IRequestSigner` interfaces with `Md5ConcatSigner` and `HmacSha256Signer` implementations.
+- File system: NFC normalization and strengthened reserved-name guard in `FileSystemUtilities`.
+- Settings: `Locale` added to `BaseStreamingSettings` (defaults to `en-US`).
+
+### Changed
+- Documentation updated to reference new utilities where applicable.
+
+### Notes
+- All changes are additive and backward compatible. Submodule consumers can adopt incrementally.
+
 ## [1.1.0] - 2025-08-30
 
 ### Added

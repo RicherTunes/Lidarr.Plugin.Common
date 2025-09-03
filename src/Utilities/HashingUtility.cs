@@ -33,6 +33,31 @@ namespace Lidarr.Plugin.Common.Utilities
             var combined = string.Join("|", components);
             return ComputeMD5Hash(combined);
         }
+
+        /// <summary>
+        /// Computes the SHA-256 hash of the input string as a lowercase hex string.
+        /// </summary>
+        public static string ComputeSHA256(string input)
+        {
+            if (input == null) throw new ArgumentNullException(nameof(input));
+            using var sha = SHA256.Create();
+            var inputBytes = Encoding.UTF8.GetBytes(input);
+            var hash = sha.ComputeHash(inputBytes);
+            return Convert.ToHexString(hash).ToLowerInvariant();
+        }
+
+        /// <summary>
+        /// Computes HMAC-SHA256 of data using the provided secret, returns lowercase hex.
+        /// </summary>
+        public static string ComputeHmacSha256(string secret, string data)
+        {
+            if (secret == null) throw new ArgumentNullException(nameof(secret));
+            if (data == null) throw new ArgumentNullException(nameof(data));
+            using var hmac = new HMACSHA256(Encoding.UTF8.GetBytes(secret));
+            var bytes = Encoding.UTF8.GetBytes(data);
+            var mac = hmac.ComputeHash(bytes);
+            return Convert.ToHexString(mac).ToLowerInvariant();
+        }
     }
 }
 

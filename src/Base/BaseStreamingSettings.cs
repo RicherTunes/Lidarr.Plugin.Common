@@ -16,6 +16,7 @@ namespace Lidarr.Plugin.Common.Base
             ApiRateLimit = 60;
             SearchCacheDuration = 5;
             CountryCode = "US";
+            Locale = "en-US";
             IncludeSingles = false;
             IncludeCompilations = false;
             EarlyReleaseDayLimit = 0;
@@ -51,6 +52,11 @@ namespace Lidarr.Plugin.Common.Base
         /// Country/region code for content availability.
         /// </summary>
         public virtual string CountryCode { get; set; }
+
+        /// <summary>
+        /// Locale/language preference (e.g., en-US). Optional; services can opt-in.
+        /// </summary>
+        public virtual string Locale { get; set; }
 
         /// <summary>
         /// Maximum number of search results to fetch per query.
@@ -167,6 +173,7 @@ namespace Lidarr.Plugin.Common.Base
                 AuthToken = string.IsNullOrEmpty(AuthToken) ? "[not set]" : "[MASKED]", 
                 UserId,
                 CountryCode,
+                Locale,
                 SearchLimit,
                 IncludeSingles,
                 IncludeCompilations,
