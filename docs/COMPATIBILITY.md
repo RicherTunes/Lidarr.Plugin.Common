@@ -7,10 +7,12 @@
 | 1.0.0-alpha | 2.13.x (plugins branch) | net6.0 | Initial release | Production ready utilities |
 | 1.1.0 | 2.13.x - 2.14.x | net6.0 | None | Enhanced base classes |
 | 1.1.1 | 2.13.x - 2.14.x | net6.0 | None | Resilient HTTP, OAuth 401 refresh, atomic/resume downloads, context sanitizers |
+| 1.1.2 | 2.13.x - 2.14.x | net6.0 | None | Preview heuristics, file signature validation, signing helpers, NFC filenames, Locale |
+| 1.1.3 | 2.13.x - 2.14.x | net6.0 | None | Streaming search APIs, downloader retry hook |
 | 1.2.0 | 2.14.x+ | net6.0 | TBD | Advanced ML patterns |
 | 2.0.0 | 3.0.x | net8.0 | Major | .NET 8 upgrade |
 
-## 🚀 **Current Release: 1.1.1**
+## 🚀 **Current Release: 1.1.3**
 
 ### **Supported Features**
 - ✅ **Core utilities** (FileNameSanitizer, Sanitize, RetryUtilities, HttpClientExtensions)
@@ -23,7 +25,10 @@
 - ✅ **Lidarr integration helpers** (Composition-based patterns)
 - ✅ **Authentication abstractions** (IStreamingAuthenticationService, OAuthDelegatingHandler for 401 refresh)
 - ✅ **Caching patterns** (StreamingResponseCache with TTL)
- - ✅ **Downloads** (Atomic writes to .partial, optional resume)
+- ✅ **Downloads** (Atomic writes to .partial, optional resume; retry hook with Retry-After)
+- ✅ **Preview detection** (threshold-based; extended URL markers)
+- ✅ **Signing** (IRequestSigner with MD5/HMAC helpers)
+- ✅ **Indexer streaming** (Search*StreamAsync; FetchPagedAsync<T>)
 
 ### **Compatibility Requirements**
 - **Lidarr**: 2.13.x plugins branch or compatible
@@ -39,7 +44,7 @@
 ### **NuGet Package Installation**
 ```xml
 <!-- In your streaming plugin .csproj -->
-<PackageReference Include="Lidarr.Plugin.Common" Version="1.1.1" />
+<PackageReference Include="Lidarr.Plugin.Common" Version="1.1.3" />
 ```
 
 ### **Local Development Reference**
