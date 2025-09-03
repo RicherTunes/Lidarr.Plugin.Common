@@ -456,16 +456,16 @@ namespace Lidarr.Plugin.Common.Base
             IProgress<double>? progress = null,
             CancellationToken cancellationToken = default)
         {
-            const int MaxRetries = 3;
+            int maxRetries = GetMaxDownloadRetries();
             const int BufferSize = 8192;
             
             Exception? lastException = null;
             
-            for (int attempt = 1; attempt <= MaxRetries; attempt++)
+            for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
                 try
                 {
-                    Logger?.LogDebug("Download attempt {Attempt}/{MaxRetries}: {Title}", attempt, MaxRetries, metadata.Title);
+                    Logger?.LogDebug("Download attempt {Attempt}/{MaxRetries}: {Title}", attempt, maxRetries, metadata.Title);
 
                     // Ensure output directory exists
                     var outputDirectory = Path.GetDirectoryName(outputFilePath);
@@ -494,7 +494,19 @@ namespace Lidarr.Plugin.Common.Base
                     }
 
                     using var response = await httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-                    response.EnsureSuccessStatusCode();
+
+                    // Handle non-success with retry awareness (429/5xx/408)
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        if (attempt < maxRetries && ShouldRetryDownload(response))
+                        {
+                            var delay = GetDownloadRetryDelay(attempt, response);
+                            Logger?.LogWarning("Retrying download after {DelayMs}ms due to HTTP {StatusCode}", delay.TotalMilliseconds, (int)response.StatusCode);
+                            await Task.Delay(delay, cancellationToken);
+                            continue;
+                        }
+                        response.EnsureSuccessStatusCode(); // throws
+                    }
 
                     var totalBytesHeader = response.Content.Headers.ContentLength;
                     var isPartial = response.StatusCode == System.Net.HttpStatusCode.PartialContent;
@@ -559,15 +571,59 @@ namespace Lidarr.Plugin.Common.Base
                     lastException = ex;
                     Logger?.LogWarning(ex, "Download attempt {Attempt} failed: {Title}", attempt, metadata.Title);
                     
-                    if (attempt < MaxRetries)
+                    if (attempt < maxRetries)
                     {
-                        await Task.Delay(1000 * attempt, cancellationToken); // Exponential backoff
+                        var delay = GetDownloadRetryDelay(attempt, null);
+                        await Task.Delay(delay, cancellationToken);
                     }
                 }
             }
 
             Logger?.LogError(lastException, "All download attempts failed: {Title}", metadata.Title);
             return new StreamingDownloadResult { Success = false, ErrorMessage = lastException?.Message ?? "Download failed after all retries" };
+        }
+
+        /// <summary>
+        /// Max retry attempts for downloads. Services can override.
+        /// </summary>
+        protected virtual int GetMaxDownloadRetries() => 3;
+
+        /// <summary>
+        /// Decide whether a download should be retried based on the HTTP response.
+        /// Default: retry 408, 429, and 5xx.
+        /// </summary>
+        protected virtual bool ShouldRetryDownload(System.Net.Http.HttpResponseMessage response)
+        {
+            var status = (int)response.StatusCode;
+            return status == 408 || status == 429 || (status >= 500 && status <= 599);
+        }
+
+        /// <summary>
+        /// Computes retry delay using Retry-After if present; otherwise exponential backoff with jitter.
+        /// </summary>
+        protected virtual TimeSpan GetDownloadRetryDelay(int attempt, System.Net.Http.HttpResponseMessage? response)
+        {
+            if (response != null)
+            {
+                try
+                {
+                    var ra = response.Headers?.RetryAfter;
+                    if (ra != null)
+                    {
+                        if (ra.Delta.HasValue) return ra.Delta.Value + TimeSpan.FromMilliseconds(Random.Shared.Next(50, 250));
+                        if (ra.Date.HasValue)
+                        {
+                            var delta = ra.Date.Value - DateTimeOffset.UtcNow;
+                            if (delta > TimeSpan.Zero) return delta + TimeSpan.FromMilliseconds(Random.Shared.Next(50, 250));
+                        }
+                    }
+                }
+                catch { /* ignore */ }
+            }
+
+            var baseDelay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Max(1, attempt))));
+            var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(50, 250));
+            return baseDelay + jitter;
         }
 
         /// <summary>
