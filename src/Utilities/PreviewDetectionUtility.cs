@@ -36,10 +36,40 @@ namespace Lidarr.Plugin.Common.Utilities
             return durationSeconds > 0 && PreviewDurationLimits.Contains(durationSeconds);
         }
 
+        /// <summary>
+        /// Treat durations up to a threshold (default 90s) as likely previews.
+        /// </summary>
+        public static bool IsPreviewDuration(int durationSeconds, int thresholdSeconds)
+        {
+            return durationSeconds > 0 && durationSeconds <= Math.Max(1, thresholdSeconds);
+        }
+
         public static bool IsLikelyPreview(string url, int? durationSeconds, string restrictionMessage)
         {
-            if (!string.IsNullOrWhiteSpace(url) && IsPreviewOrSampleUrl(url)) return true;
-            if (durationSeconds.HasValue && IsPreviewDuration(durationSeconds.Value)) return true;
+            return IsLikelyPreview(url, durationSeconds, restrictionMessage, 90);
+        }
+
+        /// <summary>
+        /// Extended preview heuristic with tunable threshold and extra URL patterns.
+        /// </summary>
+        public static bool IsLikelyPreview(
+            string url,
+            int? durationSeconds,
+            string restrictionMessage,
+            int durationThresholdSeconds,
+            System.Collections.Generic.IEnumerable<string>? extraPatterns = null)
+        {
+            if (!string.IsNullOrWhiteSpace(url))
+            {
+                var u = url.ToLowerInvariant();
+                var patterns = PreviewUrlPatterns
+                    .Concat(new[] { ".m3u8", "/samples/", "/clip/", "/snippet/", "/trial/" })
+                    .Concat(extraPatterns ?? Array.Empty<string>());
+                if (patterns.Any(p => u.Contains(p))) return true;
+            }
+
+            if (durationSeconds.HasValue && IsPreviewDuration(durationSeconds.Value, durationThresholdSeconds)) return true;
+
             if (!string.IsNullOrWhiteSpace(restrictionMessage))
             {
                 var msg = restrictionMessage.ToLowerInvariant();

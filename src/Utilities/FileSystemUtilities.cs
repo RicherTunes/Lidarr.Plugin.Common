@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Text;
 using System.Linq;
 
 namespace Lidarr.Plugin.Common.Utilities
@@ -11,7 +12,17 @@ namespace Lidarr.Plugin.Common.Utilities
     {
         public static string SanitizeFileName(string fileName, int maxLength = 255)
         {
-            var sanitized = FileNameSanitizer.SanitizeFileName(fileName);
+            // Normalize to NFC to avoid cross-OS inconsistencies
+            var normalized = (fileName ?? string.Empty).Normalize(NormalizationForm.FormC);
+            var sanitized = FileNameSanitizer.SanitizeFileName(normalized);
+
+            // Extra reserved name guard after sanitization (defense in depth)
+            var upper = sanitized.ToUpperInvariant();
+            var reserved = new System.Collections.Generic.HashSet<string>{
+                "CON","PRN","AUX","NUL","COM1","COM2","COM3","COM4","COM5","COM6","COM7","COM8","COM9",
+                "LPT1","LPT2","LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9"
+            };
+            if (reserved.Contains(upper)) sanitized = "_" + sanitized;
             if (sanitized.Length > maxLength)
             {
                 sanitized = sanitized[..maxLength];
@@ -28,7 +39,8 @@ namespace Lidarr.Plugin.Common.Utilities
         public static string SanitizeDirectoryPath(string path, int maxLength = 255)
         {
             if (string.IsNullOrWhiteSpace(path)) return "Unknown";
-            var parts = path.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
+            var normalized = path.Normalize(NormalizationForm.FormC);
+            var parts = normalized.Split(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar, StringSplitOptions.RemoveEmptyEntries);
             var sanitized = parts.Select(p => SanitizeFileName(p, maxLength));
             return string.Join(Path.DirectorySeparatorChar, sanitized);
         }
@@ -36,7 +48,9 @@ namespace Lidarr.Plugin.Common.Utilities
         public static string CreateTrackFileName(string title, int trackNumber, string extension = "flac", int maxLength = 200)
         {
             var trackNum = trackNumber.ToString("D2");
-            var safeTitle = SanitizeFileName(title, Math.Max(1, maxLength - trackNum.Length - 4));
+            // Leave a bit more headroom to avoid cutting grapheme clusters mid-slice
+            var headroom = Math.Max(1, maxLength - trackNum.Length - 4);
+            var safeTitle = SanitizeFileName(title, headroom);
             return $"{trackNum} - {safeTitle}.{extension}";
         }
 
