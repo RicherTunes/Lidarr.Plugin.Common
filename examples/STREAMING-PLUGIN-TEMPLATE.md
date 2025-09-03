@@ -206,6 +206,12 @@ var request = new StreamingApiRequestBuilder(baseUrl)
 // Optional: Auto-refresh on 401
 var handler = new OAuthDelegatingHandler(tokenProvider, logger) { InnerHandler = new HttpClientHandler() };
 using var httpClient = new HttpClient(handler);
+
+// Identify likely previews; skip 30–90s samples
+if (PreviewDetectionUtility.IsLikelyPreview(url, durationSeconds, restrictionMessage)) return;
+
+// Validate container signature when size/hash are unknown
+var ok = ValidationUtilities.ValidateDownloadedFile(path, null, null, validateSignature: true);
 ```
 
 ### Base Classes (Inherit and override)
@@ -215,6 +221,20 @@ public class YourSettings : BaseStreamingSettings { /* service-specific fields *
 
 // Indexer  
 public class YourIndexer : BaseStreamingIndexer<YourSettings> { /* service-specific search */ }
+
+// Optional: streaming search + paging helper
+protected override async IAsyncEnumerable<StreamingAlbum> SearchAlbumsStreamAsync(
+    string term,
+    [EnumeratorCancellation] CancellationToken ct = default)
+{
+    await foreach (var album in FetchPagedAsync(
+        async offset => await FetchServicePageAsync(term, offset),
+        pageSize: 100,
+        ct))
+    {
+        yield return album;
+    }
+}
 
 // Download Client
 public class YourDownloadClient : BaseStreamingDownloadClient<YourSettings> { /* service-specific download */ }

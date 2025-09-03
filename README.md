@@ -85,6 +85,15 @@ using var httpClient = new HttpClient(handler);
 var resilient = await httpClient.ExecuteWithResilienceAsync(request);
 ```
 
+### New in 1.1.2–1.1.3 (highlights)
+- Preview detection: threshold-based (≤90s by default) + extra URL markers.
+- File validation: optional container signature checks (FLAC/OGG/MP4/M4A/WAV).
+- Request signing utilities: `IRequestSigner` with MD5-concat and HMAC-SHA256.
+- Filenames: NFC normalization + extra reserved-name guard.
+- Settings: `Locale` (default `en-US`) alongside `CountryCode`.
+- Indexer streaming: `Search*StreamAsync` + `FetchPagedAsync<T>` helper.
+- Downloader retry hook: overridable max retries and Retry-After-aware delays.
+
 **Result: Focus on your streaming service's unique features, not infrastructure! 🎵**
 
 ---
@@ -96,6 +105,26 @@ var resilient = await httpClient.ExecuteWithResilienceAsync(request);
 - **`Sanitize`** - Context-specific encoding: `UrlComponent`, `PathSegment`, `DisplayText`, `IsSafePath`
 - **`HttpClientExtensions`** - HTTP utilities with resilient retries, `Retry-After` handling, parameter masking, per-host concurrency
 - **`RetryUtilities`** - Exponential backoff, circuit breaker, simple rate limiter
+
+#### Preview Detection & Validation
+```csharp
+// Identify likely previews (URL markers + ≤90s default threshold)
+var isPreview = PreviewDetectionUtility.IsLikelyPreview(url, durationSeconds, restrictionMessage);
+
+// Validate audio container signature (quick sniff)
+var ok = ValidationUtilities.ValidateDownloadedFile(path, expectedSize: null, expectedHash: null, validateSignature: true);
+```
+
+#### Signing & Hashing
+```csharp
+// MD5 concat signer (legacy styles like Qobuz)
+IRequestSigner signer = new Md5ConcatSigner(secret);
+var signature = signer.Sign(parameters);
+
+// HMAC-SHA256 signer
+IRequestSigner signer2 = new HmacSha256Signer(secret);
+var mac = signer2.Sign(parameters);
+```
 
 #### Sanitize Usage Tips
 ```csharp
@@ -123,6 +152,21 @@ var safeDisplay = Sanitize.DisplayText(userFacingText);
 - **`StreamingIndexerMixin`** - Composition helpers for Lidarr integration
 - **`StreamingApiRequestBuilder`** - Fluent HTTP request builder
 - **`QualityMapper`** - Quality comparison across streaming services
+
+#### Indexer Streaming & Pagination (1.1.3)
+```csharp
+// Optional streaming variant (override for true streaming, default wraps list-based)
+protected override async IAsyncEnumerable<StreamingAlbum> SearchAlbumsStreamAsync(string term, [EnumeratorCancellation] CancellationToken ct = default)
+{
+    await foreach (var a in FetchPagedAsync<StreamingAlbum>(
+        async offset => await FetchPageAsync(term, offset),
+        pageSize: 100,
+        ct))
+    {
+        yield return a;
+    }
+}
+```
 
 ### **🔐 Authentication & Security**
 - **`IStreamingAuthenticationService`** - Generic auth service contracts
@@ -160,6 +204,19 @@ var safeDisplay = Sanitize.DisplayText(userFacingText);
 ### **Design Principles**
 - **Composition over inheritance** - Avoid complex base class hierarchies
 - **Security-first** - Parameter masking and context-specific encoding (no HTML encode of search terms)  
+
+## 🔁 Downloader Retry Hook (1.1.3)
+```csharp
+protected override int GetMaxDownloadRetries() => 5;
+
+protected override bool ShouldRetryDownload(HttpResponseMessage resp)
+{   // Retry 408/429/5xx only
+    var s = (int)resp.StatusCode; return s == 408 || s == 429 || (s >= 500 && s <= 599);
+}
+```
+
+## 🌐 Locale Support
+`BaseStreamingSettings` exposes `CountryCode` and `Locale` (default `en-US`). Thread both to services that localize responses.
 - **Performance-optimized** - Caching, retry logic, rate limiting built-in
 - **Cross-service compatibility** - Universal models and quality tiers
 - **Professional quality** - Battle-tested patterns from production plugins
