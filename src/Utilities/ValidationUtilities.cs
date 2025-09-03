@@ -10,6 +10,45 @@ namespace Lidarr.Plugin.Common.Utilities
     /// </summary>
     public static class ValidationUtilities
     {
+        /// <summary>
+        /// Validates common audio container signatures based on file extension.
+        /// Returns true for unknown extensions to avoid false negatives.
+        /// </summary>
+        public static bool ValidateFileSignature(string filePath, string? expectedExtension = null)
+        {
+            if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return false;
+
+            expectedExtension ??= Path.GetExtension(filePath)?.TrimStart('.');
+            if (string.IsNullOrEmpty(expectedExtension)) return true; // unknown ext → bypass
+
+            expectedExtension = expectedExtension.ToLowerInvariant();
+
+            try
+            {
+                using var fs = File.OpenRead(filePath);
+                Span<byte> header = stackalloc byte[12];
+                var read = fs.Read(header);
+                if (read < 4) return false;
+
+                static bool StartsWith(Span<byte> span, ReadOnlySpan<byte> prefix)
+                {
+                    if (span.Length < prefix.Length) return false;
+                    for (int i = 0; i < prefix.Length; i++) if (span[i] != prefix[i]) return false;
+                    return true;
+                }
+
+                return expectedExtension switch
+                {
+                    "flac" => StartsWith(header, "fLaC"u8),
+                    "ogg"  => StartsWith(header, "OggS"u8),
+                    "m4a" or "mp4" => StartsWith(header, "ftyp"u8),
+                    "wav"  => StartsWith(header, "RIFF"u8),
+                    _ => true
+                };
+            }
+            catch { return false; }
+        }
+
         public static bool ValidateDownloadedFile(string filePath, long? expectedSize = null, string expectedHash = null)
         {
             if (string.IsNullOrWhiteSpace(filePath) || !File.Exists(filePath)) return false;
@@ -23,6 +62,16 @@ namespace Lidarr.Plugin.Common.Utilities
                 if (!string.Equals(actual, expectedHash, StringComparison.OrdinalIgnoreCase)) return false;
             }
             return true;
+        }
+
+        /// <summary>
+        /// Extended validation that also checks container signature when requested.
+        /// </summary>
+        public static bool ValidateDownloadedFile(string filePath, long? expectedSize, string expectedHash, bool validateSignature, string? expectedExtension = null)
+        {
+            if (!ValidateDownloadedFile(filePath, expectedSize, expectedHash)) return false;
+            if (!validateSignature) return true;
+            return ValidateFileSignature(filePath, expectedExtension);
         }
 
         public static bool ValidateDirectoryPath(string directoryPath, bool createIfMissing = false)
