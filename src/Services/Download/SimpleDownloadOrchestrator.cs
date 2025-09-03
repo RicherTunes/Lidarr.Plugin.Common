@@ -108,6 +108,7 @@ namespace Lidarr.Plugin.Common.Services.Download
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
                 var tempPath = outputPath + ".partial";
+                var resumePath = tempPath + ".resume.json";
 
                 long existingBytes = 0;
                 if (File.Exists(tempPath))
@@ -127,6 +128,15 @@ namespace Lidarr.Plugin.Common.Services.Download
                 var totalHeader = resp.Content.Headers.ContentLength;
                 var isPartial = resp.StatusCode == System.Net.HttpStatusCode.PartialContent;
                 var totalExpected = isPartial && totalHeader.HasValue ? existingBytes + totalHeader.Value : (totalHeader ?? 0);
+
+                // If server did not honor range, restart cleanly
+                if (existingBytes > 0 && !isPartial)
+                {
+                    try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                    try { if (File.Exists(resumePath)) File.Delete(resumePath); } catch { }
+                    existingBytes = 0;
+                }
+
                 var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
 
                 long downloaded = existingBytes;
@@ -139,6 +149,9 @@ namespace Lidarr.Plugin.Common.Services.Download
                     {
                         await fs.WriteAsync(buffer, 0, read).ConfigureAwait(false);
                         downloaded += read;
+
+                        // Opportunistic checkpoint (simple byte count)
+                        TryWriteResumeCheckpoint(resumePath, downloaded, totalExpected);
                     }
                     await fs.FlushAsync().ConfigureAwait(false);
                     try { fs.Flush(true); } catch { }
@@ -155,6 +168,9 @@ namespace Lidarr.Plugin.Common.Services.Download
                     File.Move(tempPath, outputPath);
                 }
 
+                // Clean up checkpoint
+                try { if (File.Exists(resumePath)) File.Delete(resumePath); } catch { }
+
                 return new TrackDownloadResult
                 {
                     TrackId = trackId,
@@ -168,6 +184,26 @@ namespace Lidarr.Plugin.Common.Services.Download
             {
                 return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = ex.Message };
             }
+        }
+
+        private static void TryWriteResumeCheckpoint(string resumePath, long downloaded, long totalExpected)
+        {
+            try
+            {
+                var json = System.Text.Json.JsonSerializer.Serialize(new ResumeState
+                {
+                    DownloadedBytes = downloaded,
+                    TotalExpectedBytes = totalExpected
+                });
+                File.WriteAllText(resumePath, json);
+            }
+            catch { /* best-effort */ }
+        }
+
+        private sealed class ResumeState
+        {
+            public long DownloadedBytes { get; set; }
+            public long TotalExpectedBytes { get; set; }
         }
 
         public Task<List<StreamingQuality>> GetAvailableQualitiesAsync(string contentId)
