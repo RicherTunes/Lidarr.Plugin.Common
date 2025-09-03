@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using FluentValidation.Results;
 using Microsoft.Extensions.Logging;
 using TagLib;
+using File = System.IO.File;
 using Lidarr.Plugin.Common.Base;
 using Lidarr.Plugin.Common.Models;
 using Lidarr.Plugin.Common.Services.Performance;
