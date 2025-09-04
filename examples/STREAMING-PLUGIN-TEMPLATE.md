@@ -48,12 +48,13 @@ public class YourServiceIndexer : HttpIndexerBase<YourServiceSettings>
         
         var request = new StreamingApiRequestBuilder(Settings.BaseUrl)
             .Endpoint("search/albums")
-            .Query("q", searchTerm)
+            .Query("q", searchTerm) // builder handles URL encoding
             .ApiKey("X-API-Key", Settings.ApiKey)
             .WithStreamingDefaults()
             .Build();
 
-        var response = await httpClient.ExecuteWithRetryAsync(request);
+        // Prefer resilient HTTP (handles 429 + Retry-After and per-host concurrency)
+        var response = await httpClient.ExecuteWithResilienceAsync(request);
         var apiResponse = await response.Content.ReadAsJsonAsync<YourServiceSearchResponse>();
         
         return apiResponse.Albums.Select(MapToStreamingSearchResult);
@@ -167,13 +168,30 @@ public class YourServiceIndexer : BaseStreamingIndexer<YourServiceSettings>
 
 ## 🛠 Available Shared Components
 
+### Inject OAuth auto-refresh into BaseStreamingIndexer
+```csharp
+public class YourServiceIndexer : BaseStreamingIndexer<YourServiceSettings>
+{
+    private readonly HttpClient _http;
+    public YourServiceIndexer(YourServiceSettings settings, IStreamingTokenProvider tokenProvider, ILogger<YourServiceIndexer> logger)
+        : base(settings, logger)
+    {
+        var handler = new OAuthDelegatingHandler(tokenProvider, logger) { InnerHandler = new HttpClientHandler() };
+        _http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(100) };
+    }
+
+    protected override HttpClient GetHttpClient() => _http; // used by ExecuteRequestAsync
+    // override abstract members here...
+}
+```
+
 ### Utilities (Copy-paste ready)
 ```csharp
 // File naming
 var safeName = FileNameSanitizer.SanitizeFileName(trackTitle);
 
-// HTTP with retry
-var response = await httpClient.ExecuteWithRetryAsync(request);
+// HTTP with resilience (retry-after + concurrency gating)
+var response = await httpClient.ExecuteWithResilienceAsync(request);
 
 // Quality comparison  
 var bestQuality = QualityMapper.FindBestMatch(availableQualities, StreamingQualityTier.Lossless);
@@ -181,9 +199,19 @@ var bestQuality = QualityMapper.FindBestMatch(availableQualities, StreamingQuali
 // Request building
 var request = new StreamingApiRequestBuilder(baseUrl)
     .Endpoint("search")
-    .Query("q", term)
+    .Query("q", term) // builder handles URL encoding
     .BearerToken(token)
     .Build();
+
+// Optional: Auto-refresh on 401
+var handler = new OAuthDelegatingHandler(tokenProvider, logger) { InnerHandler = new HttpClientHandler() };
+using var httpClient = new HttpClient(handler);
+
+// Identify likely previews; skip 30–90s samples
+if (PreviewDetectionUtility.IsLikelyPreview(url, durationSeconds, restrictionMessage)) return;
+
+// Validate container signature when size/hash are unknown
+var ok = ValidationUtilities.ValidateDownloadedFile(path, null, null, validateSignature: true);
 ```
 
 ### Base Classes (Inherit and override)
@@ -193,6 +221,20 @@ public class YourSettings : BaseStreamingSettings { /* service-specific fields *
 
 // Indexer  
 public class YourIndexer : BaseStreamingIndexer<YourSettings> { /* service-specific search */ }
+
+// Optional: streaming search + paging helper
+protected override async IAsyncEnumerable<StreamingAlbum> SearchAlbumsStreamAsync(
+    string term,
+    [EnumeratorCancellation] CancellationToken ct = default)
+{
+    await foreach (var album in FetchPagedAsync(
+        async offset => await FetchServicePageAsync(term, offset),
+        pageSize: 100,
+        ct))
+    {
+        yield return album;
+    }
+}
 
 // Download Client
 public class YourDownloadClient : BaseStreamingDownloadClient<YourSettings> { /* service-specific download */ }

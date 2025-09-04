@@ -72,7 +72,7 @@ namespace Lidarr.Plugin.Tidalarr.API
                     .Build();
 
                 // Execute with shared retry logic (40+ LOC saved)
-                var response = await _httpClient.ExecuteWithRetryAsync(request, maxRetries: 3);
+                var response = await _httpClient.ExecuteWithResilienceAsync(request);
                 response.EnsureSuccessStatusCode();
 
                 var content = await response.Content.ReadContentSafelyAsync();
@@ -116,7 +116,7 @@ namespace Lidarr.Plugin.Tidalarr.API
                 .WithStreamingDefaults("Tidalarr/1.0")
                 .Build();
 
-            var response = await _httpClient.ExecuteWithRetryAsync(request, maxRetries: 3);
+            var response = await _httpClient.ExecuteWithResilienceAsync(request);
             response.EnsureSuccessStatusCode();
 
             var content = await response.Content.ReadContentSafelyAsync();
@@ -142,7 +142,7 @@ namespace Lidarr.Plugin.Tidalarr.API
                 .WithStreamingDefaults("Tidalarr/1.0")
                 .Build();
 
-            var response = await _httpClient.ExecuteWithRetryAsync(request);
+            var response = await _httpClient.ExecuteWithResilienceAsync(request);
             response.EnsureSuccessStatusCode();
 
             var content = await response.Content.ReadContentSafelyAsync();

@@ -65,19 +65,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [1.1.1] - 2025-09-03
 
-### Planned for v1.1.0
-- Advanced ML optimization patterns abstraction
-- Real-time collaboration between plugins
-- Enhanced performance analytics
-- Cross-service content matching utilities
+### Added
+- Context-specific sanitizers: `Sanitize.UrlComponent`, `Sanitize.PathSegment`, `Sanitize.DisplayText`, `Sanitize.IsSafePath`.
+- HTTP resilience: `HttpClientExtensions.ExecuteWithResilienceAsync` with 429/Retry-After awareness, jittered backoff, retry budget, and per-host concurrency gating.
+- OAuth token refresh: `OAuthDelegatingHandler` for Bearer injection and single-flight refresh on 401.
+- Atomic/resumable downloads: Base download client now writes to `.partial`, flushes to disk, and performs atomic move; resumes when server supports ranges.
+- Universal IDs on models: `StreamingAlbum.MusicBrainzId`, `StreamingAlbum.ExternalIds`, `StreamingTrack.MusicBrainzId`, `StreamingTrack.ExternalIds`.
 
-### Planned for v1.2.0
-- Enterprise monitoring features
-- Advanced caching strategies
-- Plugin marketplace integration
-- Community contribution framework
+### Changed
+- `BaseStreamingIndexer` now uses a shared `HttpClient` + resilient pipeline to avoid socket exhaustion and improve stability.
+- `InputSanitizer` methods marked `[Obsolete]` in favor of context-specific `Sanitize` helpers.
+
+### Notes
+- No breaking changes: obsolete APIs remain for compatibility.
+- Submodule usage continues to work; package metadata remains enabled for future NuGet distribution.
+
+## [1.1.2] - 2025-09-03
+
+### Added
+- Preview detection: threshold-based duration (default ≤90s), extended URL patterns, and tunable overload with extra patterns.
+- Validation: `ValidateFileSignature` (FLAC/OGG/MP4/M4A/WAV) and an extended `ValidateDownloadedFile` overload.
+- Hashing/Signing: `ComputeSHA256`, `ComputeHmacSha256`, and `IRequestSigner` interfaces with `Md5ConcatSigner` and `HmacSha256Signer` implementations.
+- File system: NFC normalization and strengthened reserved-name guard in `FileSystemUtilities`.
+- Settings: `Locale` added to `BaseStreamingSettings` (defaults to `en-US`).
+
+### Changed
+- Documentation updated to reference new utilities where applicable.
+
+### Notes
+- All changes are additive and backward compatible. Submodule consumers can adopt incrementally.
+
+## [1.1.3] - 2025-09-03
+
+### Added
+- BaseStreamingIndexer: optional streaming search APIs (`SearchAlbumsStreamAsync`, `SearchTracksStreamAsync`) and `FetchPagedAsync<T>` helper.
+- BaseStreamingIndexer: `SearchStreamAsync` wrapper and enhanced dedup (title+artist+year).
+- BaseStreamingDownloadClient: overridable retry hook with `Retry-After` support and jittered backoff; configurable max retries.
+
+### Notes
+- All additions are non-breaking. Existing list-based APIs continue to work.
+
+## [1.1.0] - 2025-08-30
+
+### Added
+- OAuth/PKCE authentication base and token management utilities.
+- Base streaming indexer and download client frameworks.
+- Performance and memory management helpers (batch manager, monitors).
+
+### Notes
+- Prepared the library for packaging with source link and symbols.
 
 ---
 
