@@ -11,7 +11,7 @@ namespace Lidarr.Plugin.Common.Interfaces
     /// </summary>
     public interface IAudioStreamProvider
     {
-        Task<AudioStreamResult> GetStreamAsync(string trackId, StreamingQuality quality = null, CancellationToken cancellationToken = default);
+        Task<AudioStreamResult> GetStreamAsync(string trackId, StreamingQuality? quality = null, CancellationToken cancellationToken = default);
     }
 
     public class AudioStreamResult
@@ -21,4 +21,3 @@ namespace Lidarr.Plugin.Common.Interfaces
         public string SuggestedExtension { get; set; }
     }
 }
-

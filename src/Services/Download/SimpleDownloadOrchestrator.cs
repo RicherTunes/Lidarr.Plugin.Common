@@ -85,14 +85,14 @@ namespace Lidarr.Plugin.Common.Services.Download
             return result;
         }
 
-        public async Task<TrackDownloadResult> DownloadTrackAsync(string trackId, string outputPath, StreamingQuality quality = null)
+        public async Task<TrackDownloadResult> DownloadTrackAsync(string trackId, string outputPath, StreamingQuality? quality = null)
         {
             var track = await _getTrackAsync(trackId).ConfigureAwait(false);
             if (track == null) throw new InvalidOperationException($"Track not found: {trackId}");
             return await DownloadTrackInternalAsync(trackId, track, outputPath, quality, null, 0, 1).ConfigureAwait(false);
         }
 
-        private async Task<TrackDownloadResult> DownloadTrackInternalAsync(string trackId, StreamingTrack track, string outputPath, StreamingQuality quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks)
+        private async Task<TrackDownloadResult> DownloadTrackInternalAsync(string trackId, StreamingTrack track, string outputPath, StreamingQuality? quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks)
         {
             // If a chunk-based stream provider is supplied, use it
             if (_streamProvider != null)
@@ -130,7 +130,7 @@ namespace Lidarr.Plugin.Common.Services.Download
             return await DownloadViaUrlAsync(trackId, track, outputPath, quality, progress, completedBefore, totalTracks).ConfigureAwait(false);
         }
 
-        private async Task<TrackDownloadResult> DownloadViaUrlAsync(string trackId, StreamingTrack track, string outputPath, StreamingQuality quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks)
+        private async Task<TrackDownloadResult> DownloadViaUrlAsync(string trackId, StreamingTrack track, string outputPath, StreamingQuality? quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks)
         {
             var (url, extension) = await _getStreamAsync(trackId, quality).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(url)) return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Empty stream URL" };
