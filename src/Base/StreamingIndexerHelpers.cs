@@ -104,7 +104,7 @@ namespace Lidarr.Plugin.Common.Base
                 return (false, "Search term contains invalid characters");
             }
 
-            return (true, null);
+            return (true, string.Empty);
         }
 
         /// <summary>

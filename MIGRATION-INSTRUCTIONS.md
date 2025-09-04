@@ -1,4 +1,43 @@
-# 📦 Migration Instructions: Repository Separation
+# 📦 Migration Instructions
+
+## ⬆️ Upgrading to v1.1.1
+
+This release adds resilient HTTP, context-specific sanitizers, optional OAuth auto-refresh, atomic/resumable downloads, and universal IDs. It is backwards compatible; deprecated APIs remain available.
+
+### 1) Replace generic input sanitization
+- Stop using `InputSanitizer.*` for search or metadata. These APIs are now `[Obsolete]`.
+- Do:
+  - Use `Sanitize.UrlComponent(value)` only when manually building URLs without `StreamingApiRequestBuilder`.
+  - Use `Sanitize.PathSegment(value)` for filenames/folders (or keep `FileNameSanitizer` if you prefer its behavior).
+  - Use `Sanitize.DisplayText(value)` when rendering to HTML/console, not for HTTP.
+  - Use `Sanitize.IsSafePath(path)` to guard relative path traversal.
+
+### 2) Adopt resilient HTTP
+- Prefer `HttpClientExtensions.ExecuteWithResilienceAsync(request)` over `ExecuteWithRetryAsync`.
+- This adds: 429/Retry-After handling, jitter, retry budgets, and per-host concurrency gates.
+- The `BaseStreamingIndexer` already uses the resilient path for its internal `ExecuteRequestAsync`.
+
+### 3) Optional: Token auto-refresh on 401
+- Add `OAuthDelegatingHandler` to your `HttpClient` if your service uses tokens:
+```csharp
+var handler = new OAuthDelegatingHandler(tokenProvider, logger)
+{
+    InnerHandler = new SocketsHttpHandler { AutomaticDecompression = System.Net.DecompressionMethods.GZip | System.Net.DecompressionMethods.Deflate }
+};
+using var httpClient = new HttpClient(handler);
+```
+- Implement `IStreamingTokenProvider` in your plugin to back the handler.
+
+### 4) Atomic/resumable downloads
+- Base download client now writes to `*.partial`, flushes, and atomically moves to the final path.
+- If the server supports ranges, downloads resume from the partial file automatically.
+- No changes required for consumers; behavior improves by default.
+
+### 5) Universal IDs for cross-service matching
+- Populate `StreamingAlbum.ExternalIds`, `StreamingTrack.ExternalIds`, and (if available) `MusicBrainzId` in your mappers.
+- This improves de-duplication and prepares for Brainarr’s resolver.
+
+---
 
 ## 🎯 **Professional Repository Separation Complete**
 
