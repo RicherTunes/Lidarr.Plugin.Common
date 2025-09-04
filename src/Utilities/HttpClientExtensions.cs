@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -14,6 +15,14 @@ namespace Lidarr.Plugin.Common.Utilities
     /// </summary>
     public static class HttpClientExtensions
     {
+        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _hostGates = new();
+
+        private static SemaphoreSlim GetHostGate(string? host, int maxConcurrencyPerHost)
+        {
+            host ??= "__unknown__";
+            return _hostGates.GetOrAdd(host, _ => new SemaphoreSlim(maxConcurrencyPerHost, maxConcurrencyPerHost));
+        }
+
         /// <summary>
         /// Executes an HTTP request with built-in retry logic and error handling.
         /// </summary>
@@ -34,6 +43,74 @@ namespace Lidarr.Plugin.Common.Utilities
                 maxRetries,
                 initialDelayMs,
                 $"HTTP {request.Method} to {request.RequestUri}");
+        }
+
+        /// <summary>
+        /// Executes an HTTP request with enhanced resilience: 429/Retry-After awareness,
+        /// exponential backoff with jitter, per-host concurrency gating, and retry budget.
+        /// The provided request is cloned per attempt to allow safe retries.
+        /// </summary>
+        public static async Task<HttpResponseMessage> ExecuteWithResilienceAsync(
+            this HttpClient httpClient,
+            HttpRequestMessage request,
+            int maxRetries = 5,
+            TimeSpan? retryBudget = null,
+            int maxConcurrencyPerHost = 6,
+            CancellationToken cancellationToken = default)
+        {
+            retryBudget ??= TimeSpan.FromSeconds(60);
+            var deadline = DateTime.UtcNow + retryBudget.Value;
+            var attempt = 0;
+            var host = request.RequestUri?.Host;
+            var gate = GetHostGate(host, Math.Max(1, maxConcurrencyPerHost));
+
+            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                while (true)
+                {
+                    attempt++;
+
+                    using var attemptRequest = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
+                    var response = await httpClient.SendAsync(attemptRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+
+                    if ((int)response.StatusCode >= 200 && (int)response.StatusCode < 300)
+                    {
+                        // Success; caller disposes response
+                        return response;
+                    }
+
+                    // Determine if retryable
+                    var status = (int)response.StatusCode;
+                    var retryable = status == 408 || status == 429 || (status >= 500 && status <= 599);
+                    if (!retryable || attempt >= maxRetries)
+                    {
+                        return response; // let caller handle non-retryable or last attempt
+                    }
+
+                    // Compute delay from headers or backoff
+                    var delay = GetRetryDelay(response) ?? TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt))) + GetJitter();
+                    response.Dispose(); // dispose before waiting
+
+                    // Respect retry budget
+                    var now = DateTime.UtcNow;
+                    if (now + delay > deadline)
+                    {
+                        // Budget exceeded; stop retrying
+                        break;
+                    }
+
+                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                gate.Release();
+            }
+
+            // Final attempt without retry or return last response -> do one last send
+            using var finalRequest = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
+            return await httpClient.SendAsync(finalRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -210,7 +287,7 @@ namespace Lidarr.Plugin.Common.Utilities
             return $"{value.Substring(0, 2)}{"*".PadLeft(value.Length - 4, '*')}{value.Substring(value.Length - 2)}";
         }
 
-        private static async Task<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage request)
+        public static async Task<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage request)
         {
             var clone = new HttpRequestMessage(request.Method, request.RequestUri)
             {
@@ -237,6 +314,30 @@ namespace Lidarr.Plugin.Common.Utilities
             }
 
             return clone;
+        }
+
+        private static TimeSpan? GetRetryDelay(HttpResponseMessage response)
+        {
+            try
+            {
+                var ra = response.Headers?.RetryAfter;
+                if (ra == null) return null;
+
+                if (ra.Delta.HasValue) return ra.Delta.Value;
+                if (ra.Date.HasValue)
+                {
+                    var delta = ra.Date.Value - DateTimeOffset.UtcNow;
+                    if (delta > TimeSpan.Zero) return delta;
+                }
+            }
+            catch { /* ignore parse issues */ }
+            return null;
+        }
+
+        private static TimeSpan GetJitter()
+        {
+            var ms = Random.Shared.Next(50, 250);
+            return TimeSpan.FromMilliseconds(ms);
         }
     }
 }
