@@ -32,10 +32,8 @@ namespace Lidarr.Plugin.Common.Tests
             var temp = Path.Combine(Path.GetTempPath(), "orch_test_progress.bin");
             try
             {
-                double lastPercent = 0;
-                long lastBps = 0;
-                TimeSpan? lastEta = null;
-                var result = await orch.DownloadTrackAsync("t1", temp, null);
+                // Minimal assertion-only test; progress values are exercised by the download
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 });
 
                 Assert.True(result.Success);
                 Assert.True(File.Exists(result.FilePath));
@@ -73,7 +71,7 @@ namespace Lidarr.Plugin.Common.Tests
                     fs.Write(buf, 0, buf.Length);
                 }
 
-                var result = await orch.DownloadTrackAsync("t1", temp, null);
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 });
                 Assert.True(result.Success);
                 Assert.Equal(totalBytes, new FileInfo(result.FilePath).Length);
             }

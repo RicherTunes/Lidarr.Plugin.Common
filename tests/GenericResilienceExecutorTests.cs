@@ -16,24 +16,24 @@ namespace Lidarr.Plugin.Common.Tests
             var attempts = 0;
             var request = new HttpRequestMessage(HttpMethod.Get, "http://example.com/test");
 
-            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send = async (req, ct) =>
+            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send = (req, ct) =>
             {
                 attempts++;
                 if (attempts == 1)
                 {
                     var r = new HttpResponseMessage((HttpStatusCode)429);
                     r.Headers.Add("Retry-After", "1");
-                    return r;
+                    return Task.FromResult(r);
                 }
-                return new HttpResponseMessage(HttpStatusCode.OK);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
             };
 
-            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = async (r) =>
+            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = (r) =>
             {
                 var c = new HttpRequestMessage(r.Method, r.RequestUri);
                 foreach (var h in r.Headers)
                     c.Headers.TryAddWithoutValidation(h.Key, h.Value);
-                return c;
+                return Task.FromResult(c);
             };
 
             var response = await GenericResilienceExecutor.ExecuteWithResilienceAsync<HttpRequestMessage, HttpResponseMessage>(
@@ -57,4 +57,3 @@ namespace Lidarr.Plugin.Common.Tests
         }
     }
 }
-
