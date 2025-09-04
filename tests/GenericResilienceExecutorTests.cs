@@ -55,5 +55,36 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             Assert.Equal(2, attempts);
         }
+
+        [Fact]
+        public async Task ExecuteWithResilience_StopsOnBudgetExhaustion()
+        {
+            var attempts = 0;
+            var request = new HttpRequestMessage(HttpMethod.Get, "http://example.com/test2");
+            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send = (req, ct) =>
+            {
+                attempts++;
+                var r = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+                // Huge Retry-After to force budget exceed
+                r.Headers.Add("Retry-After", "120");
+                return Task.FromResult(r);
+            };
+            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = (r) => Task.FromResult(new HttpRequestMessage(r.Method, r.RequestUri));
+
+            var response = await GenericResilienceExecutor.ExecuteWithResilienceAsync<HttpRequestMessage, HttpResponseMessage>(
+                request,
+                send,
+                clone,
+                r => r.RequestUri?.Host,
+                r => (int)r.StatusCode,
+                r => { if (r.Headers.RetryAfter?.Delta.HasValue == true) return r.Headers.RetryAfter!.Delta; return null; },
+                maxRetries: 5,
+                retryBudget: TimeSpan.FromMilliseconds(10),
+                maxConcurrencyPerHost: 1,
+                cancellationToken: CancellationToken.None);
+
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Equal(1, attempts); // budget prevents retry
+        }
     }
 }
