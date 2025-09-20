@@ -119,7 +119,7 @@ namespace Lidarr.Plugin.Common.Services.Registration
         /// </summary>
         protected T GetSingleton<T>(Func<T> factory) where T : class
         {
-            return (T)GetSingleton(typeof(T), () => factory());
+            return (T)GetSingleton(typeof(T), () => factory()!);
         }
 
         /// <summary>
@@ -131,7 +131,12 @@ namespace Lidarr.Plugin.Common.Services.Registration
             {
                 if (!_singletonInstances.TryGetValue(type, out object instance))
                 {
-                    instance = factory();
+                    var created = factory();
+                    if (created == null)
+                    {
+                        throw new InvalidOperationException($"Factory for {type.Name} returned null instance");
+                    }
+                    instance = created;
                     _singletonInstances[type] = instance;
                 }
                 return instance;

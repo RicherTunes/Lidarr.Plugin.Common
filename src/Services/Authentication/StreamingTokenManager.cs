@@ -35,7 +35,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private readonly object _tokenLock = new();
         
         // Token management state
-        private volatile TSession _currentSession;
+        private volatile TSession? _currentSession;
         private DateTime _sessionExpiryTime; // Not volatile - accessed within locks
         private volatile bool _isRefreshing = false;
         private volatile int _refreshAttempts = 0;
@@ -68,12 +68,12 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// <summary>
         /// Gets the current valid session, refreshing if necessary.
         /// </summary>
-        public async Task<TSession> GetValidSessionAsync(TCredentials fallbackCredentials = null)
+        public async Task<TSession> GetValidSessionAsync(TCredentials? fallbackCredentials = null)
         {
             // Fast path - check if current session is still valid
             if (IsSessionValid())
             {
-                return _currentSession;
+                return _currentSession!;
             }
 
             // Slow path - refresh session with semaphore protection
@@ -83,13 +83,13 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 // Double-check pattern
                 if (IsSessionValid())
                 {
-                    return _currentSession;
+                    return _currentSession!;
                 }
 
                 _logger.LogInformation("Session expired or invalid, refreshing...");
-                await RefreshSessionAsync(fallbackCredentials);
+                await RefreshSessionAsync(fallbackCredentials!);
                 
-                return _currentSession;
+                return _currentSession!;
             }
             finally
             {
@@ -115,7 +115,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
 
                 _logger.LogDebug("Attempting session refresh (attempt {0}/{1})", _refreshAttempts, _maxRefreshAttempts);
 
-                var newSession = await _authService.AuthenticateAsync(credentials);
+                var newSession = await _authService.AuthenticateAsync(credentials).ConfigureAwait(false);
                 
                 lock (_tokenLock)
                 {
@@ -203,7 +203,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             }
         }
 
-        private void CheckTokenExpiry(object state)
+        private void CheckTokenExpiry(object? state)
         {
             try
             {

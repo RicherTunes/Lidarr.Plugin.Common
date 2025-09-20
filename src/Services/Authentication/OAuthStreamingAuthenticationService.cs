@@ -158,10 +158,15 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 var session = await ExchangeCodeForTokensInternalAsync(
                     authorizationCode, 
                     flowState.CodeVerifier, 
-                    flowState.RedirectUri);
+                    flowState.RedirectUri).ConfigureAwait(false);
+
+                if (session == null)
+                {
+                    throw new InvalidOperationException("Authentication service returned null session");
+                }
 
                 // Cache session
-                await CacheSessionAsync(session);
+                await CacheSessionAsync(session).ConfigureAwait(false);
                 
                 return session;
             }
