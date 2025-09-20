@@ -26,8 +26,6 @@ namespace Lidarr.Plugin.Common.Services
                 return fallbackValue;
             }
 
-            Exception lastException = null;
-
             for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
                 try
@@ -40,10 +38,8 @@ namespace Lidarr.Plugin.Common.Services
 
                     return operation(filePath);
                 }
-                catch (IOException ex) when (attempt < maxRetries)
+                catch (IOException) when (attempt < maxRetries)
                 {
-                    lastException = ex;
-                    
                     // Wait briefly before retry (file might be locked)
                     Thread.Sleep(500 * attempt);
                 }
