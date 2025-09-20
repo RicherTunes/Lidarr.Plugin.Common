@@ -238,7 +238,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
                 : DateTime.UtcNow;
         }
 
-        private void FlushMetrics(object state)
+        private void FlushMetrics(object? state)
         {
             if (_disposed) return;
 

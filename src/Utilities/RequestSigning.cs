@@ -16,7 +16,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
     /// <summary>
     /// Simple MD5 concatenation signer (e.g., legacy styles):
-    /// Joins sorted key=value pairs with '&' and appends a secret, then MD5.
+    /// Joins sorted key=value pairs with an ampersand (&amp;) and appends a secret, then MD5.
     /// </summary>
     public sealed class Md5ConcatSigner : IRequestSigner
     {
@@ -38,7 +38,7 @@ namespace Lidarr.Plugin.Common.Utilities
     }
 
     /// <summary>
-    /// HMAC-SHA256 signer: joins sorted key=value pairs with '&' and signs using the secret.
+    /// HMAC-SHA256 signer: joins sorted key=value pairs with an ampersand (&amp;) and signs using the secret.
     /// </summary>
     public sealed class HmacSha256Signer : IRequestSigner
     {
