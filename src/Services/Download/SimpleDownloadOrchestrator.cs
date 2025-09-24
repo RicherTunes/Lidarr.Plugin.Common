@@ -103,7 +103,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                     var tempPath = outputPath + ".partial";
                     var streamResult = await _streamProvider.GetStreamAsync(trackId, quality).ConfigureAwait(false);
                     var totalExpected = streamResult.TotalBytes ?? 0;
-                    if (string.IsNullOrWhiteSpace(Path.GetExtension(outputPath)) && !string.IsNullOrWhiteSpace(streamResult.SuggestedExtension))
+                    if (!string.IsNullOrWhiteSpace(streamResult.SuggestedExtension))
                     {
                         outputPath = Path.ChangeExtension(outputPath, streamResult.SuggestedExtension.TrimStart('.'));
                     }
@@ -134,7 +134,7 @@ namespace Lidarr.Plugin.Common.Services.Download
         {
             var (url, extension) = await _getStreamAsync(trackId, quality).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(url)) return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Empty stream URL" };
-            if (string.IsNullOrWhiteSpace(Path.GetExtension(outputPath)) && !string.IsNullOrWhiteSpace(extension)) outputPath = Path.ChangeExtension(outputPath, extension.TrimStart('.'));
+            if (!string.IsNullOrWhiteSpace(extension)) outputPath = Path.ChangeExtension(outputPath, extension.TrimStart('.'));
 
             try
             {
