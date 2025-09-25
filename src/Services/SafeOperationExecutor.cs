@@ -16,8 +16,8 @@ namespace Lidarr.Plugin.Common.Services
         /// Executes file operation with proper file locking and retry logic
         /// </summary>
         public static T ExecuteFileOperation<T>(
-            string filePath, 
-            Func<string, T> operation, 
+            string filePath,
+            Func<string, T> operation,
             T fallbackValue = default,
             int maxRetries = 3)
         {
@@ -26,15 +26,10 @@ namespace Lidarr.Plugin.Common.Services
                 return fallbackValue!;
             }
 
-<<<<<<< HEAD
-
-=======
->>>>>>> 9d3d66119a6f3c48e407a01d4726940c2ed526ae
             for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
                 try
                 {
-                    // Defensive: Ensure file exists before operation
                     if (!File.Exists(filePath))
                     {
                         return fallbackValue!;
@@ -44,11 +39,6 @@ namespace Lidarr.Plugin.Common.Services
                 }
                 catch (IOException) when (attempt < maxRetries)
                 {
-<<<<<<< HEAD
-                    
-=======
->>>>>>> 9d3d66119a6f3c48e407a01d4726940c2ed526ae
-                    // Wait briefly before retry (file might be locked)
                     Thread.Sleep(500 * attempt);
                 }
                 catch (UnauthorizedAccessException)
@@ -74,14 +64,13 @@ namespace Lidarr.Plugin.Common.Services
             string operationName = "Operation")
         {
             using var cts = new CancellationTokenSource(timeout);
-            
+
             try
             {
                 return await operation(cts.Token);
             }
             catch (OperationCanceledException) when (cts.Token.IsCancellationRequested)
             {
-                // Timeout occurred
                 return fallbackValue!;
             }
             catch (Exception)
@@ -103,7 +92,7 @@ namespace Lidarr.Plugin.Common.Services
             }
             catch
             {
-                result = fallbackValue!; 
+                result = fallbackValue!;
                 return false;
             }
         }
@@ -113,7 +102,7 @@ namespace Lidarr.Plugin.Common.Services
         /// Returns success status and result via tuple
         /// </summary>
         public static async Task<(bool Success, T Result)> TryExecuteAsync<T>(
-            Func<Task<T>> operation, 
+            Func<Task<T>> operation,
             T fallbackValue = default)
         {
             try
@@ -143,7 +132,7 @@ namespace Lidarr.Plugin.Common.Services
                     // Continue to next fallback
                 }
             }
-            
+
             return default!;
         }
     }
