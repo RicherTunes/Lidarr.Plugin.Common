@@ -203,7 +203,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             }
         }
 
-        private void CheckTokenExpiry(object state)
+        private void CheckTokenExpiry(object? state)
         {
             try
             {
