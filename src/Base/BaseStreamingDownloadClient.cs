@@ -288,7 +288,7 @@ namespace Lidarr.Plugin.Common.Base
         /// <summary>
         /// Remove a download from the queue
         /// </summary>
-        public async Task<bool> RemoveDownloadAsync(string downloadId, bool deleteData = false)
+        public Task<bool> RemoveDownloadAsync(string downloadId, bool deleteData = false)
         {
             if (_activeDownloads.TryRemove(downloadId, out var download))
             {
@@ -304,16 +304,16 @@ namespace Lidarr.Plugin.Common.Base
                     }
 
                     Logger?.LogDebug($"Removed {ServiceName} download: {downloadId}");
-                    return true;
+                    return Task.FromResult(true);
                 }
                 catch (Exception ex)
                 {
                     Logger?.LogError(ex, $"Error removing {ServiceName} download: {downloadId}");
-                    return false;
+                    return Task.FromResult(false);
                 }
             }
 
-            return false;
+            return Task.FromResult(false);
         }
 
         /// <summary>

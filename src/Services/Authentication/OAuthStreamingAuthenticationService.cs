@@ -118,10 +118,12 @@ namespace Lidarr.Plugin.Common.Services.Authentication
 
             // Build authorization URL using service-specific implementation
             var authUrl = await BuildAuthorizationUrlAsync(codeChallenge, state, redirectUri, scopes);
+            if (string.IsNullOrEmpty(authUrl))
+                throw new InvalidOperationException("Authorization URL cannot be null or empty.");
 
             return new OAuthFlowResult
             {
-                AuthorizationUrl = authUrl,
+                AuthorizationUrl = authUrl!,
                 FlowId = flowId,
                 State = state,
                 ExpiresAt = DateTime.UtcNow.Add(_flowExpirationTime)
@@ -141,11 +143,12 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             OAuthFlowState flowState;
             lock (_flowsLock)
             {
-                if (!_activeFlows.TryGetValue(flowId, out flowState))
+                if (!_activeFlows.TryGetValue(flowId, out var existingState))
                     throw new InvalidOperationException($"OAuth flow {flowId} not found or expired");
                 
                 // Remove used flow
                 _activeFlows.Remove(flowId);
+                flowState = existingState;
             }
 
             // Check flow expiration

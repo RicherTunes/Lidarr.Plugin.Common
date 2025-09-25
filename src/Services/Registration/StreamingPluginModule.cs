@@ -129,12 +129,14 @@ namespace Lidarr.Plugin.Common.Services.Registration
         {
             lock (_lock)
             {
-                if (!_singletonInstances.TryGetValue(type, out object instance))
+                if (_singletonInstances.TryGetValue(type, out var existing))
                 {
-                    instance = factory();
-                    _singletonInstances[type] = instance;
+                    return existing;
                 }
-                return instance;
+
+                var created = factory() ?? throw new InvalidOperationException("Factory returned null for singleton type " + type.FullName);
+                _singletonInstances[type] = created;
+                return created;
             }
         }
 
