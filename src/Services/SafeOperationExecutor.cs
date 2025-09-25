@@ -23,10 +23,9 @@ namespace Lidarr.Plugin.Common.Services
         {
             if (string.IsNullOrWhiteSpace(filePath))
             {
-                return fallbackValue;
+                return fallbackValue!;
             }
 
-            Exception lastException = null;
 
             for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
@@ -35,29 +34,28 @@ namespace Lidarr.Plugin.Common.Services
                     // Defensive: Ensure file exists before operation
                     if (!File.Exists(filePath))
                     {
-                        return fallbackValue;
+                        return fallbackValue!;
                     }
 
                     return operation(filePath);
                 }
-                catch (IOException ex) when (attempt < maxRetries)
+                catch (IOException) when (attempt < maxRetries)
                 {
-                    lastException = ex;
                     
                     // Wait briefly before retry (file might be locked)
                     Thread.Sleep(500 * attempt);
                 }
                 catch (UnauthorizedAccessException)
                 {
-                    return fallbackValue;
+                    return fallbackValue!;
                 }
                 catch (Exception)
                 {
-                    return fallbackValue;
+                    return fallbackValue!;
                 }
             }
 
-            return fallbackValue;
+            return fallbackValue!;
         }
 
         /// <summary>
@@ -78,11 +76,11 @@ namespace Lidarr.Plugin.Common.Services
             catch (OperationCanceledException) when (cts.Token.IsCancellationRequested)
             {
                 // Timeout occurred
-                return fallbackValue;
+                return fallbackValue!;
             }
             catch (Exception)
             {
-                return fallbackValue;
+                return fallbackValue!;
             }
         }
 
@@ -99,7 +97,7 @@ namespace Lidarr.Plugin.Common.Services
             }
             catch
             {
-                result = fallbackValue;
+                result = fallbackValue!; 
                 return false;
             }
         }
@@ -119,7 +117,7 @@ namespace Lidarr.Plugin.Common.Services
             }
             catch
             {
-                return (false, fallbackValue);
+                return (false, fallbackValue!);
             }
         }
 
@@ -140,7 +138,7 @@ namespace Lidarr.Plugin.Common.Services
                 }
             }
             
-            return default(T);
+            return default!;
         }
     }
 }

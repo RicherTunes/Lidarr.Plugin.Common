@@ -372,6 +372,7 @@ namespace Lidarr.Plugin.Common.Services.Network
         /// <summary>
         /// Saves operation checkpoint for recovery
         /// </summary>
+#pragma warning disable CS1998
         private async Task SaveCheckpointAsync(BatchOperationState batchState)
         {
             try
@@ -428,6 +429,7 @@ namespace Lidarr.Plugin.Common.Services.Network
                 _logger.LogError(ex, "Failed to cleanup operation: {0}", operationId);
             }
         }
+#pragma warning restore CS1998
 
         #endregion
 
