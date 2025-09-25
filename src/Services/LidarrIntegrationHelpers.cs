@@ -177,11 +177,7 @@ namespace Lidarr.Plugin.Common.Services
         /// Parses common streaming API error responses.
         /// Based on patterns from working Qobuzarr error handling.
         /// </summary>
-<<<<<<< HEAD
         public static (bool isError, string? errorMessage, int? statusCode) ParseApiError(string responseContent, int statusCode)
-=======
-        public static (bool IsError, string? ErrorMessage, int? StatusCode) ParseApiError(string responseContent, int statusCode)
->>>>>>> 9d3d66119a6f3c48e407a01d4726940c2ed526ae
         {
             if (statusCode >= 200 && statusCode < 300)
                 return (false, null, statusCode);
