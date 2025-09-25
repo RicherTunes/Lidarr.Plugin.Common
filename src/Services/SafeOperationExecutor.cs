@@ -26,7 +26,10 @@ namespace Lidarr.Plugin.Common.Services
                 return fallbackValue!;
             }
 
+<<<<<<< HEAD
 
+=======
+>>>>>>> 9d3d66119a6f3c48e407a01d4726940c2ed526ae
             for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
                 try
@@ -41,7 +44,10 @@ namespace Lidarr.Plugin.Common.Services
                 }
                 catch (IOException) when (attempt < maxRetries)
                 {
+<<<<<<< HEAD
                     
+=======
+>>>>>>> 9d3d66119a6f3c48e407a01d4726940c2ed526ae
                     // Wait briefly before retry (file might be locked)
                     Thread.Sleep(500 * attempt);
                 }
