@@ -1,0 +1,76 @@
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PluginAssemblyFileName Condition="'$(PluginAssemblyFileName)' == ''">$(AssemblyName).dll</PluginAssemblyFileName>
+    <PluginSymbolFileName Condition="'$(PluginSymbolFileName)' == ''">$(AssemblyName).pdb</PluginSymbolFileName>
+    <PluginManifestFileName Condition="'$(PluginManifestFileName)' == ''">plugin.json</PluginManifestFileName>
+    <EnablePluginDeployment Condition="'$(EnablePluginDeployment)' == ''">false</EnablePluginDeployment>
+    <PluginPackagingDisable Condition="'$(PluginPackagingDisable)' == ''">false</PluginPackagingDisable>
+  </PropertyGroup>
+
+  <!-- Default dependency merge list; projects can extend via PluginPackagingAdditionalMerge -->
+  <ItemGroup>
+    <PluginMergeDependency Include="$(OutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Common.dll')" />
+    <PluginMergeDependency Include="$(OutputPath)FluentValidation.dll" Condition="Exists('$(OutputPath)FluentValidation.dll')" />
+    <PluginMergeDependency Include="$(OutputPath)Polly.dll" Condition="Exists('$(OutputPath)Polly.dll')" />
+    <PluginMergeDependency Include="$(OutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(OutputPath)Polly.Extensions.Http.dll')" />
+    <PluginMergeDependency Include="$(OutputPath)Microsoft.Extensions.*.dll" />
+    <PluginMergeDependency Include="$(OutputPath)System.Text.Json.dll" Condition="Exists('$(OutputPath)System.Text.Json.dll')" />
+    <PluginMergeDependency Include="$(OutputPath)TagLibSharp*.dll" />
+    <PluginMergeDependency Include="@(PluginPackagingAdditionalMerge)" />
+  </ItemGroup>
+
+  <Target Name="RepackPlugin" AfterTargets="Build" Condition="'$(PluginPackagingDisable)' != 'true'">
+    <ItemGroup>
+      <_AssembliesToMerge Include="$(OutputPath)$(AssemblyName).dll" />
+      <_AssembliesToMerge Include="@(PluginMergeDependency)" />
+    </ItemGroup>
+
+    <ILRepack
+      Parallel="true"
+      Internalize="true"
+      DebugInfo="true"
+      TargetKind="Dll"
+      InputAssemblies="@(_AssembliesToMerge)"
+      OutputFile="$(IntermediateOutputPath)$(AssemblyName).merged.dll"
+      LibraryPath="$(OutputPath)" />
+
+    <Copy SourceFiles="$(IntermediateOutputPath)$(AssemblyName).merged.dll"
+          DestinationFiles="$(OutputPath)$(PluginAssemblyFileName)"
+          OverwriteReadOnlyFiles="true" />
+
+    <Copy SourceFiles="$(IntermediateOutputPath)$(AssemblyName).merged.pdb"
+          DestinationFiles="$(OutputPath)$(PluginSymbolFileName)"
+          OverwriteReadOnlyFiles="true"
+          Condition="Exists('$(IntermediateOutputPath)$(AssemblyName).merged.pdb')" />
+
+    <Delete Files="$(IntermediateOutputPath)$(AssemblyName).merged.dll" />
+    <Delete Files="$(IntermediateOutputPath)$(AssemblyName).merged.pdb"
+            Condition="Exists('$(IntermediateOutputPath)$(AssemblyName).merged.pdb')" />
+
+    <ItemGroup>
+      <_ExtraAssemblies Include="$(OutputPath)*.dll" Exclude="$(OutputPath)$(PluginAssemblyFileName)" />
+      <_ExtraSymbols Include="$(OutputPath)*.pdb" Exclude="$(OutputPath)$(PluginSymbolFileName)" />
+      <_ExtraDocs Include="$(OutputPath)*.xml" />
+    </ItemGroup>
+
+    <Delete Files="@(_ExtraAssemblies)" />
+    <Delete Files="@(_ExtraSymbols)" />
+    <Delete Files="@(_ExtraDocs)" />
+    <Delete Files="$(OutputPath)$(AssemblyName).deps.json" Condition="Exists('$(OutputPath)$(AssemblyName).deps.json')" />
+    <RemoveDir Directories="$(OutputPath)runtimes" Condition="Exists('$(OutputPath)runtimes')" />
+  </Target>
+
+  <Target Name="DeployPluginArtifacts" AfterTargets="RepackPlugin" Condition="'$(EnablePluginDeployment)' == 'true' and '$(LidarrPluginDeployPath)' != ''">
+    <ItemGroup>
+      <PluginDeploymentFiles Include="$(OutputPath)$(PluginAssemblyFileName)" />
+      <PluginDeploymentFiles Include="$(OutputPath)$(PluginSymbolFileName)" Condition="Exists('$(OutputPath)$(PluginSymbolFileName)')" />
+      <PluginDeploymentFiles Include="$(OutputPath)$(PluginManifestFileName)" Condition="Exists('$(OutputPath)$(PluginManifestFileName)')" />
+      <PluginDeploymentFiles Include="@(PluginExtraContent)" />
+    </ItemGroup>
+
+    <MakeDir Directories="$(LidarrPluginDeployPath)" />
+    <Copy SourceFiles="@(PluginDeploymentFiles)"
+          DestinationFiles="@(PluginDeploymentFiles->'$(LidarrPluginDeployPath)\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>
