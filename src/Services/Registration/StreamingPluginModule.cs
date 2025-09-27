@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using Lidarr.Plugin.Common.Base;
 using Lidarr.Plugin.Common.Interfaces;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Lidarr.Plugin.Common.Services.Registration
 {
@@ -35,6 +36,47 @@ namespace Lidarr.Plugin.Common.Services.Registration
         /// Gets the author of this plugin.
         /// </summary>
         public abstract string Author { get; }
+
+        /// <summary>
+        /// Allows derived modules to configure dependency injection services used outside of Lidarr runtime.
+        /// </summary>
+        /// <param name="services">Service collection to populate.</param>
+        protected virtual void ConfigureServices(IServiceCollection services)
+        {
+            // Override in derived classes to register DI services for CLI/tests
+        }
+
+        /// <summary>
+        /// Creates a service collection pre-populated with the module's registrations.
+        /// </summary>
+        public ServiceCollection CreateServiceCollection(Action<IServiceCollection>? configureServices = null)
+        {
+            var services = new ServiceCollection();
+            ConfigureServices(services);
+            configureServices?.Invoke(services);
+            return services;
+        }
+
+        /// <summary>
+        /// Builds a service provider using the module's registrations.
+        /// </summary>
+        public ServiceProvider BuildServiceProvider(Action<IServiceCollection>? configureServices = null)
+        {
+            return CreateServiceCollection(configureServices).BuildServiceProvider();
+        }
+
+        /// <summary>
+        /// Builds a service provider using the module's registrations and supplied settings.
+        /// </summary>
+        public ServiceProvider BuildServiceProvider<TSettings>(TSettings settings, Action<IServiceCollection>? configureServices = null)
+            where TSettings : class
+        {
+            return BuildServiceProvider(services =>
+            {
+                services.AddSingleton(settings);
+                configureServices?.Invoke(services);
+            });
+        }
 
         /// <summary>
         /// Registers all services required by this streaming plugin.
