@@ -7,14 +7,6 @@
 [![NuGet Version](https://img.shields.io/nuget/v/Lidarr.Plugin.Common.svg)](https://www.nuget.org/packages/Lidarr.Plugin.Common/)
 [![Downloads](https://img.shields.io/nuget/dt/Lidarr.Plugin.Common.svg)](https://www.nuget.org/packages/Lidarr.Plugin.Common/)
 
-## 🚀 **Proven Results**
-
-**Tidalarr Developer Feedback:**
-> *"INCREDIBLE! 74% code reduction - ~400 lines vs ~3,500 lines. Production-ready quality from day one with battle-tested patterns."*
-
-**Chief Architect Approval:**  
-> *"READY TO SHIP - Engineering excellence. This will actually work in practice. Ship it! 🚀"*
-
 ---
 
 ## ⚡ **Quick Start**
@@ -184,10 +176,11 @@ protected override async IAsyncEnumerable<StreamingAlbum> SearchAlbumsStreamAsyn
 ## 🎯 **Supported Streaming Services**
 
 ### **✅ Production Ready**
-- **[Qobuzarr](https://github.com/RicherTunes/Qobuzarr)** - Qobuz integration
+- **[Brainarr](https://github.com/RicherTunes/Brainarr)** - Brainarr integration
 
 ### **🚀 In Development**  
-- **[Tidalarr](https://github.com/TidalAuthor/Tidalarr)** - Tidal integration (74% code reduction confirmed)
+- **[Qobuzarr](https://github.com/RicherTunes/Qobuzarr)** - Qobuz integration
+- **[Tidalarr](https://github.com/TidalAuthor/Tidalarr)** - Tidal integration
 
 ### **📋 Planned**
 - **Spotifyarr** - Spotify integration (OAuth patterns ready)
