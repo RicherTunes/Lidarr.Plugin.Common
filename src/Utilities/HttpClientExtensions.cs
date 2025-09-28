@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Linq;
 using System.Net.Http;
@@ -15,14 +16,27 @@ namespace Lidarr.Plugin.Common.Utilities
     /// </summary>
     public static class HttpClientExtensions
     {
-        private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, SemaphoreSlim> _hostGates = new();
+        private sealed record HostGate(SemaphoreSlim Semaphore, int Limit);
 
-        private static SemaphoreSlim GetHostGate(string? host, int maxConcurrencyPerHost)
+        private static readonly ConcurrentDictionary<string, HostGate> _hostGates = new();
+
+        private static SemaphoreSlim GetHostGate(string? host, int requestedLimit)
         {
             host ??= "__unknown__";
-            return _hostGates.GetOrAdd(host, _ => new SemaphoreSlim(maxConcurrencyPerHost, maxConcurrencyPerHost));
-        }
+            return _hostGates.AddOrUpdate(
+                host,
+                _ => new HostGate(new SemaphoreSlim(requestedLimit, requestedLimit), requestedLimit),
+                (_, existing) =>
+                {
+                    if (requestedLimit <= existing.Limit)
+                    {
+                        return existing;
+                    }
 
+                    return new HostGate(new SemaphoreSlim(requestedLimit, requestedLimit), requestedLimit);
+                })
+                .Semaphore;
+        }
         /// <summary>
         /// Executes an HTTP request with built-in retry logic and error handling.
         /// </summary>
@@ -179,7 +193,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
             // Common headers for streaming APIs
             request.Headers.Add("Accept", "application/json");
-            request.Headers.Add("Accept-Encoding", "gzip, deflate");
+            // Do not set Accept-Encoding here; rely on the HTTP handler configuration.
             request.Headers.Add("Accept-Language", "en-US,en;q=0.9");
 
             if (additionalHeaders != null)

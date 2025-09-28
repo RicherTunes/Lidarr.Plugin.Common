@@ -16,12 +16,26 @@ namespace Lidarr.Plugin.Common.Utilities
     /// </summary>
     public static class GenericResilienceExecutor
     {
-        private static readonly ConcurrentDictionary<string, SemaphoreSlim> _hostGates = new();
+        private sealed record HostGate(SemaphoreSlim Semaphore, int Limit);
 
-        private static SemaphoreSlim GetHostGate(string? host, int maxConcurrencyPerHost)
+        private static readonly ConcurrentDictionary<string, HostGate> _hostGates = new();
+
+        private static SemaphoreSlim GetHostGate(string? host, int requestedLimit)
         {
             host ??= "__unknown__";
-            return _hostGates.GetOrAdd(host, _ => new SemaphoreSlim(maxConcurrencyPerHost, maxConcurrencyPerHost));
+            return _hostGates.AddOrUpdate(
+                host,
+                _ => new HostGate(new SemaphoreSlim(requestedLimit, requestedLimit), requestedLimit),
+                (_, existing) =>
+                {
+                    if (requestedLimit <= existing.Limit)
+                    {
+                        return existing;
+                    }
+
+                    return new HostGate(new SemaphoreSlim(requestedLimit, requestedLimit), requestedLimit);
+                })
+                .Semaphore;
         }
 
         /// <summary>
@@ -92,4 +106,3 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
-
