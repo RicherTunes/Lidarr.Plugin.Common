@@ -35,7 +35,7 @@ namespace Lidarr.Plugin.Common.Tests
                 // Minimal assertion-only test; progress values are exercised by the download
                 var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 });
 
-                Assert.True(result.Success);
+                Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
                 Assert.True(File.Exists(result.FilePath));
                 Assert.Equal(totalBytes, new FileInfo(result.FilePath).Length);
             }
@@ -72,7 +72,7 @@ namespace Lidarr.Plugin.Common.Tests
                 }
 
                 var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 });
-                Assert.True(result.Success);
+                Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
                 Assert.Equal(totalBytes, new FileInfo(result.FilePath).Length);
             }
             finally { TryDelete(temp); TryDelete(partial); TryDelete(temp + ".partial.resume.json"); }
