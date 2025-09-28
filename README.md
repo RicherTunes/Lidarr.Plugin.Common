@@ -176,10 +176,11 @@ protected override async IAsyncEnumerable<StreamingAlbum> SearchAlbumsStreamAsyn
 ## 🎯 **Supported Streaming Services**
 
 ### **✅ Production Ready**
-- **[Qobuzarr](https://github.com/RicherTunes/Qobuzarr)** - Qobuz integration
+- **[Brainarr](https://github.com/RicherTunes/Brainarr)** - Brainarr integration
 
 ### **🚀 In Development**  
-- **[Tidalarr](https://github.com/TidalAuthor/Tidalarr)** - Tidal integration (74% code reduction confirmed)
+- **[Qobuzarr](https://github.com/RicherTunes/Qobuzarr)** - Qobuz integration
+- **[Tidalarr](https://github.com/TidalAuthor/Tidalarr)** - Tidal integration
 
 ### **📋 Planned**
 - **Spotifyarr** - Spotify integration (OAuth patterns ready)
