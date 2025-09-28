@@ -6,6 +6,8 @@ This guide summarizes best practices and key building blocks when implementing a
 - Use `HttpClientExtensions.ExecuteWithResilienceAsync` for requests.
 - Honors `Retry-After` (delta/date) and adds per-host concurrency gates.
 - Keep retries budgeted; avoid stacking custom throttles on top of adaptive limiters.
+- Register `ContentDecodingSnifferHandler` after your auth handler to auto-inflate mislabelled gzip payloads.
+- For non-OAuth services, add `TokenDelegatingHandler` to automatically attach bearer tokens from your `IStreamingTokenProvider`.
 
 ## Authentication
 - OAuth flows: use `OAuthStreamingAuthenticationService` and `OAuthDelegatingHandler` for 401 single-flight refresh.
