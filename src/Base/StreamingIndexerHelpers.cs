@@ -30,8 +30,7 @@ namespace Lidarr.Plugin.Common.Base
             var headers = new Dictionary<string, string>
             {
                 ["User-Agent"] = userAgent ?? "Lidarr-StreamingPlugin/1.0",
-                ["Accept"] = "application/json",
-                ["Accept-Encoding"] = "gzip, deflate"
+                ["Accept"] = "application/json"
             };
 
             if (!string.IsNullOrEmpty(authToken))
@@ -76,8 +75,8 @@ namespace Lidarr.Plugin.Common.Base
                 keyParts.AddRange(sortedParams);
             }
 
-            var fullKey = string.Join("_", keyParts);
-            return Math.Abs(fullKey.GetHashCode()).ToString();
+            var fullKey = string.Join("|", keyParts);
+            return HashingUtility.ComputeSHA256(fullKey);
         }
 
         /// <summary>
@@ -267,3 +266,4 @@ namespace Lidarr.Plugin.Common.Base
         }
     }
 }
+

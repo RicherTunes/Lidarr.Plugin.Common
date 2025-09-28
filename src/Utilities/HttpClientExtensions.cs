@@ -148,7 +148,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 return default;
             }
 
-            if (string.IsNullOrEmpty(contentType) || !contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+            if (!IsJsonMediaType(contentType))
             {
                 var previewLength = Math.Min(8, payload.Length);
                 var previewSegment = payload.Substring(0, previewLength);
@@ -279,8 +279,7 @@ namespace Lidarr.Plugin.Common.Utilities
         public static bool IsJsonContent(this HttpResponseMessage response)
         {
             var contentType = response.Content?.Headers?.ContentType?.MediaType;
-            return contentType != null &&
-                   (contentType.Contains("application/json") || contentType.Contains("text/json"));
+            return IsJsonMediaType(contentType);
         }
 
         /// <summary>
@@ -379,6 +378,18 @@ namespace Lidarr.Plugin.Common.Utilities
         {
             var ms = Random.Shared.Next(50, 250);
             return TimeSpan.FromMilliseconds(ms);
+        }
+
+        private static bool IsJsonMediaType(string? contentType)
+        {
+            if (string.IsNullOrWhiteSpace(contentType))
+            {
+                return false;
+            }
+
+            return contentType.Contains("application/json", StringComparison.OrdinalIgnoreCase)
+                || contentType.Contains("text/json", StringComparison.OrdinalIgnoreCase)
+                || contentType.Contains("application/problem+json", StringComparison.OrdinalIgnoreCase);
         }
     }
 }
