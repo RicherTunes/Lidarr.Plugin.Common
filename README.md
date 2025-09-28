@@ -327,6 +327,7 @@ dotnet add package Lidarr.Plugin.Common
 
 ## 🛠️ **Maintainer Checklist**
 - Ensure Lidarr host build output exists at `../Lidarr/_output/net6.0/`.
+- If you are running in CI or without a Lidarr checkout, run `pwsh scripts/prepare-host-stub.ps1` to generate stub host assemblies before verification.
 - Run `pwsh scripts/verify-assemblies.ps1` to copy host assemblies locally and validate `AssemblyVersion`/`FileVersion` sync (expected `10.0.0.35686`).
 - Finish with `dotnet build -c Release` and `dotnet test -c Release --no-build` before publishing updates.
 ### **Plugin Version Governance**
