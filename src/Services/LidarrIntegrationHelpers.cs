@@ -19,8 +19,8 @@ namespace Lidarr.Plugin.Common.Services
         /// Plugins provide the factory method, shared library provides the data mapping.
         /// </summary>
         public static T CreateReleaseInfo<T>(
-            StreamingSearchResult result, 
-            string indexerName, 
+            StreamingSearchResult result,
+            string indexerName,
             Func<string, string, long, string, string, DateTime, int[], T> factory,
             string protocol = "unknown") where T : new()
         {
@@ -95,7 +95,7 @@ namespace Lidarr.Plugin.Common.Services
             if (result.Metadata?.ContainsKey("quality") == true)
             {
                 var quality = result.Metadata["quality"]?.ToString();
-                if (!string.IsNullOrEmpty(quality) && 
+                if (!string.IsNullOrEmpty(quality) &&
                     (quality.Contains("FLAC") || quality.Contains("Hi-Res") || quality.Contains("MQA")))
                 {
                     parts.Add($"[{quality}]");
@@ -123,14 +123,14 @@ namespace Lidarr.Plugin.Common.Services
         public static long EstimateSize(StreamingSearchResult result)
         {
             var trackCount = result.TrackCount ?? 10;
-            
+
             // Try to detect quality from metadata
             var qualityTier = StreamingQualityTier.Normal; // Default
-            
+
             if (result.Metadata?.ContainsKey("quality") == true)
             {
                 var qualityStr = result.Metadata["quality"]?.ToString()?.ToLowerInvariant() ?? "";
-                
+
                 qualityTier = qualityStr switch
                 {
                     var q when q.Contains("flac") && q.Contains("hires") => StreamingQualityTier.HiRes,
@@ -149,14 +149,14 @@ namespace Lidarr.Plugin.Common.Services
         /// Returns data that plugins can easily convert to IndexerRequest.
         /// </summary>
         public static RequestInfo BuildSearchRequest(
-            string baseUrl, 
+            string baseUrl,
             string searchEndpoint,
-            string searchTerm, 
+            string searchTerm,
             Dictionary<string, string> parameters = null,
             Dictionary<string, string> headers = null)
         {
             var requestParams = new Dictionary<string, string>(parameters ?? new Dictionary<string, string>());
-            
+
             // Add standard search parameters
             if (!requestParams.ContainsKey("q") && !requestParams.ContainsKey("query"))
                 requestParams["q"] = searchTerm;
@@ -220,8 +220,8 @@ namespace Lidarr.Plugin.Common.Services
         /// Based on working validation from Qobuzarr.
         /// </summary>
         public static (bool isValid, string errorMessage) ValidateSearchRequest(
-            string artist, 
-            string album, 
+            string artist,
+            string album,
             string searchTerm,
             int maxLength = 500)
         {
@@ -257,9 +257,9 @@ namespace Lidarr.Plugin.Common.Services
             try
             {
                 var logMethod = logger.GetType().GetMethod("Debug", new[] { typeof(string), typeof(object[]) });
-                logMethod?.Invoke(logger, new object[] { 
-                    $"{operation} request: {requestInfo.Url} with {maskedParams.Count} parameters", 
-                    new object[] { maskedParams, maskedHeaders } 
+                logMethod?.Invoke(logger, new object[] {
+                    $"{operation} request: {requestInfo.Url} with {maskedParams.Count} parameters",
+                    new object[] { maskedParams, maskedHeaders }
                 });
             }
             catch
@@ -302,7 +302,7 @@ namespace Lidarr.Plugin.Common.Services
         public T Get<T>(string endpoint, Dictionary<string, string> parameters) where T : class
         {
             var cacheKey = GenerateCacheKey(endpoint, parameters);
-            
+
             lock (_cacheLock)
             {
                 if (_cache.TryGetValue(cacheKey, out var item))

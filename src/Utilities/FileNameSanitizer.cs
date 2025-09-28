@@ -12,10 +12,10 @@ namespace Lidarr.Plugin.Common.Utilities
     {
         private static readonly char[] InvalidFileNameChars = Path.GetInvalidFileNameChars();
         private static readonly char[] InvalidPathChars = Path.GetInvalidPathChars();
-        
+
         // Additional characters that can cause issues
         private static readonly char[] ProblematicChars = { ':', '*', '?', '"', '<', '>', '|' };
-        
+
         // Zero-width characters that should be removed
         private static readonly char[] ZeroWidthChars = { '\u200B', '\u200C', '\u200D', '\uFEFF' };
 

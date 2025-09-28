@@ -1,0 +1,7 @@
+<Project>
+  <PropertyGroup>
+    <!-- // Matches Lidarr 2.14.2.4786 host binaries -->
+    <AssemblyVersion>10.0.0.35686</AssemblyVersion>
+    <FileVersion>10.0.0.35686</FileVersion>
+  </PropertyGroup>
+</Project>

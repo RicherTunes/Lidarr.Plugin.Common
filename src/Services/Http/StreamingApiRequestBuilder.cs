@@ -207,7 +207,7 @@ namespace Lidarr.Plugin.Common.Services.Http
             _headers["Accept"] = "application/json";
             _headers["Accept-Encoding"] = "gzip, deflate";
             _headers["Accept-Language"] = "en-US,en;q=0.9";
-            
+
             if (!string.IsNullOrEmpty(userAgent))
             {
                 _headers["User-Agent"] = userAgent;
@@ -248,7 +248,7 @@ namespace Lidarr.Plugin.Common.Services.Http
             if (_bodyContent != null && (_method == HttpMethod.Post || _method == HttpMethod.Put))
             {
                 var contentType = _headers.GetValueOrDefault("Content-Type", "application/json");
-                
+
                 if (contentType.Contains("application/json"))
                 {
                     var json = JsonSerializer.Serialize(_bodyContent);
@@ -287,7 +287,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         private string BuildUrl()
         {
             var url = string.IsNullOrEmpty(_endpoint) ? _baseUrl : $"{_baseUrl}/{_endpoint}";
-            
+
             if (_queryParams.Any())
             {
                 url = HttpClientExtensions.BuildUrlWithParams(url, _queryParams);
@@ -313,7 +313,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         {
             var sb = new StringBuilder();
             sb.AppendLine($"{Method} {Url}");
-            
+
             if (Headers.Any())
             {
                 sb.AppendLine("Headers:");

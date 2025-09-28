@@ -93,7 +93,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
                 {
                     limit.ConsecutiveFailures++;
                     limit.ConsecutiveSuccesses = 0;
-                    
+
                     // Aggressive reduction on rate limit
                     var newRate = (int)(limit.RequestsPerMinute * RATE_REDUCTION_FACTOR);
                     limit.RequestsPerMinute = Math.Max(newRate, MIN_REQUESTS_PER_MINUTE);
@@ -102,7 +102,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
                 {
                     limit.ConsecutiveSuccesses++;
                     limit.ConsecutiveFailures = 0;
-                    
+
                     // Gradual increase after sustained success
                     if (limit.ConsecutiveSuccesses >= SUCCESS_THRESHOLD_FOR_INCREASE)
                     {
@@ -116,8 +116,8 @@ namespace Lidarr.Plugin.Common.Services.Performance
 
         public int GetCurrentLimit(string endpoint)
         {
-            return _endpointLimits.TryGetValue(endpoint, out var limit) 
-                ? limit.RequestsPerMinute 
+            return _endpointLimits.TryGetValue(endpoint, out var limit)
+                ? limit.RequestsPerMinute
                 : DEFAULT_REQUESTS_PER_MINUTE;
         }
 
@@ -128,7 +128,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
             {
                 stats[kvp.Key] = kvp.Value.RequestsPerMinute;
             }
-            
+
             return new RateLimitStats
             {
                 EndpointLimits = stats,

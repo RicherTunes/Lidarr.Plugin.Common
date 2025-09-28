@@ -330,3 +330,13 @@ dotnet add package Lidarr.Plugin.Common
 ```
 
 **Let's build the future of streaming automation together! 🚀🎵✨**
+---
+
+## 🛠️ **Maintainer Checklist**
+- Ensure Lidarr host build output exists at `../Lidarr/_output/net6.0/`.
+- Run `pwsh scripts/verify-assemblies.ps1` to copy host assemblies locally and validate `AssemblyVersion`/`FileVersion` sync (expected `10.0.0.35686`).
+- Finish with `dotnet build -c Release` and `dotnet test -c Release --no-build` before publishing updates.
+### **Plugin Version Governance**
+- Refer to [docs/UNIFIED_PLUGIN_PIPELINE.md](docs/UNIFIED_PLUGIN_PIPELINE.md) for the end-to-end platform blueprint.
+- Every downstream plugin must consume the shared `Directory.Build.props` (AssemblyVersion/FileVersion `10.0.0.35686`) and run `scripts/sync-host-assemblies.ps1` before `dotnet build`/`dotnet test`.
+- Releases only ship after the coordinated pipeline validates all plugins against Lidarr 2.14.2.4786.

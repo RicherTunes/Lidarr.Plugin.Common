@@ -33,34 +33,34 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private readonly Timer _refreshTimer;
         private readonly SemaphoreSlim _refreshSemaphore;
         private readonly object _tokenLock = new();
-        
+
         // Token management state
         private volatile TSession? _currentSession;
         private DateTime _sessionExpiryTime; // Not volatile - accessed within locks
         private volatile bool _isRefreshing = false;
         private volatile int _refreshAttempts = 0;
-        
+
         // Configuration
         private readonly TimeSpan _refreshBufferTime = TimeSpan.FromMinutes(5); // Refresh 5 minutes before expiry
         private readonly TimeSpan _refreshCheckInterval = TimeSpan.FromMinutes(1); // Check every minute
         private readonly int _maxRefreshAttempts = 3;
         private readonly TimeSpan _refreshRetryDelay = TimeSpan.FromSeconds(30);
-        
+
         // Events
         public event EventHandler<SessionRefreshEventArgs<TSession>> SessionRefreshed;
         public event EventHandler<SessionRefreshFailedEventArgs> SessionRefreshFailed;
 
         public StreamingTokenManager(
-            IStreamingTokenAuthenticationService<TSession, TCredentials> authService, 
+            IStreamingTokenAuthenticationService<TSession, TCredentials> authService,
             ILogger<StreamingTokenManager<TSession, TCredentials>> logger)
         {
             _authService = authService ?? throw new ArgumentNullException(nameof(authService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _refreshSemaphore = new SemaphoreSlim(1, 1);
-            
+
             // Start background refresh timer
             _refreshTimer = new Timer(CheckTokenExpiry, null, _refreshCheckInterval, _refreshCheckInterval);
-            
+
             _logger.LogDebug("StreamingTokenManager initialized with {0}min buffer and {1}min check interval",
                          _refreshBufferTime.TotalMinutes, _refreshCheckInterval.TotalMinutes);
         }
@@ -88,7 +88,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
 
                 _logger.LogInformation("Session expired or invalid, refreshing...");
                 await RefreshSessionAsync(fallbackCredentials!);
-                
+
                 return _currentSession!;
             }
             finally
@@ -116,7 +116,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 _logger.LogDebug("Attempting session refresh (attempt {0}/{1})", _refreshAttempts, _maxRefreshAttempts);
 
                 var newSession = await _authService.AuthenticateAsync(credentials).ConfigureAwait(false);
-                
+
                 lock (_tokenLock)
                 {
                     _currentSession = newSession;
@@ -170,7 +170,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 _sessionExpiryTime = DateTime.MinValue;
                 _refreshAttempts = 0;
             }
-            
+
             _logger.LogDebug("Session cleared");
         }
 
@@ -198,7 +198,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         {
             lock (_tokenLock)
             {
-                return _currentSession != null && 
+                return _currentSession != null &&
                        DateTime.UtcNow < _sessionExpiryTime.Subtract(_refreshBufferTime);
             }
         }

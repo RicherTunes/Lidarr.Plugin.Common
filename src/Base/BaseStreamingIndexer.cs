@@ -82,7 +82,7 @@ namespace Lidarr.Plugin.Common.Base
         {
             Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             Logger = logger ?? CreateDefaultLogger();
-            
+
             PerformanceMonitor = new PerformanceMonitor(TimeSpan.FromMinutes(5));
             _requestBuilder = new StreamingApiRequestBuilder(settings.BaseUrl);
         }
@@ -160,7 +160,7 @@ namespace Lidarr.Plugin.Common.Base
 
             // Basic sanitization and normalization
             var sanitized = Guard.NotNullOrEmpty(query, nameof(query));
-            
+
             // Remove extra whitespace
             sanitized = System.Text.RegularExpressions.Regex.Replace(sanitized, @"\s+", " ").Trim();
 
@@ -268,7 +268,7 @@ namespace Lidarr.Plugin.Common.Base
             try
             {
                 var startTime = DateTime.UtcNow;
-                
+
                 // Pre-process query
                 var processedQuery = PreprocessQuery(query);
                 Logger?.LogDebug($"Searching {ServiceName} for: {processedQuery}");
