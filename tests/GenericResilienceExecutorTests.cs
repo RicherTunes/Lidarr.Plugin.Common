@@ -99,7 +99,7 @@ namespace Lidarr.Plugin.Common.Tests
             {
                 Interlocked.Increment(ref concurrent);
                 peak = Math.Max(peak, concurrent);
-                await Task.Delay(50, ct).ConfigureAwait(false);
+                await Task.Delay(50, ct);
                 Interlocked.Decrement(ref concurrent);
                 return new HttpResponseMessage(HttpStatusCode.OK);
             };
@@ -122,7 +122,7 @@ namespace Lidarr.Plugin.Common.Tests
                     cancellationToken: CancellationToken.None);
             }
 
-            await Task.WhenAll(tasks).ConfigureAwait(false);
+            await Task.WhenAll(tasks);
             Assert.True(peak >= 5, $"Expected peak concurrency >=5 but was {peak}");
         }
     }
