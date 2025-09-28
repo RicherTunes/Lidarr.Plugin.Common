@@ -22,9 +22,9 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Bootstrap host assemblies (stub)
+      - name: Setup Lidarr host
         shell: pwsh
-        run: ./scripts/prepare-host-stub.ps1
+        run: ./scripts/setup-lidarr.ps1 -SkipBuild
 
       - name: Verify host assemblies
         shell: pwsh
@@ -35,3 +35,4 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build
+
