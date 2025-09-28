@@ -2,13 +2,14 @@ param()
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path $scriptRoot -Parent
-$sourcePath = Join-Path $repoRoot '..\Lidarr\_output\net6.0'
+
+$sourcePath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($repoRoot, '..', 'Lidarr', '_output', 'net6.0'))
 if (-not (Test-Path $sourcePath)) {
     Write-Error "Host assemblies not found at $sourcePath. Run build/publish on Lidarr first."
     exit 1
 }
 
-$targetPath = Join-Path $repoRoot 'artifacts/host-assemblies'
+$targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($repoRoot, 'artifacts', 'host-assemblies'))
 if (Test-Path $targetPath) {
     Remove-Item -LiteralPath $targetPath -Recurse -Force
 }
@@ -22,7 +23,7 @@ if (-not $assemblies) {
 
 $copied = @()
 foreach ($assembly in $assemblies) {
-    $relative = $assembly.FullName.Substring($sourcePath.Length).TrimStart('\\','/')
+    $relative = $assembly.FullName.Substring($sourcePath.Length).TrimStart([char[]]@('\','/'))
     $destination = Join-Path $targetPath $relative
     $destinationDir = Split-Path $destination -Parent
     if (-not (Test-Path $destinationDir)) {
@@ -39,7 +40,7 @@ foreach ($assemblyPath in $copied) {
         $assemblyVersion = [System.Reflection.AssemblyName]::GetAssemblyName($assemblyPath).Version.ToString()
     }
     catch {
-        Write-Error "Failed to read AssemblyVersion from $assemblyPath: $_"
+        Write-Error ("Failed to read AssemblyVersion from {0}: {1}" -f $assemblyPath, $_)
         exit 1
     }
 

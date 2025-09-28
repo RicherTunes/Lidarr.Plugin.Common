@@ -22,6 +22,10 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
+      - name: Bootstrap host assemblies (stub)
+        shell: pwsh
+        run: ./scripts/prepare-host-stub.ps1
+
       - name: Verify host assemblies
         shell: pwsh
         run: ./scripts/verify-assemblies.ps1
