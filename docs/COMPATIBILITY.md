@@ -34,7 +34,8 @@
 ### **Compatibility Requirements**
 - **Lidarr**: 2.13.x plugins branch or compatible
 - **.NET**: net6.0 or net8.0
-- **Dependencies**: System.Text.Json 8.0.0+
+- **Dependencies (net6.0)**: Microsoft.Extensions.* 6.0.x, System.Text.Json 6.0.11, TagLibSharp-Lidarr 2.2.0.27.
+- **Dependencies (net8.0)**: Microsoft.Extensions.* 8.0.1, System.Text.Json 8.0.6; keep plugins on SDK 8.0.8+ to avoid NU1903 runtime mismatches.
 
 ### **Breaking Changes**: None (initial release)
 
@@ -167,6 +168,8 @@ var best = QualityMapper.FindBestMatch(streamingQualities, StreamingQualityTier.
 ## 🔍 **Troubleshooting**
 
 ### **Build Issues**
+- Use `pwsh scripts/prepare-host-stub.ps1` to generate Lidarr host stubs when the real `../Lidarr/_output/net6.0/` folder is unavailable (CI does this automatically).
+- Always run `pwsh scripts/verify-assemblies.ps1` before `dotnet build` to confirm host `AssemblyVersion` == `FileVersion` (expected `10.0.0.35686`).
 ```bash
 # Missing dependencies
 dotnet restore
