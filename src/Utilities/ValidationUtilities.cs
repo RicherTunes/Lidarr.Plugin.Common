@@ -40,9 +40,9 @@ namespace Lidarr.Plugin.Common.Utilities
                 return expectedExtension switch
                 {
                     "flac" => StartsWith(header, "fLaC"u8),
-                    "ogg"  => StartsWith(header, "OggS"u8),
+                    "ogg" => StartsWith(header, "OggS"u8),
                     "m4a" or "mp4" => StartsWith(header, "ftyp"u8),
-                    "wav"  => StartsWith(header, "RIFF"u8),
+                    "wav" => StartsWith(header, "RIFF"u8),
                     _ => true
                 };
             }

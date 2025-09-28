@@ -31,33 +31,55 @@ namespace Lidarr.Plugin.Common.Services.Globalization
     public class UnicodeNormalizer
     {
         private readonly ILogger<UnicodeNormalizer> _logger;
-        
+
         // Common romanization mappings for major languages
         private static readonly Dictionary<string, Dictionary<string, string>> RomanizationMaps = new()
         {
             // Korean romanization variants
             ["korean"] = new Dictionary<string, string>
             {
-                ["ㅂ"] = "b", ["ㅍ"] = "p", ["ㅃ"] = "bb",
-                ["ㄱ"] = "g", ["ㅋ"] = "k", ["ㄲ"] = "gg",
-                ["ㄷ"] = "d", ["ㅌ"] = "t", ["ㄸ"] = "dd",
-                ["ㅅ"] = "s", ["ㅆ"] = "ss", ["ㅈ"] = "j",
-                ["ㅊ"] = "ch", ["ㅉ"] = "jj", ["ㅎ"] = "h"
+                ["ㅂ"] = "b",
+                ["ㅍ"] = "p",
+                ["ㅃ"] = "bb",
+                ["ㄱ"] = "g",
+                ["ㅋ"] = "k",
+                ["ㄲ"] = "gg",
+                ["ㄷ"] = "d",
+                ["ㅌ"] = "t",
+                ["ㄸ"] = "dd",
+                ["ㅅ"] = "s",
+                ["ㅆ"] = "ss",
+                ["ㅈ"] = "j",
+                ["ㅊ"] = "ch",
+                ["ㅉ"] = "jj",
+                ["ㅎ"] = "h"
             },
-            
+
             // Japanese romanization variants  
             ["japanese"] = new Dictionary<string, string>
             {
-                ["あ"] = "a", ["か"] = "ka", ["さ"] = "sa", ["た"] = "ta",
-                ["な"] = "na", ["は"] = "ha", ["ま"] = "ma", ["や"] = "ya",
-                ["ら"] = "ra", ["わ"] = "wa", ["を"] = "wo", ["ん"] = "n"
+                ["あ"] = "a",
+                ["か"] = "ka",
+                ["さ"] = "sa",
+                ["た"] = "ta",
+                ["な"] = "na",
+                ["は"] = "ha",
+                ["ま"] = "ma",
+                ["や"] = "ya",
+                ["ら"] = "ra",
+                ["わ"] = "wa",
+                ["を"] = "wo",
+                ["ん"] = "n"
             },
-            
+
             // Chinese pinyin variants
             ["chinese"] = new Dictionary<string, string>
             {
-                ["zh"] = "z", ["ch"] = "c", ["sh"] = "s",
-                ["ü"] = "u", ["ê"] = "e"
+                ["zh"] = "z",
+                ["ch"] = "c",
+                ["sh"] = "s",
+                ["ü"] = "u",
+                ["ê"] = "e"
             }
         };
 
@@ -65,19 +87,63 @@ namespace Lidarr.Plugin.Common.Services.Globalization
         private static readonly Dictionary<char, char> DiacriticMappings = new()
         {
             // Latin extended
-            ['á'] = 'a', ['à'] = 'a', ['ä'] = 'a', ['â'] = 'a', ['ã'] = 'a', ['å'] = 'a',
-            ['é'] = 'e', ['è'] = 'e', ['ë'] = 'e', ['ê'] = 'e', ['ė'] = 'e', ['ę'] = 'e',
-            ['í'] = 'i', ['ì'] = 'i', ['ï'] = 'i', ['î'] = 'i', ['į'] = 'i',
-            ['ó'] = 'o', ['ò'] = 'o', ['ö'] = 'o', ['ô'] = 'o', ['õ'] = 'o', ['ø'] = 'o',
-            ['ú'] = 'u', ['ù'] = 'u', ['ü'] = 'u', ['û'] = 'u', ['ū'] = 'u', ['ų'] = 'u',
-            ['ý'] = 'y', ['ÿ'] = 'y',
-            ['ñ'] = 'n', ['ç'] = 'c', ['ğ'] = 'g', ['ş'] = 's', ['ı'] = 'i',
-            ['ć'] = 'c', ['č'] = 'c', ['ď'] = 'd', ['ľ'] = 'l', ['ł'] = 'l',
-            ['ń'] = 'n', ['ř'] = 'r', ['ś'] = 's', ['š'] = 's', ['ť'] = 't',
-            ['ź'] = 'z', ['ž'] = 'z', ['ż'] = 'z',
-            
+            ['á'] = 'a',
+            ['à'] = 'a',
+            ['ä'] = 'a',
+            ['â'] = 'a',
+            ['ã'] = 'a',
+            ['å'] = 'a',
+            ['é'] = 'e',
+            ['è'] = 'e',
+            ['ë'] = 'e',
+            ['ê'] = 'e',
+            ['ė'] = 'e',
+            ['ę'] = 'e',
+            ['í'] = 'i',
+            ['ì'] = 'i',
+            ['ï'] = 'i',
+            ['î'] = 'i',
+            ['į'] = 'i',
+            ['ó'] = 'o',
+            ['ò'] = 'o',
+            ['ö'] = 'o',
+            ['ô'] = 'o',
+            ['õ'] = 'o',
+            ['ø'] = 'o',
+            ['ú'] = 'u',
+            ['ù'] = 'u',
+            ['ü'] = 'u',
+            ['û'] = 'u',
+            ['ū'] = 'u',
+            ['ų'] = 'u',
+            ['ý'] = 'y',
+            ['ÿ'] = 'y',
+            ['ñ'] = 'n',
+            ['ç'] = 'c',
+            ['ğ'] = 'g',
+            ['ş'] = 's',
+            ['ı'] = 'i',
+            ['ć'] = 'c',
+            ['č'] = 'c',
+            ['ď'] = 'd',
+            ['ľ'] = 'l',
+            ['ł'] = 'l',
+            ['ń'] = 'n',
+            ['ř'] = 'r',
+            ['ś'] = 's',
+            ['š'] = 's',
+            ['ť'] = 't',
+            ['ź'] = 'z',
+            ['ž'] = 'z',
+            ['ż'] = 'z',
+
             // Cyrillic to Latin approximations (common cases)
-            ['а'] = 'a', ['е'] = 'e', ['и'] = 'i', ['о'] = 'o', ['у'] = 'u', ['ы'] = 'y'
+            ['а'] = 'a',
+            ['е'] = 'e',
+            ['и'] = 'i',
+            ['о'] = 'o',
+            ['у'] = 'u',
+            ['ы'] = 'y'
         };
 
         // Common artist name variations for major international artists
@@ -87,15 +153,15 @@ namespace Lidarr.Plugin.Common.Services.Globalization
             ["blackpink"] = new[] { "블랙핑크", "BLACKPINK", "BlackPink", "Black Pink" },
             ["bts"] = new[] { "방탄소년단", "BTS", "Bangtan Boys", "Bangtan Sonyeondan" },
             ["bigbang"] = new[] { "빅뱅", "BIGBANG", "Big Bang" },
-            
+
             // Japanese artists  
             ["babymetal"] = new[] { "ベビーメタル", "BABYMETAL", "Baby Metal" },
             ["xjapan"] = new[] { "エックス・ジャパン", "X JAPAN", "X-Japan" },
-            
+
             // Chinese artists
             ["jackson wang"] = new[] { "王嘉尔", "Jackson Wang", "Jackson Wang 王嘉尔" },
             ["jay chou"] = new[] { "周杰倫", "Jay Chou", "Jay Chow", "Zhou Jielun" },
-            
+
             // European artists with diacritics
             ["bjork"] = new[] { "Björk", "Bjork", "Björk" },
             ["mylene farmer"] = new[] { "Mylène Farmer", "Mylene Farmer" },
@@ -153,7 +219,7 @@ namespace Lidarr.Plugin.Common.Services.Globalization
                     normalized = ApplyKnownVariations(normalized);
 
                 var result = normalized.Trim();
-                
+
                 if (result != input)
                 {
                     _logger.LogDebug("🌍 NORMALIZED: '{0}' → '{1}'", input, result);
@@ -176,13 +242,13 @@ namespace Lidarr.Plugin.Common.Services.Globalization
         /// <param name="options">Normalization options for comparison</param>
         /// <returns>Similarity score from 0.0 to 1.0</returns>
         public double CalculateInternationalSimilarity(
-            string text1, 
-            string text2, 
+            string text1,
+            string text2,
             UnicodeNormalizationOptions options = null)
         {
             if (string.IsNullOrEmpty(text1) && string.IsNullOrEmpty(text2))
                 return 1.0;
-                
+
             if (string.IsNullOrEmpty(text1) || string.IsNullOrEmpty(text2))
                 return 0.0;
 
@@ -314,7 +380,7 @@ namespace Lidarr.Plugin.Common.Services.Globalization
                     // Use Unicode category to identify and remove other diacritics
                     if (char.GetUnicodeCategory(ch) == UnicodeCategory.NonSpacingMark)
                         continue; // Skip combining diacritical marks
-                    
+
                     sb.Append(ch);
                 }
             }
@@ -331,7 +397,7 @@ namespace Lidarr.Plugin.Common.Services.Globalization
 
             // Apply romanization mappings for detected scripts
             var script = DetectScript(text);
-            
+
             if (script.PrimaryScript == "Hangul" && RomanizationMaps.TryGetValue("korean", out var koreanMap))
             {
                 foreach (var mapping in koreanMap)
@@ -364,10 +430,10 @@ namespace Lidarr.Plugin.Common.Services.Globalization
 
             // Normalize whitespace
             normalized = Regex.Replace(normalized, @"\s+", " ");
-            
+
             // Remove common punctuation that doesn't affect meaning
             normalized = Regex.Replace(normalized, @"[^\w\s]", " ");
-            
+
             return Regex.Replace(normalized, @"\s+", " ").Trim();
         }
 
@@ -401,10 +467,10 @@ namespace Lidarr.Plugin.Common.Services.Globalization
             foreach (var variations in KnownVariations.Values)
             {
                 var variations1 = variations.Select(v => v.ToLowerInvariant()).ToArray();
-                
+
                 var has1 = variations1.Contains(norm1);
                 var has2 = variations1.Contains(norm2);
-                
+
                 if (has1 && has2)
                     return 1.0; // Perfect match via known variations
             }
@@ -418,34 +484,34 @@ namespace Lidarr.Plugin.Common.Services.Globalization
         private string GetCharacterScript(char ch)
         {
             var category = char.GetUnicodeCategory(ch);
-            
+
             // CJK ranges
             if (ch >= 0x4E00 && ch <= 0x9FFF) return "CJK";
             if (ch >= 0x3400 && ch <= 0x4DBF) return "CJK";
             if (ch >= 0x20000 && ch <= 0x2A6DF) return "CJK";
-            
+
             // Korean
             if (ch >= 0xAC00 && ch <= 0xD7AF) return "Hangul";
             if (ch >= 0x1100 && ch <= 0x11FF) return "Hangul";
             if (ch >= 0x3130 && ch <= 0x318F) return "Hangul";
-            
+
             // Japanese
             if (ch >= 0x3040 && ch <= 0x309F) return "Hiragana";
             if (ch >= 0x30A0 && ch <= 0x30FF) return "Katakana";
-            
+
             // Arabic
             if (ch >= 0x0600 && ch <= 0x06FF) return "Arabic";
             if (ch >= 0x0750 && ch <= 0x077F) return "Arabic";
-            
+
             // Hebrew
             if (ch >= 0x0590 && ch <= 0x05FF) return "Hebrew";
-            
+
             // Cyrillic
             if (ch >= 0x0400 && ch <= 0x04FF) return "Cyrillic";
-            
+
             // Thai
             if (ch >= 0x0E00 && ch <= 0x0E7F) return "Thai";
-            
+
             // Default to Latin for basic ASCII and Latin extended
             return "Latin";
         }
@@ -458,26 +524,26 @@ namespace Lidarr.Plugin.Common.Services.Globalization
             // Simple similarity calculation using Levenshtein distance for shared library
             if (string.IsNullOrEmpty(s1) || string.IsNullOrEmpty(s2))
                 return 0.0;
-            
+
             if (s1 == s2)
                 return 1.0;
-            
+
             var maxLength = Math.Max(s1.Length, s2.Length);
             var distance = LevenshteinDistance(s1, s2);
-            
+
             return 1.0 - (double)distance / maxLength;
         }
 
         private static int LevenshteinDistance(string s1, string s2)
         {
             var matrix = new int[s1.Length + 1, s2.Length + 1];
-            
+
             for (int i = 0; i <= s1.Length; i++)
                 matrix[i, 0] = i;
-            
+
             for (int j = 0; j <= s2.Length; j++)
                 matrix[0, j] = j;
-            
+
             for (int i = 1; i <= s1.Length; i++)
             {
                 for (int j = 1; j <= s2.Length; j++)
@@ -489,7 +555,7 @@ namespace Lidarr.Plugin.Common.Services.Globalization
                         matrix[i - 1, j - 1] + cost); // substitution
                 }
             }
-            
+
             return matrix[s1.Length, s2.Length];
         }
 
@@ -512,7 +578,7 @@ namespace Lidarr.Plugin.Common.Services.Globalization
         public bool UseKnownVariations { get; set; } = true;
 
         public static UnicodeNormalizationOptions Default => new();
-        
+
         public static UnicodeNormalizationOptions Conservative => new()
         {
             RemoveDirectionalMarks = true,
@@ -542,7 +608,7 @@ namespace Lidarr.Plugin.Common.Services.Globalization
             if (HandleRomanization) features.Add("Romanization");
             if (NormalizePunctuation) features.Add("Punctuation");
             if (UseKnownVariations) features.Add("KnownVariations");
-            
+
             return string.Join("|", features);
         }
     }
@@ -558,7 +624,7 @@ namespace Lidarr.Plugin.Common.Services.Globalization
         public bool IsMixedScript { get; set; }
 
         public bool IsRightToLeft => PrimaryScript == "Arabic" || PrimaryScript == "Hebrew";
-        public bool IsCJK => PrimaryScript == "CJK" || PrimaryScript == "Hangul" || 
+        public bool IsCJK => PrimaryScript == "CJK" || PrimaryScript == "Hangul" ||
                            PrimaryScript == "Hiragana" || PrimaryScript == "Katakana";
     }
 

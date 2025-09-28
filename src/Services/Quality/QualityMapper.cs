@@ -27,7 +27,7 @@ namespace Lidarr.Plugin.Common.Services.Quality
             public static readonly StreamingQuality Mp3Normal = new StreamingQuality
             {
                 Id = "mp3_256",
-                Name = "MP3 256kbps", 
+                Name = "MP3 256kbps",
                 Format = "MP3",
                 Bitrate = 256
             };
@@ -36,7 +36,7 @@ namespace Lidarr.Plugin.Common.Services.Quality
             {
                 Id = "mp3_320",
                 Name = "MP3 320kbps",
-                Format = "MP3", 
+                Format = "MP3",
                 Bitrate = 320
             };
 
@@ -98,7 +98,7 @@ namespace Lidarr.Plugin.Common.Services.Quality
         /// Finds the best matching quality from available options based on preference.
         /// </summary>
         public static StreamingQuality FindBestMatch(
-            IEnumerable<StreamingQuality> availableQualities, 
+            IEnumerable<StreamingQuality> availableQualities,
             StreamingQualityTier preferredTier = StreamingQualityTier.Lossless)
         {
             if (availableQualities == null || !availableQualities.Any())
@@ -147,7 +147,7 @@ namespace Lidarr.Plugin.Common.Services.Quality
 
             return qualities
                 .OrderByDescending(q => q.BitDepth ?? 0)
-                .ThenByDescending(q => q.SampleRate ?? 0) 
+                .ThenByDescending(q => q.SampleRate ?? 0)
                 .ThenByDescending(q => q.Bitrate ?? 0)
                 .First();
         }
@@ -227,11 +227,11 @@ namespace Lidarr.Plugin.Common.Services.Quality
                 "lossless" => StandardQualities.FlacCD,
                 "master" or "hi_res" or "hires" => StandardQualities.FlacHiRes,
                 "studio_master" or "max" => StandardQualities.FlacMax,
-                _ => new StreamingQuality 
-                { 
-                    Id = descriptor, 
-                    Name = $"{serviceName} {descriptor}", 
-                    Format = "Unknown" 
+                _ => new StreamingQuality
+                {
+                    Id = descriptor,
+                    Name = $"{serviceName} {descriptor}",
+                    Format = "Unknown"
                 }
             };
         }
@@ -254,7 +254,7 @@ namespace Lidarr.Plugin.Common.Services.Quality
                 {
                     parts.Add($"{quality.SampleRate / 1000.0:F1}kHz/{quality.BitDepth}bit");
                 }
-                
+
                 if (quality.IsHighResolution)
                     parts.Add("Hi-Res");
             }
@@ -293,21 +293,21 @@ namespace Lidarr.Plugin.Common.Services.Quality
         public int GetPreferenceScore(StreamingQualityTier tier)
         {
             if (!IsAcceptable(tier)) return -1;
-            
+
             // Perfect match gets highest score
             if (tier == PreferredTier) return 100;
-            
+
             // Calculate distance from preferred tier
             var distance = Math.Abs((int)tier - (int)PreferredTier);
-            
+
             // Higher quality than preferred gets slight bonus if allowed
             if (tier > PreferredTier && AllowHigherQuality)
                 return 90 - distance;
-            
+
             // Lower quality than preferred gets penalty but still acceptable if allowed
             if (tier < PreferredTier && AllowLowerQuality)
                 return 80 - (distance * 10);
-            
+
             return 0;
         }
     }

@@ -15,7 +15,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
         private readonly ConcurrentDictionary<string, CacheItem> _cache;
         private readonly object _cleanupLock = new object();
         private DateTime _lastCleanup = DateTime.UtcNow;
-        
+
         protected TimeSpan DefaultCacheDuration { get; set; } = TimeSpan.FromMinutes(15);
         protected int MaxCacheSize { get; set; } = 1000;
         protected TimeSpan CleanupInterval { get; set; } = TimeSpan.FromMinutes(5);
@@ -34,7 +34,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 return null;
 
             var cacheKey = GenerateCacheKey(endpoint, parameters);
-            
+
             if (_cache.TryGetValue(cacheKey, out var cacheItem))
             {
                 if (cacheItem.ExpiresAt > DateTime.UtcNow)
@@ -50,10 +50,10 @@ namespace Lidarr.Plugin.Common.Services.Caching
             }
 
             OnCacheMiss(endpoint, cacheKey);
-            
+
             // Periodic cleanup
             CleanupExpiredItems();
-            
+
             return null;
         }
 
@@ -72,7 +72,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
 
             var cacheKey = GenerateCacheKey(endpoint, parameters);
             var expiresAt = DateTime.UtcNow.Add(duration);
-            
+
             var cacheItem = new CacheItem
             {
                 Value = value,
@@ -165,7 +165,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// </summary>
         protected virtual object GetStatistics()
         {
-            return new 
+            return new
             {
                 TotalEntries = _cache.Count,
                 HitRatio = 0.0,
@@ -259,7 +259,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 }
 
                 _lastCleanup = now;
-                
+
                 if (expiredKeys.Count > 0)
                 {
                     OnExpiredItemsCleanup(expiredKeys.Count);

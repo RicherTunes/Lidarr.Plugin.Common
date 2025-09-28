@@ -15,11 +15,11 @@ namespace Lidarr.Plugin.Common.Services.Validation
     public class DataValidationService
     {
         private readonly ILogger<DataValidationService> _logger;
-        
+
         // Invalid characters for file names on different platforms
         private static readonly char[] InvalidFileChars = Path.GetInvalidFileNameChars();
         private static readonly char[] InvalidPathChars = Path.GetInvalidPathChars();
-        
+
         // Maximum path lengths for different platforms
         private static readonly int MAX_PATH_LENGTH = Environment.OSVersion.Platform == PlatformID.Win32NT ? 260 : 4096;
         private const int MAX_FILENAME_LENGTH = 255;
@@ -56,7 +56,7 @@ namespace Lidarr.Plugin.Common.Services.Validation
             // Check for suspicious data patterns
             if (title.Length > 500 || artist.Length > 200)
             {
-                _logger.LogWarning("⚠️ SUSPICIOUS DATA: Very long title/artist - Title: {0} chars, Artist: {1} chars", 
+                _logger.LogWarning("⚠️ SUSPICIOUS DATA: Very long title/artist - Title: {0} chars, Artist: {1} chars",
                            title.Length, artist.Length);
             }
 
@@ -71,7 +71,7 @@ namespace Lidarr.Plugin.Common.Services.Validation
             try
             {
                 var sanitized = FileNameSanitizer.SanitizeFileName(fileName);
-                
+
                 // Ensure not too long
                 if (sanitized.Length > MAX_FILENAME_LENGTH)
                 {
@@ -101,11 +101,11 @@ namespace Lidarr.Plugin.Common.Services.Validation
                 // Check path length (platform-specific)
                 if (fullPath.Length > MAX_PATH_LENGTH)
                 {
-                    var shortenedFileName = SanitizeFileName(fileName.Substring(0, 
+                    var shortenedFileName = SanitizeFileName(fileName.Substring(0,
                         Math.Max(10, fileName.Length - (fullPath.Length - MAX_PATH_LENGTH + 20))));
-                    
+
                     fullPath = Path.Combine(basePath, shortenedFileName);
-                    
+
                     _logger.LogWarning("📏 PATH TRUNCATED: Original path too long, shortened filename to fit");
                 }
 
@@ -131,14 +131,15 @@ namespace Lidarr.Plugin.Common.Services.Validation
         /// <summary>
         /// Detects duplicate tracks in a collection
         /// </summary>
-        public DuplicateDetectionResult<T> DetectDuplicates<T>(T[] tracks, 
-            Func<T, string> getTitle, 
+        public DuplicateDetectionResult<T> DetectDuplicates<T>(T[] tracks,
+            Func<T, string> getTitle,
             Func<T, string> getArtist,
             Func<T, TimeSpan?> getDuration)
         {
             var duplicates = tracks
-                .GroupBy(t => new { 
-                    Title = NormalizeForComparison(getTitle(t)), 
+                .GroupBy(t => new
+                {
+                    Title = NormalizeForComparison(getTitle(t)),
                     Artist = NormalizeForComparison(getArtist(t))
                 })
                 .Where(g => g.Count() > 1)
@@ -147,10 +148,10 @@ namespace Lidarr.Plugin.Common.Services.Validation
             if (duplicates.Any())
             {
                 _logger.LogWarning("🔍 DUPLICATES DETECTED: {0} duplicate groups found", duplicates.Count);
-                
+
                 // Get all duplicate track IDs to exclude
                 var duplicateTrackIds = new HashSet<T>(duplicates.SelectMany(g => g.Skip(1)));
-                
+
                 // Get non-duplicate tracks plus the first track from each duplicate group
                 var uniqueTracks = tracks.Where(t => !duplicateTrackIds.Contains(t)).ToList();
 
@@ -175,13 +176,13 @@ namespace Lidarr.Plugin.Common.Services.Validation
         public TrackSequenceResult ValidateTrackSequence<T>(T[] tracks, Func<T, int> getTrackNumber)
         {
             var trackNumbers = tracks.Select(getTrackNumber).Where(n => n > 0).OrderBy(n => n).ToArray();
-            
+
             if (!trackNumbers.Any())
             {
-                return new TrackSequenceResult 
-                { 
-                    IsValid = false, 
-                    Issue = "No valid track numbers found" 
+                return new TrackSequenceResult
+                {
+                    IsValid = false,
+                    Issue = "No valid track numbers found"
                 };
             }
 
@@ -198,7 +199,7 @@ namespace Lidarr.Plugin.Common.Services.Validation
             if (gaps.Any())
             {
                 _logger.LogWarning("📊 TRACK GAPS: Missing track numbers: {0}", string.Join(", ", gaps));
-                
+
                 return new TrackSequenceResult
                 {
                     IsValid = false,

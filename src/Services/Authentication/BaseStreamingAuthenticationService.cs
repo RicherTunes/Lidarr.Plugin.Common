@@ -12,7 +12,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
     /// </summary>
     /// <typeparam name="TSession">The service-specific session type</typeparam>
     /// <typeparam name="TCredentials">The service-specific credentials type</typeparam>
-    public abstract class BaseStreamingAuthenticationService<TSession, TCredentials> 
+    public abstract class BaseStreamingAuthenticationService<TSession, TCredentials>
         : IStreamingAuthenticationService<TSession, TCredentials>
         where TSession : class, IAuthSession
         where TCredentials : class, IAuthCredentials
@@ -65,7 +65,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         public virtual async Task<TSession> GetValidSessionAsync()
         {
             var cachedSession = GetCachedSession();
-            
+
             if (cachedSession == null)
                 return null;
 
@@ -162,7 +162,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 {
                     await PerformSessionRevocationAsync(session);
                 }
-                
+
                 ClearSession();
                 OnSessionRevoked(session);
             }
@@ -194,7 +194,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             {
                 var previousSession = _cachedSession;
                 _cachedSession = null;
-                
+
                 if (previousSession != null)
                 {
                     OnSessionCleared(previousSession);

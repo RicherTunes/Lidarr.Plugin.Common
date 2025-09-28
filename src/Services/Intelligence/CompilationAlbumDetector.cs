@@ -59,7 +59,7 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
                 return false;
 
             var artistLower = albumArtist.ToLowerInvariant();
-            
+
             // Direct various artists pattern match
             if (VariousArtistsPatterns.Any(pattern => artistLower.Contains(pattern)))
                 return true;
@@ -68,11 +68,11 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
             if (!string.IsNullOrWhiteSpace(albumTitle))
             {
                 var titleLower = albumTitle.ToLowerInvariant();
-                
+
                 // Soundtrack detection
                 if (SoundtrackPatterns.Any(pattern => titleLower.Contains(pattern)))
                     return true;
-                    
+
                 // Compilation title patterns
                 if (CompilationTitleRegexes.Any(regex => regex.IsMatch(albumTitle)))
                     return true;
@@ -92,7 +92,7 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
             var titleLower = albumTitle.ToLowerInvariant();
             var artistLower = albumArtist?.ToLowerInvariant() ?? "";
 
-            return SoundtrackPatterns.Any(pattern => 
+            return SoundtrackPatterns.Any(pattern =>
                 titleLower.Contains(pattern) || artistLower.Contains(pattern));
         }
 
@@ -103,23 +103,23 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
         {
             if (IsSoundtrack(albumTitle, albumArtist))
                 return CompilationType.Soundtrack;
-                
+
             if (IsVariousArtists(albumArtist, albumTitle))
             {
                 if (!string.IsNullOrWhiteSpace(albumTitle))
                 {
                     var titleLower = albumTitle.ToLowerInvariant();
-                    
+
                     if (titleLower.Contains("greatest hits") || titleLower.Contains("best of"))
                         return CompilationType.GreatestHits;
-                        
+
                     if (titleLower.Contains("live") || titleLower.Contains("concert"))
                         return CompilationType.LiveCompilation;
-                        
+
                     if (titleLower.Contains("tribute"))
                         return CompilationType.Tribute;
                 }
-                
+
                 return CompilationType.VariousArtists;
             }
 

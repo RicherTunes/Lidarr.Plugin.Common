@@ -170,7 +170,7 @@ namespace Lidarr.Plugin.Common.Base
                 BaseUrl,
                 Email = MaskEmail(Email),
                 Password = string.IsNullOrEmpty(Password) ? "[not set]" : "[MASKED]",
-                AuthToken = string.IsNullOrEmpty(AuthToken) ? "[not set]" : "[MASKED]", 
+                AuthToken = string.IsNullOrEmpty(AuthToken) ? "[not set]" : "[MASKED]",
                 UserId,
                 CountryCode,
                 Locale,

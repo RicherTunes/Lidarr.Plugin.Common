@@ -66,7 +66,7 @@ namespace Lidarr.Plugin.Common.Base
         public static string GenerateSearchCacheKey(string serviceName, string searchTerm, Dictionary<string, string> parameters = null)
         {
             var keyParts = new List<string> { serviceName, "search", searchTerm };
-            
+
             if (parameters != null)
             {
                 var sortedParams = parameters
@@ -85,8 +85,8 @@ namespace Lidarr.Plugin.Common.Base
         /// </summary>
         public static (bool isValid, string errorMessage) ValidateSearchCriteria(string artist, string album, string searchTerm)
         {
-            if (string.IsNullOrWhiteSpace(artist) && 
-                string.IsNullOrWhiteSpace(album) && 
+            if (string.IsNullOrWhiteSpace(artist) &&
+                string.IsNullOrWhiteSpace(album) &&
                 string.IsNullOrWhiteSpace(searchTerm))
             {
                 return (false, "At least one search term (artist, album, or search term) is required");
@@ -159,7 +159,7 @@ namespace Lidarr.Plugin.Common.Base
         public static int[] GetMusicCategories(bool includeAudiobooks = false)
         {
             var categories = new List<int> { 3030 }; // Audio
-            
+
             if (includeAudiobooks)
             {
                 categories.Add(3030); // Could add audiobook categories if needed
@@ -181,7 +181,7 @@ namespace Lidarr.Plugin.Common.Base
         private static bool ContainsSqlInjectionPatterns(string input)
         {
             if (string.IsNullOrEmpty(input)) return false;
-            
+
             var lower = input.ToLowerInvariant();
             return lower.Contains("'; ") ||
                    lower.Contains("' or ") ||
@@ -201,9 +201,9 @@ namespace Lidarr.Plugin.Common.Base
         /// Validates common streaming service settings.
         /// </summary>
         public static (bool isValid, List<string> errors) ValidateStreamingSettings(
-            string baseUrl, 
-            string authMethod, 
-            int searchLimit, 
+            string baseUrl,
+            string authMethod,
+            int searchLimit,
             int rateLimit,
             string countryCode)
         {

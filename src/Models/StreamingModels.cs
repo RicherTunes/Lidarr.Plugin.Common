@@ -172,7 +172,7 @@ namespace Lidarr.Plugin.Common.Models
         public string GetAllArtistNames(string separator = ", ")
         {
             var artists = new List<string>();
-            
+
             if (Artist != null && !string.IsNullOrEmpty(Artist.Name))
                 artists.Add(Artist.Name);
 
@@ -369,7 +369,7 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// Whether this is a lossless format.
         /// </summary>
-        public bool IsLossless => 
+        public bool IsLossless =>
             Format?.ToUpperInvariant().Contains("FLAC") == true ||
             Format?.ToUpperInvariant().Contains("ALAC") == true ||
             Format?.ToUpperInvariant().Contains("WAV") == true;
@@ -377,7 +377,7 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// Whether this is high-resolution audio (>44.1kHz or >16bit).
         /// </summary>
-        public bool IsHighResolution => 
+        public bool IsHighResolution =>
             (SampleRate.HasValue && SampleRate.Value > 44100) ||
             (BitDepth.HasValue && BitDepth.Value > 16);
 
@@ -474,7 +474,7 @@ namespace Lidarr.Plugin.Common.Models
     public enum StreamingSearchType
     {
         Album,
-        Artist, 
+        Artist,
         Track,
         Playlist,
         Label

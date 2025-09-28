@@ -35,19 +35,19 @@ namespace Lidarr.Plugin.Common.Security
                 return null;
 
             var secureString = new SecureString();
-            
+
             try
             {
                 foreach (char c in source)
                 {
                     secureString.AppendChar(c);
                 }
-                
+
                 secureString.MakeReadOnly();
-                
+
                 // Clear the source string from memory if possible
                 ClearString(ref source);
-                
+
                 return secureString;
             }
             catch (Exception)
@@ -63,10 +63,10 @@ namespace Lidarr.Plugin.Common.Security
         public void StoreCredential(string key, string credential)
         {
             ThrowIfDisposed();
-            
+
             var secureCredential = CreateSecureString(credential);
             var wrapper = new SecureCredentialWrapper(secureCredential);
-            
+
             _secureCredentials.AddOrUpdate(key, wrapper, (_, old) =>
             {
                 old.Dispose();
@@ -80,10 +80,10 @@ namespace Lidarr.Plugin.Common.Security
         public string GetCredential(string key)
         {
             ThrowIfDisposed();
-            
+
             if (!_secureCredentials.TryGetValue(key, out var wrapper))
                 return null;
-                
+
             return wrapper.GetPlainText();
         }
 
@@ -94,7 +94,7 @@ namespace Lidarr.Plugin.Common.Security
         private unsafe void ClearString(ref string str)
         {
             if (str == null) return;
-            
+
             try
             {
                 fixed (char* ptr = str)
@@ -120,13 +120,13 @@ namespace Lidarr.Plugin.Common.Security
         public void Dispose()
         {
             if (_disposed) return;
-            
+
             foreach (var wrapper in _secureCredentials.Values)
             {
                 wrapper.Dispose();
             }
             _secureCredentials.Clear();
-            
+
             _disposed = true;
         }
     }
@@ -165,7 +165,7 @@ namespace Lidarr.Plugin.Common.Security
         public void Dispose()
         {
             if (_disposed) return;
-            
+
             _secureString?.Dispose();
             _secureString = null;
             _disposed = true;

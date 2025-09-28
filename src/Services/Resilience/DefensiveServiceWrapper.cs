@@ -28,7 +28,7 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         /// Executes service operation safely with fallback value
         /// </summary>
         public TResult ExecuteSafely<TResult>(
-            Func<T, TResult> operation, 
+            Func<T, TResult> operation,
             TResult fallbackValue = default,
             string operationName = "Operation")
         {
@@ -41,28 +41,28 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             try
             {
                 var result = operation(_service);
-                
+
                 // Reset failure count on success
                 if (_consecutiveFailures > 0)
                 {
                     _consecutiveFailures = 0;
                     _logger.LogDebug("✅ SERVICE RECOVERED: {0} back to healthy state", _serviceName);
                 }
-                
+
                 return result;
             }
             catch (Exception ex)
             {
                 _consecutiveFailures++;
-                
-                _logger.LogWarning(ex, "⚠️ SERVICE FAILURE: {0}.{1} failed (attempt {2}), using fallback", 
+
+                _logger.LogWarning(ex, "⚠️ SERVICE FAILURE: {0}.{1} failed (attempt {2}), using fallback",
                            _serviceName, operationName, _consecutiveFailures);
 
                 // Circuit breaker - mark unhealthy after too many failures
                 if (_consecutiveFailures >= _maxFailuresBeforeCircuitBreak)
                 {
                     _isHealthy = false;
-                    _logger.LogError("🚫 CIRCUIT BREAKER OPENED: {0} marked unhealthy after {1} failures", 
+                    _logger.LogError("🚫 CIRCUIT BREAKER OPENED: {0} marked unhealthy after {1} failures",
                                 _serviceName, _consecutiveFailures);
                 }
 

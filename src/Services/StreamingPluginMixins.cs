@@ -138,7 +138,7 @@ namespace Lidarr.Plugin.Common.Services
         public string StartDownloadJob(StreamingAlbum album, string outputPath)
         {
             var jobId = $"{_serviceName}_{album.Id}_{DateTime.UtcNow.Ticks}";
-            
+
             var job = new DownloadJobInfo
             {
                 Id = jobId,
@@ -299,7 +299,7 @@ namespace Lidarr.Plugin.Common.Services
         public bool IsSessionValid<T>(T session, Func<T, bool> validator) where T : class
         {
             if (session == null) return false;
-            
+
             try
             {
                 return validator(session);

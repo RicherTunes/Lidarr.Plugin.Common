@@ -264,13 +264,13 @@ namespace Lidarr.Plugin.Common.Services.Registration
         protected virtual List<string> GetSupportedFeatures()
         {
             var features = new List<string>();
-            
+
             if (HasIndexer()) features.Add("Search");
             if (HasDownloadClient()) features.Add("Download");
             if (SupportsCaching()) features.Add("Caching");
             if (SupportsAuthentication()) features.Add("Authentication");
             if (SupportsQualitySelection()) features.Add("Quality Selection");
-            
+
             return features;
         }
 
@@ -351,17 +351,17 @@ namespace Lidarr.Plugin.Common.Services.Registration
         public override string ToString()
         {
             var result = IsValid ? "Valid" : "Invalid";
-            
+
             if (Errors.Any())
             {
                 result += $"\nErrors: {string.Join(", ", Errors)}";
             }
-            
+
             if (Warnings.Any())
             {
                 result += $"\nWarnings: {string.Join(", ", Warnings)}";
             }
-            
+
             return result;
         }
     }
