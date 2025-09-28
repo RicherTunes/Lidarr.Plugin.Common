@@ -34,8 +34,10 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <WarningsAsErrors />
     <NoWarn>SA1200;SA1633;CS1591;CS8625;CS8618;CS8604;CS8603;CS8601;CS8602;CS8629</NoWarn>
-    <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
-    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <AnalysisLevel>latest</AnalysisLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
     
     <!-- Package Generation -->
     <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
@@ -102,6 +104,15 @@
     <PackageReference Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
   <!-- Include documentation files in package -->
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="\" />
@@ -111,6 +122,3 @@
   </ItemGroup>
 
 </Project>
-
-
-

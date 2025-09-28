@@ -25,14 +25,18 @@ namespace Lidarr.Plugin.Common.Tests
                     r.Headers.Add("Retry-After", "1");
                     return Task.FromResult(r);
                 }
+
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK));
             };
 
-            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = (r) =>
+            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = r =>
             {
                 var c = new HttpRequestMessage(r.Method, r.RequestUri);
                 foreach (var h in r.Headers)
+                {
                     c.Headers.TryAddWithoutValidation(h.Key, h.Value);
+                }
+
                 return Task.FromResult(c);
             };
 
@@ -42,11 +46,7 @@ namespace Lidarr.Plugin.Common.Tests
                 clone,
                 r => r.RequestUri?.Host,
                 r => (int)r.StatusCode,
-                r =>
-                {
-                    if (r.Headers.RetryAfter?.Delta.HasValue == true) return r.Headers.RetryAfter!.Delta;
-                    return null;
-                },
+                r => r.Headers.RetryAfter?.Delta,
                 maxRetries: 3,
                 retryBudget: TimeSpan.FromSeconds(10),
                 maxConcurrencyPerHost: 2,
@@ -61,15 +61,16 @@ namespace Lidarr.Plugin.Common.Tests
         {
             var attempts = 0;
             var request = new HttpRequestMessage(HttpMethod.Get, "http://example.com/test2");
+
             Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send = (req, ct) =>
             {
                 attempts++;
                 var r = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
-                // Huge Retry-After to force budget exceed
                 r.Headers.Add("Retry-After", "120");
                 return Task.FromResult(r);
             };
-            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = (r) => Task.FromResult(new HttpRequestMessage(r.Method, r.RequestUri));
+
+            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = r => Task.FromResult(new HttpRequestMessage(r.Method, r.RequestUri));
 
             var response = await GenericResilienceExecutor.ExecuteWithResilienceAsync<HttpRequestMessage, HttpResponseMessage>(
                 request,
@@ -77,14 +78,52 @@ namespace Lidarr.Plugin.Common.Tests
                 clone,
                 r => r.RequestUri?.Host,
                 r => (int)r.StatusCode,
-                r => { if (r.Headers.RetryAfter?.Delta.HasValue == true) return r.Headers.RetryAfter!.Delta; return null; },
+                r => r.Headers.RetryAfter?.Delta,
                 maxRetries: 5,
                 retryBudget: TimeSpan.FromMilliseconds(10),
                 maxConcurrencyPerHost: 1,
                 cancellationToken: CancellationToken.None);
 
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
-            Assert.Equal(1, attempts); // budget prevents retry
+            Assert.Equal(1, attempts);
+        }
+
+        [Fact]
+        public async Task ExecuteWithResilience_IncreasesHostGateOnHigherConcurrency()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "http://host-gate.test/resource");
+            var concurrent = 0;
+            var peak = 0;
+
+            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send = async (req, ct) =>
+            {
+                Interlocked.Increment(ref concurrent);
+                peak = Math.Max(peak, concurrent);
+                await Task.Delay(50, ct).ConfigureAwait(false);
+                Interlocked.Decrement(ref concurrent);
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            };
+
+            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = r => Task.FromResult(new HttpRequestMessage(r.Method, r.RequestUri));
+
+            var tasks = new Task<HttpResponseMessage>[6];
+            for (var i = 0; i < tasks.Length; i++)
+            {
+                tasks[i] = GenericResilienceExecutor.ExecuteWithResilienceAsync<HttpRequestMessage, HttpResponseMessage>(
+                    request,
+                    send,
+                    clone,
+                    r => r.RequestUri?.Host,
+                    r => (int)r.StatusCode,
+                    r => null,
+                    maxRetries: 1,
+                    retryBudget: TimeSpan.FromSeconds(5),
+                    maxConcurrencyPerHost: 6,
+                    cancellationToken: CancellationToken.None);
+            }
+
+            await Task.WhenAll(tasks).ConfigureAwait(false);
+            Assert.True(peak >= 5, $"Expected peak concurrency >=5 but was {peak}");
         }
     }
 }
