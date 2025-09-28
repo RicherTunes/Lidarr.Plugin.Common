@@ -48,17 +48,24 @@ namespace Lidarr.Plugin.Common.Services.Http
             await _refreshLock.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                var before = token;
-                var maybeNew = await _tokenProvider.RefreshTokenAsync().ConfigureAwait(false);
-                if (string.IsNullOrEmpty(maybeNew))
+                var currentToken = await _tokenProvider.GetAccessTokenAsync().ConfigureAwait(false);
+                if (!string.IsNullOrEmpty(currentToken) && currentToken != token)
                 {
-                    _logger.LogWarning("[{Service}] Token refresh returned empty token after 401", _tokenProvider.ServiceName);
-                    return new HttpResponseMessage(HttpStatusCode.Unauthorized) { RequestMessage = request };
+                    _logger.LogDebug("[{Service}] Token already refreshed by another request; reusing cached token", _tokenProvider.ServiceName);
                 }
-
-                if (maybeNew == before)
+                else
                 {
-                    _logger.LogDebug("[{Service}] Token unchanged after refresh; proceeding to retry once", _tokenProvider.ServiceName);
+                    var refreshed = await _tokenProvider.RefreshTokenAsync().ConfigureAwait(false);
+                    if (string.IsNullOrEmpty(refreshed))
+                    {
+                        _logger.LogWarning("[{Service}] Token refresh returned empty token after 401", _tokenProvider.ServiceName);
+                        return new HttpResponseMessage(HttpStatusCode.Unauthorized) { RequestMessage = request };
+                    }
+
+                    if (refreshed == token)
+                    {
+                        _logger.LogDebug("[{Service}] Token unchanged after refresh; proceeding to retry once", _tokenProvider.ServiceName);
+                    }
                 }
             }
             catch (Exception ex)
