@@ -1,150 +1,105 @@
 # Changelog - Lidarr.Plugin.Common
 
-All notable changes to the shared library will be documented in this file.
+All notable changes to the shared library are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+## [Unreleased] - 2025-09-28
 
-## [Maintenance] - 2025-09-28
+### Added
+- `Directory.Build.props` pins `<AssemblyVersion>`/`<FileVersion>` to `10.0.0.35686` (Lidarr 2.14.2.4786 host) so every downstream plugin consumes matching binaries.
+- `scripts/verify-assemblies.ps1` copies host assemblies, validates `FileVersion` <-> `AssemblyVersion`, and fails fast when the Lidarr output folder is missing.
+- `.github/workflows/pr-validation.yml` enforces the verification script, `dotnet build -c Release -warnaserror:NU1903`, and `dotnet test -c Release --no-build` on every pull request.
+- `docs/UNIFIED_PLUGIN_PIPELINE.md` describes the shared platform repo, version-gated CI, ILRepack guardrails, release orchestration, packaging, and monitoring expectations for plugins.
+
+### Changed
+- README gains a Maintainer Checklist and Plugin Version Governance section referencing the sync script and unified pipeline playbook.
+- NuGet dependencies (System.Text.Json, Microsoft.Extensions.* , Newtonsoft.Json) updated to the latest 6.0.x/13.0.x patches to clear NU1903 advisories during Release builds.
 
 ### Reminder
-- Maintainers must keep host assemblies in sync with Lidarr 2.14.2.4786 (AssemblyVersion/FileVersion 10.0.0.35686) before pushing downstream plugin updates.
+- Maintainers must keep host assemblies in sync with Lidarr 2.14.2.4786 before shipping plugin updates; see `docs/UNIFIED_PLUGIN_PIPELINE.md` for the complete process.
 
-## [1.0.0] - 2025-08-26
+## [1.1.3] - 2025-09-03
 
-### Added - Initial Release 🎉
+### Added
+- `BaseStreamingIndexer`: streaming search helpers (`SearchAlbumsStreamAsync`, `SearchTracksStreamAsync`, `FetchPagedAsync<T>`) plus deduplication on title/artist/year.
+- `BaseStreamingDownloadClient`: overridable retry hook with `Retry-After` handling and jittered backoff; configurable retry counts per service.
 
-#### Base Classes
-- `BaseStreamingSettings` - Common configuration patterns for all streaming services
-- `BaseStreamingIndexer<T>` - Generic indexer with caching, rate limiting, validation
-- `BaseStreamingDownloadClient<T>` - Download orchestration with progress tracking
-- `BaseStreamingAuthenticationService<T>` - Complete authentication framework
+### Notes
+- All additions are non-breaking; existing list-based APIs remain fully supported.
 
-#### Services
-- `StreamingResponseCache` - Generic cache implementation with TTL and cleanup
-- `StreamingApiRequestBuilder` - Fluent HTTP request builder for streaming APIs
-- `QualityMapper` - Quality tier mapping and comparison utilities
-- `PerformanceMonitor` - Comprehensive performance tracking
-- `StreamingPluginModule` - Plugin registration and DI patterns
+## [1.1.2] - 2025-09-03
 
-#### Models
-- `StreamingArtist` - Universal artist model for cross-service compatibility
-- `StreamingAlbum` - Universal album model with quality and metadata support
-- `StreamingTrack` - Universal track model with rich feature support
-- `StreamingQuality` - Quality abstraction with tier mapping
-- `StreamingQualityTier` - Universal quality classification system
+### Added
+- Preview detection improvements: duration threshold (default ~90s), extended URL markers, additional heuristics.
+- Validation enhancements: `ValidateFileSignature` for FLAC/OGG/MP4/M4A/WAV and richer overloads of `ValidateDownloadedFile`.
+- Hashing/signing utilities: `ComputeSHA256`, `ComputeHmacSha256`, and `IRequestSigner` implementations (`Md5ConcatSigner`, `HmacSha256Signer`).
+- File system hardening: NFC normalization, expanded reserved-name guard.
+- Settings: `Locale` property on `BaseStreamingSettings` (default `en-US`).
 
-#### Utilities
-- `FileNameSanitizer` - Cross-platform file naming with security
-- `HttpClientExtensions` - HTTP utilities with retry and error handling
-- `RetryUtilities` - Exponential backoff, circuit breaker, rate limiter
+### Changed
+- Documentation refreshed to reference the new utilities and configuration options.
 
-#### Testing Support
-- `MockFactories` - Realistic test data generators
-- `TestDataSets` - Pre-built test scenarios for edge cases
-
-#### Interfaces
-- `IStreamingAuthenticationService<T>` - Generic authentication contract
-- `IStreamingResponseCache` - Cache service interface
-- `IQueryOptimizer` - Query optimization patterns
-
-### Features
-- **60-75% code reduction** for new streaming service plugins
-- **Thread-safe operations** with proper locking mechanisms
-- **Security built-in** with parameter masking and validation
-- **Performance optimization** with caching and rate limiting
-- **Comprehensive error handling** with retry strategies
-- **Universal quality management** across different streaming services
-- **Professional testing support** with mock data generators
-
-### Documentation
-- Complete README with usage examples
-- Streaming plugin development template
-- Ecosystem expansion roadmap
-- Complete usage examples with working code
-
-### Compatibility
-- **.NET 6.0** target framework
-- **Lidarr plugins branch** compatibility
-- **Production-ready** for immediate use
-
----
+### Notes
+- Changes are additive and backward compatible; submodule consumers can adopt incrementally.
 
 ## [1.1.1] - 2025-09-03
 
 ### Added
 - Context-specific sanitizers: `Sanitize.UrlComponent`, `Sanitize.PathSegment`, `Sanitize.DisplayText`, `Sanitize.IsSafePath`.
-- HTTP resilience: `HttpClientExtensions.ExecuteWithResilienceAsync` with 429/Retry-After awareness, jittered backoff, retry budget, and per-host concurrency gating.
-- OAuth token refresh: `OAuthDelegatingHandler` for Bearer injection and single-flight refresh on 401.
-- Atomic/resumable downloads: Base download client now writes to `.partial`, flushes to disk, and performs atomic move; resumes when server supports ranges.
-- Universal IDs on models: `StreamingAlbum.MusicBrainzId`, `StreamingAlbum.ExternalIds`, `StreamingTrack.MusicBrainzId`, `StreamingTrack.ExternalIds`.
+- HTTP resilience: `HttpClientExtensions.ExecuteWithResilienceAsync` with 429/Retry-After awareness, jittered backoff, retry budgets, and per-host concurrency gating.
+- OAuth token refresh: `OAuthDelegatingHandler` for bearer injection and single-flight refresh on 401.
+- Atomic/resumable downloads: `.partial` staging, atomic moves, resume on 206.
+- Model metadata: `StreamingAlbum.ExternalIds`, `StreamingTrack.ExternalIds`, `MusicBrainzId` support.
 
 ### Changed
-- `BaseStreamingIndexer` now uses a shared `HttpClient` + resilient pipeline to avoid socket exhaustion and improve stability.
-- `InputSanitizer` methods marked `[Obsolete]` in favor of context-specific `Sanitize` helpers.
+- `BaseStreamingIndexer` now shares a resilient `HttpClient` pipeline to reduce socket exhaustion.
+- Legacy `InputSanitizer` methods marked `[Obsolete]` in favor of the context-specific helpers.
 
 ### Notes
-- No breaking changes: obsolete APIs remain for compatibility.
-- Submodule usage continues to work; package metadata remains enabled for future NuGet distribution.
-
-## [1.1.2] - 2025-09-03
-
-### Added
-- Preview detection: threshold-based duration (default ≤90s), extended URL patterns, and tunable overload with extra patterns.
-- Validation: `ValidateFileSignature` (FLAC/OGG/MP4/M4A/WAV) and an extended `ValidateDownloadedFile` overload.
-- Hashing/Signing: `ComputeSHA256`, `ComputeHmacSha256`, and `IRequestSigner` interfaces with `Md5ConcatSigner` and `HmacSha256Signer` implementations.
-- File system: NFC normalization and strengthened reserved-name guard in `FileSystemUtilities`.
-- Settings: `Locale` added to `BaseStreamingSettings` (defaults to `en-US`).
-
-### Changed
-- Documentation updated to reference new utilities where applicable.
-
-### Notes
-- All changes are additive and backward compatible. Submodule consumers can adopt incrementally.
-
-## [1.1.3] - 2025-09-03
-
-### Added
-- BaseStreamingIndexer: optional streaming search APIs (`SearchAlbumsStreamAsync`, `SearchTracksStreamAsync`) and `FetchPagedAsync<T>` helper.
-- BaseStreamingIndexer: `SearchStreamAsync` wrapper and enhanced dedup (title+artist+year).
-- BaseStreamingDownloadClient: overridable retry hook with `Retry-After` support and jittered backoff; configurable max retries.
-
-### Notes
-- All additions are non-breaking. Existing list-based APIs continue to work.
+- No breaking changes; obsolete APIs remain available for compatibility.
 
 ## [1.1.0] - 2025-08-30
 
 ### Added
-- OAuth/PKCE authentication base and token management utilities.
-- Base streaming indexer and download client frameworks.
+- OAuth/PKCE authentication base classes and token lifecycle helpers.
+- Core streaming indexer/download client frameworks.
 - Performance and memory management helpers (batch manager, monitors).
 
 ### Notes
-- Prepared the library for packaging with source link and symbols.
+- Prepared the library for packaging with Source Link and symbols.
+
+## [1.0.0] - 2025-08-26
+
+### Added
+- Base classes: `BaseStreamingSettings`, `BaseStreamingIndexer<T>`, `BaseStreamingDownloadClient<T>`, `BaseStreamingAuthenticationService<T>`.
+- Services: `StreamingResponseCache`, `StreamingApiRequestBuilder`, `QualityMapper`, `PerformanceMonitor`, `StreamingPluginModule`.
+- Models: `StreamingArtist`, `StreamingAlbum`, `StreamingTrack`, `StreamingQuality`, `StreamingQualityTier`.
+- Utilities: `FileNameSanitizer`, `HttpClientExtensions`, `RetryUtilities`.
+- Testing support: `MockFactories`, `TestDataSets`.
+- Interfaces: `IStreamingAuthenticationService<T>`, `IStreamingResponseCache`, `IQueryOptimizer`.
+
+### Highlights
+- 60–75% code reduction for new streaming plugins, thread-safe operations, built-in security, performance optimizations, comprehensive error handling, and rich documentation/examples.
 
 ---
 
 ## Version Management
 
-- **1.x.x**: Stable API, backward compatible changes only
-- **0.x.x**: Development versions, breaking changes allowed
-- **x.Y.x**: Feature additions, backward compatible
-- **x.x.Z**: Bug fixes and patches
+- **1.x.x**: Backward-compatible API evolution.
+- **0.x.x**: Development versions where breaking changes are allowed.
+- **x.Y.x**: Feature additions (minor).
+- **x.x.Z**: Bug fixes and patches (patch).
 
 ## Migration Guide
 
-When upgrading between versions:
-1. Check CHANGELOG for breaking changes
-2. Update plugin project references
-3. Run provided migration scripts (if any)
-4. Test thoroughly with updated shared library
-5. Update plugin version numbers to match compatibility
+1. Check this changelog for breaking changes.
+2. Update plugin project references.
+3. Run provided migration scripts (if any).
+4. Test thoroughly with the updated shared library.
+5. Update plugin version numbers to match compatibility.
 
 ## Support
 
-- **Issues**: Report bugs in the main Qobuzarr repository
-- **Feature Requests**: Discuss in GitHub Discussions
-- **Community**: Join the streaming plugin developer community
-- **Documentation**: See README.md and examples/ directory
-
-
+- **Issues**: Report bugs in the main Qobuzarr repository.
+- **Feature Requests**: Discuss in GitHub Discussions.
+- **Community**: Join the streaming plugin developer community.
+- **Documentation**: See `README.md` and the `docs/` folder.
