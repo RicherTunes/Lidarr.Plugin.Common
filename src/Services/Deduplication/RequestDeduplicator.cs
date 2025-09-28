@@ -173,8 +173,14 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
 
                 var result = await factory();
 
+                if (_disposed)
+                {
+                    taskCompletionSource.TrySetCanceled();
+                    throw new TaskCanceledException($"Deduplicated request for key '{key}' was cancelled because the deduplicator was disposed.");
+                }
+
                 // Set the result for all waiting requests
-                taskCompletionSource.SetResult(result);
+                taskCompletionSource.TrySetResult(result);
 
                 var executionTime = DateTime.UtcNow - startTime;
                 _logger.LogInformation("✅ DEDUPLICATED REQUEST COMPLETE: Key '{0}' completed in {1:F1}s",
@@ -185,13 +191,13 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
             catch (OperationCanceledException)
             {
                 _logger.LogDebug("⏰ REQUEST CANCELLED: Key '{0}' was cancelled", key);
-                taskCompletionSource.SetCanceled();
+                taskCompletionSource.TrySetCanceled();
                 throw;
             }
             catch (Exception ex)
             {
                 _logger.LogError(ex, "❌ REQUEST FAILED: Factory execution failed for key: {0}", key);
-                taskCompletionSource.SetException(ex);
+                taskCompletionSource.TrySetException(ex);
                 throw;
             }
             finally
@@ -285,7 +291,7 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
                         // Cancel the expired task if it's still running
                         if (!taskInfo.TaskCompletionSource.Task.IsCompleted)
                         {
-                            taskInfo.TaskCompletionSource.SetCanceled();
+                            taskInfo.TaskCompletionSource.TrySetCanceled();
                         }
                     }
                 }
@@ -344,7 +350,7 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
                 {
                     if (!kvp.Value.TaskCompletionSource.Task.IsCompleted)
                     {
-                        kvp.Value.TaskCompletionSource.SetCanceled();
+                        kvp.Value.TaskCompletionSource.TrySetCanceled();
                     }
                 }
 

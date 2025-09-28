@@ -8,11 +8,13 @@ All notable changes to the shared library are documented here. The format follow
 - `Directory.Build.props` pins `<AssemblyVersion>`/`<FileVersion>` to `10.0.0.35686` (Lidarr 2.14.2.4786 host) so every downstream plugin consumes matching binaries.
 - `scripts/verify-assemblies.ps1` copies host assemblies, validates `FileVersion` <-> `AssemblyVersion`, and fails fast when the Lidarr output folder is missing.
 - `scripts/prepare-host-stub.ps1` generates a `10.0.0.35686` Lidarr host stub so CI and clean machines can satisfy verification without the full Lidarr repo.
+- Solution now includes `Lidarr.Plugin.Common.Tests` so CI collects coverage and enforces regression suites.
 - `.github/workflows/pr-validation.yml` enforces the verification script, `dotnet build -c Release -warnaserror:NU1903`, and `dotnet test -c Release --no-build` on every pull request.
 - `docs/UNIFIED_PLUGIN_PIPELINE.md` describes the shared platform repo, version-gated CI, ILRepack guardrails, release orchestration, packaging, and monitoring expectations for plugins.
 - `TokenDelegatingHandler` and `ContentDecodingSnifferHandler` provide reusable bearer-token injection and mislabelled gzip recovery across all plugins.
 
 ### Changed
+- Request deduplication now cancels in-flight tasks when the deduplicator is disposed and uses `TrySet*` guards to avoid race exceptions.
 - README gains a Maintainer Checklist and Plugin Version Governance section referencing the sync script and unified pipeline playbook.
 - NuGet dependencies (System.Text.Json, Microsoft.Extensions.* , Newtonsoft.Json) updated to the latest 6.0.x/13.0.x patches to clear NU1903 advisories during Release builds.
 - `HttpClientExtensions.GetJsonAsync<T>` now verifies Content-Type and includes payload previews when responses are not JSON.
