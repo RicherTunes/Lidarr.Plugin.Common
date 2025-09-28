@@ -57,7 +57,7 @@ jobs:
         run: dotnet format --verify-no-changes
 
       - name: Build (Release, warnings as errors)
-        run: dotnet build -c Release -warnaserror
+        run: dotnet build -c Release -warnaserror -p:EnableNETAnalyzers=true -p:RunAnalyzersDuringBuild=true -p:TreatWarningsAsErrors=true
 
       - name: Test (all TFMs) + coverage
         run: >
@@ -112,3 +112,4 @@ jobs:
         with:
           name: nupkg
           path: dist/*.nupkg
+
