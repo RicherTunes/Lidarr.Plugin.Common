@@ -12,7 +12,7 @@ if (-not $OutputPath -or [string]::IsNullOrWhiteSpace($OutputPath)) {
 }
 
 $resolvedOutput = [System.IO.Path]::GetFullPath($OutputPath)
-New-Item -ItemType Directory -Path $resolvedOutput -Force | Out-Null
+[System.IO.Directory]::CreateDirectory($resolvedOutput) | Out-Null
 
 $workingDir = [System.IO.Path]::Combine($repoRoot, 'artifacts', 'host-stub-build')
 if (Test-Path $workingDir) {

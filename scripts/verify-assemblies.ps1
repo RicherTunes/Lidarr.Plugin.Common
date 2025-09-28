@@ -13,7 +13,7 @@ $targetPath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($repoRoot,
 if (Test-Path $targetPath) {
     Remove-Item -LiteralPath $targetPath -Recurse -Force
 }
-New-Item -ItemType Directory -Path $targetPath | Out-Null
+[System.IO.Directory]::CreateDirectory($targetPath) | Out-Null
 
 $assemblies = Get-ChildItem -Path $sourcePath -Filter *.dll -File -Recurse
 if (-not $assemblies) {
@@ -27,7 +27,7 @@ foreach ($assembly in $assemblies) {
     $destination = Join-Path $targetPath $relative
     $destinationDir = Split-Path $destination -Parent
     if (-not (Test-Path $destinationDir)) {
-        New-Item -ItemType Directory -Path $destinationDir -Force | Out-Null
+        [System.IO.Directory]::CreateDirectory($destinationDir) | Out-Null
     }
     Copy-Item -LiteralPath $assembly.FullName -Destination $destination -Force
     $copied += $destination
