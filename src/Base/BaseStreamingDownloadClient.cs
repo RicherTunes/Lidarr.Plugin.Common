@@ -515,27 +515,36 @@ namespace Lidarr.Plugin.Common.Base
                     var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
                     var downloadedBytes = existingBytes;
 
-                    using (var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken))
-                    using (var fileStream = new FileStream(tempFilePath, fileMode, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
+#if NET8_0_OR_GREATER
+                    using (var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
+#else
+                    using (var contentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
+#endif
                     {
-                        var buffer = new byte[BufferSize];
-                        int bytesRead;
-
-                        while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+#if !NET8_0_OR_GREATER
+                        cancellationToken.ThrowIfCancellationRequested();
+#endif
+                        using (var fileStream = new FileStream(tempFilePath, fileMode, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
                         {
-                            await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
-                            downloadedBytes += bytesRead;
+                            var buffer = new byte[BufferSize];
+                            int bytesRead;
 
-                            if (progress != null && totalExpected > 0)
+                            while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
                             {
-                                var progressPercent = (double)downloadedBytes / totalExpected * 100d;
-                                progress.Report(progressPercent);
-                            }
-                        }
+                                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+                                downloadedBytes += bytesRead;
 
-                        // Flush to disk for atomicity
-                        await fileStream.FlushAsync(cancellationToken);
-                        try { fileStream.Flush(true); } catch { /* best effort */ }
+                                if (progress != null && totalExpected > 0)
+                                {
+                                    var progressPercent = (double)downloadedBytes / totalExpected * 100d;
+                                    progress.Report(progressPercent);
+                                }
+                            }
+
+                            // Flush to disk for atomicity
+                            await fileStream.FlushAsync(cancellationToken);
+                            try { fileStream.Flush(true); } catch { /* best effort */ }
+                        }
                     }
 
                     // Apply metadata to the temp file before moving

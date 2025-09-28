@@ -33,7 +33,12 @@ namespace Lidarr.Plugin.Common.Services.Http
             }
 
             var originalHeaders = response.Content.Headers.Select(h => h).ToList();
+#if NET8_0_OR_GREATER
             var payload = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
+#else
+            var payload = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+#endif
 
             // Always reset the response content to a seekable stream after inspection.
             var bufferStream = new MemoryStream(payload, writable: false);

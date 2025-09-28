@@ -19,7 +19,40 @@ namespace Lidarr.Plugin.Common.Utilities
     {
         private sealed record HostGate(SemaphoreSlim Semaphore, int Limit);
 
+        private static readonly TimeSpan HostGateDisposalDelay = TimeSpan.FromMinutes(2);
         private static readonly ConcurrentDictionary<string, HostGate> _hostGates = new();
+
+        private static void ScheduleGateDisposal(SemaphoreSlim semaphore, int limit)
+        {
+            if (semaphore == null)
+            {
+                return;
+            }
+
+            _ = Task.Run(async () =>
+            {
+                while (true)
+                {
+                    try
+                    {
+                        await Task.Delay(HostGateDisposalDelay).ConfigureAwait(false);
+                        if (semaphore.CurrentCount >= limit)
+                        {
+                            semaphore.Dispose();
+                            break;
+                        }
+                    }
+                    catch (ObjectDisposedException)
+                    {
+                        break;
+                    }
+                    catch
+                    {
+                        // swallow and retry until disposal succeeds
+                    }
+                }
+            });
+        }
 
         private static SemaphoreSlim GetHostGate(string? host, int requestedLimit)
         {
@@ -34,7 +67,9 @@ namespace Lidarr.Plugin.Common.Utilities
                         return existing;
                     }
 
-                    return new HostGate(new SemaphoreSlim(requestedLimit, requestedLimit), requestedLimit);
+                    var upgraded = new HostGate(new SemaphoreSlim(requestedLimit, requestedLimit), requestedLimit);
+                    ScheduleGateDisposal(existing.Semaphore, existing.Limit);
+                    return upgraded;
                 })
                 .Semaphore;
         }
@@ -141,7 +176,12 @@ namespace Lidarr.Plugin.Common.Utilities
             response.EnsureSuccessStatusCode();
 
             var contentType = response.Content.Headers.ContentType?.MediaType;
+#if NET8_0_OR_GREATER
             var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+#else
+            var payload = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
+#endif
 
             if (string.IsNullOrWhiteSpace(payload))
             {
@@ -154,7 +194,8 @@ namespace Lidarr.Plugin.Common.Utilities
                 var previewSegment = payload.Substring(0, previewLength);
                 var previewBytes = Encoding.UTF8.GetBytes(previewSegment);
                 var previewHex = previewLength > 0 ? BitConverter.ToString(previewBytes) : "<empty>";
-                throw new InvalidOperationException($"Expected JSON but got '{contentType ?? "none"}' (first bytes: {previewHex}).");
+                var statusCode = (int)response.StatusCode;
+                throw new InvalidOperationException($"Expected JSON but got '{contentType ?? "none"}' from {response.RequestMessage?.RequestUri} (status {statusCode}) (first bytes: {previewHex}).");
             }
 
             options ??= new JsonSerializerOptions
