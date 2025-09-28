@@ -76,11 +76,11 @@ namespace Lidarr.Plugin.Common.Base
         {
             Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             Logger = logger ?? CreateDefaultLogger();
-            
+
             PerformanceMonitor = new PerformanceMonitor(TimeSpan.FromMinutes(5));
             RateLimiter = new AdaptiveRateLimiter();
             _activeDownloads = new ConcurrentDictionary<string, StreamingDownloadItem>();
-            
+
             // Initialize concurrency limiter based on settings
             var maxConcurrency = GetMaxConcurrency(settings);
             _concurrencyLimiter = new SemaphoreSlim(maxConcurrency, maxConcurrency);
@@ -127,7 +127,7 @@ namespace Lidarr.Plugin.Common.Base
             var trackNumber = track.TrackNumber?.ToString("00") ?? "00";
             var title = FileNameSanitizer.SanitizeFileName(track.Title ?? "Unknown");
             var artist = FileNameSanitizer.SanitizeFileName(track.Artist?.Name ?? album?.Artist?.Name ?? "Unknown");
-            
+
             return $"{trackNumber} - {artist} - {title}.flac";
         }
 
@@ -137,14 +137,14 @@ namespace Lidarr.Plugin.Common.Base
         protected virtual string GenerateTrackPath(StreamingTrack track, StreamingAlbum album, string basePath)
         {
             var fileName = GenerateFileName(track, album);
-            
+
             if (Settings.OrganizeByArtist && album?.Artist?.Name != null)
             {
                 var artistFolder = FileNameSanitizer.SanitizeFileName(album.Artist.Name);
                 var albumFolder = FileNameSanitizer.SanitizeFileName(album.Title ?? "Unknown Album");
                 return Path.Combine(basePath, artistFolder, albumFolder, fileName);
             }
-            
+
             return Path.Combine(basePath, fileName);
         }
 
@@ -172,11 +172,11 @@ namespace Lidarr.Plugin.Common.Base
                 download.Success = success;
                 download.ErrorMessage = errorMessage;
                 download.CompletedAt = DateTime.UtcNow;
-                
+
                 // Record performance metrics
                 var duration = download.CompletedAt - download.StartedAt;
                 PerformanceMonitor?.RecordOperation($"download_{ServiceName.ToLowerInvariant()}", duration ?? TimeSpan.Zero, success);
-                
+
                 Logger?.LogInformation($"{ServiceName} download {downloadId} completed: Success={success}");
             }
         }
@@ -245,7 +245,7 @@ namespace Lidarr.Plugin.Common.Base
             }
 
             var downloadId = Guid.NewGuid().ToString("N");
-            
+
             try
             {
                 Logger?.LogDebug($"Adding {ServiceName} album download: {albumId}");
@@ -346,7 +346,7 @@ namespace Lidarr.Plugin.Common.Base
             try
             {
                 await _concurrencyLimiter.WaitAsync(cancellationTokenSource.Token);
-                
+
                 var album = downloadItem.Album;
                 var totalTracks = album.TrackCount;
                 var completedTracks = 0;
@@ -359,7 +359,7 @@ namespace Lidarr.Plugin.Common.Base
 
                 // Download tracks concurrently but controlled
                 var downloadTasks = new List<Task>();
-                
+
                 // For now, simulate track download - in real implementation, 
                 // you would get actual track list from the album
                 for (int i = 1; i <= totalTracks; i++)
@@ -404,12 +404,12 @@ namespace Lidarr.Plugin.Common.Base
                 // Services must provide track details separately since album doesn't contain full track list
                 // This is a placeholder that services would override with proper track enumeration
                 Logger?.LogInformation("Processing track {TrackNumber} from album {AlbumTitle}", trackNumber, album.Title);
-                
+
                 // In a service-specific implementation, you would:
                 // 1. Get track list from the service API
                 // 2. Find the specific track by number
                 // 3. Download using DownloadTrackAsync
-                
+
                 // For now, skip the placeholder implementation
                 await Task.Delay(100, cancellationToken);
             }
@@ -458,9 +458,9 @@ namespace Lidarr.Plugin.Common.Base
         {
             int maxRetries = GetMaxDownloadRetries();
             const int BufferSize = 8192;
-            
+
             Exception? lastException = null;
-            
+
             for (int attempt = 1; attempt <= maxRetries; attempt++)
             {
                 try
@@ -570,7 +570,7 @@ namespace Lidarr.Plugin.Common.Base
                 {
                     lastException = ex;
                     Logger?.LogWarning(ex, "Download attempt {Attempt} failed: {Title}", attempt, metadata.Title);
-                    
+
                     if (attempt < maxRetries)
                     {
                         var delay = GetDownloadRetryDelay(attempt, null);
@@ -636,22 +636,22 @@ namespace Lidarr.Plugin.Common.Base
                 await Task.Run(() =>
                 {
                     using var file = TagLib.File.Create(filePath);
-                    
+
                     if (!string.IsNullOrEmpty(metadata.Title))
                         file.Tag.Title = metadata.Title;
-                    
+
                     if (metadata.Artist?.Name != null)
                         file.Tag.Performers = new[] { metadata.Artist.Name };
-                        
+
                     if (metadata.Album?.Title != null)
                         file.Tag.Album = metadata.Album.Title;
-                    
+
                     if (metadata.TrackNumber.HasValue && metadata.TrackNumber > 0)
                         file.Tag.Track = (uint)metadata.TrackNumber.Value;
-                        
+
                     if (metadata.Album?.ReleaseDate.HasValue == true)
                         file.Tag.Year = (uint)metadata.Album.ReleaseDate.Value.Year;
-                    
+
                     // Use first genre if available
                     if (metadata.Album?.Genres?.Any() == true)
                         file.Tag.Genres = new[] { metadata.Album.Genres.First() };
@@ -676,7 +676,7 @@ namespace Lidarr.Plugin.Common.Base
             var trackNumber = (track.TrackNumber ?? 0) > 0 ? track.TrackNumber.Value.ToString("D2") : "00";
             var artist = SanitizeFileName(track.Artist?.Name ?? album.Artist?.Name ?? "Unknown Artist");
             var title = SanitizeFileName(track.Title ?? "Unknown Title");
-            
+
             return $"{trackNumber} - {artist} - {title}.flac";
         }
 
@@ -686,15 +686,15 @@ namespace Lidarr.Plugin.Common.Base
         private static string SanitizeFileName(string fileName)
         {
             if (string.IsNullOrEmpty(fileName)) return "Unknown";
-            
+
             var invalidChars = Path.GetInvalidFileNameChars();
             var sanitized = fileName;
-            
+
             foreach (var invalidChar in invalidChars)
             {
                 sanitized = sanitized.Replace(invalidChar, '_');
             }
-            
+
             // Additional cleanup for common problematic characters
             sanitized = sanitized
                 .Replace(":", " -")
@@ -702,7 +702,7 @@ namespace Lidarr.Plugin.Common.Base
                 .Replace("*", "")
                 .Replace("\"", "'")
                 .Replace("|", "-");
-            
+
             return sanitized.Trim();
         }
 
@@ -723,7 +723,7 @@ namespace Lidarr.Plugin.Common.Base
                 var albumFolder = FileNameSanitizer.SanitizeFileName(album.Title ?? "Unknown Album");
                 return Path.Combine(basePath, artistFolder, albumFolder);
             }
-            
+
             return Path.Combine(basePath, FileNameSanitizer.SanitizeFileName(album.Title ?? "Unknown Album"));
         }
 

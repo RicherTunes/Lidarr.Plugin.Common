@@ -21,7 +21,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
         /// <param name="cancellationToken">Cancellation token</param>
         /// <returns>True if request can proceed</returns>
         Task<bool> WaitIfNeededAsync(string service, string endpoint, CancellationToken cancellationToken = default);
-        
+
         /// <summary>
         /// Record response to adjust future rate limiting
         /// </summary>
@@ -29,7 +29,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
         /// <param name="endpoint">Endpoint path</param>
         /// <param name="response">HTTP response to analyze</param>
         void RecordResponse(string service, string endpoint, HttpResponseMessage response);
-        
+
         /// <summary>
         /// Get current rate limit for a specific service/endpoint
         /// </summary>
@@ -37,14 +37,14 @@ namespace Lidarr.Plugin.Common.Services.Performance
         /// <param name="endpoint">Endpoint path</param>
         /// <returns>Current requests per minute limit</returns>
         int GetCurrentLimit(string service, string endpoint);
-        
+
         /// <summary>
         /// Get statistics for a specific service
         /// </summary>
         /// <param name="service">Service name</param>
         /// <returns>Rate limit statistics</returns>
         ServiceRateLimitStats GetServiceStats(string service);
-        
+
         /// <summary>
         /// Get global rate limit statistics
         /// </summary>
@@ -80,7 +80,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
         private static readonly Dictionary<string, ServiceConfig> DefaultServiceConfigs = new(StringComparer.OrdinalIgnoreCase)
         {
             ["Tidal"] = new ServiceConfig(300, 50, 400),
-            ["Qobuz"] = new ServiceConfig(500, 100, 600), 
+            ["Qobuz"] = new ServiceConfig(500, 100, 600),
             ["Spotify"] = new ServiceConfig(150, 30, 200),
             ["AppleMusic"] = new ServiceConfig(200, 50, 300),
             ["Deezer"] = new ServiceConfig(250, 50, 350),
@@ -137,7 +137,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
             lock (_statsLock)
             {
                 var globalStats = new GlobalRateLimitStats();
-                
+
                 foreach (var kvp in _serviceLimiters)
                 {
                     var serviceStats = kvp.Value.GetStats();
@@ -147,8 +147,8 @@ namespace Lidarr.Plugin.Common.Services.Performance
                     globalStats.TotalRateLimitHits += serviceStats.TotalRateLimitHits;
                 }
 
-                globalStats.GlobalSuccessRate = globalStats.TotalRequests > 0 
-                    ? (double)(globalStats.TotalRequests - globalStats.TotalErrors) / globalStats.TotalRequests 
+                globalStats.GlobalSuccessRate = globalStats.TotalRequests > 0
+                    ? (double)(globalStats.TotalRequests - globalStats.TotalErrors) / globalStats.TotalRequests
                     : 0;
 
                 return globalStats;
@@ -176,12 +176,12 @@ namespace Lidarr.Plugin.Common.Services.Performance
 
             _disposed = true;
             _globalSemaphore?.Dispose();
-            
+
             foreach (var limiter in _serviceLimiters.Values)
             {
                 limiter?.Dispose();
             }
-            
+
             _serviceLimiters.Clear();
         }
     }
@@ -273,15 +273,15 @@ namespace Lidarr.Plugin.Common.Services.Performance
 
         public int GetCurrentLimit(string endpoint)
         {
-            return _endpointLimits.TryGetValue(endpoint, out var limit) 
-                ? limit.RequestsPerMinute 
+            return _endpointLimits.TryGetValue(endpoint, out var limit)
+                ? limit.RequestsPerMinute
                 : _config.DefaultRequestsPerMinute;
         }
 
         public ServiceRateLimitStats GetStats()
         {
             var stats = new ServiceRateLimitStats { ServiceName = _serviceName };
-            
+
             foreach (var kvp in _endpointLimits)
             {
                 var limit = kvp.Value;
@@ -292,11 +292,11 @@ namespace Lidarr.Plugin.Common.Services.Performance
                     SuccessfulRequests = limit.SuccessfulRequests,
                     TotalErrors = limit.TotalErrors,
                     RateLimitHits = limit.RateLimitHits,
-                    SuccessRate = limit.TotalRequests > 0 
-                        ? (double)limit.SuccessfulRequests / limit.TotalRequests 
+                    SuccessRate = limit.TotalRequests > 0
+                        ? (double)limit.SuccessfulRequests / limit.TotalRequests
                         : 0
                 };
-                
+
                 stats.TotalRequests += limit.TotalRequests;
                 stats.TotalErrors += limit.TotalErrors;
                 stats.TotalRateLimitHits += limit.RateLimitHits;
@@ -312,7 +312,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
             limit.ConsecutiveSuccesses = 0;
 
             var oldLimit = limit.RequestsPerMinute;
-            limit.RequestsPerMinute = Math.Max(_config.MinRequestsPerMinute, 
+            limit.RequestsPerMinute = Math.Max(_config.MinRequestsPerMinute,
                 (int)(limit.RequestsPerMinute * 0.75));
         }
 
@@ -344,7 +344,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
             limit.ConsecutiveErrors = 0;
             limit.SuccessfulRequests++;
 
-            if (limit.ConsecutiveSuccesses >= 20 && 
+            if (limit.ConsecutiveSuccesses >= 20 &&
                 limit.RequestsPerMinute < _config.MaxRequestsPerMinute)
             {
                 var oldLimit = limit.RequestsPerMinute;

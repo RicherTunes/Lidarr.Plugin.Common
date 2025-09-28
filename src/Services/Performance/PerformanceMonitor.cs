@@ -38,13 +38,13 @@ namespace Lidarr.Plugin.Common.Services.Performance
             {
                 metrics.TotalCalls++;
                 metrics.TotalDuration += duration;
-                
+
                 if (fromCache)
                     metrics.CacheHits++;
-                
+
                 if (statusCode.HasValue && statusCode >= 400)
                     metrics.ErrorCount++;
-                
+
                 metrics.LastUpdated = DateTime.UtcNow;
             }
 
@@ -73,13 +73,13 @@ namespace Lidarr.Plugin.Common.Services.Performance
             lock (metrics.Lock)
             {
                 metrics.TotalCalls++;
-                
+
                 if (hit)
                     metrics.CacheHits++;
-                
+
                 if (duration.HasValue)
                     metrics.TotalDuration += duration.Value;
-                
+
                 metrics.LastUpdated = DateTime.UtcNow;
             }
 
@@ -111,10 +111,10 @@ namespace Lidarr.Plugin.Common.Services.Performance
                 metrics.TotalCalls++;
                 metrics.TotalDuration += duration;
                 metrics.TotalBytes += fileSize;
-                
+
                 if (!success)
                     metrics.ErrorCount++;
-                
+
                 metrics.LastUpdated = DateTime.UtcNow;
             }
 
@@ -145,10 +145,10 @@ namespace Lidarr.Plugin.Common.Services.Performance
             {
                 metrics.TotalCalls++;
                 metrics.TotalDuration += duration;
-                
+
                 if (!success)
                     metrics.ErrorCount++;
-                
+
                 metrics.LastUpdated = DateTime.UtcNow;
             }
 
@@ -212,7 +212,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
         public void Reset()
         {
             _metrics.Clear();
-            
+
             while (_events.TryDequeue(out _))
             {
                 // Clear queue
@@ -233,7 +233,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
 
         private DateTime GetEarliestMetricTime()
         {
-            return _metrics.Values.Any() 
+            return _metrics.Values.Any()
                 ? _metrics.Values.Min(m => m.LastUpdated)
                 : DateTime.UtcNow;
         }
@@ -267,7 +267,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
             {
                 _disposed = true;
                 _flushTimer?.Dispose();
-                
+
                 // Final flush
                 try
                 {

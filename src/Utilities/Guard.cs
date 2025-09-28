@@ -90,7 +90,7 @@ namespace Lidarr.Plugin.Common.Utilities
             {
                 throw new ArgumentNullException(paramName);
             }
-            
+
             var list = value as IList<T> ?? value.ToList();
             if (!list.Any())
             {
@@ -110,12 +110,12 @@ namespace Lidarr.Plugin.Common.Utilities
         /// <returns>The value if it's within range.</returns>
         /// <exception cref="ArgumentOutOfRangeException">Thrown when value is outside the specified range.</exception>
         [MethodImpl(MethodImplOptions.AggressiveInlining)]
-        public static T InRange<T>(T value, T min, T max, [CallerArgumentExpression("value")] string paramName = null) 
+        public static T InRange<T>(T value, T min, T max, [CallerArgumentExpression("value")] string paramName = null)
             where T : IComparable<T>
         {
             if (value.CompareTo(min) < 0 || value.CompareTo(max) > 0)
             {
-                throw new ArgumentOutOfRangeException(paramName, value, 
+                throw new ArgumentOutOfRangeException(paramName, value,
                     $"Value must be between {min} and {max} (inclusive).");
             }
             return value;
@@ -133,13 +133,13 @@ namespace Lidarr.Plugin.Common.Utilities
         public static string ValidFilePath(string path, [CallerArgumentExpression("path")] string paramName = null)
         {
             NotNullOrWhiteSpace(path, paramName);
-            
+
             var invalidChars = System.IO.Path.GetInvalidPathChars();
             if (path.IndexOfAny(invalidChars) >= 0)
             {
                 throw new ArgumentException($"Path contains invalid characters: '{path}'", paramName);
             }
-            
+
             return path;
         }
     }

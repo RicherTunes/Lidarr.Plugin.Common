@@ -104,7 +104,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 {
                     var opName = operationName ?? "operation";
                     onRetry?.Invoke(ex, attempt, $"Attempt {attempt} of {maxRetries} failed for {opName}. Retrying in {delay}ms...");
-                    
+
                     // Add jitter to prevent thundering herd
                     var jitter = new Random().Next(0, 500);
                     await Task.Delay(delay + jitter);
@@ -207,25 +207,25 @@ namespace Lidarr.Plugin.Common.Utilities
                 try
                 {
                     var result = await action();
-                    
+
                     if (_state == CircuitBreakerState.HalfOpen)
                     {
                         _state = CircuitBreakerState.Closed;
                         _failureCount = 0;
                     }
-                    
+
                     return result;
                 }
                 catch (Exception)
                 {
                     _failureCount++;
                     _lastFailureTime = DateTime.UtcNow;
-                    
+
                     if (_failureCount >= _failureThreshold)
                     {
                         _state = CircuitBreakerState.Open;
                     }
-                    
+
                     throw;
                 }
             }
@@ -263,7 +263,7 @@ namespace Lidarr.Plugin.Common.Utilities
             public async Task WaitIfNeededAsync()
             {
                 TimeSpan waitTime = TimeSpan.Zero;
-                
+
                 lock (_lock)
                 {
                     var now = DateTime.UtcNow;
@@ -282,13 +282,13 @@ namespace Lidarr.Plugin.Common.Utilities
                         waitTime = oldestRequest + _timeWindow - now;
                     }
                 }
-                
+
                 // Wait outside the lock to avoid blocking
                 if (waitTime > TimeSpan.Zero)
                 {
                     await Task.Delay(waitTime).ConfigureAwait(false);
                 }
-                
+
                 lock (_lock)
                 {
                     _requestTimes.Enqueue(DateTime.UtcNow);

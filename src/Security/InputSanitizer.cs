@@ -94,10 +94,10 @@ namespace Lidarr.Plugin.Common.Security
 
             // Remove script tags and suspicious content
             metadata = ScriptInjectionPattern.Replace(metadata, "");
-            
+
             // HTML encode dangerous characters
             metadata = System.Net.WebUtility.HtmlEncode(metadata);
-            
+
             return metadata.Trim();
         }
     }

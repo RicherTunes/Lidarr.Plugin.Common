@@ -17,7 +17,7 @@ namespace Lidarr.Plugin.Common.Testing
         /// <summary>
         /// Common artist names for test data.
         /// </summary>
-        private static readonly string[] ArtistNames = 
+        private static readonly string[] ArtistNames =
         {
             "The Test Band", "Mock Artist", "Sample Orchestra", "Digital Musicians",
             "Virtual Ensemble", "Test Case Collective", "Mock Symphony", "Sample Artists"
@@ -108,7 +108,7 @@ namespace Lidarr.Plugin.Common.Testing
                 CoverArtUrls = new Dictionary<string, string>
                 {
                     ["small"] = $"https://example.com/covers/{albumId}_150.jpg",
-                    ["medium"] = $"https://example.com/covers/{albumId}_300.jpg", 
+                    ["medium"] = $"https://example.com/covers/{albumId}_300.jpg",
                     ["large"] = $"https://example.com/covers/{albumId}_600.jpg"
                 },
                 ExternalUrls = new Dictionary<string, string>
@@ -163,7 +163,7 @@ namespace Lidarr.Plugin.Common.Testing
         public static StreamingQuality CreateMockQuality(string id = null, string format = null, int? bitrate = null, int? sampleRate = null, int? bitDepth = null)
         {
             var qualityId = id ?? $"quality_{Random.Next(1, 10)}";
-            
+
             // If no format specified, choose randomly
             if (format == null)
             {
@@ -335,12 +335,12 @@ namespace Lidarr.Plugin.Common.Testing
         {
             var artist = MockFactories.CreateMockArtist("jazz_artist_1", "Miles Davis Test");
             var album = MockFactories.CreateMockAlbum("jazz_album_1", "Kind of Blue (Test)", artist);
-            
+
             album.Genres = new List<string> { "Jazz" };
             album.ReleaseDate = new DateTime(1959, 8, 17);
             album.TrackCount = 5;
             album.Duration = TimeSpan.FromMinutes(45);
-            
+
             return album;
         }
 
@@ -351,7 +351,7 @@ namespace Lidarr.Plugin.Common.Testing
         {
             var artist = MockFactories.CreateMockArtist("classical_artist_1", "Berlin Philharmonic Test");
             var album = MockFactories.CreateMockAlbum("classical_album_1", "Symphony No. 9 (Test)", artist);
-            
+
             album.Genres = new List<string> { "Classical" };
             album.TrackCount = 4;
             album.Duration = TimeSpan.FromMinutes(65);
@@ -361,7 +361,7 @@ namespace Lidarr.Plugin.Common.Testing
                 MockFactories.CreateMockQuality("hires_2", "FLAC", null, 96000, 24),
                 MockFactories.CreateMockQuality("cd_quality", "FLAC", null, 44100, 16)
             };
-            
+
             return album;
         }
 
@@ -372,7 +372,7 @@ namespace Lidarr.Plugin.Common.Testing
         {
             var artist = MockFactories.CreateMockArtist("edge_artist_1", "Test Artist: With/Special\\Characters?");
             var album = MockFactories.CreateMockAlbum("edge_album_1", "Album with \"Quotes\" & <Symbols>", artist);
-            
+
             return album;
         }
     }

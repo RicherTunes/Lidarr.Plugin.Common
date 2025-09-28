@@ -33,18 +33,18 @@ namespace Lidarr.Plugin.Common.Services.Network
         private readonly NetworkHealthMonitor _healthMonitor;
         private readonly Dictionary<string, BatchOperationState> _activeBatchOperations;
         private readonly SemaphoreSlim _operationLock;
-        
+
         // Circuit breaker settings
         private int _consecutiveFailures = 0;
         private DateTime _lastFailureTime = DateTime.MinValue;
         private readonly int _circuitBreakerThreshold = 5; // Failures before opening circuit
         private readonly TimeSpan _circuitBreakerTimeout = TimeSpan.FromMinutes(2); // How long to keep circuit open
-        
+
         // Retry settings
         private readonly int _maxRetryAttempts = 3;
         private readonly TimeSpan _baseRetryDelay = TimeSpan.FromSeconds(1);
         private readonly TimeSpan _maxRetryDelay = TimeSpan.FromSeconds(30);
-        
+
         // Checkpoint settings
         private readonly int _checkpointInterval = 10; // Save progress every 10 operations
 
@@ -78,7 +78,7 @@ namespace Lidarr.Plugin.Common.Services.Network
         {
             options ??= NetworkResilienceOptions.Default;
             var itemList = items.ToList();
-            
+
             if (!itemList.Any())
             {
                 return new ResilientBatchResult<TResult>
@@ -112,7 +112,7 @@ namespace Lidarr.Plugin.Common.Services.Network
 
                 // Cleanup successful operation
                 await CleanupOperationAsync(operationId);
-                
+
                 return result;
             }
             finally
@@ -142,9 +142,9 @@ namespace Lidarr.Plugin.Common.Services.Network
                 // Check circuit breaker before each operation
                 if (IsCircuitBreakerOpen())
                 {
-                    _logger.LogWarning("⚡ CIRCUIT BREAKER OPEN: Failing fast for operation '{0}' at item {1}", 
+                    _logger.LogWarning("⚡ CIRCUIT BREAKER OPEN: Failing fast for operation '{0}' at item {1}",
                                 batchState.OperationId, i);
-                    
+
                     return new ResilientBatchResult<TResult>
                     {
                         IsSuccessful = false,
@@ -204,8 +204,8 @@ namespace Lidarr.Plugin.Common.Services.Network
                     batchState.Results = results.Cast<object>().ToList();
                     batchState.Failures = failures;
                     await SaveCheckpointAsync(batchState);
-                    
-                    _logger.LogDebug("💾 CHECKPOINT: Saved progress for operation '{0}' at item {1}/{2}", 
+
+                    _logger.LogDebug("💾 CHECKPOINT: Saved progress for operation '{0}' at item {1}/{2}",
                                  batchState.OperationId, i + 1, items.Count);
                 }
 
@@ -221,10 +221,10 @@ namespace Lidarr.Plugin.Common.Services.Network
             }
 
             // Final result
-            var isSuccessful = failures.Count == 0 || 
+            var isSuccessful = failures.Count == 0 ||
                               (batchState.Options.ContinueOnFailure && results.Any());
 
-            _logger.LogInformation("🛡️ RESILIENT BATCH COMPLETE: Operation '{0}' - {1}/{2} successful", 
+            _logger.LogInformation("🛡️ RESILIENT BATCH COMPLETE: Operation '{0}' - {1}/{2} successful",
                         batchState.OperationId, results.Count, items.Count);
 
             return new ResilientBatchResult<TResult>
@@ -247,18 +247,18 @@ namespace Lidarr.Plugin.Common.Services.Network
             CancellationToken cancellationToken)
         {
             Exception? lastException = null;
-            
+
             for (int attempt = 0; attempt < _maxRetryAttempts; attempt++)
             {
                 try
                 {
                     var result = await processor(item, cancellationToken);
-                    
+
                     if (attempt > 0)
                     {
                         _logger.LogDebug("✅ RETRY SUCCESS: Item processed successfully on attempt {0}", attempt + 1);
                     }
-                    
+
                     return new ItemProcessingResult<TResult>
                     {
                         IsSuccess = true,
@@ -272,7 +272,7 @@ namespace Lidarr.Plugin.Common.Services.Network
                 catch (Exception ex)
                 {
                     lastException = ex;
-                    
+
                     if (!ShouldRetry(ex, attempt))
                     {
                         break; // Don't retry this type of exception
@@ -281,16 +281,16 @@ namespace Lidarr.Plugin.Common.Services.Network
                     if (attempt < _maxRetryAttempts - 1)
                     {
                         var delay = CalculateRetryDelay(attempt);
-                        _logger.LogDebug("🔄 RETRY: Attempt {0} failed, retrying in {1}ms: {2}", 
+                        _logger.LogDebug("🔄 RETRY: Attempt {0} failed, retrying in {1}ms: {2}",
                                      attempt + 1, delay.TotalMilliseconds, ex.Message);
-                        
+
                         await Task.Delay(delay, cancellationToken);
                     }
                 }
             }
 
             var canRetry = ShouldRetry(lastException, 0);
-            
+
             return new ItemProcessingResult<TResult>
             {
                 IsSuccess = false,
@@ -360,7 +360,7 @@ namespace Lidarr.Plugin.Common.Services.Network
         {
             _consecutiveFailures++;
             _lastFailureTime = DateTime.UtcNow;
-            
+
             if (_consecutiveFailures == _circuitBreakerThreshold)
             {
                 _logger.LogWarning("⚡ CIRCUIT BREAKER: Opening circuit after {0} consecutive failures", _consecutiveFailures);
@@ -380,8 +380,8 @@ namespace Lidarr.Plugin.Common.Services.Network
                 // In a real implementation, this would save to persistent storage
                 // For now, we keep it in memory
                 batchState.LastCheckpointTime = DateTime.UtcNow;
-                
-                _logger.LogDebug("💾 CHECKPOINT SAVED: Operation '{0}' at {1}/{2} items", 
+
+                _logger.LogDebug("💾 CHECKPOINT SAVED: Operation '{0}' at {1}/{2} items",
                              batchState.OperationId, batchState.CompletedItems, batchState.TotalItems);
             }
             catch (Exception ex)
@@ -401,7 +401,7 @@ namespace Lidarr.Plugin.Common.Services.Network
                 // In a real implementation, this would load from persistent storage
                 if (_activeBatchOperations.TryGetValue(operationId, out var existingState))
                 {
-                    _logger.LogInformation("🔄 RESUMING: Found existing operation '{0}' at {1}/{2} items", 
+                    _logger.LogInformation("🔄 RESUMING: Found existing operation '{0}' at {1}/{2} items",
                                 operationId, existingState.CompletedItems, existingState.TotalItems);
                     return existingState;
                 }
@@ -505,9 +505,9 @@ namespace Lidarr.Plugin.Common.Services.Network
         public int CheckpointInterval { get; set; } = 10;
         public int MaxRetryAttempts { get; set; } = 3;
         public TimeSpan RetryDelay { get; set; } = TimeSpan.FromSeconds(1);
-        
+
         public static NetworkResilienceOptions Default => new();
-        
+
         public static NetworkResilienceOptions StrictMode => new()
         {
             ContinueOnFailure = false,
@@ -548,7 +548,7 @@ namespace Lidarr.Plugin.Common.Services.Network
         public int SuccessfulItems { get; set; }
         public int FailedItems { get; set; }
         public int CurrentItem { get; set; }
-        
+
         public double PercentComplete => TotalItems > 0 ? (double)CompletedItems / TotalItems * 100 : 0;
     }
 
@@ -565,8 +565,8 @@ namespace Lidarr.Plugin.Common.Services.Network
         public bool CanRetryLater { get; set; }
         public bool CanRetryFromCheckpoint { get; set; }
         public TimeSpan CompletionTime { get; set; }
-        
-        public double SuccessRate => Results.Count + Failures.Count > 0 ? 
+
+        public double SuccessRate => Results.Count + Failures.Count > 0 ?
             (double)Results.Count / (Results.Count + Failures.Count) : 0;
     }
 

@@ -117,22 +117,22 @@ namespace Lidarr.Plugin.Common.Interfaces
         /// Username/email and password authentication.
         /// </summary>
         UsernamePassword,
-        
+
         /// <summary>
         /// OAuth2 authorization code flow.
         /// </summary>
         OAuth2,
-        
+
         /// <summary>
         /// Simple API key authentication.
         /// </summary>
         ApiKey,
-        
+
         /// <summary>
         /// Pre-existing token authentication.
         /// </summary>
         Token,
-        
+
         /// <summary>
         /// Certificate-based authentication.
         /// </summary>
@@ -168,7 +168,7 @@ namespace Lidarr.Plugin.Common.Interfaces
         /// <summary>
         /// Additional context about the error.
         /// </summary>
-        public System.Collections.Generic.Dictionary<string, object> ErrorContext { get; set; } = 
+        public System.Collections.Generic.Dictionary<string, object> ErrorContext { get; set; } =
             new System.Collections.Generic.Dictionary<string, object>();
 
         /// <summary>

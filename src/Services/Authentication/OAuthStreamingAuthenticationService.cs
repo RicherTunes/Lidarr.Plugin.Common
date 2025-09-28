@@ -10,7 +10,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
     /// <summary>
     /// Interface for OAuth-specific streaming authentication operations
     /// </summary>
-    public interface IOAuthStreamingAuthenticationService<TSession, TCredentials> 
+    public interface IOAuthStreamingAuthenticationService<TSession, TCredentials>
         : IStreamingAuthenticationService<TSession, TCredentials>
         where TSession : class, IAuthSession
         where TCredentials : class, IAuthCredentials
@@ -23,7 +23,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// <param name="state">Optional state parameter for security</param>
         /// <returns>Authorization URL and flow identifier</returns>
         Task<OAuthFlowResult> InitiateOAuthFlowAsync(string redirectUri, IEnumerable<string> scopes = null, string state = null);
-        
+
         /// <summary>
         /// Exchanges authorization code for access tokens
         /// </summary>
@@ -31,14 +31,14 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// <param name="flowId">Flow identifier from InitiateOAuthFlowAsync</param>
         /// <returns>Authenticated session</returns>
         Task<TSession> ExchangeCodeForTokensAsync(string authorizationCode, string flowId);
-        
+
         /// <summary>
         /// Refreshes an expired access token using refresh token
         /// </summary>
         /// <param name="session">Current session with refresh token</param>
         /// <returns>Updated session with new tokens</returns>
         Task<TSession> RefreshTokensAsync(TSession session);
-        
+
         /// <summary>
         /// Revokes tokens and ends session
         /// </summary>
@@ -64,7 +64,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
     /// - Token refresh with automatic retry and fallback
     /// - Secure credential storage integration
     /// </remarks>
-    public abstract class OAuthStreamingAuthenticationService<TSession, TCredentials> 
+    public abstract class OAuthStreamingAuthenticationService<TSession, TCredentials>
         : BaseStreamingAuthenticationService<TSession, TCredentials>, IOAuthStreamingAuthenticationService<TSession, TCredentials>
         where TSession : class, IAuthSession
         where TCredentials : class, IAuthCredentials
@@ -84,8 +84,8 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// Initiates OAuth authorization flow with PKCE protection
         /// </summary>
         public virtual async Task<OAuthFlowResult> InitiateOAuthFlowAsync(
-            string redirectUri, 
-            IEnumerable<string> scopes = null, 
+            string redirectUri,
+            IEnumerable<string> scopes = null,
             string state = null)
         {
             if (string.IsNullOrEmpty(redirectUri))
@@ -93,13 +93,13 @@ namespace Lidarr.Plugin.Common.Services.Authentication
 
             // Generate PKCE codes
             var (codeVerifier, codeChallenge) = _pkceGenerator.GeneratePair();
-            
+
             // Generate state for CSRF protection if not provided
             state ??= GenerateSecureState();
-            
+
             // Create flow identifier
             var flowId = Guid.NewGuid().ToString();
-            
+
             // Store flow state for later verification
             lock (_flowsLock)
             {
@@ -111,7 +111,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     CreatedAt = DateTime.UtcNow,
                     Scopes = scopes?.ToList()
                 };
-                
+
                 // Cleanup expired flows
                 CleanupExpiredFlows();
             }
@@ -145,7 +145,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             {
                 if (!_activeFlows.TryGetValue(flowId, out var existingState))
                     throw new InvalidOperationException($"OAuth flow {flowId} not found or expired");
-                
+
                 // Remove used flow
                 _activeFlows.Remove(flowId);
                 flowState = existingState;
@@ -159,8 +159,8 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             {
                 // Exchange code for tokens using service-specific implementation
                 var session = await ExchangeCodeForTokensInternalAsync(
-                    authorizationCode, 
-                    flowState.CodeVerifier, 
+                    authorizationCode,
+                    flowState.CodeVerifier,
                     flowState.RedirectUri).ConfigureAwait(false);
 
                 if (session == null)
@@ -170,7 +170,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
 
                 // Cache session
                 await CacheSessionAsync(session).ConfigureAwait(false);
-                
+
                 return session;
             }
             catch (Exception ex)
@@ -194,10 +194,10 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             try
             {
                 var refreshedSession = await RefreshTokensInternalAsync(refreshToken);
-                
+
                 // Update cached session
                 await CacheSessionAsync(refreshedSession);
-                
+
                 return refreshedSession;
             }
             catch (Exception ex)
@@ -238,17 +238,17 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// Builds service-specific authorization URL
         /// </summary>
         protected abstract Task<string> BuildAuthorizationUrlAsync(
-            string codeChallenge, 
-            string state, 
-            string redirectUri, 
+            string codeChallenge,
+            string state,
+            string redirectUri,
             IEnumerable<string> scopes);
 
         /// <summary>
         /// Exchanges authorization code for tokens (service-specific implementation)
         /// </summary>
         protected abstract Task<TSession> ExchangeCodeForTokensInternalAsync(
-            string authorizationCode, 
-            string codeVerifier, 
+            string authorizationCode,
+            string codeVerifier,
             string redirectUri);
 
         /// <summary>
@@ -347,17 +347,17 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// URL user should visit to authorize the application
         /// </summary>
         public string AuthorizationUrl { get; set; } = string.Empty;
-        
+
         /// <summary>
         /// Unique identifier for this OAuth flow
         /// </summary>
         public string FlowId { get; set; } = string.Empty;
-        
+
         /// <summary>
         /// State parameter for CSRF protection (should match callback)
         /// </summary>
         public string State { get; set; } = string.Empty;
-        
+
         /// <summary>
         /// When this OAuth flow expires
         /// </summary>
@@ -373,37 +373,37 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// OAuth client ID
         /// </summary>
         public string ClientId { get; set; } = string.Empty;
-        
+
         /// <summary>
         /// OAuth client secret (optional for PKCE flows)
         /// </summary>
         public string ClientSecret { get; set; } = string.Empty;
-        
+
         /// <summary>
         /// Authorization endpoint URL
         /// </summary>
         public string AuthorizationEndpoint { get; set; } = string.Empty;
-        
+
         /// <summary>
         /// Token exchange endpoint URL
         /// </summary>
         public string TokenEndpoint { get; set; } = string.Empty;
-        
+
         /// <summary>
         /// Token revocation endpoint URL (optional)
         /// </summary>
         public string RevocationEndpoint { get; set; } = string.Empty;
-        
+
         /// <summary>
         /// Default scopes to request
         /// </summary>
         public List<string> DefaultScopes { get; set; } = new();
-        
+
         /// <summary>
         /// Whether to use PKCE (recommended for public clients)
         /// </summary>
         public bool UsePKCE { get; set; } = true;
-        
+
         /// <summary>
         /// Additional parameters to include in authorization request
         /// </summary>

@@ -16,15 +16,15 @@ namespace Lidarr.Plugin.Common.Services.Performance
         private readonly ILogger<MemoryHealthMonitor> _logger;
         private readonly Timer _monitorTimer;
         private readonly object _statsLock = new object();
-        
+
         private MemoryHealthStatistics _currentStats;
         private bool _disposed = false;
-        
+
         // Thresholds (configurable)
         private readonly long _warningThresholdMB;
         private readonly long _criticalThresholdMB;
         private readonly TimeSpan _monitorInterval;
-        
+
         // History for trend analysis
         private readonly System.Collections.Generic.Queue<MemorySnapshot> _history;
         private const int MaxHistorySize = 10;
@@ -40,20 +40,20 @@ namespace Lidarr.Plugin.Common.Services.Performance
             _criticalThresholdMB = criticalThresholdMB;
             _monitorInterval = monitorInterval ?? TimeSpan.FromSeconds(30);
             _history = new System.Collections.Generic.Queue<MemorySnapshot>(MaxHistorySize);
-            
+
             _currentStats = new MemoryHealthStatistics
             {
                 Status = MemoryHealthStatus.Healthy,
                 LastChecked = DateTime.UtcNow
             };
-            
+
             // Start monitoring
             _monitorTimer = new Timer(
                 MonitorMemory,
                 null,
                 _monitorInterval,
                 _monitorInterval);
-                
+
             _logger.LogInformation("Memory health monitor initialized (warning: {0}MB, critical: {1}MB)",
                 _warningThresholdMB, _criticalThresholdMB);
         }
@@ -90,7 +90,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
                 {
                     var snapshots = _history.ToArray();
                     var recentGrowth = CalculateGrowthRate(snapshots);
-                    
+
                     advice.MemoryGrowthRate = recentGrowth;
                     advice.IsGrowthConcerning = recentGrowth > 10; // >10MB/minute is concerning
                 }
@@ -105,14 +105,14 @@ namespace Lidarr.Plugin.Common.Services.Performance
                     advice.Recommendation = "Critical memory usage. Consider reducing batch sizes and clearing caches.";
                     advice.SuggestedBatchSizeReduction = 0.25; // Reduce to 25% of current
                     break;
-                    
+
                 case MemoryHealthStatus.Warning:
                     advice.ShouldOptimize = true;
                     advice.Urgency = OptimizationUrgency.Soon;
                     advice.Recommendation = "High memory usage detected. Monitor closely and prepare to reduce load.";
                     advice.SuggestedBatchSizeReduction = 0.5; // Reduce to 50% of current
                     break;
-                    
+
                 case MemoryHealthStatus.Healthy:
                     advice.ShouldOptimize = false;
                     advice.Urgency = OptimizationUrgency.None;
@@ -148,16 +148,16 @@ namespace Lidarr.Plugin.Common.Services.Performance
                 if (aggressive && startStats.Status == MemoryHealthStatus.Critical)
                 {
                     _logger.LogWarning("Aggressive memory optimization requested due to critical status");
-                    
+
                     // Even in aggressive mode, use non-blocking optimized collection
                     GC.Collect(2, GCCollectionMode.Optimized, blocking: false, compacting: true);
-                    
+
                     // Add latency pressure to encourage more aggressive collection
                     GCSettings.LatencyMode = GCLatencyMode.LowLatency;
-                    
+
                     // Wait briefly for GC to work
                     await Task.Delay(500);
-                    
+
                     // Restore normal latency mode
                     GCSettings.LatencyMode = GCLatencyMode.Interactive;
                 }
@@ -165,7 +165,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
                 {
                     // Normal optimization - just suggest collection
                     GC.Collect(0, GCCollectionMode.Optimized, blocking: false);
-                    
+
                     // Brief delay to allow GC to work if it chooses to
                     await Task.Delay(100);
                 }
@@ -203,12 +203,12 @@ namespace Lidarr.Plugin.Common.Services.Performance
             try
             {
                 using var process = Process.GetCurrentProcess();
-                
+
                 // Get memory info WITHOUT forcing collection
                 var managedMemory = GC.GetTotalMemory(false);
                 var workingSet = process.WorkingSet64;
                 var privateMemory = process.PrivateMemorySize64;
-                
+
                 var snapshot = new MemorySnapshot
                 {
                     Timestamp = DateTime.UtcNow,
@@ -288,7 +288,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
             var first = snapshots[0];
             var last = snapshots[snapshots.Length - 1];
             var timeDiff = (last.Timestamp - first.Timestamp).TotalMinutes;
-            
+
             if (timeDiff <= 0)
                 return 0;
 
@@ -418,7 +418,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
             public bool Success { get; set; }
             public string OptimizationType { get; set; }
             public string ErrorMessage { get; set; }
-            
+
             public TimeSpan Duration => EndTime - StartTime;
         }
 

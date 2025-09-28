@@ -68,8 +68,8 @@ namespace Lidarr.Plugin.Common.Interfaces
         /// <param name="progress">Progress callback (optional)</param>
         /// <returns>Download result with success status and file paths</returns>
         Task<DownloadResult> DownloadAlbumAsync(
-            string albumId, 
-            string outputDirectory, 
+            string albumId,
+            string outputDirectory,
             StreamingQuality quality = null,
             IProgress<DownloadProgress> progress = null);
 
@@ -81,8 +81,8 @@ namespace Lidarr.Plugin.Common.Interfaces
         /// <param name="quality">Preferred quality (optional)</param>
         /// <returns>Download result with success status and file path</returns>
         Task<TrackDownloadResult> DownloadTrackAsync(
-            string trackId, 
-            string outputPath, 
+            string trackId,
+            string outputPath,
             StreamingQuality quality = null);
 
         /// <summary>

@@ -124,7 +124,7 @@ namespace Lidarr.Plugin.Common.Utilities
         {
             var response = await httpClient.GetAsync(url, cancellationToken);
             response.EnsureSuccessStatusCode();
-            
+
             var content = await response.Content.ReadAsStringAsync();
             return JsonSerializer.Deserialize<T>(content, options);
         }
@@ -141,10 +141,10 @@ namespace Lidarr.Plugin.Common.Utilities
         {
             var json = JsonSerializer.Serialize(data, options);
             var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
-            
+
             var response = await httpClient.PostAsync(url, content, cancellationToken);
             response.EnsureSuccessStatusCode();
-            
+
             var responseContent = await response.Content.ReadAsStringAsync();
             return JsonSerializer.Deserialize<TResponse>(responseContent, options);
         }
@@ -157,7 +157,7 @@ namespace Lidarr.Plugin.Common.Utilities
             if (parameters == null || !parameters.Any())
                 return baseUrl;
 
-            var queryString = string.Join("&", 
+            var queryString = string.Join("&",
                 parameters.Select(p => $"{Uri.EscapeDataString(p.Key)}={Uri.EscapeDataString(p.Value)}"));
 
             var separator = baseUrl.Contains('?') ? "&" : "?";
@@ -238,7 +238,7 @@ namespace Lidarr.Plugin.Common.Utilities
         public static bool IsJsonContent(this HttpResponseMessage response)
         {
             var contentType = response.Content?.Headers?.ContentType?.MediaType;
-            return contentType != null && 
+            return contentType != null &&
                    (contentType.Contains("application/json") || contentType.Contains("text/json"));
         }
 

@@ -16,7 +16,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// <param name="length">Length of the code verifier (43-128 characters, default 128)</param>
         /// <returns>Tuple containing the code verifier and S256 code challenge</returns>
         (string codeVerifier, string codeChallenge) GeneratePair(int length = 128);
-        
+
         /// <summary>
         /// Creates an S256 code challenge from a code verifier
         /// </summary>
@@ -43,7 +43,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private const int MinimumLength = 43;
         private const int MaximumLength = 128;
         private const int DefaultLength = 128;
-        
+
         // RFC 7636 unreserved characters: [A-Z] / [a-z] / [0-9] / "-" / "." / "_" / "~"
         private const string UnreservedCharacters = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~";
 
@@ -57,13 +57,13 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         {
             if (length < MinimumLength || length > MaximumLength)
             {
-                throw new ArgumentOutOfRangeException(nameof(length), 
+                throw new ArgumentOutOfRangeException(nameof(length),
                     $"Code verifier length must be between {MinimumLength} and {MaximumLength} characters (RFC 7636)");
             }
 
             var codeVerifier = GenerateCodeVerifier(length);
             var codeChallenge = CreateS256Challenge(codeVerifier);
-            
+
             return (codeVerifier, codeChallenge);
         }
 
@@ -93,18 +93,18 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private string GenerateCodeVerifier(int length)
         {
             var result = new char[length];
-            
+
             using var rng = RandomNumberGenerator.Create();
             var randomBytes = new byte[length];
             rng.GetBytes(randomBytes);
-            
+
             for (int i = 0; i < length; i++)
             {
                 // Use modulo to map random byte to character index
                 // This is safe as we're using cryptographically secure random
                 result[i] = UnreservedCharacters[randomBytes[i] % UnreservedCharacters.Length];
             }
-            
+
             return new string(result);
         }
 
@@ -117,7 +117,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         {
             // Convert to base64
             var base64 = Convert.ToBase64String(input);
-            
+
             // Make URL-safe by replacing characters and removing padding
             return base64
                 .Replace('+', '-')  // 62nd character
@@ -134,17 +134,17 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         {
             if (string.IsNullOrEmpty(codeVerifier))
                 return false;
-                
+
             if (codeVerifier.Length < MinimumLength || codeVerifier.Length > MaximumLength)
                 return false;
-                
+
             // Check all characters are unreserved
             foreach (char c in codeVerifier)
             {
                 if (!UnreservedCharacters.Contains(c))
                     return false;
             }
-            
+
             return true;
         }
     }

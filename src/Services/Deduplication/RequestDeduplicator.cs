@@ -37,7 +37,7 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
         private const int MAX_CONCURRENT_DEDUPLICATED_REQUESTS = 1000; // Prevent memory abuse
 
         public RequestDeduplicator(
-            ILogger<RequestDeduplicator> logger, 
+            ILogger<RequestDeduplicator> logger,
             TimeSpan? requestTimeout = null,
             TimeSpan? cleanupInterval = null)
         {
@@ -62,7 +62,7 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
         /// <param name="cancellationToken">Cancellation token for the operation</param>
         /// <returns>Result from either the factory function or a concurrent execution</returns>
         public async Task<T> GetOrCreateAsync<T>(
-            string key, 
+            string key,
             Func<Task<T>> factory,
             CancellationToken cancellationToken = default)
         {
@@ -75,32 +75,32 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
             // Check memory limits to prevent abuse
             if (_pendingRequests.Count >= MAX_CONCURRENT_DEDUPLICATED_REQUESTS)
             {
-                _logger.LogWarning("⚠️ DEDUPLICATION LIMIT: Too many concurrent requests ({0}), executing without deduplication", 
+                _logger.LogWarning("⚠️ DEDUPLICATION LIMIT: Too many concurrent requests ({0}), executing without deduplication",
                            _pendingRequests.Count);
                 return await factory();
             }
 
             var startTime = DateTime.UtcNow;
-            
+
             // Try to get existing pending request
             if (_pendingRequests.TryGetValue(key, out var existingTaskInfo))
             {
                 if (!existingTaskInfo.IsExpired(_requestTimeout))
                 {
                     _logger.LogDebug("🔄 REQUEST COALESCING: Joining existing request for key: {0}", key);
-                    
+
                     try
                     {
                         // Wait for the existing request to complete
                         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                         timeoutCts.CancelAfter(_requestTimeout);
-                        
+
                         var result = await existingTaskInfo.GetResultAsync<T>(timeoutCts.Token);
-                        
+
                         var waitTime = DateTime.UtcNow - startTime;
-                        _logger.LogDebug("✅ COALESCED REQUEST COMPLETE: Key '{0}' completed in {1:F1}s (waited for existing)", 
+                        _logger.LogDebug("✅ COALESCED REQUEST COMPLETE: Key '{0}' completed in {1:F1}s (waited for existing)",
                                      key, waitTime.TotalSeconds);
-                        
+
                         return result;
                     }
                     catch (OperationCanceledException)
@@ -110,7 +110,7 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
                     }
                     catch (Exception ex)
                     {
-                        _logger.LogDebug("❌ COALESCED REQUEST FAILED: Key '{0}' failed, falling back to new request: {1}", 
+                        _logger.LogDebug("❌ COALESCED REQUEST FAILED: Key '{0}' failed, falling back to new request: {1}",
                                      key, ex.Message);
                         // Fall through to create new request
                     }
@@ -145,12 +145,12 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
             {
                 // Another request was added concurrently, join that one
                 _logger.LogDebug("🔄 CONCURRENT ADDITION: Another request added for key '{0}', joining it", key);
-                
+
                 try
                 {
                     using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
                     timeoutCts.CancelAfter(_requestTimeout);
-                    
+
                     return await addedTaskInfo.GetResultAsync<T>(timeoutCts.Token);
                 }
                 catch (Exception ex)
@@ -171,14 +171,14 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
                 timeoutCts.CancelAfter(_requestTimeout);
 
                 var result = await factory();
-                
+
                 // Set the result for all waiting requests
                 taskCompletionSource.SetResult(result);
-                
+
                 var executionTime = DateTime.UtcNow - startTime;
-                _logger.LogInformation("✅ DEDUPLICATED REQUEST COMPLETE: Key '{0}' completed in {1:F1}s", 
+                _logger.LogInformation("✅ DEDUPLICATED REQUEST COMPLETE: Key '{0}' completed in {1:F1}s",
                             key, executionTime.TotalSeconds);
-                
+
                 return result;
             }
             catch (OperationCanceledException)
@@ -207,10 +207,10 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
         public string CreateSearchKey(string artist, string album = null)
         {
             var normalizedArtist = NormalizeKeyComponent(artist);
-            
+
             if (string.IsNullOrWhiteSpace(album))
                 return $"search_artist_{normalizedArtist}";
-                
+
             var normalizedAlbum = NormalizeKeyComponent(album);
             return $"search_{normalizedArtist}_{normalizedAlbum}";
         }
@@ -250,7 +250,7 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
 
             // Remove special characters and normalize case
             return System.Text.RegularExpressions.Regex.Replace(
-                component.ToLowerInvariant().Trim(), 
+                component.ToLowerInvariant().Trim(),
                 @"[^\w\s]", "")
                 .Replace(" ", "_")
                 .Substring(0, Math.Min(component.Length, 50)); // Limit length
@@ -280,7 +280,7 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
                     if (_pendingRequests.TryRemove(expiredKey, out var taskInfo))
                     {
                         removedCount++;
-                        
+
                         // Cancel the expired task if it's still running
                         if (!taskInfo.TaskCompletionSource.Task.IsCompleted)
                         {
@@ -292,7 +292,7 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
                 if (removedCount > 0)
                 {
                     var cleanupTime = DateTime.UtcNow - cleanupStartTime;
-                    _logger.LogDebug("🧹 REQUEST CLEANUP: Removed {0} expired requests in {1:F1}ms", 
+                    _logger.LogDebug("🧹 REQUEST CLEANUP: Removed {0} expired requests in {1:F1}ms",
                                  removedCount, cleanupTime.TotalMilliseconds);
                 }
 
