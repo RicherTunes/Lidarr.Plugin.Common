@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 
-namespace Lidarr.Plugin.Qobuzarr.Services.Caching
+namespace Lidarr.Plugin.Common.Services.Caching
 {
     /// <summary>
     /// Interface for cache serialization and deserialization operations

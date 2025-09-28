@@ -23,13 +23,14 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
     /// - Maintains cache consistency across concurrent requests
     /// - Provides automatic cleanup of completed requests
     /// </remarks>
-    public class RequestDeduplicator
+    public class RequestDeduplicator : IDisposable
     {
         private readonly ConcurrentDictionary<string, TaskInfo> _pendingRequests;
         private readonly Timer _cleanupTimer;
         private readonly ILogger<RequestDeduplicator> _logger;
         private readonly TimeSpan _requestTimeout;
         private readonly TimeSpan _cleanupInterval;
+        private bool _disposed;
 
         // Default timeouts and limits
         private const int DEFAULT_REQUEST_TIMEOUT_SECONDS = 60; // 1 minute timeout
@@ -327,6 +328,13 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
         /// </summary>
         public void Dispose()
         {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+
             try
             {
                 _cleanupTimer?.Dispose();
@@ -346,6 +354,10 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
             catch (Exception ex)
             {
                 _logger.LogError(ex, "Error during RequestDeduplicator disposal");
+            }
+            finally
+            {
+                GC.SuppressFinalize(this);
             }
         }
     }
