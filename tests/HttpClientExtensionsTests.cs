@@ -3,6 +3,7 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Http;
@@ -31,6 +32,117 @@ namespace Lidarr.Plugin.Common.Tests
         private sealed class ProblemDocument
         {
             public string Title { get; set; } = string.Empty;
+        }
+
+        private static FieldInfo GetHostGatesField() => typeof(HttpClientExtensions).GetField("_hostGates", BindingFlags.NonPublic | BindingFlags.Static) ?? throw new InvalidOperationException("Host gate registry not found.");
+
+        private static (int Limit, SemaphoreSlim Semaphore) GetHostGateState(string host)
+        {
+            var field = GetHostGatesField();
+            var gates = field.GetValue(null) ?? throw new InvalidOperationException("Host gate dictionary unavailable.");
+            var tryGetValue = field.FieldType.GetMethod("TryGetValue") ?? throw new InvalidOperationException("Unable to locate TryGetValue on host gate registry.");
+            var args = new object?[] { host, null };
+            var found = (bool)tryGetValue.Invoke(gates, args)!;
+            if (!found || args[1] is null)
+            {
+                throw new InvalidOperationException($"Host gate for '{host}' not found.");
+            }
+
+            var gate = args[1]!;
+            var gateType = gate.GetType();
+            var limitProperty = gateType.GetProperty("Limit") ?? throw new InvalidOperationException("Host gate limit property missing.");
+            var semaphoreProperty = gateType.GetProperty("Semaphore") ?? throw new InvalidOperationException("Host gate semaphore property missing.");
+            var limit = (int)limitProperty.GetValue(gate)!;
+            var semaphore = (SemaphoreSlim)semaphoreProperty.GetValue(gate)!;
+            return (limit, semaphore);
+        }
+
+        private static void ClearHostGate(string host)
+        {
+            var field = GetHostGatesField();
+            var gates = field.GetValue(null);
+            if (gates == null)
+            {
+                return;
+            }
+
+            MethodInfo? tryRemove = null;
+            foreach (var method in field.FieldType.GetMethods())
+            {
+                var parameters = method.GetParameters();
+                if (method.Name == "TryRemove" && parameters.Length == 2 && parameters[0].ParameterType == typeof(string))
+                {
+                    tryRemove = method;
+                    break;
+                }
+            }
+
+            if (tryRemove == null)
+            {
+                return;
+            }
+
+            var args = new object?[] { host, null };
+            var removed = (bool)tryRemove.Invoke(gates, args)!;
+            if (removed && args[1] is not null)
+            {
+                var gate = args[1]!;
+                var semaphoreProperty = gate.GetType().GetProperty("Semaphore") ?? throw new InvalidOperationException("Host gate semaphore property missing.");
+                if (semaphoreProperty.GetValue(gate) is SemaphoreSlim semaphore)
+                {
+                    semaphore.Dispose();
+                }
+            }
+        }
+
+        [Fact]
+        public async Task ExecuteWithResilienceAsync_UpgradesHostGateLimit()
+        {
+            var host = $"resize-{Guid.NewGuid():N}.example";
+            var handler = new StubHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
+            using var client = new HttpClient(handler);
+
+            using (await client.ExecuteWithResilienceAsync(
+                new HttpRequestMessage(HttpMethod.Get, $"https://{host}/one"),
+                maxRetries: 0,
+                retryBudget: TimeSpan.FromSeconds(1),
+                maxConcurrencyPerHost: 1))
+            {
+            }
+
+            var initialState = GetHostGateState(host);
+            var firstSemaphore = initialState.Semaphore;
+            SemaphoreSlim? upgradedSemaphore = null;
+
+            try
+            {
+                Assert.Equal(1, initialState.Limit);
+                Assert.Equal(1, firstSemaphore.CurrentCount);
+
+                using (await client.ExecuteWithResilienceAsync(
+                    new HttpRequestMessage(HttpMethod.Get, $"https://{host}/two"),
+                    maxRetries: 0,
+                    retryBudget: TimeSpan.FromSeconds(1),
+                    maxConcurrencyPerHost: 4))
+                {
+                }
+
+                var upgradedState = GetHostGateState(host);
+                upgradedSemaphore = upgradedState.Semaphore;
+
+                Assert.Equal(4, upgradedState.Limit);
+                Assert.Equal(4, upgradedSemaphore.CurrentCount);
+                Assert.NotSame(firstSemaphore, upgradedSemaphore);
+            }
+            finally
+            {
+                if (firstSemaphore != null && !ReferenceEquals(firstSemaphore, upgradedSemaphore))
+                {
+                    firstSemaphore.Dispose();
+                }
+
+                ClearHostGate(host);
+            }
         }
 
         [Fact]
