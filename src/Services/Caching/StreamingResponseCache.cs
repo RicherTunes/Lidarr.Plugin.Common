@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Linq;
 using Lidarr.Plugin.Common.Interfaces;
+using Lidarr.Plugin.Common.Utilities;
 
 namespace Lidarr.Plugin.Common.Services.Caching
 {
@@ -101,8 +102,8 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 .ToArray();
 
             var paramString = string.Join("&", relevantParams);
-            var key = $"{GetServiceName()}_{endpoint}_{paramString}";
-            return Math.Abs(key.GetHashCode()).ToString();
+            var key = $"{GetServiceName()}|{endpoint}|{paramString}";
+            return HashingUtility.ComputeSHA256(key);
         }
 
         /// <inheritdoc/>
@@ -234,7 +235,6 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// Called when the entire cache is cleared.
         /// </summary>
         protected virtual void OnCacheCleared() { }
-
 
         private void CleanupExpiredItems()
         {
