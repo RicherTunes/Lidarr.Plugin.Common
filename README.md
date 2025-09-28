@@ -7,14 +7,6 @@
 [![NuGet Version](https://img.shields.io/nuget/v/Lidarr.Plugin.Common.svg)](https://www.nuget.org/packages/Lidarr.Plugin.Common/)
 [![Downloads](https://img.shields.io/nuget/dt/Lidarr.Plugin.Common.svg)](https://www.nuget.org/packages/Lidarr.Plugin.Common/)
 
-## 🚀 **Proven Results**
-
-**Tidalarr Developer Feedback:**
-> *"INCREDIBLE! 74% code reduction - ~400 lines vs ~3,500 lines. Production-ready quality from day one with battle-tested patterns."*
-
-**Chief Architect Approval:**  
-> *"READY TO SHIP - Engineering excellence. This will actually work in practice. Ship it! 🚀"*
-
 ---
 
 ## ⚡ **Quick Start**
