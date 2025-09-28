@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -136,13 +137,39 @@ namespace Lidarr.Plugin.Common.Utilities
             JsonSerializerOptions options = null,
             CancellationToken cancellationToken = default)
         {
-            var response = await httpClient.GetAsync(url, cancellationToken);
+            var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
-            var content = await response.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<T>(content, options);
-        }
+            var contentType = response.Content.Headers.ContentType?.MediaType;
+            var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
 
+            if (string.IsNullOrWhiteSpace(payload))
+            {
+                return default;
+            }
+
+            if (string.IsNullOrEmpty(contentType) || !contentType.Contains("json", StringComparison.OrdinalIgnoreCase))
+            {
+                var previewLength = Math.Min(8, payload.Length);
+                var previewSegment = payload.Substring(0, previewLength);
+                var previewBytes = Encoding.UTF8.GetBytes(previewSegment);
+                var previewHex = previewLength > 0 ? BitConverter.ToString(previewBytes) : "<empty>";
+                throw new InvalidOperationException($"Expected JSON but got '{contentType ?? "none"}' (first bytes: {previewHex}).");
+            }
+
+            options ??= new JsonSerializerOptions
+            {
+                PropertyNameCaseInsensitive = true
+            };
+
+            var result = JsonSerializer.Deserialize<T>(payload, options);
+            if (result == null)
+            {
+                throw new InvalidOperationException("Failed to deserialize JSON payload into the requested type.");
+            }
+
+            return result;
+        }
         /// <summary>
         /// Posts JSON data and returns a deserialized response.
         /// </summary>

@@ -4,7 +4,7 @@
     <TargetFramework>net6.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
-    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <AssemblyName>Lidarr.Plugin.Common</AssemblyName>
     <RootNamespace>Lidarr.Plugin.Common</RootNamespace>
     
@@ -71,8 +71,6 @@
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="6.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="6.0.2" />
     <PackageReference Include="FluentValidation" Version="9.5.4" />
-    <PackageReference Include="Polly" Version="7.2.4" />
-    <PackageReference Include="Polly.Extensions.Http" Version="3.0.0" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
   </ItemGroup>
 
@@ -98,3 +96,4 @@
   </ItemGroup>
 
 </Project>
+

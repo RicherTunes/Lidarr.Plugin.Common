@@ -91,24 +91,15 @@ namespace Lidarr.Plugin.Common.Security
         /// Clears string from memory by overwriting with random data
         /// Best effort - GC may have moved the string
         /// </summary>
-        private unsafe void ClearString(ref string str)
+        private void ClearString(ref string str)
         {
-            if (str == null) return;
+            if (str == null)
+            {
+                return;
+            }
 
-            try
-            {
-                fixed (char* ptr = str)
-                {
-                    for (int i = 0; i < str.Length; i++)
-                    {
-                        ptr[i] = (char)(Random.Shared.Next(32, 127));
-                    }
-                }
-            }
-            catch
-            {
-                // Best effort - if this fails, continue
-            }
+            // Without unsafe blocks we cannot mutate the existing string buffer. Reassign and allow GC to reclaim.
+            str = string.Empty;
         }
 
         private void ThrowIfDisposed()
