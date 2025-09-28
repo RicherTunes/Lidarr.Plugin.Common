@@ -50,7 +50,6 @@
   </ItemGroup>
   <!-- Core Dependencies -->
   <ItemGroup>
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="FluentValidation" Version="9.5.4" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
   </ItemGroup>
@@ -81,6 +80,7 @@
   <!-- Development teams: enable with -p:IncludeCLIFramework=true -->
   <ItemGroup Condition="'$(IncludeCLIFramework)' == 'true'">
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageReference Include="Spectre.Console" Version="0.50.0" />
   </ItemGroup>
   <!-- Audio Processing Dependencies -->
@@ -95,4 +95,5 @@
     <None Include="..\examples\**\*" Pack="true" PackagePath="examples\" />
   </ItemGroup>
 </Project>
+
 

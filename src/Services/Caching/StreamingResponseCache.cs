@@ -14,6 +14,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
     public abstract class StreamingResponseCache : IStreamingResponseCache
     {
         private readonly ConcurrentDictionary<string, CacheItem> _cache;
+        private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _keysByEndpoint;
         private readonly object _cleanupLock = new object();
         private DateTime _lastCleanup = DateTime.UtcNow;
 
@@ -25,6 +26,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
         protected StreamingResponseCache(Microsoft.Extensions.Logging.ILogger logger = null)
         {
             _cache = new ConcurrentDictionary<string, CacheItem>();
+            _keysByEndpoint = new ConcurrentDictionary<string, ConcurrentDictionary<string, byte>>(StringComparer.OrdinalIgnoreCase);
             Logger = logger;
         }
 
@@ -43,10 +45,10 @@ namespace Lidarr.Plugin.Common.Services.Caching
                     OnCacheHit(endpoint, cacheKey);
                     return cacheItem.Value as T;
                 }
-                else
+
+                if (_cache.TryRemove(cacheKey, out var removedItem))
                 {
-                    // Item expired, remove it
-                    _cache.TryRemove(cacheKey, out _);
+                    RemoveKeyFromEndpointIndex(removedItem.Endpoint, cacheKey);
                 }
             }
 
@@ -72,16 +74,27 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 return;
 
             var cacheKey = GenerateCacheKey(endpoint, parameters);
+            var cacheSeed = BuildCacheKeySeed(endpoint, parameters);
+            var normalizedEndpoint = NormalizeEndpointKey(endpoint);
             var expiresAt = DateTime.UtcNow.Add(duration);
 
             var cacheItem = new CacheItem
             {
                 Value = value,
                 ExpiresAt = expiresAt,
-                CreatedAt = DateTime.UtcNow
+                CreatedAt = DateTime.UtcNow,
+                Endpoint = normalizedEndpoint,
+                CacheKey = cacheKey,
+                CacheKeySeed = cacheSeed
             };
 
-            _cache.AddOrUpdate(cacheKey, cacheItem, (key, oldValue) => cacheItem);
+            _cache.AddOrUpdate(cacheKey, cacheItem, (key, existing) =>
+            {
+                RemoveKeyFromEndpointIndex(existing.Endpoint, key);
+                return cacheItem;
+            });
+
+            AddKeyToEndpointIndex(normalizedEndpoint, cacheKey);
             OnCacheSet(endpoint, cacheKey, duration);
         }
 
@@ -94,38 +107,41 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// <inheritdoc/>
         public virtual string GenerateCacheKey(string endpoint, Dictionary<string, string> parameters)
         {
-            // Exclude authentication tokens from cache key to allow sharing cached data
-            var relevantParams = parameters
-                .Where(p => !IsSensitiveParameter(p.Key))
-                .OrderBy(p => p.Key)
-                .Select(p => $"{p.Key}={p.Value}")
-                .ToArray();
-
-            var paramString = string.Join("&", relevantParams);
-            var key = $"{GetServiceName()}|{endpoint}|{paramString}";
-            return HashingUtility.ComputeSHA256(key);
+            var seed = BuildCacheKeySeed(endpoint, parameters);
+            return HashCacheKeySeed(seed);
         }
 
         /// <inheritdoc/>
         public void Clear()
         {
             _cache.Clear();
+            _keysByEndpoint.Clear();
             OnCacheCleared();
         }
 
         /// <inheritdoc/>
         public virtual void ClearEndpoint(string endpoint)
         {
-            var keysToRemove = _cache.Keys
-                .Where(key => key.Contains($"_{endpoint}_"))
-                .ToList();
+            var normalizedEndpoint = NormalizeEndpointKey(endpoint);
+            var callbackEndpoint = string.IsNullOrWhiteSpace(endpoint) ? normalizedEndpoint : endpoint;
 
-            foreach (var key in keysToRemove)
+            if (_keysByEndpoint.TryRemove(normalizedEndpoint, out var bucket))
             {
-                _cache.TryRemove(key, out _);
-            }
+                var removed = 0;
+                foreach (var key in bucket.Keys)
+                {
+                    if (_cache.TryRemove(key, out _))
+                    {
+                        removed++;
+                    }
+                }
 
-            OnEndpointCleared(endpoint, keysToRemove.Count);
+                OnEndpointCleared(callbackEndpoint, removed);
+            }
+            else
+            {
+                OnEndpointCleared(callbackEndpoint, 0);
+            }
         }
 
         /// <summary>
@@ -182,13 +198,26 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// </summary>
         protected virtual void InvalidateByPrefix(string prefix)
         {
-            var keysToRemove = _cache.Keys
-                .Where(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrWhiteSpace(prefix))
+            {
+                return;
+            }
+
+            var keysToRemove = _cache
+                .Where(kvp => MatchesPrefix(kvp.Key, kvp.Value, prefix))
+                .Select(kvp => (kvp.Key, kvp.Value.Endpoint))
                 .ToList();
 
-            foreach (var key in keysToRemove)
+            foreach (var entry in keysToRemove)
             {
-                _cache.TryRemove(key, out _);
+                if (_cache.TryRemove(entry.Key, out var removed))
+                {
+                    RemoveKeyFromEndpointIndex(removed.Endpoint, entry.Key);
+                }
+                else
+                {
+                    RemoveKeyFromEndpointIndex(entry.Endpoint, entry.Key);
+                }
             }
         }
 
@@ -197,7 +226,12 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// </summary>
         protected virtual int CountEntriesByPrefix(string prefix)
         {
-            return _cache.Keys.Count(key => key.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+            if (string.IsNullOrWhiteSpace(prefix))
+            {
+                return 0;
+            }
+
+            return _cache.Count(kvp => MatchesPrefix(kvp.Key, kvp.Value, prefix));
         }
 
         /// <summary>
@@ -219,12 +253,18 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// <summary>
         /// Called when a cache hit occurs.
         /// </summary>
-        protected virtual void OnCacheHit(string endpoint, string cacheKey) { }
+        protected virtual void OnCacheHit(string endpoint, string cacheKey)
+        {
+            OnCacheHit(cacheKey);
+        }
 
         /// <summary>
         /// Called when a cache miss occurs.
         /// </summary>
-        protected virtual void OnCacheMiss(string endpoint, string cacheKey) { }
+        protected virtual void OnCacheMiss(string endpoint, string cacheKey)
+        {
+            OnCacheMiss(cacheKey);
+        }
 
         /// <summary>
         /// Called when an item is set in the cache.
@@ -238,31 +278,38 @@ namespace Lidarr.Plugin.Common.Services.Caching
 
         private void CleanupExpiredItems()
         {
-            // Only cleanup every 5 minutes to avoid performance impact
-            if (DateTime.UtcNow - _lastCleanup < TimeSpan.FromMinutes(5))
+            // Only cleanup every configured interval to avoid performance impact
+            if (DateTime.UtcNow - _lastCleanup < CleanupInterval)
                 return;
 
             lock (_cleanupLock)
             {
-                if (DateTime.UtcNow - _lastCleanup < TimeSpan.FromMinutes(5))
+                if (DateTime.UtcNow - _lastCleanup < CleanupInterval)
                     return;
 
                 var now = DateTime.UtcNow;
-                var expiredKeys = _cache
+                var expiredEntries = _cache
                     .Where(kvp => kvp.Value.ExpiresAt <= now)
-                    .Select(kvp => kvp.Key)
+                    .Select(kvp => new { kvp.Key, kvp.Value })
                     .ToList();
 
-                foreach (var key in expiredKeys)
+                foreach (var entry in expiredEntries)
                 {
-                    _cache.TryRemove(key, out _);
+                    if (_cache.TryRemove(entry.Key, out var removed))
+                    {
+                        RemoveKeyFromEndpointIndex(removed.Endpoint, entry.Key);
+                    }
+                    else
+                    {
+                        RemoveKeyFromEndpointIndex(entry.Value.Endpoint, entry.Key);
+                    }
                 }
 
                 _lastCleanup = now;
 
-                if (expiredKeys.Count > 0)
+                if (expiredEntries.Count > 0)
                 {
-                    OnExpiredItemsCleanup(expiredKeys.Count);
+                    OnExpiredItemsCleanup(expiredEntries.Count);
                 }
             }
         }
@@ -272,11 +319,84 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// </summary>
         protected virtual void OnExpiredItemsCleanup(int itemsRemoved) { }
 
+        private string NormalizeEndpointKey(string endpoint)
+        {
+            return string.IsNullOrWhiteSpace(endpoint) ? string.Empty : endpoint.Trim();
+        }
+
+        protected virtual string BuildCacheKeySeed(string endpoint, Dictionary<string, string> parameters)
+        {
+            endpoint = NormalizeEndpointKey(endpoint);
+            parameters ??= new Dictionary<string, string>();
+
+            var relevantParams = parameters
+                .Where(p => !IsSensitiveParameter(p.Key))
+                .OrderBy(p => p.Key)
+                .Select(p => $"{p.Key}={p.Value}")
+                .ToArray();
+
+            var paramString = string.Join("&", relevantParams);
+            return $"{GetServiceName()}|{endpoint}|{paramString}";
+        }
+
+        protected virtual string HashCacheKeySeed(string seed)
+        {
+            return HashingUtility.ComputeSHA256(seed);
+        }
+
+        private void AddKeyToEndpointIndex(string endpoint, string cacheKey)
+        {
+            endpoint = NormalizeEndpointKey(endpoint);
+            if (string.IsNullOrEmpty(cacheKey))
+            {
+                return;
+            }
+
+            var bucket = _keysByEndpoint.GetOrAdd(endpoint, _ => new ConcurrentDictionary<string, byte>());
+            bucket[cacheKey] = 0;
+        }
+
+        private void RemoveKeyFromEndpointIndex(string endpoint, string cacheKey)
+        {
+            endpoint = NormalizeEndpointKey(endpoint);
+
+            if (!_keysByEndpoint.TryGetValue(endpoint, out var bucket))
+            {
+                return;
+            }
+
+            bucket.TryRemove(cacheKey, out _);
+
+            if (bucket.IsEmpty)
+            {
+                _keysByEndpoint.TryRemove(endpoint, out _);
+            }
+        }
+
+        private static bool MatchesPrefix(string cacheKey, CacheItem cacheItem, string prefix)
+        {
+            if (string.IsNullOrEmpty(prefix))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(cacheItem.CacheKeySeed) &&
+                cacheItem.CacheKeySeed.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            return cacheKey.StartsWith(prefix, StringComparison.OrdinalIgnoreCase);
+        }
+
         private class CacheItem
         {
             public object Value { get; set; }
             public DateTime ExpiresAt { get; set; }
             public DateTime CreatedAt { get; set; }
+            public string Endpoint { get; set; } = string.Empty;
+            public string CacheKey { get; set; } = string.Empty;
+            public string CacheKeySeed { get; set; } = string.Empty;
         }
     }
 }
