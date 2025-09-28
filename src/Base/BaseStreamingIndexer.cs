@@ -56,35 +56,55 @@ namespace Lidarr.Plugin.Common.Base
         #region Private Fields
 
         private readonly StreamingApiRequestBuilder _requestBuilder;
+        private readonly Func<HttpClient> _httpClientFactory;
         private readonly object _initializationLock = new object();
         private bool _isInitialized = false;
         private bool _disposed = false;
 
-        private static readonly HttpClient SharedHttpClient = new HttpClient(new SocketsHttpHandler
+        private static readonly Lazy<HttpClient> SharedHttpClient = new Lazy<HttpClient>(CreateSharedHttpClient, LazyThreadSafetyMode.ExecutionAndPublication);
+
+        private static HttpClient CreateSharedHttpClient()
         {
-            AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
-        })
+            var handler = CreateDefaultHandler();
+            return new HttpClient(handler)
+            {
+                Timeout = TimeSpan.FromSeconds(100)
+            };
+        }
+
+        private static HttpMessageHandler CreateDefaultHandler()
         {
-            Timeout = TimeSpan.FromSeconds(100)
-        };
+#if NET8_0_OR_GREATER
+            return new SocketsHttpHandler
+            {
+                AutomaticDecompression = DecompressionMethods.All
+            };
+#else
+            return new SocketsHttpHandler
+            {
+                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
+            };
+#endif
+        }
 
         /// <summary>
         /// Provides the HttpClient used for API calls. Override to inject custom handlers (e.g., OAuthDelegatingHandler).
         /// Defaults to a shared, decompression-enabled client.
         /// </summary>
-        protected virtual HttpClient GetHttpClient() => SharedHttpClient;
+        protected virtual HttpClient GetHttpClient() => _httpClientFactory();
 
         #endregion
 
         #region Constructor
 
-        protected BaseStreamingIndexer(TSettings settings, ILogger logger = null)
+        protected BaseStreamingIndexer(TSettings settings, ILogger logger = null, Func<HttpClient> httpClientFactory = null)
         {
             Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             Logger = logger ?? CreateDefaultLogger();
 
             PerformanceMonitor = new PerformanceMonitor(TimeSpan.FromMinutes(5));
             _requestBuilder = new StreamingApiRequestBuilder(settings.BaseUrl);
+            _httpClientFactory = httpClientFactory ?? (() => SharedHttpClient.Value);
         }
 
         #endregion

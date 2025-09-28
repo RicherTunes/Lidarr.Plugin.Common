@@ -9,10 +9,11 @@
 | 1.1.1 | 2.13.x - 2.14.x | net6.0 | None | Resilient HTTP, OAuth 401 refresh, atomic/resume downloads, context sanitizers |
 | 1.1.2 | 2.13.x - 2.14.x | net6.0 | None | Preview heuristics, file signature validation, signing helpers, NFC filenames, Locale |
 | 1.1.3 | 2.13.x - 2.14.x | net6.0 | None | Streaming search APIs, downloader retry hook |
+| 1.1.4 | 2.13.x - 2.14.x | net6.0;net8.0 | None | Multi-target build; shared HTTP handlers |
 | 1.2.0 | 2.14.x+ | net6.0 | TBD | Advanced ML patterns |
 | 2.0.0 | 3.0.x | net8.0 | Major | .NET 8 upgrade |
 
-## 🚀 **Current Release: 1.1.3**
+## ?? **Current Release: 1.1.4 (in progress)**
 
 ### **Supported Features**
 - ✅ **Core utilities** (FileNameSanitizer, Sanitize, RetryUtilities, HttpClientExtensions)
@@ -32,7 +33,7 @@
 
 ### **Compatibility Requirements**
 - **Lidarr**: 2.13.x plugins branch or compatible
-- **.NET**: 6.0 or higher
+- **.NET**: net6.0 or net8.0
 - **Dependencies**: System.Text.Json 8.0.0+
 
 ### **Breaking Changes**: None (initial release)
@@ -254,3 +255,7 @@ var release = new ReleaseInfo
 ---
 
 **The compatibility matrix ensures smooth ecosystem evolution while maintaining backward compatibility! 🚀**
+
+
+
+

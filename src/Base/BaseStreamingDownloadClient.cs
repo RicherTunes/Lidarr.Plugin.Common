@@ -56,7 +56,7 @@ namespace Lidarr.Plugin.Common.Base
         /// <summary>
         /// Rate limiter for API calls
         /// </summary>
-        protected AdaptiveRateLimiter RateLimiter { get; private set; }
+        protected IUniversalAdaptiveRateLimiter RateLimiter { get; private set; }
 
         #endregion
 
@@ -78,7 +78,7 @@ namespace Lidarr.Plugin.Common.Base
             Logger = logger ?? CreateDefaultLogger();
 
             PerformanceMonitor = new PerformanceMonitor(TimeSpan.FromMinutes(5));
-            RateLimiter = new AdaptiveRateLimiter();
+            RateLimiter = new UniversalAdaptiveRateLimiter();
             _activeDownloads = new ConcurrentDictionary<string, StreamingDownloadItem>();
 
             // Initialize concurrency limiter based on settings
@@ -375,7 +375,7 @@ namespace Lidarr.Plugin.Common.Base
                     OnDownloadProgress(downloadItem.Id, progress, $"Track {i}");
 
                     // Rate limiting
-                    await RateLimiter.WaitIfNeededAsync($"download_{ServiceName}", cancellationTokenSource.Token);
+                    await RateLimiter.WaitIfNeededAsync(ServiceName, "download", cancellationTokenSource.Token);
                 }
 
                 await Task.WhenAll(downloadTasks);
@@ -755,7 +755,7 @@ namespace Lidarr.Plugin.Common.Base
 
             _concurrencyLimiter?.Dispose();
             PerformanceMonitor?.Dispose();
-            // RateLimiter doesn't implement IDisposable yet
+            RateLimiter?.Dispose();
             _disposed = true;
         }
 
