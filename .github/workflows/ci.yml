@@ -80,15 +80,14 @@ jobs:
         with:
           files: "**/TestResults/*.trx"
 
-      - name: Coverage summary in PR
+      - name: Generate coverage summary
         if: always()
-        uses: irongut/CodeCoverageSummary@v1.3.1
+        uses: danielpalme/ReportGenerator-GitHub-Action@5.2.4
         with:
-          filename: "**/TestResults/*/coverage.cobertura.xml"
-          fail_below_min: true
-          format: markdown
-          output: both
-          thresholds: '60 80'
+          reports: "**/TestResults/*/coverage.cobertura.xml"
+          targetdir: "coverage-report"
+          reporttypes: "MarkdownSummary;HtmlInline_AzurePipelines"
+          toolpath: "reportgenerator"
 
   pack_dry_run:
     name: Pack (dry run)
