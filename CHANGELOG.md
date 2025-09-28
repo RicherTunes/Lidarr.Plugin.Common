@@ -18,7 +18,7 @@ All notable changes to the shared library are documented here. The format follow
 ### Changed
 - Request deduplication now cancels in-flight tasks when the deduplicator is disposed and uses `TrySet*` guards to avoid race exceptions.
 - README Maintainer Checklist now references the Lidarr setup script for host bootstrap.
-- CI aggregates test annotations from a dedicated Linux job so both Windows and Linux TRX files are reported without hitting the Windows container limitation.
+- CI only runs the test-result annotation step on Linux runners to avoid the Windows container limitation.
 - README gains a Maintainer Checklist and Plugin Version Governance section referencing the sync script and unified pipeline playbook.
 - NuGet dependencies (System.Text.Json, Microsoft.Extensions.* , Newtonsoft.Json) updated to the latest 6.0.x/13.0.x patches to clear NU1903 advisories during Release builds.
 - `HttpClientExtensions.GetJsonAsync<T>` now verifies Content-Type and includes payload previews when responses are not JSON.

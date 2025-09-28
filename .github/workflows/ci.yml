@@ -89,7 +89,7 @@ jobs:
     needs: build_and_test
     if: always()
     steps:
-      - name: Download artifacts
+      - name: Download test artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
@@ -122,4 +122,3 @@ jobs:
         with:
           name: nupkg
           path: dist/*.nupkg
-
