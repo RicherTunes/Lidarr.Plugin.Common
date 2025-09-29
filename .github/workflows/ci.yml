@@ -52,6 +52,8 @@ jobs:
 
       - name: Restore
         run: dotnet restore
+      - name: Build (Release, all TFMs)
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror
 
       - name: Dotnet format (verify)
         run: dotnet format --verify-no-changes
@@ -113,6 +115,8 @@ jobs:
             6.0.x
       - name: Restore
         run: dotnet restore
+      - name: Build (Release, all TFMs)
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror
       - name: Pack nupkg
         run: >
           dotnet pack src/Lidarr.Plugin.Common.csproj
@@ -122,3 +126,4 @@ jobs:
         with:
           name: nupkg
           path: dist/*.nupkg
+
