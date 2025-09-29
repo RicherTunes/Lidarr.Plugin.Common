@@ -1,6 +1,13 @@
 # Developer Guide
 
-This guide summarizes best practices and key building blocks when implementing a streaming plugin with Lidarr.Plugin.Common v1.1.3.
+This guide summarizes best practices and key building blocks when implementing a streaming plugin with Lidarr.Plugin.Common v1.1.4.
+
+## Assembly Load Isolation
+- **Treat `Lidarr.Plugin.Abstractions` as the ABI**. The host loads this once in the default ALC; plugins add it as `<PackageReference ... PrivateAssets="all" ExcludeAssets="runtime" />` so no duplicate runtime copy is shipped.
+- **Ship your own `Lidarr.Plugin.Common`**. Each plugin packs its preferred version next to the entry assembly and enables `CopyLocalLockFileAssemblies`.
+- **Keep boundaries clean**. Only types defined in Abstractions cross process/ALC boundaries (e.g., `IPlugin`, `IIndexer`, shared DTOs, logging abstractions). Avoid leaking Common types or concrete implementations back to the host.
+- **Use `plugin.json`** to declare compatibility (`apiVersion` == Abstractions major, `minHostVersion`, optional diagnostics). The loader validates this before spinning up the plugin ALC.
+- **Prefer dependency injection parameters over service locators** so statics do not capture host references and block ALC unload.
 
 ## HTTP Resilience
 - Use `HttpClientExtensions.ExecuteWithResilienceAsync` for requests.
@@ -41,4 +48,6 @@ This guide summarizes best practices and key building blocks when implementing a
 
 ## Preview Detection
 - Use `PreviewDetectionUtility.IsLikelyPreview` to filter 30–90s previews based on duration/URL/flags.
+
+
 

@@ -90,6 +90,57 @@ var resilient = await httpClient.ExecuteWithResilienceAsync(request);
 
 ---
 
+## 🧩 Host/Plugin Architecture
+
+**Stable contract (`Lidarr.Plugin.Abstractions`)**
+- The host loads `Lidarr.Plugin.Abstractions` into the default AssemblyLoadContext and treats it as a stable ABI.
+- Plugins reference the package as a compile-time dependency only:
+  ```xml
+  <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.0.0" PrivateAssets="all" ExcludeAssets="runtime;native;contentfiles" />
+  ```
+- Only interfaces, DTOs, and logging abstractions from this assembly cross the host ↔ plugin boundary.
+
+**Plugin-owned implementation (`Lidarr.Plugin.Common`)**
+- Each plugin ships its own copy/version of `Lidarr.Plugin.Common` and supporting binaries next to its main DLL.
+- Enable `CopyLocalLockFileAssemblies` (or publish the plugin) so every dependency lives beside the entry assembly.
+- Because each plugin is loaded into its own collectible AssemblyLoadContext, side-by-side versions of Common happily coexist.
+
+**Packaging checklist**
+- Recommended `.csproj` fragment:
+  ```xml
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.0.0" PrivateAssets="all" ExcludeAssets="runtime;native;contentfiles" />
+    <PackageReference Include="Lidarr.Plugin.Common" Version="1.1.4" />
+  </ItemGroup>
+  ```
+- Folder layout expected by the loader:
+  ```text
+  /Plugins/MyPlugin/
+    MyPlugin.dll
+    Lidarr.Plugin.Common.dll      # plugin-private implementation
+    ThirdPartyA.dll
+    plugin.json
+  ```
+- `plugin.json` drives compatibility checks:
+  ```json
+  {
+    "id": "myplugin",
+    "name": "My Plugin",
+    "version": "2.3.0",
+    "apiVersion": "1.x",
+    "commonVersion": "1.1.4",
+    "minHostVersion": "2.12.0",
+    "entryAssembly": "MyPlugin.dll"
+  }
+  ```
+
+> ✅ When only Abstractions crosses the boundary, the host can unload, upgrade, and run different plugin stacks without assembly/version conflicts. See `docs/PLUGIN_ISOLATION.md` and the runnable loader in `examples/IsolationHostSample/` for a complete walkthrough.
+
 ## 📦 **What's Included**
 
 ### **🛠️ Core Utilities**
@@ -228,7 +279,7 @@ public class YourServiceIndexer : HttpIndexerBase<YourServiceSettings>
 
 ---
 
-## 📊 **Success Metrics**
+\n## Documentation\n- See [docs/README.md](docs/README.md) for the full library playbooks (Abstractions contract, isolation guide, migration checklist, manifest schema, release policy).\n\n## 📊 **Success Metrics**
 
 ### **Development Impact**
 - **60-74% code reduction** for new streaming plugins
@@ -334,3 +385,7 @@ dotnet add package Lidarr.Plugin.Common
 - Refer to [docs/UNIFIED_PLUGIN_PIPELINE.md](docs/UNIFIED_PLUGIN_PIPELINE.md) for the end-to-end platform blueprint.
 - Every downstream plugin must consume the shared `Directory.Build.props` (AssemblyVersion/FileVersion `10.0.0.35686`) and run `scripts/sync-host-assemblies.ps1` before `dotnet build`/`dotnet test`.
 - Releases only ship after the coordinated pipeline validates all plugins against Lidarr 2.14.2.4786.
+
+
+
+
