@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Reflection;
 using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -327,14 +328,19 @@ namespace Lidarr.Plugin.Common.Utilities
 
         private static bool IsSensitiveParameter(string parameterName)
         {
-            var lowerName = parameterName?.ToLowerInvariant() ?? "";
+            var lowerName = parameterName?.ToLowerInvariant() ?? string.Empty;
             return lowerName.Contains("token") ||
                    lowerName.Contains("secret") ||
                    lowerName.Contains("password") ||
                    lowerName.Contains("auth") ||
                    lowerName.Contains("credential") ||
                    lowerName.Contains("key") ||
-                   lowerName == "request_sig";
+                   lowerName == "request_sig" ||
+                   lowerName == "sid" ||
+                   lowerName.Contains("session") ||
+                   lowerName.Contains("cookie") ||
+                   lowerName.Contains("signature") ||
+                   lowerName == "app_secret";
         }
 
         private static string MaskValue(string value)
@@ -354,6 +360,11 @@ namespace Lidarr.Plugin.Common.Utilities
             {
                 Version = request.Version
             };
+
+#if NET5_0_OR_GREATER
+            clone.VersionPolicy = request.VersionPolicy;
+            CopyHttpRequestOptions(request, clone);
+#endif
 
             // Copy headers
             foreach (var header in request.Headers)
@@ -377,6 +388,30 @@ namespace Lidarr.Plugin.Common.Utilities
             return clone;
         }
 
+#if NET5_0_OR_GREATER
+        private static readonly MethodInfo HttpRequestOptionsSetMethod = typeof(HttpRequestOptions)
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
+            .First(m => m.Name == "Set" && m.IsGenericMethodDefinition && m.GetParameters().Length == 2);
+
+        private static void CopyHttpRequestOptions(HttpRequestMessage source, HttpRequestMessage destination)
+        {
+            foreach (var option in source.Options)
+            {
+                var value = option.Value;
+                if (value is null)
+                {
+                    destination.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), null);
+                    continue;
+                }
+
+                var valueType = value.GetType();
+                var keyType = typeof(HttpRequestOptionsKey<>).MakeGenericType(valueType);
+                var keyInstance = Activator.CreateInstance(keyType, option.Key);
+                var setMethod = HttpRequestOptionsSetMethod.MakeGenericMethod(valueType);
+                setMethod.Invoke(destination.Options, new[] { keyInstance, value });
+            }
+        }
+#endif
         private static TimeSpan? GetRetryDelay(HttpResponseMessage response)
         {
             try
@@ -414,3 +449,4 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
+

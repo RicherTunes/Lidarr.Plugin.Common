@@ -638,7 +638,7 @@ namespace Lidarr.Plugin.Common.Base
         /// <summary>
         /// Framework provides: Metadata tagging using TagLibSharp (common implementation)
         /// </summary>
-        private async Task ApplyMetadataTagsAsync(string filePath, StreamingTrack metadata)
+        protected virtual async Task ApplyMetadataTagsAsync(string filePath, StreamingTrack metadata)
         {
             try
             {
@@ -821,3 +821,4 @@ namespace Lidarr.Plugin.Common.Base
 
     #endregion
 }
+
