@@ -112,7 +112,6 @@ namespace Lidarr.Plugin.Common.Tests
 
             var initialState = GetHostGateState(host);
             var firstSemaphore = initialState.Semaphore;
-            SemaphoreSlim? upgradedSemaphore = null;
 
             try
             {
@@ -128,21 +127,16 @@ namespace Lidarr.Plugin.Common.Tests
                 }
 
                 var upgradedState = GetHostGateState(host);
-                upgradedSemaphore = upgradedState.Semaphore;
 
                 Assert.Equal(4, upgradedState.Limit);
-                Assert.Equal(4, upgradedSemaphore.CurrentCount);
-                Assert.NotSame(firstSemaphore, upgradedSemaphore);
+                Assert.Same(firstSemaphore, upgradedState.Semaphore);
+                Assert.Equal(4, upgradedState.Semaphore.CurrentCount);
             }
             finally
             {
-                if (firstSemaphore != null && !ReferenceEquals(firstSemaphore, upgradedSemaphore))
-                {
-                    firstSemaphore.Dispose();
-                }
-
                 ClearHostGate(host);
             }
+
         }
 
         [Fact]

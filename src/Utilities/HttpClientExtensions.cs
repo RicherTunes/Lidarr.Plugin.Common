@@ -17,59 +17,39 @@ namespace Lidarr.Plugin.Common.Utilities
     /// </summary>
     public static class HttpClientExtensions
     {
-        private sealed record HostGate(SemaphoreSlim Semaphore, int Limit);
-
-        private static readonly TimeSpan HostGateDisposalDelay = TimeSpan.FromMinutes(2);
-        private static readonly ConcurrentDictionary<string, HostGate> _hostGates = new();
-
-        private static void ScheduleGateDisposal(SemaphoreSlim semaphore, int limit)
+        private sealed class HostGate
         {
-            if (semaphore == null)
+            public HostGate(SemaphoreSlim semaphore, int limit)
             {
-                return;
+                Semaphore = semaphore;
+                Limit = limit;
             }
 
-            _ = Task.Run(async () =>
-            {
-                while (true)
-                {
-                    try
-                    {
-                        await Task.Delay(HostGateDisposalDelay).ConfigureAwait(false);
-                        if (semaphore.CurrentCount >= limit)
-                        {
-                            semaphore.Dispose();
-                            break;
-                        }
-                    }
-                    catch (ObjectDisposedException)
-                    {
-                        break;
-                    }
-                    catch
-                    {
-                        // swallow and retry until disposal succeeds
-                    }
-                }
-            });
+            public SemaphoreSlim Semaphore { get; }
+
+            public int Limit { get; private set; }
+
+            public void UpdateLimit(int limit) => Limit = limit;
         }
+
+        private static readonly ConcurrentDictionary<string, HostGate> _hostGates = new();
 
         private static SemaphoreSlim GetHostGate(string? host, int requestedLimit)
         {
             host ??= "__unknown__";
             return _hostGates.AddOrUpdate(
                 host,
-                _ => new HostGate(new SemaphoreSlim(requestedLimit, requestedLimit), requestedLimit),
+                _ => new HostGate(new SemaphoreSlim(requestedLimit, int.MaxValue), requestedLimit),
                 (_, existing) =>
                 {
-                    if (requestedLimit <= existing.Limit)
+                    if (requestedLimit > existing.Limit)
                     {
-                        return existing;
+                        var delta = requestedLimit - existing.Limit;
+                        existing.Semaphore.Release(delta);
+                        existing.UpdateLimit(requestedLimit);
                     }
 
-                    var upgraded = new HostGate(new SemaphoreSlim(requestedLimit, requestedLimit), requestedLimit);
-                    ScheduleGateDisposal(existing.Semaphore, existing.Limit);
-                    return upgraded;
+                    return existing;
                 })
                 .Semaphore;
         }
