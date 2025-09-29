@@ -12,8 +12,14 @@
 | 1.1.4 | 2.13.x - 2.14.x | net6.0;net8.0 | None | Multi-target build; shared HTTP handlers |
 | 1.2.0 | 2.14.x+ | net6.0 | TBD | Advanced ML patterns |
 | 2.0.0 | 3.0.x | net8.0 | Major | .NET 8 upgrade |
+## 🔐 Contract Strategy
+- **`Lidarr.Plugin.Abstractions` (1.x)** is the host-owned ABI. Update this package only when the host does, and restrict changes to additive members in minor releases.
+- **`Lidarr.Plugin.Common` (1.x)** is plugin-owned. Different plugins can ship different Common versions side-by-side thanks to the per-plugin AssemblyLoadContext.
+- **Compatibility rule of thumb**: `plugin.json.apiVersion` must match the Abstractions *major* shipped with the host, while `commonVersion` is informational for diagnostics.
+- **Loader policy**: the host shares Abstractions (and optional logging abstractions) with every plugin, and loads each plugin payload into a collectible, dependency-resolving AssemblyLoadContext.
 
-## ?? **Current Release: 1.1.4 (in progress)**
+
+## 🚀 Current Release: 1.1.4 (in progress)
 
 ### **Supported Features**
 - ✅ **Core utilities** (FileNameSanitizer, Sanitize, RetryUtilities, HttpClientExtensions)
@@ -258,6 +264,7 @@ var release = new ReleaseInfo
 ---
 
 **The compatibility matrix ensures smooth ecosystem evolution while maintaining backward compatibility! 🚀**
+
 
 
 

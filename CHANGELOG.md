@@ -2,9 +2,7 @@
 
 All notable changes to the shared library are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased] - 2025-09-28
-
-### Added
+- Carved out `Lidarr.Plugin.Abstractions` as the host-owned ABI package with public API analyzers and AssemblyLoadContext guidance.
 - `NuGet.config` maps TagLibSharp packages to the public Lidarr Azure Artifacts feed so CI restores `TagLibSharp-Lidarr` 2.2.0.27.
 - `Directory.Build.props` pins `<AssemblyVersion>`/`<FileVersion>` to `10.0.0.35686` (Lidarr 2.14.2.4786 host) so every downstream plugin consumes matching binaries.
 - `scripts/verify-assemblies.ps1` copies host assemblies, validates `FileVersion` <-> `AssemblyVersion`, and fails fast when the Lidarr output folder is missing.
@@ -118,3 +116,4 @@ All notable changes to the shared library are documented here. The format follow
 - **Feature Requests**: Discuss in GitHub Discussions.
 - **Community**: Join the streaming plugin developer community.
 - **Documentation**: See `README.md` and the `docs/` folder.
+
