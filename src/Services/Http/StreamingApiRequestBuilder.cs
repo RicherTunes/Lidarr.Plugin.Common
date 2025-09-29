@@ -15,8 +15,8 @@ namespace Lidarr.Plugin.Common.Services.Http
     public class StreamingApiRequestBuilder
     {
         private readonly string _baseUrl;
-        private readonly Dictionary<string, string> _headers = new Dictionary<string, string>();
-        private readonly Dictionary<string, string> _queryParams = new Dictionary<string, string>();
+        private readonly Dictionary<string, string> _headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        private readonly Dictionary<string, string> _queryParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         private HttpMethod _method = HttpMethod.Get;
         private object _bodyContent;
         private string _endpoint;
@@ -304,8 +304,8 @@ namespace Lidarr.Plugin.Common.Services.Http
     {
         public string Method { get; set; }
         public string Url { get; set; }
-        public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>();
-        public Dictionary<string, string> QueryParameters { get; set; } = new Dictionary<string, string>();
+        public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, string> QueryParameters { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public bool HasBody { get; set; }
         public TimeSpan? Timeout { get; set; }
 

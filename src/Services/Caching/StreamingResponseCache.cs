@@ -95,6 +95,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
             });
 
             AddKeyToEndpointIndex(normalizedEndpoint, cacheKey);
+            EnsureCacheWithinLimit();
             OnCacheSet(endpoint, cacheKey, duration);
         }
 
@@ -239,7 +240,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// </summary>
         protected virtual bool IsSensitiveParameter(string parameterName)
         {
-            var lowerName = parameterName?.ToLowerInvariant() ?? "";
+            var lowerName = parameterName?.ToLowerInvariant() ?? string.Empty;
             return lowerName.Contains("token") ||
                    lowerName.Contains("secret") ||
                    lowerName.Contains("password") ||
@@ -247,7 +248,11 @@ namespace Lidarr.Plugin.Common.Services.Caching
                    lowerName.Contains("credential") ||
                    lowerName.Contains("key") ||
                    lowerName == "request_sig" ||
-                   lowerName == "app_id";
+                   lowerName == "sid" ||
+                   lowerName.Contains("session") ||
+                   lowerName.Contains("cookie") ||
+                   lowerName.Contains("signature") ||
+                   lowerName == "app_secret";
         }
 
         /// <summary>
@@ -275,6 +280,37 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// Called when the entire cache is cleared.
         /// </summary>
         protected virtual void OnCacheCleared() { }
+
+        private void EnsureCacheWithinLimit()
+        {
+            if (MaxCacheSize <= 0)
+            {
+                return;
+            }
+
+            var overage = _cache.Count - MaxCacheSize;
+            if (overage <= 0)
+            {
+                return;
+            }
+
+            var victims = _cache
+                .OrderBy(kvp => kvp.Value.CreatedAt)
+                .Take(overage)
+                .ToList();
+
+            foreach (var victim in victims)
+            {
+                if (_cache.TryRemove(victim.Key, out var removed))
+                {
+                    RemoveKeyFromEndpointIndex(removed.Endpoint, victim.Key);
+                }
+                else if (_cache.TryGetValue(victim.Key, out var fallback))
+                {
+                    RemoveKeyFromEndpointIndex(fallback.Endpoint, victim.Key);
+                }
+            }
+        }
 
         private void CleanupExpiredItems()
         {
