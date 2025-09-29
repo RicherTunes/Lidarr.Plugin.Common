@@ -9,12 +9,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using FluentValidation.Results;
 using Microsoft.Extensions.Logging;
-using TagLib;
 using File = System.IO.File;
 using Lidarr.Plugin.Common.Base;
 using Lidarr.Plugin.Common.Models;
 using Lidarr.Plugin.Common.Services.Performance;
 using Lidarr.Plugin.Common.Utilities;
+using Lidarr.Plugin.Common.Interfaces;
+using Lidarr.Plugin.Common.Services.Metadata;
 
 namespace Lidarr.Plugin.Common.Base
 {
@@ -65,6 +66,7 @@ namespace Lidarr.Plugin.Common.Base
         private readonly ConcurrentDictionary<string, StreamingDownloadItem> _activeDownloads;
         private readonly SemaphoreSlim _concurrencyLimiter;
         private readonly object _initializationLock = new object();
+        private readonly IAudioMetadataApplier _metadataApplier;
         private bool _isInitialized = false;
         private bool _disposed = false;
 
@@ -72,10 +74,11 @@ namespace Lidarr.Plugin.Common.Base
 
         #region Constructor
 
-        protected BaseStreamingDownloadClient(TSettings settings, ILogger logger = null)
+        protected BaseStreamingDownloadClient(TSettings settings, ILogger logger = null, IAudioMetadataApplier metadataApplier = null)
         {
             Settings = settings ?? throw new ArgumentNullException(nameof(settings));
             Logger = logger ?? CreateDefaultLogger();
+            _metadataApplier = metadataApplier ?? new TagLibAudioMetadataApplier();
 
             PerformanceMonitor = new PerformanceMonitor(TimeSpan.FromMinutes(5));
             RateLimiter = new UniversalAdaptiveRateLimiter();
@@ -640,43 +643,21 @@ namespace Lidarr.Plugin.Common.Base
         /// </summary>
         protected virtual async Task ApplyMetadataTagsAsync(string filePath, StreamingTrack metadata)
         {
+            if (_metadataApplier == null || metadata == null)
+            {
+                return;
+            }
+
             try
             {
-                await Task.Run(() =>
-                {
-                    using var file = TagLib.File.Create(filePath);
-
-                    if (!string.IsNullOrEmpty(metadata.Title))
-                        file.Tag.Title = metadata.Title;
-
-                    if (metadata.Artist?.Name != null)
-                        file.Tag.Performers = new[] { metadata.Artist.Name };
-
-                    if (metadata.Album?.Title != null)
-                        file.Tag.Album = metadata.Album.Title;
-
-                    if (metadata.TrackNumber.HasValue && metadata.TrackNumber > 0)
-                        file.Tag.Track = (uint)metadata.TrackNumber.Value;
-
-                    if (metadata.Album?.ReleaseDate.HasValue == true)
-                        file.Tag.Year = (uint)metadata.Album.ReleaseDate.Value.Year;
-
-                    // Use first genre if available
-                    if (metadata.Album?.Genres?.Any() == true)
-                        file.Tag.Genres = new[] { metadata.Album.Genres.First() };
-
-                    file.Save();
-                });
-
+                await _metadataApplier.ApplyAsync(filePath, metadata, CancellationToken.None).ConfigureAwait(false);
                 Logger?.LogDebug("Metadata applied: {Title}", metadata.Title);
             }
             catch (Exception ex)
             {
-                // Don't fail download for metadata issues
                 Logger?.LogWarning(ex, "Failed to apply metadata to {FilePath}", filePath);
             }
         }
-
         /// <summary>
         /// Framework provides: Clean filename generation
         /// </summary>
