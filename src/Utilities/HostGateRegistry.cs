@@ -55,5 +55,29 @@ namespace Lidarr.Plugin.Common.Utilities
 
             return gate.Semaphore;
         }
+
+        public static bool TryGetState(string? host, out (SemaphoreSlim Semaphore, int Limit) state)
+        {
+            host ??= "__unknown__";
+
+            if (Gates.TryGetValue(host, out var gate))
+            {
+                state = (gate.Semaphore, gate.Limit);
+                return true;
+            }
+
+            state = default;
+            return false;
+        }
+
+        public static void Clear(string? host)
+        {
+            host ??= "__unknown__";
+
+            if (Gates.TryRemove(host, out var gate))
+            {
+                gate.Semaphore.Dispose();
+            }
+        }
     }
 }

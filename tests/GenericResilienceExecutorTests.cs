@@ -124,6 +124,7 @@ namespace Lidarr.Plugin.Common.Tests
 
             await Task.WhenAll(tasks);
             Assert.True(peak >= 5, $"Expected peak concurrency >=5 but was {peak}");
+            HostGateRegistry.Clear("host-gate.test");
         }
 
         [Fact]
@@ -198,6 +199,8 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.InRange(initialPeak, 1, 2);
             Assert.True(upgradedPeak > initialPeak, $"Expected upgraded peak to exceed initial peak (initial {initialPeak}, upgraded {upgradedPeak})");
             Assert.True(upgradedPeak >= 5, $"Expected upgraded peak concurrency >=5 but was {upgradedPeak}");
+
+            HostGateRegistry.Clear(host);
         }
     }
 }

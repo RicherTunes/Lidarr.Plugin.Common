@@ -240,21 +240,8 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// </summary>
         protected virtual bool IsSensitiveParameter(string parameterName)
         {
-            var lowerName = parameterName?.ToLowerInvariant() ?? string.Empty;
-            return lowerName.Contains("token") ||
-                   lowerName.Contains("secret") ||
-                   lowerName.Contains("password") ||
-                   lowerName.Contains("auth") ||
-                   lowerName.Contains("credential") ||
-                   lowerName.Contains("key") ||
-                   lowerName == "request_sig" ||
-                   lowerName == "sid" ||
-                   lowerName.Contains("session") ||
-                   lowerName.Contains("cookie") ||
-                   lowerName.Contains("signature") ||
-                   lowerName == "app_secret";
+            return SensitiveKeys.IsSensitive(parameterName);
         }
-
         /// <summary>
         /// Called when a cache hit occurs.
         /// </summary>

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
 using System.Reflection;
@@ -44,6 +45,17 @@ internal static class SettingsBinder
             throw new ArgumentNullException(nameof(values));
         }
 
+        var readOnly = values as IReadOnlyDictionary<string, object?> ?? new ReadOnlyDictionary<string, object?>(values);
+        Populate(readOnly, target);
+    }
+    public static void Populate<TSettings>(IReadOnlyDictionary<string, object?> values, TSettings target)
+        where TSettings : class
+    {
+        if (values is null)
+        {
+            throw new ArgumentNullException(nameof(values));
+        }
+
         if (target is null)
         {
             throw new ArgumentNullException(nameof(target));
@@ -75,12 +87,29 @@ internal static class SettingsBinder
         return clone;
     }
 
+    public static void Copy<TSettings>(TSettings source, TSettings destination)
+        where TSettings : class
+    {
+        if (source is null)
+        {
+            throw new ArgumentNullException(nameof(source));
+        }
+
+        if (destination is null)
+        {
+            throw new ArgumentNullException(nameof(destination));
+        }
+
+        var dictionary = ToDictionary(source);
+        Populate(dictionary, destination);
+    }
+
     private static IEnumerable<PropertyInfo> GetWritableProperties(Type type)
         => type
             .GetProperties(BindingFlags.Instance | BindingFlags.Public)
             .Where(p => p.CanWrite && p.GetIndexParameters().Length == 0);
 
-    private static bool TryGetValue(IDictionary<string, object?> values, string key, out object? value)
+    private static bool TryGetValue(IReadOnlyDictionary<string, object?> values, string key, out object? value)
     {
         if (values.TryGetValue(key, out value))
         {
@@ -238,3 +267,4 @@ internal static class SettingsBinder
         return Enum.ToObject(enumType, numeric);
     }
 }
+
