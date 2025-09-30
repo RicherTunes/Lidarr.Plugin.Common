@@ -1,0 +1,43 @@
+{
+  "version": "0.2",
+  "language": "en",
+  "ignorePaths": [
+    "**/bin",
+    "**/obj",
+    ".git",
+    "tools/DocTools/SnippetVerifier/bin",
+    "tools/DocTools/SnippetVerifier/obj"
+  ],
+  "words": [
+    "Abstractions",
+    "ALC",
+    "AssemblyLoadContext",
+    "CLI",
+    "Common",
+    "DOTNET",
+    "Lidarr",
+    "NuGet",
+    "Pluginloadcontext",
+    "Plugins",
+    "Submodule",
+    "TFM",
+    "TFMs",
+    "coordinated",
+    "interop",
+    "unload",
+    "workflows",
+    "ALCs",
+    "CI",
+    "DocTools",
+    "GitHub",
+    "ILRepack",
+    "SemVer",
+    "Submodules",
+    "lychee",
+    "markdownlint",
+    "cspell",
+    "vale",
+    "Azure",
+    "DevOps"
+  ]
+}

@@ -6,6 +6,7 @@ Centralise your plugin settings so users know which fields must be configured an
 The host interacts with settings via `ISettingsProvider` and `SettingDefinition`.
 
 ```csharp
+
 public sealed class MySettingsProvider : ISettingsProvider
 {
     public IReadOnlyCollection<SettingDefinition> Describe() => new[]
@@ -48,9 +49,11 @@ public sealed class MySettingsProvider : ISettingsProvider
     public PluginValidationResult Apply(IDictionary<string, object?> settings)
         => PluginValidationResult.Success();
 }
+
 ```
 
 ## Recommended keys
+
 | Key | Type | Required | Notes |
 |-----|------|----------|-------|
 | `ClientId` | string | yes | OAuth identifier. |
@@ -61,12 +64,15 @@ public sealed class MySettingsProvider : ISettingsProvider
 | `PreferredQuality` | enum | no | Use `StreamingQualityTier`. |
 
 ## Best practices
+
 - Mark secrets with `IsSensitive=true` so the host hides them in UIs/logs.
 - Provide defaults for optional settings to simplify onboarding.
 - Validate settings and return actionable errors via `PluginValidationResult.Failure`.
 - Document each setting in your plugin README and cross-link here to avoid drift.
 
 ## Related docs
+
 - [Plugin manifest](MANIFEST.md)
 - [Migration guide](../migration/FROM_LEGACY.md)
 - [Developer guide → Settings](../dev-guide/DEVELOPER_GUIDE.md#settings)
+
