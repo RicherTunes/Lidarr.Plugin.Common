@@ -1,0 +1,1737 @@
+#nullable enable
+
+abstract Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.AuthenticateAsync() -> System.Threading.Tasks.Task<bool>!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GetAlbumAsync(string! albumId) -> System.Threading.Tasks.Task<Lidarr.Plugin.Abstractions.Models.StreamingAlbum!>!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GetStreamUrlAsync(string! trackId, string! quality) -> System.Threading.Tasks.Task<string!>!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GetTrackAsync(string! trackId) -> System.Threading.Tasks.Task<Lidarr.Plugin.Abstractions.Models.StreamingTrack!>!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.ProtocolName.get -> string!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.ServiceName.get -> string!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.ValidateDownloadSettings(TSettings! settings) -> FluentValidation.Results.ValidationResult!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.AuthenticateAsync() -> System.Threading.Tasks.Task<bool>!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.GetAlbumDetailsAsync(string! albumId) -> System.Threading.Tasks.Task<Lidarr.Plugin.Abstractions.Models.StreamingAlbum!>!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.ProtocolName.get -> string!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.SearchAlbumsAsync(string! searchTerm) -> System.Threading.Tasks.Task<System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingAlbum!>!>!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.SearchTracksAsync(string! searchTerm) -> System.Threading.Tasks.Task<System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingTrack!>!>!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.ServiceName.get -> string!
+abstract Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.ValidateSettings(TSettings! settings) -> FluentValidation.Results.ValidationResult!
+abstract Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.PerformAuthenticationAsync(TCredentials! credentials) -> System.Threading.Tasks.Task<TSession!>!
+abstract Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.BuildAuthorizationUrlAsync(string! codeChallenge, string! state, string! redirectUri, System.Collections.Generic.IEnumerable<string!>! scopes) -> System.Threading.Tasks.Task<string!>!
+abstract Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.CacheSessionAsync(TSession! session) -> System.Threading.Tasks.Task!
+abstract Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.ClearCachedSessionAsync() -> System.Threading.Tasks.Task!
+abstract Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.ExchangeCodeForTokensInternalAsync(string! authorizationCode, string! codeVerifier, string! redirectUri) -> System.Threading.Tasks.Task<TSession!>!
+abstract Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.ExtractRefreshToken(TSession! session) -> string!
+abstract Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.RefreshTokensInternalAsync(string! refreshToken) -> System.Threading.Tasks.Task<TSession!>!
+abstract Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.RevokeTokensInternalAsync(TSession! session) -> System.Threading.Tasks.Task!
+abstract Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.GetCacheDuration(string! endpoint) -> System.TimeSpan
+abstract Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.GetServiceName() -> string!
+abstract Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.ShouldCache(string! endpoint) -> bool
+abstract Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.Author.get -> string!
+abstract Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.Description.get -> string!
+abstract Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.ServiceName.get -> string!
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.AddDownloadAsync(string! albumId, string! outputPath) -> System.Threading.Tasks.Task<string!>!
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.BaseStreamingDownloadClient(TSettings! settings, Microsoft.Extensions.Logging.ILogger! logger = null, Lidarr.Plugin.Common.Interfaces.IAudioMetadataApplier! metadataApplier = null) -> void
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.Dispose() -> void
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.DownloadAudioFileAsync(string! streamUrl, string! outputFilePath, Lidarr.Plugin.Abstractions.Models.StreamingTrack! metadata, System.IProgress<double>? progress = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Base.StreamingDownloadResult!>!
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GetDownload(string! downloadId) -> Lidarr.Plugin.Common.Base.StreamingDownloadItem!
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GetDownloads() -> System.Collections.Generic.List<Lidarr.Plugin.Common.Base.StreamingDownloadItem!>!
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.InitializeAsync() -> System.Threading.Tasks.Task<FluentValidation.Results.ValidationResult!>!
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.Logger.get -> Microsoft.Extensions.Logging.ILogger!
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.PerformanceMonitor.get -> Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor!
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.RateLimiter.get -> Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter!
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.RemoveDownloadAsync(string! downloadId, bool deleteData = false) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.Settings.get -> TSettings!
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.BaseStreamingIndexer(TSettings! settings, Microsoft.Extensions.Logging.ILogger! logger = null, System.Func<System.Net.Http.HttpClient!>! httpClientFactory = null) -> void
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.CreateRequest(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! queryParams = null) -> System.Net.Http.HttpRequestMessage!
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.Dispose() -> void
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.ExecuteRequestAsync(System.Net.Http.HttpRequestMessage! request) -> System.Threading.Tasks.Task<string!>!
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.FetchPagedAsync<T>(System.Func<int, System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<T>!>!>! fetchPageAsync, int pageSize, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<T>!
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.InitializeAsync() -> System.Threading.Tasks.Task<FluentValidation.Results.ValidationResult!>!
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.Logger.get -> Microsoft.Extensions.Logging.ILogger!
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.PerformanceMonitor.get -> Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor!
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.SearchAsync(string! query) -> System.Threading.Tasks.Task<System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingAlbum!>!>!
+Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.Settings.get -> TSettings!
+Lidarr.Plugin.Common.Base.BaseStreamingSettings
+Lidarr.Plugin.Common.Base.BaseStreamingSettings.BaseStreamingSettings() -> void
+Lidarr.Plugin.Common.Base.BaseStreamingSettings.CacheDuration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Base.BaseStreamingSettings.RateLimitWindow.get -> System.TimeSpan
+Lidarr.Plugin.Common.Base.BaseStreamingSettings.RequestTimeout.get -> System.TimeSpan
+Lidarr.Plugin.Common.Base.StreamingConfigHelpers
+Lidarr.Plugin.Common.Base.StreamingDownloadItem
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.Album.get -> Lidarr.Plugin.Abstractions.Models.StreamingAlbum!
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.Album.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.AlbumId.get -> string!
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.AlbumId.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.CancellationToken.get -> System.Threading.CancellationTokenSource!
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.CancellationToken.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.CompletedAt.get -> System.DateTime?
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.CompletedAt.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.CurrentTrack.get -> string!
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.CurrentTrack.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.ErrorMessage.get -> string!
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.ErrorMessage.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.Id.get -> string!
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.Id.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.IsCompleted.get -> bool
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.IsCompleted.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.LastUpdated.get -> System.DateTime
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.LastUpdated.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.OutputPath.get -> string!
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.OutputPath.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.Progress.get -> double
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.Progress.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.StartedAt.get -> System.DateTime
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.StartedAt.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.Status.get -> Lidarr.Plugin.Common.Base.StreamingDownloadStatus
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.Status.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.StreamingDownloadItem() -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.Success.get -> bool
+Lidarr.Plugin.Common.Base.StreamingDownloadItem.Success.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadResult
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.Duration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.Duration.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.ErrorMessage.get -> string!
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.ErrorMessage.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.FilePath.get -> string!
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.FilePath.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.FileSize.get -> long
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.FileSize.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.Metadata.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.Metadata.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.StreamingDownloadResult() -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.Success.get -> bool
+Lidarr.Plugin.Common.Base.StreamingDownloadResult.Success.set -> void
+Lidarr.Plugin.Common.Base.StreamingDownloadStatus
+Lidarr.Plugin.Common.Base.StreamingDownloadStatus.Cancelled = 4 -> Lidarr.Plugin.Common.Base.StreamingDownloadStatus
+Lidarr.Plugin.Common.Base.StreamingDownloadStatus.Completed = 2 -> Lidarr.Plugin.Common.Base.StreamingDownloadStatus
+Lidarr.Plugin.Common.Base.StreamingDownloadStatus.Downloading = 1 -> Lidarr.Plugin.Common.Base.StreamingDownloadStatus
+Lidarr.Plugin.Common.Base.StreamingDownloadStatus.Failed = 3 -> Lidarr.Plugin.Common.Base.StreamingDownloadStatus
+Lidarr.Plugin.Common.Base.StreamingDownloadStatus.Queued = 0 -> Lidarr.Plugin.Common.Base.StreamingDownloadStatus
+Lidarr.Plugin.Common.Base.StreamingIndexerHelpers
+Lidarr.Plugin.Common.Interfaces.AudioStreamResult
+Lidarr.Plugin.Common.Interfaces.AudioStreamResult.AudioStreamResult() -> void
+Lidarr.Plugin.Common.Interfaces.AudioStreamResult.Stream.get -> System.IO.Stream!
+Lidarr.Plugin.Common.Interfaces.AudioStreamResult.Stream.set -> void
+Lidarr.Plugin.Common.Interfaces.AudioStreamResult.SuggestedExtension.get -> string!
+Lidarr.Plugin.Common.Interfaces.AudioStreamResult.SuggestedExtension.set -> void
+Lidarr.Plugin.Common.Interfaces.AudioStreamResult.TotalBytes.get -> long?
+Lidarr.Plugin.Common.Interfaces.AudioStreamResult.TotalBytes.set -> void
+Lidarr.Plugin.Common.Interfaces.AuthenticationType
+Lidarr.Plugin.Common.Interfaces.AuthenticationType.ApiKey = 2 -> Lidarr.Plugin.Common.Interfaces.AuthenticationType
+Lidarr.Plugin.Common.Interfaces.AuthenticationType.Certificate = 4 -> Lidarr.Plugin.Common.Interfaces.AuthenticationType
+Lidarr.Plugin.Common.Interfaces.AuthenticationType.OAuth2 = 1 -> Lidarr.Plugin.Common.Interfaces.AuthenticationType
+Lidarr.Plugin.Common.Interfaces.AuthenticationType.Token = 3 -> Lidarr.Plugin.Common.Interfaces.AuthenticationType
+Lidarr.Plugin.Common.Interfaces.AuthenticationType.UsernamePassword = 0 -> Lidarr.Plugin.Common.Interfaces.AuthenticationType
+Lidarr.Plugin.Common.Interfaces.AuthErrorType
+Lidarr.Plugin.Common.Interfaces.AuthErrorType.AccountLocked = 2 -> Lidarr.Plugin.Common.Interfaces.AuthErrorType
+Lidarr.Plugin.Common.Interfaces.AuthErrorType.InvalidCredentials = 1 -> Lidarr.Plugin.Common.Interfaces.AuthErrorType
+Lidarr.Plugin.Common.Interfaces.AuthErrorType.NetworkError = 4 -> Lidarr.Plugin.Common.Interfaces.AuthErrorType
+Lidarr.Plugin.Common.Interfaces.AuthErrorType.RateLimited = 6 -> Lidarr.Plugin.Common.Interfaces.AuthErrorType
+Lidarr.Plugin.Common.Interfaces.AuthErrorType.RegionBlocked = 8 -> Lidarr.Plugin.Common.Interfaces.AuthErrorType
+Lidarr.Plugin.Common.Interfaces.AuthErrorType.ServiceUnavailable = 5 -> Lidarr.Plugin.Common.Interfaces.AuthErrorType
+Lidarr.Plugin.Common.Interfaces.AuthErrorType.SubscriptionRequired = 7 -> Lidarr.Plugin.Common.Interfaces.AuthErrorType
+Lidarr.Plugin.Common.Interfaces.AuthErrorType.TwoFactorRequired = 3 -> Lidarr.Plugin.Common.Interfaces.AuthErrorType
+Lidarr.Plugin.Common.Interfaces.AuthErrorType.Unknown = 0 -> Lidarr.Plugin.Common.Interfaces.AuthErrorType
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.AuthResult() -> void
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.ErrorContext.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.ErrorContext.set -> void
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.ErrorMessage.get -> string!
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.ErrorMessage.set -> void
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.ErrorType.get -> Lidarr.Plugin.Common.Interfaces.AuthErrorType?
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.ErrorType.set -> void
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.Session.get -> TSession!
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.Session.set -> void
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.Success.get -> bool
+Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.Success.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadProgress
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.BytesPerSecond.get -> long
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.BytesPerSecond.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.CompletedTracks.get -> int
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.CompletedTracks.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.CurrentTrack.get -> string!
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.CurrentTrack.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.DownloadProgress() -> void
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.EstimatedTimeRemaining.get -> System.TimeSpan?
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.EstimatedTimeRemaining.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.PercentComplete.get -> double
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.PercentComplete.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.TotalTracks.get -> int
+Lidarr.Plugin.Common.Interfaces.DownloadProgress.TotalTracks.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadResult
+Lidarr.Plugin.Common.Interfaces.DownloadResult.DownloadResult() -> void
+Lidarr.Plugin.Common.Interfaces.DownloadResult.Duration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Interfaces.DownloadResult.Duration.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadResult.ErrorMessage.get -> string!
+Lidarr.Plugin.Common.Interfaces.DownloadResult.ErrorMessage.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadResult.FilePaths.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Common.Interfaces.DownloadResult.FilePaths.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadResult.Metadata.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Common.Interfaces.DownloadResult.Metadata.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadResult.Success.get -> bool
+Lidarr.Plugin.Common.Interfaces.DownloadResult.Success.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadResult.TotalSize.get -> long
+Lidarr.Plugin.Common.Interfaces.DownloadResult.TotalSize.set -> void
+Lidarr.Plugin.Common.Interfaces.DownloadResult.TrackResults.get -> System.Collections.Generic.List<Lidarr.Plugin.Common.Interfaces.TrackDownloadResult!>!
+Lidarr.Plugin.Common.Interfaces.DownloadResult.TrackResults.set -> void
+Lidarr.Plugin.Common.Interfaces.IAudioMetadataApplier
+Lidarr.Plugin.Common.Interfaces.IAudioMetadataApplier.ApplyAsync(string! filePath, Lidarr.Plugin.Abstractions.Models.StreamingTrack! metadata, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Interfaces.IAudioStreamProvider
+Lidarr.Plugin.Common.Interfaces.IAudioStreamProvider.GetStreamAsync(string! trackId, Lidarr.Plugin.Abstractions.Models.StreamingQuality? quality = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Interfaces.AudioStreamResult!>!
+Lidarr.Plugin.Common.Interfaces.IAuthCredentials
+Lidarr.Plugin.Common.Interfaces.IAuthCredentials.IsValid(out string! errorMessage) -> bool
+Lidarr.Plugin.Common.Interfaces.IAuthCredentials.Type.get -> Lidarr.Plugin.Common.Interfaces.AuthenticationType
+Lidarr.Plugin.Common.Interfaces.IAuthSession
+Lidarr.Plugin.Common.Interfaces.IAuthSession.AccessToken.get -> string!
+Lidarr.Plugin.Common.Interfaces.IAuthSession.ExpiresAt.get -> System.DateTime?
+Lidarr.Plugin.Common.Interfaces.IAuthSession.IsExpired.get -> bool
+Lidarr.Plugin.Common.Interfaces.IAuthSession.Metadata.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.AuthenticateAsync(TCredentials! credentials) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Interfaces.AuthResult<TSession!>!>!
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.ClearSession() -> void
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.GetCachedSession() -> TSession!
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.GetValidSessionAsync() -> System.Threading.Tasks.Task<TSession!>!
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.RefreshSessionAsync(TSession! session) -> System.Threading.Tasks.Task<TSession?>!
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.RevokeSessionAsync(TSession! session) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.StoreSession(TSession! session) -> void
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.ValidateSessionAsync(TSession! session) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Interfaces.IStreamingDownloadOrchestrator
+Lidarr.Plugin.Common.Interfaces.IStreamingDownloadOrchestrator.CancelDownloadAsync(string! downloadId) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Interfaces.IStreamingDownloadOrchestrator.DownloadAlbumAsync(string! albumId, string! outputDirectory, Lidarr.Plugin.Abstractions.Models.StreamingQuality! quality = null, System.IProgress<Lidarr.Plugin.Common.Interfaces.DownloadProgress!>! progress = null) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Interfaces.DownloadResult!>!
+Lidarr.Plugin.Common.Interfaces.IStreamingDownloadOrchestrator.DownloadTrackAsync(string! trackId, string! outputPath, Lidarr.Plugin.Abstractions.Models.StreamingQuality! quality = null) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Interfaces.TrackDownloadResult!>!
+Lidarr.Plugin.Common.Interfaces.IStreamingDownloadOrchestrator.EstimateDownloadSizeAsync(string! albumId, Lidarr.Plugin.Abstractions.Models.StreamingQuality! quality = null) -> System.Threading.Tasks.Task<long>!
+Lidarr.Plugin.Common.Interfaces.IStreamingDownloadOrchestrator.GetAvailableQualitiesAsync(string! contentId) -> System.Threading.Tasks.Task<System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingQuality!>!>!
+Lidarr.Plugin.Common.Interfaces.IStreamingDownloadOrchestrator.ServiceName.get -> string!
+Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache
+Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache.Clear() -> void
+Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache.ClearEndpoint(string! endpoint) -> void
+Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache.GenerateCacheKey(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters) -> string!
+Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache.Get<T>(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters) -> T?
+Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache.GetCacheDuration(string! endpoint) -> System.TimeSpan
+Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache.Set<T>(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters, T! value) -> void
+Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache.Set<T>(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters, T! value, System.TimeSpan duration) -> void
+Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache.ShouldCache(string! endpoint) -> bool
+Lidarr.Plugin.Common.Interfaces.IStreamingTokenProvider
+Lidarr.Plugin.Common.Interfaces.IStreamingTokenProvider.ClearAuthenticationCache() -> void
+Lidarr.Plugin.Common.Interfaces.IStreamingTokenProvider.GetAccessTokenAsync() -> System.Threading.Tasks.Task<string!>!
+Lidarr.Plugin.Common.Interfaces.IStreamingTokenProvider.GetTokenExpiration(string! token) -> System.DateTime?
+Lidarr.Plugin.Common.Interfaces.IStreamingTokenProvider.RefreshTokenAsync() -> System.Threading.Tasks.Task<string!>!
+Lidarr.Plugin.Common.Interfaces.IStreamingTokenProvider.ServiceName.get -> string!
+Lidarr.Plugin.Common.Interfaces.IStreamingTokenProvider.SupportsRefresh.get -> bool
+Lidarr.Plugin.Common.Interfaces.IStreamingTokenProvider.ValidateTokenAsync(string! token) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.ActualQuality.get -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.ActualQuality.set -> void
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.DownloadTime.get -> System.TimeSpan
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.DownloadTime.set -> void
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.ErrorMessage.get -> string!
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.ErrorMessage.set -> void
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.FilePath.get -> string!
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.FilePath.set -> void
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.FileSize.get -> long
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.FileSize.set -> void
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.Success.get -> bool
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.Success.set -> void
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.TrackDownloadResult() -> void
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.TrackId.get -> string!
+Lidarr.Plugin.Common.Interfaces.TrackDownloadResult.TrackId.set -> void
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.AlbumDownloadProgress() -> void
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.CompletedTracks.get -> int
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.CompletedTracks.set -> void
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.CurrentTrack.get -> string!
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.CurrentTrack.set -> void
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.EstimatedTimeRemaining.get -> System.TimeSpan
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.EstimatedTimeRemaining.set -> void
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.OverallPercentage.get -> double
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.TotalBytesDownloaded.get -> long
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.TotalBytesDownloaded.set -> void
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.TotalTracks.get -> int
+Lidarr.Plugin.Abstractions.Models.AlbumDownloadProgress.TotalTracks.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.AdditionalArtists.get -> System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingArtist!>!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.AdditionalArtists.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Artist.get -> Lidarr.Plugin.Abstractions.Models.StreamingArtist!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Artist.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.AvailableQualities.get -> System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingQuality!>!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.AvailableQualities.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.CoverArtUrls.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.CoverArtUrls.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Duration.get -> System.TimeSpan?
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Duration.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.ExternalIds.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.ExternalUrls.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.ExternalUrls.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Genres.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Genres.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.GetAllArtistNames(string! separator = ", ") -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.GetBestCoverArtUrl(string! preferredSize = "large") -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.GetBestQuality() -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.GetPrimaryArtistName() -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Id.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Id.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Label.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Label.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Metadata.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Metadata.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.MusicBrainzId.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.MusicBrainzId.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.ReleaseDate.get -> System.DateTime?
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.ReleaseDate.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.StreamingAlbum() -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Title.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Title.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.TrackCount.get -> int
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.TrackCount.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Type.get -> Lidarr.Plugin.Abstractions.Models.StreamingAlbumType
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Type.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Upc.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingAlbum.Upc.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingAlbumType
+Lidarr.Plugin.Abstractions.Models.StreamingAlbumType.Album = 0 -> Lidarr.Plugin.Abstractions.Models.StreamingAlbumType
+Lidarr.Plugin.Abstractions.Models.StreamingAlbumType.Bootleg = 7 -> Lidarr.Plugin.Abstractions.Models.StreamingAlbumType
+Lidarr.Plugin.Abstractions.Models.StreamingAlbumType.Compilation = 3 -> Lidarr.Plugin.Abstractions.Models.StreamingAlbumType
+Lidarr.Plugin.Abstractions.Models.StreamingAlbumType.EP = 2 -> Lidarr.Plugin.Abstractions.Models.StreamingAlbumType
+Lidarr.Plugin.Abstractions.Models.StreamingAlbumType.Live = 5 -> Lidarr.Plugin.Abstractions.Models.StreamingAlbumType
+Lidarr.Plugin.Abstractions.Models.StreamingAlbumType.Remix = 6 -> Lidarr.Plugin.Abstractions.Models.StreamingAlbumType
+Lidarr.Plugin.Abstractions.Models.StreamingAlbumType.Single = 1 -> Lidarr.Plugin.Abstractions.Models.StreamingAlbumType
+Lidarr.Plugin.Abstractions.Models.StreamingAlbumType.Soundtrack = 4 -> Lidarr.Plugin.Abstractions.Models.StreamingAlbumType
+Lidarr.Plugin.Abstractions.Models.StreamingArtist
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Biography.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Biography.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Country.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Country.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.ExternalUrls.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.ExternalUrls.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Genres.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Genres.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.GetBestImageUrl(string! preferredSize = "medium") -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Id.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Id.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.ImageUrls.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.ImageUrls.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Metadata.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Metadata.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Name.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.Name.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingArtist.StreamingArtist() -> void
+Lidarr.Plugin.Abstractions.Models.StreamingQuality
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.BitDepth.get -> int?
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.BitDepth.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.Bitrate.get -> int?
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.Bitrate.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.Format.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.Format.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.GetTier() -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.Id.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.Id.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.IsHighResolution.get -> bool
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.IsLossless.get -> bool
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.Name.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.Name.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.SampleRate.get -> int?
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.SampleRate.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingQuality.StreamingQuality() -> void
+Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+Lidarr.Plugin.Abstractions.Models.StreamingQualityTier.High = 3 -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+Lidarr.Plugin.Abstractions.Models.StreamingQualityTier.HiRes = 5 -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+Lidarr.Plugin.Abstractions.Models.StreamingQualityTier.Lossless = 4 -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+Lidarr.Plugin.Abstractions.Models.StreamingQualityTier.Low = 1 -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+Lidarr.Plugin.Abstractions.Models.StreamingQualityTier.Normal = 2 -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Album.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Album.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Artist.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Artist.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.CoverArtUrl.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.CoverArtUrl.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Duration.get -> System.TimeSpan?
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Duration.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Genre.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Genre.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Id.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Id.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Label.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Label.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Metadata.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Metadata.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.ReleaseDate.get -> System.DateTime?
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.ReleaseDate.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.StreamingSearchResult() -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Title.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Title.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.TrackCount.get -> int?
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.TrackCount.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Type.get -> Lidarr.Plugin.Abstractions.Models.StreamingSearchType
+Lidarr.Plugin.Abstractions.Models.StreamingSearchResult.Type.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingSearchType
+Lidarr.Plugin.Abstractions.Models.StreamingSearchType.Album = 0 -> Lidarr.Plugin.Abstractions.Models.StreamingSearchType
+Lidarr.Plugin.Abstractions.Models.StreamingSearchType.Artist = 1 -> Lidarr.Plugin.Abstractions.Models.StreamingSearchType
+Lidarr.Plugin.Abstractions.Models.StreamingSearchType.Label = 4 -> Lidarr.Plugin.Abstractions.Models.StreamingSearchType
+Lidarr.Plugin.Abstractions.Models.StreamingSearchType.Playlist = 3 -> Lidarr.Plugin.Abstractions.Models.StreamingSearchType
+Lidarr.Plugin.Abstractions.Models.StreamingSearchType.Track = 2 -> Lidarr.Plugin.Abstractions.Models.StreamingSearchType
+Lidarr.Plugin.Abstractions.Models.StreamingTrack
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Album.get -> Lidarr.Plugin.Abstractions.Models.StreamingAlbum!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Album.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Artist.get -> Lidarr.Plugin.Abstractions.Models.StreamingArtist!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Artist.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.AvailableQualities.get -> System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingQuality!>!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.AvailableQualities.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.DiscNumber.get -> int?
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.DiscNumber.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Duration.get -> System.TimeSpan?
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Duration.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.ExternalIds.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.FeaturedArtists.get -> System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingArtist!>!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.FeaturedArtists.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.GetBestQuality() -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.GetFullTitle() -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Id.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Id.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.IsExplicit.get -> bool
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.IsExplicit.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Isrc.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Isrc.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Metadata.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Metadata.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.MusicBrainzId.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.MusicBrainzId.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Popularity.get -> long?
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Popularity.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.PreviewUrl.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.PreviewUrl.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.StreamingTrack() -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Title.get -> string!
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.Title.set -> void
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.TrackNumber.get -> int?
+Lidarr.Plugin.Abstractions.Models.StreamingTrack.TrackNumber.set -> void
+Lidarr.Plugin.Common.Security.InputSanitizer
+Lidarr.Plugin.Common.Security.Sanitize
+Lidarr.Plugin.Common.Security.SecureCredentialManager
+Lidarr.Plugin.Common.Security.SecureCredentialManager.CreateSecureString(string! source) -> System.Security.SecureString!
+Lidarr.Plugin.Common.Security.SecureCredentialManager.Dispose() -> void
+Lidarr.Plugin.Common.Security.SecureCredentialManager.GetCredential(string! key) -> string!
+Lidarr.Plugin.Common.Security.SecureCredentialManager.SecureCredentialManager() -> void
+Lidarr.Plugin.Common.Security.SecureCredentialManager.StoreCredential(string! key, string! credential) -> void
+Lidarr.Plugin.Common.Security.SecureCredentialWrapper
+Lidarr.Plugin.Common.Security.SecureCredentialWrapper.Dispose() -> void
+Lidarr.Plugin.Common.Security.SecureCredentialWrapper.GetPlainText() -> string!
+Lidarr.Plugin.Common.Security.SecureCredentialWrapper.SecureCredentialWrapper(System.Security.SecureString! secureString) -> void
+Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>
+Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.BaseStreamingAuthenticationService() -> void
+Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>._cachedSession -> TSession!
+Lidarr.Plugin.Common.Services.Authentication.IOAuthStreamingAuthenticationService<TSession, TCredentials>
+Lidarr.Plugin.Common.Services.Authentication.IOAuthStreamingAuthenticationService<TSession, TCredentials>.ExchangeCodeForTokensAsync(string! authorizationCode, string! flowId) -> System.Threading.Tasks.Task<TSession!>!
+Lidarr.Plugin.Common.Services.Authentication.IOAuthStreamingAuthenticationService<TSession, TCredentials>.InitiateOAuthFlowAsync(string! redirectUri, System.Collections.Generic.IEnumerable<string!>! scopes = null, string! state = null) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult!>!
+Lidarr.Plugin.Common.Services.Authentication.IOAuthStreamingAuthenticationService<TSession, TCredentials>.RefreshTokensAsync(TSession! session) -> System.Threading.Tasks.Task<TSession!>!
+Lidarr.Plugin.Common.Services.Authentication.IOAuthStreamingAuthenticationService<TSession, TCredentials>.RevokeTokensAsync(TSession! session) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.Authentication.IPKCEGenerator
+Lidarr.Plugin.Common.Services.Authentication.IPKCEGenerator.CreateS256Challenge(string! codeVerifier) -> string!
+Lidarr.Plugin.Common.Services.Authentication.IPKCEGenerator.GeneratePair(int length = 128) -> (string! codeVerifier, string! codeChallenge)
+Lidarr.Plugin.Common.Services.Authentication.IStreamingAuthManager
+Lidarr.Plugin.Common.Services.Authentication.IStreamingAuthManager.EnsureValidSessionAsync() -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.Authentication.IStreamingTokenAuthenticationService<TSession, TCredentials>
+Lidarr.Plugin.Common.Services.Authentication.IStreamingTokenAuthenticationService<TSession, TCredentials>.AuthenticateAsync(TCredentials! credentials) -> System.Threading.Tasks.Task<TSession!>!
+Lidarr.Plugin.Common.Services.Authentication.IStreamingTokenAuthenticationService<TSession, TCredentials>.ValidateSessionAsync(TSession! session) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.AdditionalAuthParams.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.AdditionalAuthParams.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.AuthorizationEndpoint.get -> string!
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.AuthorizationEndpoint.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.ClientId.get -> string!
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.ClientId.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.ClientSecret.get -> string!
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.ClientSecret.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.DefaultScopes.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.DefaultScopes.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.OAuthConfiguration() -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.RevocationEndpoint.get -> string!
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.RevocationEndpoint.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.TokenEndpoint.get -> string!
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.TokenEndpoint.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.UsePKCE.get -> bool
+Lidarr.Plugin.Common.Services.Authentication.OAuthConfiguration.UsePKCE.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult
+Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult.AuthorizationUrl.get -> string!
+Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult.AuthorizationUrl.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult.ExpiresAt.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult.ExpiresAt.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult.FlowId.get -> string!
+Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult.FlowId.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult.OAuthFlowResult() -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult.State.get -> string!
+Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult.State.set -> void
+Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>
+Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.OAuthStreamingAuthenticationService(Lidarr.Plugin.Common.Services.Authentication.IPKCEGenerator! pkceGenerator = null) -> void
+Lidarr.Plugin.Common.Services.Authentication.PKCEGenerator
+Lidarr.Plugin.Common.Services.Authentication.PKCEGenerator.CreateS256Challenge(string! codeVerifier) -> string!
+Lidarr.Plugin.Common.Services.Authentication.PKCEGenerator.GeneratePair(int length = 128) -> (string! codeVerifier, string! codeChallenge)
+Lidarr.Plugin.Common.Services.Authentication.PKCEGenerator.PKCEGenerator() -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshEventArgs<TSession>
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshEventArgs<TSession>.NewSession.get -> TSession!
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshEventArgs<TSession>.NewSession.set -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshEventArgs<TSession>.RefreshedAt.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshEventArgs<TSession>.RefreshedAt.set -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshEventArgs<TSession>.SessionRefreshEventArgs() -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshFailedEventArgs
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshFailedEventArgs.AttemptNumber.get -> int
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshFailedEventArgs.AttemptNumber.set -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshFailedEventArgs.Exception.get -> System.Exception!
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshFailedEventArgs.Exception.set -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshFailedEventArgs.FailedAt.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshFailedEventArgs.FailedAt.set -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionRefreshFailedEventArgs.SessionRefreshFailedEventArgs() -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.ExpiresAt.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.ExpiresAt.set -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.IsRefreshing.get -> bool
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.IsRefreshing.set -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.IsValid.get -> bool
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.IsValid.set -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.RefreshAttempts.get -> int
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.RefreshAttempts.set -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.SessionStatus() -> void
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.TimeUntilExpiry.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Authentication.SessionStatus.TimeUntilExpiry.set -> void
+Lidarr.Plugin.Common.Services.Authentication.StreamingTokenManager<TSession, TCredentials>
+Lidarr.Plugin.Common.Services.Authentication.StreamingTokenManager<TSession, TCredentials>.ClearSession() -> void
+Lidarr.Plugin.Common.Services.Authentication.StreamingTokenManager<TSession, TCredentials>.Dispose() -> void
+Lidarr.Plugin.Common.Services.Authentication.StreamingTokenManager<TSession, TCredentials>.GetSessionStatus() -> Lidarr.Plugin.Common.Services.Authentication.SessionStatus!
+Lidarr.Plugin.Common.Services.Authentication.StreamingTokenManager<TSession, TCredentials>.GetValidSessionAsync(TCredentials? fallbackCredentials = null) -> System.Threading.Tasks.Task<TSession!>!
+Lidarr.Plugin.Common.Services.Authentication.StreamingTokenManager<TSession, TCredentials>.RefreshSessionAsync(TCredentials! credentials) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.Authentication.StreamingTokenManager<TSession, TCredentials>.SessionRefreshed -> System.EventHandler<Lidarr.Plugin.Common.Services.Authentication.SessionRefreshEventArgs<TSession!>!>!
+Lidarr.Plugin.Common.Services.Authentication.StreamingTokenManager<TSession, TCredentials>.SessionRefreshFailed -> System.EventHandler<Lidarr.Plugin.Common.Services.Authentication.SessionRefreshFailedEventArgs!>!
+Lidarr.Plugin.Common.Services.Authentication.StreamingTokenManager<TSession, TCredentials>.StreamingTokenManager(Lidarr.Plugin.Common.Services.Authentication.IStreamingTokenAuthenticationService<TSession!, TCredentials!>! authService, Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Authentication.StreamingTokenManager<TSession!, TCredentials!>!>! logger) -> void
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.AverageHitsPerEntry.get -> double
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.AverageHitsPerEntry.set -> void
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.CacheSizeBytes.get -> long
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.CacheSizeBytes.set -> void
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.CacheStatisticsSnapshot() -> void
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.HitRate.get -> double
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.HitRate.set -> void
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.Timestamp.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.Timestamp.set -> void
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.TotalEntries.get -> int
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.TotalEntries.set -> void
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.TotalHits.get -> int
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.TotalHits.set -> void
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.TotalMisses.get -> int
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.TotalMisses.set -> void
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.UniqueAlbums.get -> int
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.UniqueAlbums.set -> void
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.UniqueArtists.get -> int
+Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot.UniqueArtists.set -> void
+Lidarr.Plugin.Common.Services.Caching.ICacheEvictionStrategy<TEntry>
+Lidarr.Plugin.Common.Services.Caching.ICacheEvictionStrategy<TEntry>.EvictionPercentage.get -> double
+Lidarr.Plugin.Common.Services.Caching.ICacheEvictionStrategy<TEntry>.EvictionPercentage.set -> void
+Lidarr.Plugin.Common.Services.Caching.ICacheEvictionStrategy<TEntry>.SelectEntriesForEviction(System.Collections.Generic.IEnumerable<TEntry!>! allEntries, int maxCacheSize, int currentSize) -> System.Collections.Generic.IEnumerable<TEntry!>!
+Lidarr.Plugin.Common.Services.Caching.ICacheEvictionStrategy<TEntry>.StrategyName.get -> string!
+Lidarr.Plugin.Common.Services.Caching.ICacheSerializer<TEntry>
+Lidarr.Plugin.Common.Services.Caching.ICacheSerializer<TEntry>.DeserializeEntries(string! serializedData) -> System.Collections.Generic.IEnumerable<TEntry!>!
+Lidarr.Plugin.Common.Services.Caching.ICacheSerializer<TEntry>.DeserializeEntry(string! serializedData) -> TEntry!
+Lidarr.Plugin.Common.Services.Caching.ICacheSerializer<TEntry>.EstimateSerializedSize(System.Collections.Generic.IEnumerable<TEntry!>! entries) -> long
+Lidarr.Plugin.Common.Services.Caching.ICacheSerializer<TEntry>.IsValidFormat(string! serializedData) -> bool
+Lidarr.Plugin.Common.Services.Caching.ICacheSerializer<TEntry>.SerializationFormat.get -> string!
+Lidarr.Plugin.Common.Services.Caching.ICacheSerializer<TEntry>.SerializeEntries(System.Collections.Generic.IEnumerable<TEntry!>! entries) -> string!
+Lidarr.Plugin.Common.Services.Caching.ICacheSerializer<TEntry>.SerializeEntry(TEntry! entry) -> string!
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.Clear() -> void
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.GetHitCount(string! key) -> int
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.GetHitKeys() -> System.Collections.Generic.IEnumerable<string!>!
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.GetMissCount(string! key) -> int
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.GetMissKeys() -> System.Collections.Generic.IEnumerable<string!>!
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.GetStatistics(int totalEntries, int uniqueArtists, int uniqueAlbums) -> Lidarr.Plugin.Common.Services.Caching.CacheStatisticsSnapshot!
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.HitRate.get -> double
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.RecordHit(string! key) -> void
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.RecordMiss(string! key) -> void
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.RemoveKey(string! key) -> void
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.TotalHits.get -> int
+Lidarr.Plugin.Common.Services.Caching.ICacheStatistics.TotalMisses.get -> int
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.AddOrUpdate(string! key, TEntry! entry) -> void
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.AddToList(string! key, TEntry! entry) -> void
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.Clear() -> void
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.Count.get -> int
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.FindEntries(System.Func<TEntry!, bool>! predicate) -> System.Collections.Generic.IEnumerable<TEntry!>!
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.FindKeyValuePairs(System.Func<TEntry!, bool>! predicate) -> System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string!, System.Collections.Generic.IList<TEntry!>!>>!
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.GetAllEntries() -> System.Collections.Generic.IEnumerable<TEntry!>!
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.GetAllKeys() -> System.Collections.Generic.IEnumerable<string!>!
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.Remove(string! key) -> bool
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.RemoveFromList(string! key, TEntry! entry) -> bool
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.TryGetEntries(string! key, out System.Collections.Generic.IList<TEntry!>! entries) -> bool
+Lidarr.Plugin.Common.Services.Caching.ICacheStorage<TEntry>.TryGetEntry(string! key, out TEntry! entry) -> bool
+Lidarr.Plugin.Common.Services.Caching.ISubstringMatcher
+Lidarr.Plugin.Common.Services.Caching.ISubstringMatcher.CalculateSimilarity(string! s1, string! s2) -> double
+Lidarr.Plugin.Common.Services.Caching.ISubstringMatcher.FindAlbumMatches<TEntry>(System.Collections.Generic.IEnumerable<TEntry!>! entries, string! searchArtist, string! searchAlbum, System.Func<TEntry!, string!>! artistAccessor, System.Func<TEntry!, string!>! albumAccessor, double similarityThreshold) -> System.Collections.Generic.IEnumerable<TEntry!>!
+Lidarr.Plugin.Common.Services.Caching.ISubstringMatcher.FindArtistMatches<TEntry>(System.Collections.Generic.IEnumerable<TEntry!>! entries, string! searchArtist, string! searchAlbum, System.Func<TEntry!, string!>! artistAccessor, System.Func<TEntry!, string!>! albumAccessor, double similarityThreshold) -> System.Collections.Generic.IEnumerable<TEntry!>!
+Lidarr.Plugin.Common.Services.Caching.ISubstringMatcher.FindFuzzyMatches<TEntry>(System.Collections.Generic.IEnumerable<TEntry!>! entries, string! searchArtist, string! searchAlbum, System.Func<TEntry!, string!>! artistAccessor, System.Func<TEntry!, string!>! albumAccessor, double similarityThreshold, int maxResults = 5) -> System.Collections.Generic.IEnumerable<TEntry!>!
+Lidarr.Plugin.Common.Services.Caching.ISubstringMatcher.IsSimilar(string! s1, string! s2, double threshold) -> bool
+Lidarr.Plugin.Common.Services.Caching.ISubstringMatcher.NormalizeString(string! input) -> string!
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.CleanupInterval.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.CleanupInterval.set -> void
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.Clear() -> void
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.DefaultCacheDuration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.DefaultCacheDuration.set -> void
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.Get<T>(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters) -> T?
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.Logger.get -> Microsoft.Extensions.Logging.ILogger!
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.Logger.set -> void
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.MaxCacheSize.get -> int
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.MaxCacheSize.set -> void
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.Set<T>(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters, T! value) -> void
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.Set<T>(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters, T! value, System.TimeSpan duration) -> void
+Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.StreamingResponseCache(Microsoft.Extensions.Logging.ILogger! logger = null) -> void
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics.ActiveRequests.get -> int
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics.ActiveRequests.set -> void
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics.CleanupInterval.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics.CleanupInterval.set -> void
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics.MaxConcurrentRequests.get -> int
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics.MaxConcurrentRequests.set -> void
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics.RequestDeduplicationStatistics() -> void
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics.RequestTimeout.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics.RequestTimeout.set -> void
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator.CreateDiscographyKey(string! artist) -> string!
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator.CreateQualityKey(int albumId, int preferredQuality) -> string!
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator.CreateSearchKey(string! artist, string! album = null) -> string!
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator.CreateStreamingUrlKey(int trackId, int quality) -> string!
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator.Dispose() -> void
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator.GetOrCreateAsync<T>(string! key, System.Func<System.Threading.Tasks.Task<T>!>! factory, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator.GetStatistics() -> Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicationStatistics!
+Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator.RequestDeduplicator(Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator!>! logger, System.TimeSpan? requestTimeout = null, System.TimeSpan? cleanupInterval = null) -> void
+Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator
+Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.CancelDownloadAsync(string! downloadId) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.DownloadAlbumAsync(string! albumId, string! outputDirectory, Lidarr.Plugin.Abstractions.Models.StreamingQuality! quality = null, System.IProgress<Lidarr.Plugin.Common.Interfaces.DownloadProgress!>! progress = null) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Interfaces.DownloadResult!>!
+Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.DownloadTrackAsync(string! trackId, string! outputPath, Lidarr.Plugin.Abstractions.Models.StreamingQuality? quality = null) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Interfaces.TrackDownloadResult!>!
+Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.EstimateDownloadSizeAsync(string! albumId, Lidarr.Plugin.Abstractions.Models.StreamingQuality! quality = null) -> System.Threading.Tasks.Task<long>!
+Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.GetAvailableQualitiesAsync(string! contentId) -> System.Threading.Tasks.Task<System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingQuality!>!>!
+Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.ServiceName.get -> string!
+Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.SimpleDownloadOrchestrator(string! serviceName, System.Net.Http.HttpClient! httpClient, System.Func<string!, System.Threading.Tasks.Task<Lidarr.Plugin.Abstractions.Models.StreamingAlbum!>!>! getAlbumAsync, System.Func<string!, System.Threading.Tasks.Task<Lidarr.Plugin.Abstractions.Models.StreamingTrack!>!>! getTrackAsync, System.Func<string!, System.Threading.Tasks.Task<System.Collections.Generic.IReadOnlyList<string!>!>!>! getAlbumTrackIdsAsync, System.Func<string!, Lidarr.Plugin.Abstractions.Models.StreamingQuality?, System.Threading.Tasks.Task<(string! Url, string! Extension)>!>! getStreamAsync, Lidarr.Plugin.Common.Interfaces.IAudioStreamProvider? streamProvider = null) -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo
+Lidarr.Plugin.Common.Services.DownloadJobInfo.Album.get -> Lidarr.Plugin.Abstractions.Models.StreamingAlbum!
+Lidarr.Plugin.Common.Services.DownloadJobInfo.Album.set -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo.CompletedTime.get -> System.DateTime?
+Lidarr.Plugin.Common.Services.DownloadJobInfo.CompletedTime.set -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo.CompletedTracks.get -> int
+Lidarr.Plugin.Common.Services.DownloadJobInfo.CompletedTracks.set -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo.DownloadJobInfo() -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo.Duration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.DownloadJobInfo.ErrorMessage.get -> string!
+Lidarr.Plugin.Common.Services.DownloadJobInfo.ErrorMessage.set -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo.Id.get -> string!
+Lidarr.Plugin.Common.Services.DownloadJobInfo.Id.set -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo.LastUpdated.get -> System.DateTime
+Lidarr.Plugin.Common.Services.DownloadJobInfo.LastUpdated.set -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo.OutputPath.get -> string!
+Lidarr.Plugin.Common.Services.DownloadJobInfo.OutputPath.set -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo.ProgressPercent.get -> double
+Lidarr.Plugin.Common.Services.DownloadJobInfo.StartTime.get -> System.DateTime
+Lidarr.Plugin.Common.Services.DownloadJobInfo.StartTime.set -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo.Status.get -> string!
+Lidarr.Plugin.Common.Services.DownloadJobInfo.Status.set -> void
+Lidarr.Plugin.Common.Services.DownloadJobInfo.TotalTracks.get -> int
+Lidarr.Plugin.Common.Services.DownloadJobInfo.TotalTracks.set -> void
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.Confidence.get -> double
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.Confidence.set -> void
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.IsCJK.get -> bool
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.IsMixedScript.get -> bool
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.IsMixedScript.set -> void
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.IsRightToLeft.get -> bool
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.PrimaryScript.get -> string!
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.PrimaryScript.set -> void
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.ScriptDetectionResult() -> void
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.ScriptDistribution.get -> System.Collections.Generic.Dictionary<string!, int>!
+Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult.ScriptDistribution.set -> void
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.HandleRomanization.get -> bool
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.HandleRomanization.set -> void
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.NormalizeCase.get -> bool
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.NormalizeCase.set -> void
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.NormalizePunctuation.get -> bool
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.NormalizePunctuation.set -> void
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.RemoveDiacritics.get -> bool
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.RemoveDiacritics.set -> void
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.RemoveDirectionalMarks.get -> bool
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.RemoveDirectionalMarks.set -> void
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.UnicodeNormalizationOptions() -> void
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.UseKnownVariations.get -> bool
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.UseKnownVariations.set -> void
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizer
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizer.CalculateInternationalSimilarity(string! text1, string! text2, Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions! options = null) -> double
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizer.DetectScript(string! text) -> Lidarr.Plugin.Common.Services.Globalization.ScriptDetectionResult!
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizer.NormalizeForMatching(string! input, Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions! options = null) -> string!
+Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizer.UnicodeNormalizer(Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizer!>! logger) -> void
+Lidarr.Plugin.Common.Services.Http.ContentDecodingSnifferHandler
+Lidarr.Plugin.Common.Services.Http.ContentDecodingSnifferHandler.ContentDecodingSnifferHandler() -> void
+Lidarr.Plugin.Common.Services.Http.IPreRequestHandler
+Lidarr.Plugin.Common.Services.Http.IPreRequestHandler.EnsureValidSessionAsync() -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.Http.IPreRequestHandler.InjectAuthParameters(System.Collections.Generic.IDictionary<string!, string!>! parameters) -> void
+Lidarr.Plugin.Common.Services.Http.IPreRequestHandler.SignIfRequired(string! endpoint, System.Collections.Generic.IDictionary<string!, string!>! parameters) -> void
+Lidarr.Plugin.Common.Services.Http.IRequestSigner
+Lidarr.Plugin.Common.Services.Http.IRequestSigner.RequiresSigning(string! endpoint) -> bool
+Lidarr.Plugin.Common.Services.Http.IRequestSigner.Sign(string! endpoint, System.Collections.Generic.IDictionary<string!, string!>! parameters, string! appId, string! appSecret) -> void
+Lidarr.Plugin.Common.Services.Http.OAuthDelegatingHandler
+Lidarr.Plugin.Common.Services.Http.OAuthDelegatingHandler.OAuthDelegatingHandler(Lidarr.Plugin.Common.Interfaces.IStreamingTokenProvider! tokenProvider, Microsoft.Extensions.Logging.ILogger! logger) -> void
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.ApiKey(string! headerName, string! apiKey) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.BearerToken(string! token) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Build() -> System.Net.Http.HttpRequestMessage!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.BuildForLogging() -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Delete() -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Endpoint(string! endpoint) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.FormBody(System.Collections.Generic.Dictionary<string!, string!>! formData) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Get() -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Header(string! name, string! value) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Headers(System.Collections.Generic.Dictionary<string!, string!>! headers) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.JsonBody(object! content) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Method(System.Net.Http.HttpMethod! method) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.NoCache() -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Post() -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Put() -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Query(string! name, bool value) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Query(string! name, int value) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Query(string! name, string! value) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.QueryParams(System.Collections.Generic.Dictionary<string!, string!>! parameters) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.StreamingApiRequestBuilder(string! baseUrl) -> void
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.Timeout(System.TimeSpan timeout) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.WithStreamingDefaults(string! userAgent = null) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.HasBody.get -> bool
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.HasBody.set -> void
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.Headers.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.Headers.set -> void
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.Method.get -> string!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.Method.set -> void
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.QueryParameters.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.QueryParameters.set -> void
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.StreamingApiRequestInfo() -> void
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.Timeout.get -> System.TimeSpan?
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.Timeout.set -> void
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.Url.get -> string!
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.Url.set -> void
+Lidarr.Plugin.Common.Services.Http.TokenDelegatingHandler
+Lidarr.Plugin.Common.Services.Http.TokenDelegatingHandler.TokenDelegatingHandler(Lidarr.Plugin.Common.Interfaces.IStreamingTokenProvider! tokenProvider) -> void
+Lidarr.Plugin.Common.Services.Intelligence.CompilationAlbumDetector
+Lidarr.Plugin.Common.Services.Intelligence.CompilationAlbumDetector.CompilationAlbumDetector() -> void
+Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy
+Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy.ArtistAndTitleFuzzy = 3 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy
+Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy.Standard = 0 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy
+Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy.TitleAndGenreMatch = 5 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy
+Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy.TitleAndVenueMatch = 4 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy
+Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy.TitleAndYearOnly = 1 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy
+Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy.TitleFuzzyMatch = 2 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy
+Lidarr.Plugin.Common.Services.Intelligence.CompilationType
+Lidarr.Plugin.Common.Services.Intelligence.CompilationType.GreatestHits = 3 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationType
+Lidarr.Plugin.Common.Services.Intelligence.CompilationType.LiveCompilation = 4 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationType
+Lidarr.Plugin.Common.Services.Intelligence.CompilationType.Soundtrack = 2 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationType
+Lidarr.Plugin.Common.Services.Intelligence.CompilationType.Standard = 0 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationType
+Lidarr.Plugin.Common.Services.Intelligence.CompilationType.Tribute = 5 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationType
+Lidarr.Plugin.Common.Services.Intelligence.CompilationType.VariousArtists = 1 -> Lidarr.Plugin.Common.Services.Intelligence.CompilationType
+Lidarr.Plugin.Common.Services.Intelligence.IQueryOptimizer
+Lidarr.Plugin.Common.Services.Intelligence.IQueryOptimizer.GetMetricsAsync() -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics!>!
+Lidarr.Plugin.Common.Services.Intelligence.IQueryOptimizer.LearnFromResultsAsync(string! query, Lidarr.Plugin.Common.Services.Intelligence.QueryResults! results, Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback! userFeedback) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.Intelligence.IQueryOptimizer.OptimizeQueryAsync(string! originalQuery, Lidarr.Plugin.Common.Services.Intelligence.QueryContext! context = null) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery!>!
+Lidarr.Plugin.Common.Services.Intelligence.IQueryOptimizer.ResetAsync() -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.AdditionalMetrics.get -> System.Collections.Generic.Dictionary<string!, double>!
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.AdditionalMetrics.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.ApiCallReduction.get -> double
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.ApiCallReduction.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.AverageConfidence.get -> double
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.AverageConfidence.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.OptimizationMetrics() -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.OptimizedQueries.get -> long
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.OptimizedQueries.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.RelevanceImprovement.get -> double
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.RelevanceImprovement.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.TimeRange.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.TimeRange.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.TotalQueries.get -> long
+Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics.TotalQueries.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.Alternatives.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.Alternatives.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.Confidence.get -> double
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.Confidence.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.IsExperimental.get -> bool
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.IsExperimental.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.Metrics.get -> System.Collections.Generic.Dictionary<string!, double>!
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.Metrics.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.OptimizationReason.get -> string!
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.OptimizationReason.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.OptimizedQuery() -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.Parameters.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.Parameters.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.Query.get -> string!
+Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery.Query.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.Confidence.get -> double
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.Confidence.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.Country.get -> string!
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.Country.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.Metadata.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.Metadata.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.PreferredQuality.get -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier?
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.PreferredQuality.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.PreviousAttempts.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.PreviousAttempts.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.QueryContext() -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.Type.get -> Lidarr.Plugin.Common.Services.Intelligence.QueryType
+Lidarr.Plugin.Common.Services.Intelligence.QueryContext.Type.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.Comments.get -> string!
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.Comments.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.Issues.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.Issues.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.PreferredResult.get -> string!
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.PreferredResult.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.QueryFeedback() -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.Rating.get -> int
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.Rating.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.Satisfied.get -> bool
+Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback.Satisfied.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults.ExecutionTime.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults.ExecutionTime.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults.HasResults.get -> bool
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults.Metadata.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults.Metadata.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults.QueryResults() -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults.RelevanceScore.get -> double
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults.RelevanceScore.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults.ResultCount.get -> int
+Lidarr.Plugin.Common.Services.Intelligence.QueryResults.ResultCount.set -> void
+Lidarr.Plugin.Common.Services.Intelligence.QueryType
+Lidarr.Plugin.Common.Services.Intelligence.QueryType.Album = 0 -> Lidarr.Plugin.Common.Services.Intelligence.QueryType
+Lidarr.Plugin.Common.Services.Intelligence.QueryType.Artist = 1 -> Lidarr.Plugin.Common.Services.Intelligence.QueryType
+Lidarr.Plugin.Common.Services.Intelligence.QueryType.Genre = 5 -> Lidarr.Plugin.Common.Services.Intelligence.QueryType
+Lidarr.Plugin.Common.Services.Intelligence.QueryType.Label = 4 -> Lidarr.Plugin.Common.Services.Intelligence.QueryType
+Lidarr.Plugin.Common.Services.Intelligence.QueryType.Playlist = 3 -> Lidarr.Plugin.Common.Services.Intelligence.QueryType
+Lidarr.Plugin.Common.Services.Intelligence.QueryType.Track = 2 -> Lidarr.Plugin.Common.Services.Intelligence.QueryType
+Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers
+Lidarr.Plugin.Common.Services.Network.BatchItemFailure
+Lidarr.Plugin.Common.Services.Network.BatchItemFailure.BatchItemFailure() -> void
+Lidarr.Plugin.Common.Services.Network.BatchItemFailure.CanRetry.get -> bool
+Lidarr.Plugin.Common.Services.Network.BatchItemFailure.CanRetry.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchItemFailure.Error.get -> System.Exception!
+Lidarr.Plugin.Common.Services.Network.BatchItemFailure.Error.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchItemFailure.FailureTime.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Network.BatchItemFailure.FailureTime.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchItemFailure.ItemIndex.get -> int
+Lidarr.Plugin.Common.Services.Network.BatchItemFailure.ItemIndex.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchOperationState
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.BatchOperationState() -> void
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.CompletedItems.get -> int
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.CompletedItems.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.Failures.get -> System.Collections.Generic.List<Lidarr.Plugin.Common.Services.Network.BatchItemFailure!>!
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.Failures.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.LastCheckpointTime.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.LastCheckpointTime.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.OperationId.get -> string!
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.OperationId.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.Options.get -> Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions!
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.Options.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.Results.get -> System.Collections.Generic.List<object!>!
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.Results.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.StartTime.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.StartTime.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.TotalItems.get -> int
+Lidarr.Plugin.Common.Services.Network.BatchOperationState.TotalItems.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchProgress
+Lidarr.Plugin.Common.Services.Network.BatchProgress.BatchProgress() -> void
+Lidarr.Plugin.Common.Services.Network.BatchProgress.CompletedItems.get -> int
+Lidarr.Plugin.Common.Services.Network.BatchProgress.CompletedItems.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchProgress.CurrentItem.get -> int
+Lidarr.Plugin.Common.Services.Network.BatchProgress.CurrentItem.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchProgress.FailedItems.get -> int
+Lidarr.Plugin.Common.Services.Network.BatchProgress.FailedItems.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchProgress.PercentComplete.get -> double
+Lidarr.Plugin.Common.Services.Network.BatchProgress.SuccessfulItems.get -> int
+Lidarr.Plugin.Common.Services.Network.BatchProgress.SuccessfulItems.set -> void
+Lidarr.Plugin.Common.Services.Network.BatchProgress.TotalItems.get -> int
+Lidarr.Plugin.Common.Services.Network.BatchProgress.TotalItems.set -> void
+Lidarr.Plugin.Common.Services.Network.ItemProcessingResult<TResult>
+Lidarr.Plugin.Common.Services.Network.ItemProcessingResult<TResult>.CanRetry.get -> bool
+Lidarr.Plugin.Common.Services.Network.ItemProcessingResult<TResult>.CanRetry.set -> void
+Lidarr.Plugin.Common.Services.Network.ItemProcessingResult<TResult>.Exception.get -> System.Exception!
+Lidarr.Plugin.Common.Services.Network.ItemProcessingResult<TResult>.Exception.set -> void
+Lidarr.Plugin.Common.Services.Network.ItemProcessingResult<TResult>.IsSuccess.get -> bool
+Lidarr.Plugin.Common.Services.Network.ItemProcessingResult<TResult>.IsSuccess.set -> void
+Lidarr.Plugin.Common.Services.Network.ItemProcessingResult<TResult>.ItemProcessingResult() -> void
+Lidarr.Plugin.Common.Services.Network.ItemProcessingResult<TResult>.Result.get -> TResult
+Lidarr.Plugin.Common.Services.Network.ItemProcessingResult<TResult>.Result.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkHealthMonitor
+Lidarr.Plugin.Common.Services.Network.NetworkHealthMonitor.GetCurrentHealth() -> Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus
+Lidarr.Plugin.Common.Services.Network.NetworkHealthMonitor.NetworkHealthMonitor(Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Network.NetworkResilienceService!>! logger) -> void
+Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus
+Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus.Degraded = 1 -> Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus
+Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus.Healthy = 0 -> Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus
+Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus.Unhealthy = 2 -> Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus
+Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus.Unknown = 3 -> Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.CheckpointInterval.get -> int
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.CheckpointInterval.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.ContinueOnFailure.get -> bool
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.ContinueOnFailure.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.EnableCheckpoints.get -> bool
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.EnableCheckpoints.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.MaxRetryAttempts.get -> int
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.MaxRetryAttempts.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.NetworkResilienceOptions() -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.RetryDelay.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.RetryDelay.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceService
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceService.ExecuteResilientBatchAsync<TInput, TResult>(string! operationId, System.Collections.Generic.IEnumerable<TInput>! items, System.Func<TInput, System.Threading.CancellationToken, System.Threading.Tasks.Task<TResult>!>! processor, Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions! options = null, System.IProgress<Lidarr.Plugin.Common.Services.Network.BatchProgress!>! progress = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>!>!
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceService.GetNetworkHealth() -> Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceService.GetStatistics() -> Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics!
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceService.NetworkResilienceService(Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Network.NetworkResilienceService!>! logger) -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.ActiveOperations.get -> int
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.ActiveOperations.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.CircuitBreakerOpen.get -> bool
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.CircuitBreakerOpen.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.ConsecutiveFailures.get -> int
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.ConsecutiveFailures.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.LastFailureTime.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.LastFailureTime.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.NetworkHealth.get -> Lidarr.Plugin.Common.Services.Network.NetworkHealthStatus
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.NetworkHealth.set -> void
+Lidarr.Plugin.Common.Services.Network.NetworkResilienceStatistics.NetworkResilienceStatistics() -> void
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.CanRetryFromCheckpoint.get -> bool
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.CanRetryFromCheckpoint.set -> void
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.CanRetryLater.get -> bool
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.CanRetryLater.set -> void
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.CompletionTime.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.CompletionTime.set -> void
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.FailureReason.get -> string!
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.FailureReason.set -> void
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.Failures.get -> System.Collections.Generic.List<Lidarr.Plugin.Common.Services.Network.BatchItemFailure!>!
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.Failures.set -> void
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.IsSuccessful.get -> bool
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.IsSuccessful.set -> void
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.OperationId.get -> string!
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.OperationId.set -> void
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.ResilientBatchResult() -> void
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.Results.get -> System.Collections.Generic.List<TResult>!
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.Results.set -> void
+Lidarr.Plugin.Common.Services.Network.ResilientBatchResult<TResult>.SuccessRate.get -> double
+Lidarr.Plugin.Common.Services.Performance.AdaptiveConcurrencyManager
+Lidarr.Plugin.Common.Services.Performance.AdaptiveConcurrencyManager.AdaptiveConcurrencyManager(Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Performance.AdaptiveConcurrencyManager!>! logger, int minConcurrency = 1, int maxConcurrency = 8, System.TimeSpan? adjustmentInterval = null, double targetLatency = 1000, double maxLatency = 5000) -> void
+Lidarr.Plugin.Common.Services.Performance.AdaptiveConcurrencyManager.AverageLatency.get -> double
+Lidarr.Plugin.Common.Services.Performance.AdaptiveConcurrencyManager.CurrentConcurrency.get -> int
+Lidarr.Plugin.Common.Services.Performance.AdaptiveConcurrencyManager.ExecuteWithConcurrencyAsync<T>(System.Func<System.Threading.Tasks.Task<T>!>! operation, System.Threading.SemaphoreSlim! semaphore = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+Lidarr.Plugin.Common.Services.Performance.AdaptiveConcurrencyManager.GetConcurrencySemaphore() -> System.Threading.SemaphoreSlim!
+Lidarr.Plugin.Common.Services.Performance.AdaptiveConcurrencyManager.GetStats() -> Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats!
+Lidarr.Plugin.Common.Services.Performance.AdaptiveConcurrencyManager.RecordOperation(System.TimeSpan latency, bool success, System.Exception! error = null) -> void
+Lidarr.Plugin.Common.Services.Performance.AdaptiveConcurrencyManager.SuccessRate.get -> double
+Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter
+Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.AdaptiveRateLimiter(Microsoft.Extensions.Logging.ILogger! logger = null) -> void
+Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.Dispose() -> void
+Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.GetCurrentLimit(string! endpoint) -> int
+Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.GetStats() -> Lidarr.Plugin.Common.Services.Performance.RateLimitStats!
+Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.RecordResponse(string! endpoint, System.Net.Http.HttpResponseMessage! response) -> void
+Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.WaitIfNeededAsync(string! endpoint, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryManager
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryManager.BatchMemoryManager(long maxMemoryMB = 512) -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryManager.Dispose() -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryManager.DisposeAsync() -> System.Threading.Tasks.ValueTask
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryManager.GetMemoryStatistics() -> Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics!
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryManager.GetOptimalBatchSize<T>() -> int
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryManager.ProcessWithMemoryManagementAsync<TInput, TResult>(System.Collections.Generic.IEnumerable<TInput>! items, System.Func<System.Collections.Generic.IEnumerable<TInput>!, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<TResult>!>!>! processor, Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions! options = null, System.IProgress<Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress!>! progress = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>!>!
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryManager.ShouldPauseForMemory() -> bool
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.BatchMemoryOptions() -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.ContinueOnError.get -> bool
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.ContinueOnError.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.EnablePeriodicCleanup.get -> bool
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.EnablePeriodicCleanup.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.MaxBatchSize.get -> int
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.MaxBatchSize.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.MaxWaitTime.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.MaxWaitTime.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.MinBatchSize.get -> int
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.MinBatchSize.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.BatchDuration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.BatchDuration.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.BatchMemoryProgress() -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.BatchNumber.get -> int
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.BatchNumber.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.CurrentBatchSize.get -> int
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.CurrentBatchSize.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.IsMemoryPressureHigh.get -> bool
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.IsMemoryPressureHigh.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.ItemsPerSecond.get -> double
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.MemoryUsageMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.MemoryUsageMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.OptimalBatchSize.get -> int
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.OptimalBatchSize.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.PercentComplete.get -> double
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.ProcessedItems.get -> int
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.ProcessedItems.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.TotalItems.get -> int
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress.TotalItems.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.AvailableMemoryMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.AvailableMemoryMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.AverageBatchSize.get -> long
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.AverageBatchSize.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.AverageItemsPerSecond.get -> double
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.BatchMemoryStatistics() -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.CurrentMemoryUsageMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.CurrentMemoryUsageMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.IsMemoryPressureHigh.get -> bool
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.IsMemoryPressureHigh.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.MaxMemoryLimitMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.MaxMemoryLimitMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.MemoryUtilizationPercent.get -> double
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.OptimalBatchSize.get -> int
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.OptimalBatchSize.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.ProcessingDuration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.ProcessingDuration.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.TotalBatchesExecuted.get -> long
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.TotalBatchesExecuted.set -> void
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.TotalItemsProcessed.get -> long
+Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics.TotalItemsProcessed.set -> void
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.AverageLatency.get -> double
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.AverageLatency.set -> void
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.ConcurrencyStats() -> void
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.ConsecutiveFailures.get -> int
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.ConsecutiveFailures.set -> void
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.ConsecutiveSuccesses.get -> int
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.ConsecutiveSuccesses.set -> void
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.CurrentConcurrency.get -> int
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.CurrentConcurrency.set -> void
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.LastAdjustment.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.LastAdjustment.set -> void
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.RecentOperations.get -> int
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.RecentOperations.set -> void
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.SuccessRate.get -> double
+Lidarr.Plugin.Common.Services.Performance.ConcurrencyStats.SuccessRate.set -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit
+Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.ConsecutiveFailures.get -> int
+Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.ConsecutiveFailures.set -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.ConsecutiveSuccesses.get -> int
+Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.ConsecutiveSuccesses.set -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.EndpointRateLimit() -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.LastRequestTime.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.LastRequestTime.set -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.RequestsPerMinute.get -> int
+Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.RequestsPerMinute.set -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointStats
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.CurrentLimit.get -> int
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.CurrentLimit.set -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.EndpointStats() -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.RateLimitHits.get -> long
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.RateLimitHits.set -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.SuccessfulRequests.get -> long
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.SuccessfulRequests.set -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.SuccessRate.get -> double
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.SuccessRate.set -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.TotalErrors.get -> long
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.TotalErrors.set -> void
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.TotalRequests.get -> long
+Lidarr.Plugin.Common.Services.Performance.EndpointStats.TotalRequests.set -> void
+Lidarr.Plugin.Common.Services.Performance.EventType
+Lidarr.Plugin.Common.Services.Performance.EventType.ApiCall = 0 -> Lidarr.Plugin.Common.Services.Performance.EventType
+Lidarr.Plugin.Common.Services.Performance.EventType.Authentication = 3 -> Lidarr.Plugin.Common.Services.Performance.EventType
+Lidarr.Plugin.Common.Services.Performance.EventType.CacheOperation = 1 -> Lidarr.Plugin.Common.Services.Performance.EventType
+Lidarr.Plugin.Common.Services.Performance.EventType.Custom = 6 -> Lidarr.Plugin.Common.Services.Performance.EventType
+Lidarr.Plugin.Common.Services.Performance.EventType.Download = 2 -> Lidarr.Plugin.Common.Services.Performance.EventType
+Lidarr.Plugin.Common.Services.Performance.EventType.Error = 5 -> Lidarr.Plugin.Common.Services.Performance.EventType
+Lidarr.Plugin.Common.Services.Performance.EventType.Search = 4 -> Lidarr.Plugin.Common.Services.Performance.EventType
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.GlobalRateLimitStats() -> void
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.GlobalSuccessRate.get -> double
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.GlobalSuccessRate.set -> void
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.ServiceStats.get -> System.Collections.Generic.Dictionary<string!, Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats!>!
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.ServiceStats.set -> void
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.TotalErrors.get -> long
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.TotalErrors.set -> void
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.TotalRateLimitHits.get -> long
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.TotalRateLimitHits.set -> void
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.TotalRequests.get -> long
+Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats.TotalRequests.set -> void
+Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter
+Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter.GetCurrentLimit(string! endpoint) -> int
+Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter.GetStats() -> Lidarr.Plugin.Common.Services.Performance.RateLimitStats!
+Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter.RecordResponse(string! endpoint, System.Net.Http.HttpResponseMessage! response) -> void
+Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter.WaitIfNeededAsync(string! endpoint, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Services.Performance.IBatchMemoryManager
+Lidarr.Plugin.Common.Services.Performance.IBatchMemoryManager.GetMemoryStatistics() -> Lidarr.Plugin.Common.Services.Performance.BatchMemoryStatistics!
+Lidarr.Plugin.Common.Services.Performance.IBatchMemoryManager.GetOptimalBatchSize<T>() -> int
+Lidarr.Plugin.Common.Services.Performance.IBatchMemoryManager.ProcessWithMemoryManagementAsync<TInput, TResult>(System.Collections.Generic.IEnumerable<TInput>! items, System.Func<System.Collections.Generic.IEnumerable<TInput>!, System.Threading.CancellationToken, System.Threading.Tasks.Task<System.Collections.Generic.IEnumerable<TResult>!>!>! processor, Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions! options = null, System.IProgress<Lidarr.Plugin.Common.Services.Performance.BatchMemoryProgress!>! progress = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>!>!
+Lidarr.Plugin.Common.Services.Performance.IBatchMemoryManager.ShouldPauseForMemory() -> bool
+Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter
+Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter.GetCurrentLimit(string! service, string! endpoint) -> int
+Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter.GetGlobalStats() -> Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats!
+Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter.GetServiceStats(string! service) -> Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats!
+Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter.RecordResponse(string! service, string! endpoint, System.Net.Http.HttpResponseMessage! response) -> void
+Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter.WaitIfNeededAsync(string! service, string! endpoint, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.Dispose() -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.GetCurrentStatistics() -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics!
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.GetOptimizationAdvice() -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice!
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthMonitor(Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor!>! logger = null, long warningThresholdMB = 500, long criticalThresholdMB = 1000, System.TimeSpan? monitorInterval = null) -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.Clone() -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics!
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.Gen0Collections.get -> int
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.Gen0Collections.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.Gen1Collections.get -> int
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.Gen1Collections.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.Gen2Collections.get -> int
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.Gen2Collections.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.LastChecked.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.LastChecked.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.ManagedMemoryMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.ManagedMemoryMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.MemoryHealthStatistics() -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.PrivateMemoryMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.PrivateMemoryMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.Status.get -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatus
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.Status.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.TrendDirection.get -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryTrend
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.TrendDirection.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.WorkingSetMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatistics.WorkingSetMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatus
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatus.Critical = 2 -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatus
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatus.Healthy = 0 -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatus
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatus.Warning = 1 -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatus
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.CurrentStatus.get -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryHealthStatus
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.CurrentStatus.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.IsGrowthConcerning.get -> bool
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.IsGrowthConcerning.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.ManagedMemoryMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.ManagedMemoryMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.MemoryGrowthRate.get -> double
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.MemoryGrowthRate.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.MemoryOptimizationAdvice() -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.PossibleMemoryLeak.get -> bool
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.PossibleMemoryLeak.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.Recommendation.get -> string!
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.Recommendation.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.ShouldOptimize.get -> bool
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.ShouldOptimize.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.SuggestedBatchSizeReduction.get -> double
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.SuggestedBatchSizeReduction.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.Urgency.get -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.OptimizationUrgency
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.Urgency.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.WorkingSetMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationAdvice.WorkingSetMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.Duration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.EndMemoryMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.EndMemoryMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.EndTime.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.EndTime.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.ErrorMessage.get -> string!
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.ErrorMessage.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.MemoryFreedMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.MemoryFreedMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.MemoryOptimizationResult() -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.OptimizationType.get -> string!
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.OptimizationType.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.StartMemoryMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.StartMemoryMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.StartTime.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.StartTime.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.Success.get -> bool
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult.Success.set -> void
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryTrend
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryTrend.Decreasing = 0 -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryTrend
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryTrend.Increasing = 2 -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryTrend
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryTrend.Stable = 1 -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryTrend
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.OptimizationUrgency
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.OptimizationUrgency.Immediate = 2 -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.OptimizationUrgency
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.OptimizationUrgency.None = 0 -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.OptimizationUrgency
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.OptimizationUrgency.Soon = 1 -> Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.OptimizationUrgency
+Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.OptimizeMemoryAsync(bool aggressive = false) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Performance.MemoryHealthMonitor.MemoryOptimizationResult!>!
+Lidarr.Plugin.Common.Services.Performance.MetricType
+Lidarr.Plugin.Common.Services.Performance.MetricType.ApiCall = 0 -> Lidarr.Plugin.Common.Services.Performance.MetricType
+Lidarr.Plugin.Common.Services.Performance.MetricType.Authentication = 3 -> Lidarr.Plugin.Common.Services.Performance.MetricType
+Lidarr.Plugin.Common.Services.Performance.MetricType.Cache = 1 -> Lidarr.Plugin.Common.Services.Performance.MetricType
+Lidarr.Plugin.Common.Services.Performance.MetricType.Custom = 5 -> Lidarr.Plugin.Common.Services.Performance.MetricType
+Lidarr.Plugin.Common.Services.Performance.MetricType.Download = 2 -> Lidarr.Plugin.Common.Services.Performance.MetricType
+Lidarr.Plugin.Common.Services.Performance.MetricType.Search = 4 -> Lidarr.Plugin.Common.Services.Performance.MetricType
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.CacheHits.get -> long
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.CacheHits.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.ErrorCount.get -> long
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.ErrorCount.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.LastUpdated.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.LastUpdated.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.Lock.get -> object!
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.Name.get -> string!
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.Name.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.OperationMetrics() -> void
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.TotalBytes.get -> long
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.TotalBytes.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.TotalCalls.get -> long
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.TotalCalls.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.TotalDuration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.TotalDuration.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.Type.get -> Lidarr.Plugin.Common.Services.Performance.MetricType
+Lidarr.Plugin.Common.Services.Performance.OperationMetrics.Type.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationSummary
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.AverageDuration.get -> double
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.AverageDuration.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.CacheHitRate.get -> double
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.CacheHitRate.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.ErrorCount.get -> long
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.ErrorCount.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.ErrorRate.get -> double
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.ErrorRate.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.LastUpdated.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.LastUpdated.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.OperationSummary() -> void
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.TotalBytes.get -> long
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.TotalBytes.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.TotalCalls.get -> long
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.TotalCalls.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.TotalDuration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.TotalDuration.set -> void
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.Type.get -> Lidarr.Plugin.Common.Services.Performance.MetricType
+Lidarr.Plugin.Common.Services.Performance.OperationSummary.Type.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Duration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Duration.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Metadata.get -> System.Collections.Generic.Dictionary<string!, object!>!
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Metadata.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Name.get -> string!
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Name.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.PerformanceEvent() -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Success.get -> bool
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Success.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Timestamp.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Timestamp.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Type.get -> Lidarr.Plugin.Common.Services.Performance.EventType
+Lidarr.Plugin.Common.Services.Performance.PerformanceEvent.Type.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor
+Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor.Dispose() -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor.GetRecentEvents(int count = 100) -> System.Collections.Generic.IEnumerable<Lidarr.Plugin.Common.Services.Performance.PerformanceEvent!>!
+Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor.GetSummary() -> Lidarr.Plugin.Common.Services.Performance.PerformanceSummary!
+Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor.PerformanceMonitor(System.TimeSpan? flushInterval = null) -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor.RecordApiCall(string! endpoint, System.TimeSpan duration, bool fromCache = false, int? statusCode = null) -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor.RecordCacheOperation(string! cacheType, string! key, bool hit, System.TimeSpan? duration = null) -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor.RecordDownload(string! trackId, System.TimeSpan duration, long fileSize, bool success, string! errorMessage = null) -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor.RecordOperation(string! operationName, System.TimeSpan duration, bool success = true, System.Collections.Generic.Dictionary<string!, object!>! metadata = null) -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor.Reset() -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.CollectionStartTime.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.CollectionStartTime.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.LastUpdated.get -> System.DateTime
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.LastUpdated.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.Operations.get -> System.Collections.Generic.Dictionary<string!, Lidarr.Plugin.Common.Services.Performance.OperationSummary!>!
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.Operations.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.OverallErrorRate.get -> double
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.PerformanceSummary() -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.TotalErrors.get -> long
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.TotalErrors.set -> void
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.TotalOperations.get -> long
+Lidarr.Plugin.Common.Services.Performance.PerformanceSummary.TotalOperations.set -> void
+Lidarr.Plugin.Common.Services.Performance.RateLimitConfig
+Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.BurstSize.get -> int
+Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.BurstSize.set -> void
+Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.CooldownAfterLimit.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.CooldownAfterLimit.set -> void
+Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.RateLimitConfig() -> void
+Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.RequestsPerSecond.get -> int
+Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.RequestsPerSecond.set -> void
+Lidarr.Plugin.Common.Services.Performance.RateLimitStats
+Lidarr.Plugin.Common.Services.Performance.RateLimitStats.EndpointLimits.get -> System.Collections.Generic.Dictionary<string!, int>!
+Lidarr.Plugin.Common.Services.Performance.RateLimitStats.EndpointLimits.set -> void
+Lidarr.Plugin.Common.Services.Performance.RateLimitStats.RateLimitStats() -> void
+Lidarr.Plugin.Common.Services.Performance.RateLimitStats.TotalEndpoints.get -> int
+Lidarr.Plugin.Common.Services.Performance.RateLimitStats.TotalEndpoints.set -> void
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.EndpointStats.get -> System.Collections.Generic.Dictionary<string!, Lidarr.Plugin.Common.Services.Performance.EndpointStats!>!
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.EndpointStats.set -> void
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.ServiceName.get -> string!
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.ServiceName.set -> void
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.ServiceRateLimitStats() -> void
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.ServiceSuccessRate.get -> double
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.TotalErrors.get -> long
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.TotalErrors.set -> void
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.TotalRateLimitHits.get -> long
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.TotalRateLimitHits.set -> void
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.TotalRequests.get -> long
+Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats.TotalRequests.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.BatchDuration.get -> System.TimeSpan
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.BatchDuration.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.BatchNumber.get -> int
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.BatchNumber.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.ErrorMessage.get -> string!
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.ErrorMessage.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.HasError.get -> bool
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.HasError.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.HasMemoryIssue.get -> bool
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.HasMemoryIssue.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.IsCompleted.get -> bool
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.IsCompleted.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.ItemsInBatch.get -> int
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.ItemsInBatch.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.MemoryUsageMB.get -> long
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.MemoryUsageMB.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.PercentComplete.get -> double
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.ProcessedItems.get -> int
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.ProcessedItems.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.Results.get -> System.Collections.Generic.List<TResult>!
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.Results.set -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.StreamingBatchResult() -> void
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.TotalItems.get -> int
+Lidarr.Plugin.Common.Services.Performance.StreamingBatchResult<TResult>.TotalItems.set -> void
+Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter
+Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.Dispose() -> void
+Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.GetCurrentLimit(string! service, string! endpoint) -> int
+Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.GetGlobalStats() -> Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats!
+Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.GetServiceStats(string! service) -> Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats!
+Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.RecordResponse(string! service, string! endpoint, System.Net.Http.HttpResponseMessage! response) -> void
+Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.UniversalAdaptiveRateLimiter() -> void
+Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.WaitIfNeededAsync(string! service, string! endpoint, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Services.Quality.QualityMapper
+Lidarr.Plugin.Common.Services.Quality.QualityMapper.StandardQualities
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.AllowHigherQuality.get -> bool
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.AllowHigherQuality.set -> void
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.AllowLowerQuality.get -> bool
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.AllowLowerQuality.set -> void
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.GetPreferenceScore(Lidarr.Plugin.Abstractions.Models.StreamingQualityTier tier) -> int
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.IsAcceptable(Lidarr.Plugin.Abstractions.Models.StreamingQualityTier tier) -> bool
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.MaxAcceptableTier.get -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.MaxAcceptableTier.set -> void
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.MinAcceptableTier.get -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.MinAcceptableTier.set -> void
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.PreferredTier.get -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.PreferredTier.set -> void
+Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap.QualityPreferenceMap() -> void
+Lidarr.Plugin.Common.Services.Registration.AutoRegisterServiceAttribute
+Lidarr.Plugin.Common.Services.Registration.AutoRegisterServiceAttribute.AutoRegisterServiceAttribute() -> void
+Lidarr.Plugin.Common.Services.Registration.AutoRegisterServiceAttribute.AutoRegisterServiceAttribute(System.Type! serviceType) -> void
+Lidarr.Plugin.Common.Services.Registration.AutoRegisterServiceAttribute.Lifetime.get -> Lidarr.Plugin.Common.Services.Registration.ServiceLifetime
+Lidarr.Plugin.Common.Services.Registration.AutoRegisterServiceAttribute.Lifetime.set -> void
+Lidarr.Plugin.Common.Services.Registration.AutoRegisterServiceAttribute.ServiceType.get -> System.Type!
+Lidarr.Plugin.Common.Services.Registration.AutoRegisterServiceAttribute.ServiceType.set -> void
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.AssemblyName.get -> string!
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.AssemblyName.set -> void
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.Author.get -> string!
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.Author.set -> void
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.Description.get -> string!
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.Description.set -> void
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.HasDownloadClient.get -> bool
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.HasDownloadClient.set -> void
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.HasIndexer.get -> bool
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.HasIndexer.set -> void
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.Name.get -> string!
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.Name.set -> void
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.PluginMetadata() -> void
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.RequiredSettings.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.RequiredSettings.set -> void
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.SupportedFeatures.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.SupportedFeatures.set -> void
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.Version.get -> string!
+Lidarr.Plugin.Common.Services.Registration.PluginMetadata.Version.set -> void
+Lidarr.Plugin.Common.Services.Registration.ServiceLifetime
+Lidarr.Plugin.Common.Services.Registration.ServiceLifetime.Scoped = 2 -> Lidarr.Plugin.Common.Services.Registration.ServiceLifetime
+Lidarr.Plugin.Common.Services.Registration.ServiceLifetime.Singleton = 0 -> Lidarr.Plugin.Common.Services.Registration.ServiceLifetime
+Lidarr.Plugin.Common.Services.Registration.ServiceLifetime.Transient = 1 -> Lidarr.Plugin.Common.Services.Registration.ServiceLifetime
+Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule
+Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.BuildServiceProvider(System.Action<Microsoft.Extensions.DependencyInjection.IServiceCollection!>? configureServices = null) -> Microsoft.Extensions.DependencyInjection.ServiceProvider!
+Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.BuildServiceProvider<TSettings>(TSettings! settings, System.Action<Microsoft.Extensions.DependencyInjection.IServiceCollection!>? configureServices = null) -> Microsoft.Extensions.DependencyInjection.ServiceProvider!
+Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.CreateServiceCollection(System.Action<Microsoft.Extensions.DependencyInjection.IServiceCollection!>? configureServices = null) -> Microsoft.Extensions.DependencyInjection.ServiceCollection!
+Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.GetSingleton(System.Type! type, System.Func<object!>! factory) -> object!
+Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.GetSingleton<T>(System.Func<T!>! factory) -> T!
+Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.StreamingPluginModule() -> void
+Lidarr.Plugin.Common.Services.Registration.ValidationResult
+Lidarr.Plugin.Common.Services.Registration.ValidationResult.Errors.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Common.Services.Registration.ValidationResult.Errors.set -> void
+Lidarr.Plugin.Common.Services.Registration.ValidationResult.IsValid.get -> bool
+Lidarr.Plugin.Common.Services.Registration.ValidationResult.IsValid.set -> void
+Lidarr.Plugin.Common.Services.Registration.ValidationResult.ValidationResult() -> void
+Lidarr.Plugin.Common.Services.Registration.ValidationResult.Warnings.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Common.Services.Registration.ValidationResult.Warnings.set -> void
+Lidarr.Plugin.Common.Services.RequestInfo
+Lidarr.Plugin.Common.Services.RequestInfo.Headers.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Common.Services.RequestInfo.Headers.set -> void
+Lidarr.Plugin.Common.Services.RequestInfo.Parameters.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Common.Services.RequestInfo.Parameters.set -> void
+Lidarr.Plugin.Common.Services.RequestInfo.RequestInfo() -> void
+Lidarr.Plugin.Common.Services.RequestInfo.SearchTerm.get -> string!
+Lidarr.Plugin.Common.Services.RequestInfo.SearchTerm.set -> void
+Lidarr.Plugin.Common.Services.RequestInfo.Url.get -> string!
+Lidarr.Plugin.Common.Services.RequestInfo.Url.set -> void
+Lidarr.Plugin.Common.Services.Resilience.DefensiveService
+Lidarr.Plugin.Common.Services.Resilience.DefensiveServiceWrapper<T>
+Lidarr.Plugin.Common.Services.Resilience.DefensiveServiceWrapper<T>.ConsecutiveFailures.get -> int
+Lidarr.Plugin.Common.Services.Resilience.DefensiveServiceWrapper<T>.DefensiveServiceWrapper(T! service, Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Resilience.DefensiveServiceWrapper<T!>!>! logger) -> void
+Lidarr.Plugin.Common.Services.Resilience.DefensiveServiceWrapper<T>.ExecuteSafely(System.Action<T!>! operation, string! operationName = "Operation") -> void
+Lidarr.Plugin.Common.Services.Resilience.DefensiveServiceWrapper<T>.ExecuteSafely<TResult>(System.Func<T!, TResult>! operation, TResult fallbackValue = default(TResult), string! operationName = "Operation") -> TResult
+Lidarr.Plugin.Common.Services.Resilience.DefensiveServiceWrapper<T>.IsHealthy.get -> bool
+Lidarr.Plugin.Common.Services.Resilience.DefensiveServiceWrapper<T>.ResetHealth() -> void
+Lidarr.Plugin.Common.Services.SafeOperationExecutor
+Lidarr.Plugin.Common.Services.StreamingAuthMixin
+Lidarr.Plugin.Common.Services.StreamingAuthMixin.ClearSession() -> void
+Lidarr.Plugin.Common.Services.StreamingAuthMixin.GetCachedSession<T>() -> T!
+Lidarr.Plugin.Common.Services.StreamingAuthMixin.IsSessionValid<T>(T! session, System.Func<T!, bool>! validator) -> bool
+Lidarr.Plugin.Common.Services.StreamingAuthMixin.StoreSession<T>(T! session) -> void
+Lidarr.Plugin.Common.Services.StreamingAuthMixin.StreamingAuthMixin(string! serviceName) -> void
+Lidarr.Plugin.Common.Services.StreamingCacheHelper
+Lidarr.Plugin.Common.Services.StreamingCacheHelper.Clear() -> void
+Lidarr.Plugin.Common.Services.StreamingCacheHelper.Get<T>(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters) -> T!
+Lidarr.Plugin.Common.Services.StreamingCacheHelper.Set<T>(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters, T! data, System.TimeSpan duration) -> void
+Lidarr.Plugin.Common.Services.StreamingCacheHelper.StreamingCacheHelper(string! serviceName) -> void
+Lidarr.Plugin.Common.Services.StreamingDownloadMixin
+Lidarr.Plugin.Common.Services.StreamingDownloadMixin.CompleteJob(string! jobId, bool success, string! errorMessage = null) -> void
+Lidarr.Plugin.Common.Services.StreamingDownloadMixin.CreateSafeFilePath(Lidarr.Plugin.Abstractions.Models.StreamingTrack! track, string! baseDirectory) -> string!
+Lidarr.Plugin.Common.Services.StreamingDownloadMixin.GetActiveJobs() -> System.Collections.Generic.List<Lidarr.Plugin.Common.Services.DownloadJobInfo!>!
+Lidarr.Plugin.Common.Services.StreamingDownloadMixin.GetJobStatus(string! jobId) -> Lidarr.Plugin.Common.Services.DownloadJobInfo!
+Lidarr.Plugin.Common.Services.StreamingDownloadMixin.StartDownloadJob(Lidarr.Plugin.Abstractions.Models.StreamingAlbum! album, string! outputPath) -> string!
+Lidarr.Plugin.Common.Services.StreamingDownloadMixin.StreamingDownloadMixin(string! serviceName) -> void
+Lidarr.Plugin.Common.Services.StreamingDownloadMixin.UpdateJobProgress(string! jobId, int completedTracks, int totalTracks, string! status = "Downloading") -> void
+Lidarr.Plugin.Common.Services.StreamingIndexerMixin
+Lidarr.Plugin.Common.Services.StreamingIndexerMixin.ApplyRateLimitAsync(int requestsPerMinute) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.StreamingIndexerMixin.BuildSearchUrl(string! baseUrl, string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters) -> string!
+Lidarr.Plugin.Common.Services.StreamingIndexerMixin.CacheResults(string! searchTerm, System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingSearchResult!>! results, System.TimeSpan duration, System.Collections.Generic.Dictionary<string!, string!>! parameters = null) -> void
+Lidarr.Plugin.Common.Services.StreamingIndexerMixin.ConvertToReleaseProperties(System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingSearchResult!>! results) -> System.Collections.Generic.List<System.Collections.Generic.Dictionary<string!, object!>!>!
+Lidarr.Plugin.Common.Services.StreamingIndexerMixin.CreateHeaders(string! userAgent, string! authToken = null) -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Common.Services.StreamingIndexerMixin.GetCachedResults(string! searchTerm, System.Collections.Generic.Dictionary<string!, string!>! parameters = null) -> System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingSearchResult!>!
+Lidarr.Plugin.Common.Services.StreamingIndexerMixin.StreamingIndexerMixin(string! serviceName, Lidarr.Plugin.Common.Services.StreamingCacheHelper! cache = null) -> void
+Lidarr.Plugin.Common.Services.StreamingIndexerMixin.ValidateSearch(string! artist, string! album, string! searchTerm) -> (bool isValid, string! errorMessage)
+Lidarr.Plugin.Common.Services.Validation.DataValidationService
+Lidarr.Plugin.Common.Services.Validation.DataValidationService.DataValidationService(Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Validation.DataValidationService!>! logger) -> void
+Lidarr.Plugin.Common.Services.Validation.DataValidationService.DetectDuplicates<T>(T[]! tracks, System.Func<T, string!>! getTitle, System.Func<T, string!>! getArtist, System.Func<T, System.TimeSpan?>! getDuration) -> Lidarr.Plugin.Common.Services.Validation.DuplicateDetectionResult<T>!
+Lidarr.Plugin.Common.Services.Validation.DataValidationService.SanitizeFileName(string! fileName) -> string!
+Lidarr.Plugin.Common.Services.Validation.DataValidationService.ValidateFilePath(string! basePath, string! fileName) -> Lidarr.Plugin.Common.Services.Validation.PathValidationResult!
+Lidarr.Plugin.Common.Services.Validation.DataValidationService.ValidateTrackData<T>(T track, System.Func<T, string!>! getTitle, System.Func<T, string!>! getArtist) -> Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>!
+Lidarr.Plugin.Common.Services.Validation.DataValidationService.ValidateTrackSequence<T>(T[]! tracks, System.Func<T, int>! getTrackNumber) -> Lidarr.Plugin.Common.Services.Validation.TrackSequenceResult!
+Lidarr.Plugin.Common.Services.Validation.DuplicateDetectionResult<T>
+Lidarr.Plugin.Common.Services.Validation.DuplicateDetectionResult<T>.DuplicateCount.get -> int
+Lidarr.Plugin.Common.Services.Validation.DuplicateDetectionResult<T>.DuplicateCount.set -> void
+Lidarr.Plugin.Common.Services.Validation.DuplicateDetectionResult<T>.DuplicateDetectionResult() -> void
+Lidarr.Plugin.Common.Services.Validation.DuplicateDetectionResult<T>.HasDuplicates.get -> bool
+Lidarr.Plugin.Common.Services.Validation.DuplicateDetectionResult<T>.HasDuplicates.set -> void
+Lidarr.Plugin.Common.Services.Validation.DuplicateDetectionResult<T>.RecommendedTracks.get -> System.Collections.Generic.List<T>!
+Lidarr.Plugin.Common.Services.Validation.DuplicateDetectionResult<T>.RecommendedTracks.set -> void
+Lidarr.Plugin.Common.Services.Validation.PathValidationResult
+Lidarr.Plugin.Common.Services.Validation.PathValidationResult.ErrorMessage.get -> string!
+Lidarr.Plugin.Common.Services.Validation.PathValidationResult.ErrorMessage.set -> void
+Lidarr.Plugin.Common.Services.Validation.PathValidationResult.IsValid.get -> bool
+Lidarr.Plugin.Common.Services.Validation.PathValidationResult.IsValid.set -> void
+Lidarr.Plugin.Common.Services.Validation.PathValidationResult.PathValidationResult() -> void
+Lidarr.Plugin.Common.Services.Validation.PathValidationResult.SanitizedFileName.get -> string!
+Lidarr.Plugin.Common.Services.Validation.PathValidationResult.SanitizedFileName.set -> void
+Lidarr.Plugin.Common.Services.Validation.PathValidationResult.SanitizedPath.get -> string!
+Lidarr.Plugin.Common.Services.Validation.PathValidationResult.SanitizedPath.set -> void
+Lidarr.Plugin.Common.Services.Validation.TrackSequenceResult
+Lidarr.Plugin.Common.Services.Validation.TrackSequenceResult.Issue.get -> string!
+Lidarr.Plugin.Common.Services.Validation.TrackSequenceResult.Issue.set -> void
+Lidarr.Plugin.Common.Services.Validation.TrackSequenceResult.IsValid.get -> bool
+Lidarr.Plugin.Common.Services.Validation.TrackSequenceResult.IsValid.set -> void
+Lidarr.Plugin.Common.Services.Validation.TrackSequenceResult.MissingTrackNumbers.get -> System.Collections.Generic.List<int>!
+Lidarr.Plugin.Common.Services.Validation.TrackSequenceResult.MissingTrackNumbers.set -> void
+Lidarr.Plugin.Common.Services.Validation.TrackSequenceResult.TrackSequenceResult() -> void
+Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>
+Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>.Data.get -> T
+Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>.Data.set -> void
+Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>.ErrorMessage.get -> string!
+Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>.ErrorMessage.set -> void
+Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>.IsValid.get -> bool
+Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>.IsValid.set -> void
+Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>.ValidationResult() -> void
+Lidarr.Plugin.Common.Testing.MockFactories
+Lidarr.Plugin.Common.Testing.TestDataSets
+Lidarr.Plugin.Common.Utilities.FileNameSanitizer
+Lidarr.Plugin.Common.Utilities.FileSystemUtilities
+Lidarr.Plugin.Common.Utilities.GenericResilienceExecutor
+Lidarr.Plugin.Common.Utilities.Guard
+Lidarr.Plugin.Common.Utilities.HashingUtility
+Lidarr.Plugin.Common.Utilities.HmacSha256Signer
+Lidarr.Plugin.Common.Utilities.HmacSha256Signer.HmacSha256Signer(string! secret) -> void
+Lidarr.Plugin.Common.Utilities.HmacSha256Signer.Sign(System.Collections.Generic.IDictionary<string!, string!>! parameters) -> string!
+Lidarr.Plugin.Common.Utilities.HttpClientExtensions
+Lidarr.Plugin.Common.Utilities.IRequestSigner
+Lidarr.Plugin.Common.Utilities.IRequestSigner.Sign(System.Collections.Generic.IDictionary<string!, string!>! parameters) -> string!
+Lidarr.Plugin.Common.Utilities.Md5ConcatSigner
+Lidarr.Plugin.Common.Utilities.Md5ConcatSigner.Md5ConcatSigner(string! secret) -> void
+Lidarr.Plugin.Common.Utilities.Md5ConcatSigner.Sign(System.Collections.Generic.IDictionary<string!, string!>! parameters) -> string!
+Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility
+Lidarr.Plugin.Common.Utilities.RetryUtilities
+Lidarr.Plugin.Common.Utilities.RetryUtilities.CircuitBreaker
+Lidarr.Plugin.Common.Utilities.RetryUtilities.CircuitBreaker.CircuitBreaker(int failureThreshold = 5, System.TimeSpan? resetTimeout = null) -> void
+Lidarr.Plugin.Common.Utilities.RetryUtilities.CircuitBreaker.ExecuteAsync<T>(System.Func<System.Threading.Tasks.Task<T>!>! action) -> System.Threading.Tasks.Task<T>!
+Lidarr.Plugin.Common.Utilities.RetryUtilities.CircuitBreakerOpenException
+Lidarr.Plugin.Common.Utilities.RetryUtilities.CircuitBreakerOpenException.CircuitBreakerOpenException(string! message) -> void
+Lidarr.Plugin.Common.Utilities.RetryUtilities.RateLimiter
+Lidarr.Plugin.Common.Utilities.RetryUtilities.RateLimiter.RateLimiter(int maxRequests, System.TimeSpan timeWindow) -> void
+Lidarr.Plugin.Common.Utilities.RetryUtilities.RateLimiter.WaitIfNeededAsync() -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Utilities.ValidationUtilities
+override Lidarr.Plugin.Abstractions.Models.StreamingQuality.ToString() -> string!
+override Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.ToString() -> string!
+override Lidarr.Plugin.Common.Services.Http.OAuthDelegatingHandler.SendAsync(System.Net.Http.HttpRequestMessage! request, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage!>!
+override Lidarr.Plugin.Common.Services.Http.StreamingApiRequestInfo.ToString() -> string!
+override Lidarr.Plugin.Common.Services.Registration.ValidationResult.ToString() -> string!
+readonly Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>._sessionLock -> object!
+readonly Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>._pkceGenerator -> Lidarr.Plugin.Common.Services.Authentication.IPKCEGenerator!
+static Lidarr.Plugin.Common.Base.StreamingConfigHelpers.CreateMaskedSettings(object! settings) -> object!
+static Lidarr.Plugin.Common.Base.StreamingConfigHelpers.ValidateStreamingSettings(string! baseUrl, string! authMethod, int searchLimit, int rateLimit, string! countryCode) -> (bool isValid, System.Collections.Generic.List<string!>! errors)
+static Lidarr.Plugin.Common.Base.StreamingIndexerHelpers.BuildSearchUrl(string! baseUrl, string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters) -> string!
+static Lidarr.Plugin.Common.Base.StreamingIndexerHelpers.CreateBasicReleaseInfo(Lidarr.Plugin.Abstractions.Models.StreamingSearchResult! result, string! indexerName) -> object!
+static Lidarr.Plugin.Common.Base.StreamingIndexerHelpers.CreateDownloadUrl(string! serviceName, string! albumId, string! protocol = "unknown") -> string!
+static Lidarr.Plugin.Common.Base.StreamingIndexerHelpers.CreateInfoUrl(string! baseWebUrl, string! albumId, string! urlTemplate = "/album/{0}") -> string!
+static Lidarr.Plugin.Common.Base.StreamingIndexerHelpers.CreateStreamingHeaders(string! userAgent, string! authToken = null) -> System.Collections.Generic.Dictionary<string!, string!>!
+static Lidarr.Plugin.Common.Base.StreamingIndexerHelpers.EstimateReleaseSize(int trackCount, Lidarr.Plugin.Abstractions.Models.StreamingQualityTier qualityTier = Lidarr.Plugin.Abstractions.Models.StreamingQualityTier.Lossless) -> long
+static Lidarr.Plugin.Common.Base.StreamingIndexerHelpers.ExtractNumericId(string! input) -> string!
+static Lidarr.Plugin.Common.Base.StreamingIndexerHelpers.GenerateSearchCacheKey(string! serviceName, string! searchTerm, System.Collections.Generic.Dictionary<string!, string!>! parameters = null) -> string!
+static Lidarr.Plugin.Common.Base.StreamingIndexerHelpers.GetMusicCategories(bool includeAudiobooks = false) -> int[]!
+static Lidarr.Plugin.Common.Base.StreamingIndexerHelpers.ValidateSearchCriteria(string! artist, string! album, string! searchTerm) -> (bool isValid, string! errorMessage)
+static Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.Failed(string! errorMessage, Lidarr.Plugin.Common.Interfaces.AuthErrorType errorType = Lidarr.Plugin.Common.Interfaces.AuthErrorType.Unknown) -> Lidarr.Plugin.Common.Interfaces.AuthResult<TSession!>!
+static Lidarr.Plugin.Common.Interfaces.AuthResult<TSession>.Successful(TSession! session) -> Lidarr.Plugin.Common.Interfaces.AuthResult<TSession!>!
+static Lidarr.Plugin.Common.Security.InputSanitizer.IsSafeInput(string! input) -> bool
+static Lidarr.Plugin.Common.Security.InputSanitizer.SanitizeApiParameter(string! parameter) -> string!
+static Lidarr.Plugin.Common.Security.InputSanitizer.SanitizeFilePath(string! filePath) -> string!
+static Lidarr.Plugin.Common.Security.InputSanitizer.SanitizeMetadata(string! metadata) -> string!
+static Lidarr.Plugin.Common.Security.InputSanitizer.SanitizeSearchQuery(string! query) -> string!
+static Lidarr.Plugin.Common.Security.Sanitize.DisplayText(string? value) -> string!
+static Lidarr.Plugin.Common.Security.Sanitize.IsSafePath(string? path) -> bool
+static Lidarr.Plugin.Common.Security.Sanitize.PathSegment(string? segment) -> string!
+static Lidarr.Plugin.Common.Security.Sanitize.UrlComponent(string? value) -> string!
+static Lidarr.Plugin.Common.Services.Authentication.PKCEGenerator.IsValidCodeVerifier(string! codeVerifier) -> bool
+static Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.Aggressive.get -> Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions!
+static Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.Conservative.get -> Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions!
+static Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions.Default.get -> Lidarr.Plugin.Common.Services.Globalization.UnicodeNormalizationOptions!
+static Lidarr.Plugin.Common.Services.Intelligence.CompilationAlbumDetector.GetCompilationType(string! albumArtist, string! albumTitle = null) -> Lidarr.Plugin.Common.Services.Intelligence.CompilationType
+static Lidarr.Plugin.Common.Services.Intelligence.CompilationAlbumDetector.GetMatchingStrategy(Lidarr.Plugin.Common.Services.Intelligence.CompilationType type) -> Lidarr.Plugin.Common.Services.Intelligence.CompilationMatchingStrategy
+static Lidarr.Plugin.Common.Services.Intelligence.CompilationAlbumDetector.IsSoundtrack(string! albumTitle, string! albumArtist = null) -> bool
+static Lidarr.Plugin.Common.Services.Intelligence.CompilationAlbumDetector.IsVariousArtists(string! albumArtist, string! albumTitle = null) -> bool
+static Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers.BuildSearchRequest(string! baseUrl, string! searchEndpoint, string! searchTerm, System.Collections.Generic.Dictionary<string!, string!>! parameters = null, System.Collections.Generic.Dictionary<string!, string!>! headers = null) -> Lidarr.Plugin.Common.Services.RequestInfo!
+static Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers.CreateDownloadUrl(Lidarr.Plugin.Abstractions.Models.StreamingSearchResult! result, string! serviceName) -> string!
+static Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers.CreateReleaseInfo<T>(Lidarr.Plugin.Abstractions.Models.StreamingSearchResult! result, string! indexerName, System.Func<string!, string!, long, string!, string!, System.DateTime, int[]!, T>! factory, string! protocol = "unknown") -> T
+static Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers.CreateReleaseProperties(Lidarr.Plugin.Abstractions.Models.StreamingSearchResult! result, string! indexerName, string! protocol = "unknown") -> System.Collections.Generic.Dictionary<string!, object!>!
+static Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers.EstimateSize(Lidarr.Plugin.Abstractions.Models.StreamingSearchResult! result) -> long
+static Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers.GenerateTitle(Lidarr.Plugin.Abstractions.Models.StreamingSearchResult! result) -> string!
+static Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers.GetStreamingCategories(bool includePodcasts = false) -> int[]!
+static Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers.LogRequest(object! logger, string! operation, Lidarr.Plugin.Common.Services.RequestInfo! requestInfo) -> void
+static Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers.ParseApiError(string! responseContent, int statusCode) -> (bool isError, string? errorMessage, int? statusCode)
+static Lidarr.Plugin.Common.Services.LidarrIntegrationHelpers.ValidateSearchRequest(string! artist, string! album, string! searchTerm, int maxLength = 500) -> (bool isValid, string! errorMessage)
+static Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.Default.get -> Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions!
+static Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.StrictMode.get -> Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions!
+static Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.Aggressive.get -> Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions!
+static Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.Conservative.get -> Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions!
+static Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions.Default.get -> Lidarr.Plugin.Common.Services.Performance.BatchMemoryOptions!
+static Lidarr.Plugin.Common.Services.Quality.QualityMapper.CompareQualities(Lidarr.Plugin.Abstractions.Models.StreamingQuality! quality1, Lidarr.Plugin.Abstractions.Models.StreamingQuality! quality2) -> int
+static Lidarr.Plugin.Common.Services.Quality.QualityMapper.CreatePreferenceMap(Lidarr.Plugin.Abstractions.Models.StreamingQualityTier preferredTier, bool allowHigher = true, bool allowLower = true) -> Lidarr.Plugin.Common.Services.Quality.QualityPreferenceMap!
+static Lidarr.Plugin.Common.Services.Quality.QualityMapper.FindBestMatch(System.Collections.Generic.IEnumerable<Lidarr.Plugin.Abstractions.Models.StreamingQuality!>! availableQualities, Lidarr.Plugin.Abstractions.Models.StreamingQualityTier preferredTier = Lidarr.Plugin.Abstractions.Models.StreamingQualityTier.Lossless) -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+static Lidarr.Plugin.Common.Services.Quality.QualityMapper.FromNumericId(int qualityId, string! serviceName = "Unknown") -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+static Lidarr.Plugin.Common.Services.Quality.QualityMapper.FromStringDescriptor(string! descriptor, string! serviceName = "Unknown") -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+static Lidarr.Plugin.Common.Services.Quality.QualityMapper.GetQualityDescription(Lidarr.Plugin.Abstractions.Models.StreamingQuality! quality) -> string!
+static Lidarr.Plugin.Common.Services.Quality.QualityMapper.GetQualityTier(Lidarr.Plugin.Abstractions.Models.StreamingQuality! quality) -> Lidarr.Plugin.Abstractions.Models.StreamingQualityTier
+static Lidarr.Plugin.Common.Services.Resilience.DefensiveService.Wrap<T>(T! service, Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Resilience.DefensiveServiceWrapper<T!>!>! logger) -> Lidarr.Plugin.Common.Services.Resilience.DefensiveServiceWrapper<T!>!
+static Lidarr.Plugin.Common.Services.SafeOperationExecutor.ExecuteFileOperation<T>(string! filePath, System.Func<string!, T>! operation, T fallbackValue = default(T), int maxRetries = 3) -> T
+static Lidarr.Plugin.Common.Services.SafeOperationExecutor.ExecuteWithFallbacks<T>(params System.Func<T>![]! operations) -> T
+static Lidarr.Plugin.Common.Services.SafeOperationExecutor.ExecuteWithTimeoutAsync<T>(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<T>!>! operation, System.TimeSpan timeout, T fallbackValue = default(T), string! operationName = "Operation") -> System.Threading.Tasks.Task<T>!
+static Lidarr.Plugin.Common.Services.SafeOperationExecutor.TryExecute<T>(System.Func<T>! operation, out T result, T fallbackValue = default(T)) -> bool
+static Lidarr.Plugin.Common.Services.SafeOperationExecutor.TryExecuteAsync<T>(System.Func<System.Threading.Tasks.Task<T>!>! operation, T fallbackValue = default(T)) -> System.Threading.Tasks.Task<(bool Success, T Result)>!
+static Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>.Failed(string! error) -> Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>!
+static Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>.Success(T data) -> Lidarr.Plugin.Common.Services.Validation.ValidationResult<T>!
+static Lidarr.Plugin.Common.Testing.MockFactories.CreateMockAlbum(string! id = null, string! title = null, Lidarr.Plugin.Abstractions.Models.StreamingArtist! artist = null) -> Lidarr.Plugin.Abstractions.Models.StreamingAlbum!
+static Lidarr.Plugin.Common.Testing.MockFactories.CreateMockAlbumWithTracks(int trackCount = 10) -> Lidarr.Plugin.Abstractions.Models.StreamingAlbum!
+static Lidarr.Plugin.Common.Testing.MockFactories.CreateMockArtist(string! id = null, string! name = null) -> Lidarr.Plugin.Abstractions.Models.StreamingArtist!
+static Lidarr.Plugin.Common.Testing.MockFactories.CreateMockQualities() -> System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingQuality!>!
+static Lidarr.Plugin.Common.Testing.MockFactories.CreateMockQuality(string! id = null, string! format = null, int? bitrate = null, int? sampleRate = null, int? bitDepth = null) -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+static Lidarr.Plugin.Common.Testing.MockFactories.CreateMockSearchResults(int count = 5) -> System.Collections.Generic.IEnumerable<Lidarr.Plugin.Abstractions.Models.StreamingSearchResult!>!
+static Lidarr.Plugin.Common.Testing.MockFactories.CreateMockSettings<TSettings>() -> TSettings!
+static Lidarr.Plugin.Common.Testing.MockFactories.CreateMockTrack(string! id = null, string! title = null, Lidarr.Plugin.Abstractions.Models.StreamingAlbum! album = null, int? trackNumber = null) -> Lidarr.Plugin.Abstractions.Models.StreamingTrack!
+static Lidarr.Plugin.Common.Testing.TestDataSets.CreateClassicalHiResAlbum() -> Lidarr.Plugin.Abstractions.Models.StreamingAlbum!
+static Lidarr.Plugin.Common.Testing.TestDataSets.CreateEdgeCaseAlbum() -> Lidarr.Plugin.Abstractions.Models.StreamingAlbum!
+static Lidarr.Plugin.Common.Testing.TestDataSets.CreateJazzAlbum() -> Lidarr.Plugin.Abstractions.Models.StreamingAlbum!
+static Lidarr.Plugin.Common.Utilities.FileNameSanitizer.SanitizeFileName(string! fileName, char replacement = ' ') -> string!
+static Lidarr.Plugin.Common.Utilities.FileNameSanitizer.SanitizePath(string! path) -> string!
+static Lidarr.Plugin.Common.Utilities.FileSystemUtilities.CreateAlbumDirectoryName(string! albumTitle, int? year = null, int maxLength = 200) -> string!
+static Lidarr.Plugin.Common.Utilities.FileSystemUtilities.CreateTrackFileName(string! title, int trackNumber, string! extension = "flac", int maxLength = 200) -> string!
+static Lidarr.Plugin.Common.Utilities.FileSystemUtilities.SanitizeDirectoryPath(string! path, int maxLength = 255) -> string!
+static Lidarr.Plugin.Common.Utilities.FileSystemUtilities.SanitizeFileName(string! fileName, int maxLength = 255) -> string!
+static Lidarr.Plugin.Common.Utilities.GenericResilienceExecutor.ExecuteWithResilienceAsync<TRequest, TResponse>(TRequest request, System.Func<TRequest, System.Threading.CancellationToken, System.Threading.Tasks.Task<TResponse>!>! sendAsync, System.Func<TRequest, System.Threading.Tasks.Task<TRequest>!>! cloneRequestAsync, System.Func<TRequest, string?>! getHost, System.Func<TResponse, int>! getStatusCode, System.Func<TResponse, System.TimeSpan?>! getRetryAfterDelay, int maxRetries = 5, System.TimeSpan? retryBudget = null, int maxConcurrencyPerHost = 6, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResponse>!
+static Lidarr.Plugin.Common.Utilities.Guard.InRange<T>(T value, T min, T max, string! paramName = null) -> T
+static Lidarr.Plugin.Common.Utilities.Guard.NotNull<T>(T! value, string! paramName = null) -> T!
+static Lidarr.Plugin.Common.Utilities.Guard.NotNullOrEmpty(string! value, string! paramName = null) -> string!
+static Lidarr.Plugin.Common.Utilities.Guard.NotNullOrEmpty<T>(System.Collections.Generic.IEnumerable<T>! value, string! paramName = null) -> System.Collections.Generic.IEnumerable<T>!
+static Lidarr.Plugin.Common.Utilities.Guard.NotNullOrWhiteSpace(string! value, string! paramName = null) -> string!
+static Lidarr.Plugin.Common.Utilities.Guard.ValidFilePath(string! path, string! paramName = null) -> string!
+static Lidarr.Plugin.Common.Utilities.HashingUtility.ComputeHmacSha256(string! secret, string! data) -> string!
+static Lidarr.Plugin.Common.Utilities.HashingUtility.ComputeMD5Hash(string! input) -> string!
+static Lidarr.Plugin.Common.Utilities.HashingUtility.ComputeSHA256(string! input) -> string!
+static Lidarr.Plugin.Common.Utilities.HashingUtility.GenerateCacheKey(params string![]! components) -> string!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.AddStandardHeaders(this System.Net.Http.HttpRequestMessage! request, string! userAgent = null, System.Collections.Generic.Dictionary<string!, string!>! additionalHeaders = null) -> System.Net.Http.HttpRequestMessage!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.BuildUrlWithParams(string! baseUrl, System.Collections.Generic.Dictionary<string!, string!>! parameters) -> string!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.CloneHttpRequestMessageAsync(System.Net.Http.HttpRequestMessage! request) -> System.Threading.Tasks.Task<System.Net.Http.HttpRequestMessage!>!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.ExecuteWithResilienceAsync(this System.Net.Http.HttpClient! httpClient, System.Net.Http.HttpRequestMessage! request, int maxRetries = 5, System.TimeSpan? retryBudget = null, int maxConcurrencyPerHost = 6, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage!>!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.ExecuteWithRetryAsync(this System.Net.Http.HttpClient! httpClient, System.Net.Http.HttpRequestMessage! request, int maxRetries = 3, int initialDelayMs = 1000, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage!>!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.ExecuteWithTimingAsync(this System.Net.Http.HttpClient! httpClient, System.Net.Http.HttpRequestMessage! request, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<(System.Net.Http.HttpResponseMessage! Response, System.TimeSpan Duration)>!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.GetJsonAsync<T>(this System.Net.Http.HttpClient! httpClient, string! url, System.Text.Json.JsonSerializerOptions! options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<T>!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.IsJsonContent(this System.Net.Http.HttpResponseMessage! response) -> bool
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.MaskSensitiveParams(System.Collections.Generic.Dictionary<string!, string!>! parameters) -> System.Collections.Generic.Dictionary<string!, string!>!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.PostJsonAsync<TRequest, TResponse>(this System.Net.Http.HttpClient! httpClient, string! url, TRequest data, System.Text.Json.JsonSerializerOptions! options = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<TResponse>!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.ReadContentSafelyAsync(this System.Net.Http.HttpContent! content) -> System.Threading.Tasks.Task<string!>!
+static Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility.GetPreviewMessage(string! trackTitle) -> string!
+static Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility.IsLikelyPreview(string! url, int? durationSeconds, string! restrictionMessage) -> bool
+static Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility.IsLikelyPreview(string! url, int? durationSeconds, string! restrictionMessage, int durationThresholdSeconds, System.Collections.Generic.IEnumerable<string!>? extraPatterns = null) -> bool
+static Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility.IsPreviewDuration(int durationSeconds) -> bool
+static Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility.IsPreviewDuration(int durationSeconds, int thresholdSeconds) -> bool
+static Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility.IsPreviewOrSampleUrl(string! url) -> bool
+static Lidarr.Plugin.Common.Utilities.RetryUtilities.ExecuteWithRetryAsync<T>(System.Func<System.Threading.Tasks.Task<T>!>! action, int maxRetries = 3, int initialDelayMs = 1000, string! operationName = null, System.Action<System.Exception!, int, string!>! onRetry = null) -> System.Threading.Tasks.Task<T>!
+static Lidarr.Plugin.Common.Utilities.RetryUtilities.ExecuteWithTimeoutAndRetryAsync<T>(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<T>!>! action, System.TimeSpan timeout, int maxRetries = 3, string! operationName = null, System.Action<System.Exception!, int, string!>! onRetry = null) -> System.Threading.Tasks.Task<T>!
+static Lidarr.Plugin.Common.Utilities.RetryUtilities.IsRetryableException(System.Exception! ex) -> bool
+static Lidarr.Plugin.Common.Utilities.RetryUtilities.IsRetryableStatusCode(System.Net.HttpStatusCode statusCode) -> bool
+static Lidarr.Plugin.Common.Utilities.RetryUtilities.SimpleRetryAsync<T>(System.Func<System.Threading.Tasks.Task<T>!>! action, int maxRetries = 3, int delayMs = 1000) -> System.Threading.Tasks.Task<T>!
+static Lidarr.Plugin.Common.Utilities.ValidationUtilities.IsResponseSizeAcceptable(long? contentLength, long maxBytes = 52428800) -> bool
+static Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateDirectoryPath(string! directoryPath, bool createIfMissing = false) -> bool
+static Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateDownloadedFile(string! filePath, long? expectedSize = null, string! expectedHash = null) -> bool
+static Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateDownloadedFile(string! filePath, long? expectedSize, string! expectedHash, bool validateSignature, string? expectedExtension = null) -> bool
+static Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateEmail(string! email) -> bool
+static Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateFilePath(string! filePath) -> bool
+static Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateFileSignature(string! filePath, string? expectedExtension = null) -> bool
+static Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateUrl(string! url) -> bool
+static readonly Lidarr.Plugin.Common.Services.Quality.QualityMapper.StandardQualities.FlacCD -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+static readonly Lidarr.Plugin.Common.Services.Quality.QualityMapper.StandardQualities.FlacHiRes -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+static readonly Lidarr.Plugin.Common.Services.Quality.QualityMapper.StandardQualities.FlacMax -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+static readonly Lidarr.Plugin.Common.Services.Quality.QualityMapper.StandardQualities.Mp3High -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+static readonly Lidarr.Plugin.Common.Services.Quality.QualityMapper.StandardQualities.Mp3Low -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+static readonly Lidarr.Plugin.Common.Services.Quality.QualityMapper.StandardQualities.Mp3Normal -> Lidarr.Plugin.Abstractions.Models.StreamingQuality!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.ApplyMetadataTagsAsync(string! filePath, Lidarr.Plugin.Abstractions.Models.StreamingTrack! metadata) -> System.Threading.Tasks.Task!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.DownloadTrackAsync(Lidarr.Plugin.Abstractions.Models.StreamingTrack! track, string! outputFilePath, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Base.StreamingDownloadResult!>!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GenerateFileName(Lidarr.Plugin.Abstractions.Models.StreamingTrack! track, Lidarr.Plugin.Abstractions.Models.StreamingAlbum! album) -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GenerateTrackFileName(Lidarr.Plugin.Abstractions.Models.StreamingTrack! track, Lidarr.Plugin.Abstractions.Models.StreamingAlbum! album) -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GenerateTrackPath(Lidarr.Plugin.Abstractions.Models.StreamingTrack! track, Lidarr.Plugin.Abstractions.Models.StreamingAlbum! album, string! basePath) -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GetDefaultQuality() -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GetDownloadRetryDelay(int attempt, System.Net.Http.HttpResponseMessage? response) -> System.TimeSpan
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.GetMaxDownloadRetries() -> int
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.OnDownloadCompleted(string! downloadId, bool success, string! errorMessage = null) -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.OnDownloadProgress(string! downloadId, double progress, string! currentTrack = null) -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingDownloadClient<TSettings>.ShouldRetryDownload(System.Net.Http.HttpResponseMessage! response) -> bool
+virtual Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.GetHttpClient() -> System.Net.Http.HttpClient!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.HandleRateLimitAsync() -> System.Threading.Tasks.Task!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.InitializeAsync(System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<FluentValidation.Results.ValidationResult!>!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.PostprocessResults(System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingAlbum!>! results) -> System.Collections.Generic.List<Lidarr.Plugin.Abstractions.Models.StreamingAlbum!>!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.PreprocessQuery(string! query) -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.SearchAlbumsStreamAsync(string! searchTerm, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Lidarr.Plugin.Abstractions.Models.StreamingAlbum!>!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.SearchStreamAsync(string! query, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Lidarr.Plugin.Abstractions.Models.StreamingAlbum!>!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingIndexer<TSettings>.SearchTracksStreamAsync(string! searchTerm, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Collections.Generic.IAsyncEnumerable<Lidarr.Plugin.Abstractions.Models.StreamingTrack!>!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.ApiRateLimit.get -> int
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.ApiRateLimit.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.AuthToken.get -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.AuthToken.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.BaseUrl.get -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.BaseUrl.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.ConnectionTimeout.get -> int
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.ConnectionTimeout.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.CountryCode.get -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.CountryCode.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.EarlyReleaseDayLimit.get -> int
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.EarlyReleaseDayLimit.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.Email.get -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.Email.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.GetMaskedForLogging() -> object!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.IncludeCompilations.get -> bool
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.IncludeCompilations.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.IncludeSingles.get -> bool
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.IncludeSingles.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.IsValid(out string! errorMessage) -> bool
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.Locale.get -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.Locale.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.OrganizeByArtist.get -> bool
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.OrganizeByArtist.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.Password.get -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.Password.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.SearchCacheDuration.get -> int
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.SearchCacheDuration.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.SearchLimit.get -> int
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.SearchLimit.set -> void
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.UserId.get -> string!
+virtual Lidarr.Plugin.Common.Base.BaseStreamingSettings.UserId.set -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.AuthenticateAsync(TCredentials! credentials) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Interfaces.AuthResult<TSession!>!>!
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.ClassifyAuthenticationError(System.Exception! ex) -> Lidarr.Plugin.Common.Interfaces.AuthErrorType
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.ClearSession() -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.Dispose() -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.GetCachedSession() -> TSession!
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.GetValidSessionAsync() -> System.Threading.Tasks.Task<TSession!>!
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnAuthenticationError(TCredentials! credentials, System.Exception! ex) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnAuthenticationRetry(TCredentials! credentials, System.Exception! ex, int attempt, string! message) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnAuthenticationSuccess(TSession! session) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnRefreshError(TSession! session, System.Exception! ex) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnRefreshNotSupported(TSession! session) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnRevocationError(TSession! session, System.Exception! ex) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnSessionCleared(TSession! session) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnSessionExpired(TSession! session) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnSessionRefreshed(TSession! oldSession, TSession! newSession) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnSessionRevoked(TSession! session) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnSessionStored(TSession! session) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.OnSessionValidationError(TSession! session, System.Exception! ex) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.PerformSessionRefreshAsync(TSession! session) -> System.Threading.Tasks.Task<TSession?>!
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.PerformSessionRevocationAsync(TSession! session) -> System.Threading.Tasks.Task!
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.PerformSessionValidationAsync(TSession! session) -> System.Threading.Tasks.Task<bool>!
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.RefreshSessionAsync(TSession! session) -> System.Threading.Tasks.Task<TSession?>!
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.RevokeSessionAsync(TSession! session) -> System.Threading.Tasks.Task!
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.StoreSession(TSession! session) -> void
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.SupportsRefresh() -> bool
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.SupportsRevocation() -> bool
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.ValidateSessionAsync(TSession! session) -> System.Threading.Tasks.Task<bool>!
+virtual Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.ExchangeCodeForTokensAsync(string! authorizationCode, string! flowId) -> System.Threading.Tasks.Task<TSession!>!
+virtual Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.GenerateSecureState() -> string!
+virtual Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.InitiateOAuthFlowAsync(string! redirectUri, System.Collections.Generic.IEnumerable<string!>! scopes = null, string! state = null) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Authentication.OAuthFlowResult!>!
+virtual Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.RefreshTokensAsync(TSession! session) -> System.Threading.Tasks.Task<TSession!>!
+virtual Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.RevokeTokensAsync(TSession! session) -> System.Threading.Tasks.Task!
+virtual Lidarr.Plugin.Common.Services.Authentication.OAuthStreamingAuthenticationService<TSession, TCredentials>.ValidateFlowState(string! flowId, string! state) -> bool
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.BuildCacheKeySeed(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters) -> string!
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.ClearEndpoint(string! endpoint) -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.CountEntriesByPrefix(string! prefix) -> int
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.GenerateCacheKey(string! endpoint, System.Collections.Generic.Dictionary<string!, string!>! parameters) -> string!
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.GetStatistics() -> object!
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.HashCacheKeySeed(string! seed) -> string!
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.InvalidateByPrefix(string! prefix) -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.IsSensitiveParameter(string! parameterName) -> bool
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.OnCacheCleared() -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.OnCacheEviction(string! cacheKey, System.TimeSpan age) -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.OnCacheHit(string! cacheKey) -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.OnCacheHit(string! endpoint, string! cacheKey) -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.OnCacheMiss(string! cacheKey) -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.OnCacheMiss(string! endpoint, string! cacheKey) -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.OnCacheSet(string! endpoint, string! cacheKey, System.TimeSpan duration) -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.OnEndpointCleared(string! endpoint, int itemsRemoved) -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.OnExpiredItemsCleanup(int itemsRemoved) -> void
+virtual Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.ShouldFilterParameter(string! parameterName, object! parameterValue) -> bool
+virtual Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.DownloadAlbumAsync(string! albumId, string! outputDirectory, Lidarr.Plugin.Abstractions.Models.StreamingQuality! quality, System.IProgress<Lidarr.Plugin.Common.Interfaces.DownloadProgress!>! progress, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Interfaces.DownloadResult!>!
+virtual Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.DownloadTrackAsync(string! trackId, string! outputPath, Lidarr.Plugin.Abstractions.Models.StreamingQuality? quality, System.Threading.CancellationToken cancellationToken) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Interfaces.TrackDownloadResult!>!
+virtual Lidarr.Plugin.Common.Services.Performance.BatchMemoryManager.Dispose(bool disposing) -> void
+virtual Lidarr.Plugin.Common.Services.Performance.BatchMemoryManager.DisposeAsyncCore() -> System.Threading.Tasks.ValueTask
+virtual Lidarr.Plugin.Common.Services.Performance.PerformanceMonitor.OnMetricsFlush(Lidarr.Plugin.Common.Services.Performance.PerformanceSummary! summary) -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.ConfigureServices(Microsoft.Extensions.DependencyInjection.IServiceCollection! services) -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.Dispose() -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.GetMetadata() -> Lidarr.Plugin.Common.Services.Registration.PluginMetadata!
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.GetRequiredSettings() -> System.Collections.Generic.List<string!>!
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.GetSupportedFeatures() -> System.Collections.Generic.List<string!>!
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.HasDownloadClient() -> bool
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.HasIndexer() -> bool
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.RegisterAuthenticationServices() -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.RegisterCachingServices() -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.RegisterCoreServices() -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.RegisterCustomServices() -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.RegisterDownloadServices() -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.RegisterHttpServices() -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.RegisterQualityServices() -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.RegisterServices() -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.SupportsAuthentication() -> bool
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.SupportsCaching() -> bool
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.SupportsQualitySelection() -> bool
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.ValidateCoreServices(System.Collections.Generic.List<string!>! errors, System.Collections.Generic.List<string!>! warnings) -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.ValidateOptionalServices(System.Collections.Generic.List<string!>! errors, System.Collections.Generic.List<string!>! warnings) -> void
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.ValidateRegistration() -> Lidarr.Plugin.Common.Services.Registration.ValidationResult!
+virtual Lidarr.Plugin.Common.Services.Registration.StreamingPluginModule.Version.get -> string!

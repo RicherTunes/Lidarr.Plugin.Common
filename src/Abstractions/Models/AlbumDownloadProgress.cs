@@ -1,6 +1,6 @@
 using System;
 
-namespace Lidarr.Plugin.Common.Models
+namespace Lidarr.Plugin.Abstractions.Models
 {
     /// <summary>
     /// Progress information for album download operations

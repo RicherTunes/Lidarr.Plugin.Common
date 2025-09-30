@@ -1,7 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Lidarr.Plugin.Common.Models;
+using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Base;
 
 namespace Lidarr.Plugin.Common.Testing
@@ -304,8 +304,8 @@ namespace Lidarr.Plugin.Common.Testing
 
         private static StreamingAlbumType GetRandomAlbumType()
         {
-            var types = Enum.GetValues<StreamingAlbumType>();
-            return types[Random.Next(types.Length)];
+            var values = (StreamingAlbumType[])Enum.GetValues(typeof(StreamingAlbumType));
+            return values[Random.Next(values.Length)];
         }
 
         private static string GenerateRandomUpc()
@@ -377,3 +377,6 @@ namespace Lidarr.Plugin.Common.Testing
         }
     }
 }
+
+
+

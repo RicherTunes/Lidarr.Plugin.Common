@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
 using Lidarr.Plugin.Common.Services.Caching;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -21,6 +22,8 @@ namespace Lidarr.Plugin.Common.Tests
             public int CountByPrefix(string prefix) => CountEntriesByPrefix(prefix);
 
             public void InvalidateByPrefixPublic(string prefix) => InvalidateByPrefix(prefix);
+
+            public void SetMax(int size) => MaxCacheSize = size;
         }
 
         private sealed class CachePayload
@@ -69,6 +72,28 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public void Set_EnforcesMaxCacheSizeByEvictingOldest()
+        {
+            var cache = new TestCache();
+            cache.SetMax(2);
+
+            var p1 = new Dictionary<string, string> { { "id", "1" } };
+            var p2 = new Dictionary<string, string> { { "id", "2" } };
+            var p3 = new Dictionary<string, string> { { "id", "3" } };
+
+            cache.Set("catalog/detail", p1, new CachePayload { Id = "one" });
+            Thread.Sleep(5);
+            cache.Set("catalog/detail", p2, new CachePayload { Id = "two" });
+            Thread.Sleep(5);
+            cache.Set("catalog/detail", p3, new CachePayload { Id = "three" });
+
+            Assert.Null(cache.Get<CachePayload>("catalog/detail", p1));
+            Assert.NotNull(cache.Get<CachePayload>("catalog/detail", p2));
+            Assert.NotNull(cache.Get<CachePayload>("catalog/detail", p3));
+            Assert.Equal(2, cache.CountByPrefix("TestService|catalog/detail"));
+        }
+
+        [Fact]
         public void InvalidateByPrefix_UsesCacheSeedWhenMatching()
         {
             var cache = new TestCache();
@@ -90,3 +115,5 @@ namespace Lidarr.Plugin.Common.Tests
         }
     }
 }
+
+

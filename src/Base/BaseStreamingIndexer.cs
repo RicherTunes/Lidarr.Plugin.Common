@@ -5,7 +5,7 @@ using System.Threading.Tasks;
 using FluentValidation.Results;
 using Microsoft.Extensions.Logging;
 using Lidarr.Plugin.Common.Base;
-using Lidarr.Plugin.Common.Models;
+using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Services.Http;
 using Lidarr.Plugin.Common.Services.Performance;
 using Lidarr.Plugin.Common.Utilities;
@@ -74,17 +74,7 @@ namespace Lidarr.Plugin.Common.Base
 
         private static HttpMessageHandler CreateDefaultHandler()
         {
-#if NET8_0_OR_GREATER
-            return new SocketsHttpHandler
-            {
-                AutomaticDecompression = DecompressionMethods.All
-            };
-#else
-            return new SocketsHttpHandler
-            {
-                AutomaticDecompression = DecompressionMethods.GZip | DecompressionMethods.Deflate
-            };
-#endif
+            return HttpHandlerFactory.CreateDefaultHandler();
         }
 
         /// <summary>
@@ -429,3 +419,5 @@ namespace Lidarr.Plugin.Common.Base
         #endregion
     }
 }
+
+

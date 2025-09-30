@@ -157,12 +157,7 @@ namespace Lidarr.Plugin.Common.Utilities
             response.EnsureSuccessStatusCode();
 
             var contentType = response.Content.Headers.ContentType?.MediaType;
-#if NET8_0_OR_GREATER
-            var payload = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
-#else
-            var payload = await response.Content.ReadAsStringAsync().ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-#endif
+            var payload = await HttpContentLightUp.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
 
             if (string.IsNullOrWhiteSpace(payload))
             {
@@ -361,11 +356,8 @@ namespace Lidarr.Plugin.Common.Utilities
                 Version = request.Version
             };
 
-#if NET5_0_OR_GREATER
             clone.VersionPolicy = request.VersionPolicy;
             CopyHttpRequestOptions(request, clone);
-#endif
-
             // Copy headers
             foreach (var header in request.Headers)
             {
@@ -388,7 +380,6 @@ namespace Lidarr.Plugin.Common.Utilities
             return clone;
         }
 
-#if NET5_0_OR_GREATER
         private static readonly MethodInfo HttpRequestOptionsSetMethod = typeof(HttpRequestOptions)
             .GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .First(m => m.Name == "Set" && m.IsGenericMethodDefinition && m.GetParameters().Length == 2);
@@ -411,7 +402,6 @@ namespace Lidarr.Plugin.Common.Utilities
                 setMethod.Invoke(destination.Options, new[] { keyInstance, value });
             }
         }
-#endif
         private static TimeSpan? GetRetryDelay(HttpResponseMessage response)
         {
             try
@@ -432,7 +422,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
         private static TimeSpan GetJitter()
         {
-            var ms = Random.Shared.Next(50, 250);
+            var ms = RandomProvider.Next(50, 250);
             return TimeSpan.FromMilliseconds(ms);
         }
 
@@ -449,4 +439,9 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
+
+
+
+
+
 

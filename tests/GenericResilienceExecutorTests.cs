@@ -125,5 +125,79 @@ namespace Lidarr.Plugin.Common.Tests
             await Task.WhenAll(tasks);
             Assert.True(peak >= 5, $"Expected peak concurrency >=5 but was {peak}");
         }
+
+        [Fact]
+        public async Task ExecuteWithResilience_UpgradesHostGateWhenConcurrencyIncreases()
+        {
+            const string host = "host-gate-upgrade.test";
+            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = r =>
+                Task.FromResult(new HttpRequestMessage(r.Method, r.RequestUri));
+
+            static void UpdatePeak(ref int peak, int current)
+            {
+                while (true)
+                {
+                    var observed = peak;
+                    if (current <= observed)
+                    {
+                        return;
+                    }
+
+                    if (Interlocked.CompareExchange(ref peak, current, observed) == observed)
+                    {
+                        return;
+                    }
+                }
+            }
+
+            async Task<int> RunBatchAsync(int requestedLimit)
+            {
+                var concurrent = 0;
+                var peak = 0;
+                var request = new HttpRequestMessage(HttpMethod.Get, $"http://{host}/resource");
+
+                Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send = async (req, ct) =>
+                {
+                    var current = Interlocked.Increment(ref concurrent);
+                    UpdatePeak(ref peak, current);
+
+                    try
+                    {
+                        await Task.Delay(40, ct);
+                        return new HttpResponseMessage(HttpStatusCode.OK);
+                    }
+                    finally
+                    {
+                        Interlocked.Decrement(ref concurrent);
+                    }
+                };
+
+                var tasks = new Task<HttpResponseMessage>[8];
+                for (var i = 0; i < tasks.Length; i++)
+                {
+                    tasks[i] = GenericResilienceExecutor.ExecuteWithResilienceAsync<HttpRequestMessage, HttpResponseMessage>(
+                        request,
+                        send,
+                        clone,
+                        r => r.RequestUri?.Host,
+                        r => (int)r.StatusCode,
+                        r => null,
+                        maxRetries: 1,
+                        retryBudget: TimeSpan.FromSeconds(5),
+                        maxConcurrencyPerHost: requestedLimit,
+                        cancellationToken: CancellationToken.None);
+                }
+
+                await Task.WhenAll(tasks);
+                return peak;
+            }
+
+            var initialPeak = await RunBatchAsync(requestedLimit: 2);
+            var upgradedPeak = await RunBatchAsync(requestedLimit: 6);
+
+            Assert.InRange(initialPeak, 1, 2);
+            Assert.True(upgradedPeak > initialPeak, $"Expected upgraded peak to exceed initial peak (initial {initialPeak}, upgraded {upgradedPeak})");
+            Assert.True(upgradedPeak >= 5, $"Expected upgraded peak concurrency >=5 but was {upgradedPeak}");
+        }
     }
 }

@@ -5,7 +5,10 @@ using System.Net;
 using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
-using Lidarr.Plugin.Common.Models;
+using FluentValidation.Results;
+using Lidarr.Plugin.Common.Base;
+using Lidarr.Plugin.Common.Interfaces;
+using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Services.Download;
 using Xunit;
 
@@ -29,7 +32,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin"))
             );
 
-            var temp = Path.Combine(Path.GetTempPath(), "orch_test_progress.bin");
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_test_progress_{Guid.NewGuid():N}.bin");
             try
             {
                 // Minimal assertion-only test; progress values are exercised by the download
@@ -58,7 +61,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getStreamAsync: (id, q) => Task.FromResult(("http://test/file2", "bin"))
             );
 
-            var temp = Path.Combine(Path.GetTempPath(), "orch_test_resume.bin");
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_test_resume_{Guid.NewGuid():N}.bin");
             var partial = temp + ".partial";
             try
             {
@@ -78,9 +81,187 @@ namespace Lidarr.Plugin.Common.Tests
             finally { TryDelete(temp); TryDelete(partial); TryDelete(temp + ".partial.resume.json"); }
         }
 
+        [Fact]
+        public async Task DownloadTrackAsync_CancelledTokenStopsCopyAndReleasesPartialFile()
+        {
+            var handler = new SlowStreamingHandler();
+            using var http = new HttpClient(handler);
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("http://slow/track", "bin"))
+            );
+
+            var outputPath = Path.Combine(Path.GetTempPath(), $"orch_test_cancel_{Guid.NewGuid():N}.bin");
+            var partialPath = outputPath + ".partial";
+            var resumePath = outputPath + ".partial.resume.json";
+            using var cts = new CancellationTokenSource();
+            cts.CancelAfter(TimeSpan.FromSeconds(5));
+
+            try
+            {
+                var downloadTask = orch.DownloadTrackAsync("t1", outputPath, new StreamingQuality { Bitrate = 320 }, cts.Token);
+
+                await handler.FirstRead;
+                cts.Cancel();
+
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await downloadTask);
+
+                Assert.True(File.Exists(partialPath), "Partial download file should exist after cancellation.");
+
+                using (var fs = new FileStream(partialPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+                {
+                    Assert.NotNull(fs);
+                }
+            }
+            finally
+            {
+                TryDelete(outputPath);
+                TryDelete(partialPath);
+                TryDelete(resumePath);
+            }
+        }
+
         private static void TryDelete(string path)
         {
             try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+    }
+
+
+    public class BaseStreamingDownloadClientTests
+    {
+        [Fact]
+        public async Task ApplyMetadataTags_InvokesApplierWhenMetadataPresent()
+        {
+            var applier = new CapturingMetadataApplier();
+            var client = new TestDownloadClient(new TestSettings(), applier);
+            var track = new StreamingTrack { Title = "Test Track" };
+            var tempPath = Path.Combine(Path.GetTempPath(), $"metadata_apply_test_{Guid.NewGuid():N}.bin");
+            File.WriteAllBytes(tempPath, new byte[1]);
+
+            try
+            {
+                await client.InvokeApplyMetadataAsync(tempPath, track);
+                Assert.True(applier.WasCalled);
+                Assert.Equal(tempPath, applier.FilePath);
+                Assert.Same(track, applier.Metadata);
+                Assert.False(applier.CancellationToken.CanBeCanceled);
+            }
+            finally
+            {
+                if (File.Exists(tempPath)) File.Delete(tempPath);
+            }
+        }
+
+        [Fact]
+        public async Task ApplyMetadataTags_SkipsWhenMetadataNull()
+        {
+            var applier = new CapturingMetadataApplier();
+            var client = new TestDownloadClient(new TestSettings(), applier);
+            await client.InvokeApplyMetadataAsync(Path.Combine(Path.GetTempPath(), $"metadata_null_{Guid.NewGuid():N}.bin"), null!);
+            Assert.False(applier.WasCalled);
+        }
+
+        [Fact]
+        public async Task ApplyMetadataTags_SkipsWhenApplierMissing()
+        {
+            var client = new TestDownloadClient(new TestSettings(), null);
+            var track = new StreamingTrack { Title = "Track" };
+            await client.InvokeApplyMetadataAsync(Path.Combine(Path.GetTempPath(), $"metadata_missing_{Guid.NewGuid():N}.bin"), track);
+        }
+    }
+
+    internal sealed class SlowStreamingHandler : HttpMessageHandler
+    {
+        private readonly long _totalBytes;
+        private readonly TaskCompletionSource<bool> _firstRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public SlowStreamingHandler(long totalBytes = 5 * 1024 * 1024)
+        {
+            _totalBytes = totalBytes;
+        }
+
+        public Task FirstRead => _firstRead.Task;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            var response = new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new SlowStreamingContent(this, _totalBytes))
+            };
+            response.Content.Headers.ContentLength = _totalBytes;
+            return Task.FromResult(response);
+        }
+
+        private void NotifyFirstRead() => _firstRead.TrySetResult(true);
+
+        private sealed class SlowStreamingContent : Stream
+        {
+            private readonly SlowStreamingHandler _owner;
+            private readonly long _totalBytes;
+            private long _position;
+
+            public SlowStreamingContent(SlowStreamingHandler owner, long totalBytes)
+            {
+                _owner = owner;
+                _totalBytes = totalBytes;
+            }
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => _totalBytes;
+            public override long Position
+            {
+                get => _position;
+                set => throw new NotSupportedException();
+            }
+
+            public override void Flush() => throw new NotSupportedException();
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                throw new NotSupportedException();
+            }
+
+#if NET8_0_OR_GREATER
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                return await ReadInternalAsync(buffer, cancellationToken);
+            }
+#endif
+
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            {
+                var destination = new Memory<byte>(buffer, offset, count);
+                return await ReadInternalAsync(destination, cancellationToken);
+            }
+
+            private async ValueTask<int> ReadInternalAsync(Memory<byte> destination, CancellationToken cancellationToken)
+            {
+                _owner.NotifyFirstRead();
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (_position >= _totalBytes)
+                {
+                    return 0;
+                }
+
+                await Task.Delay(20, cancellationToken);
+
+                var remaining = (int)Math.Min(destination.Length, _totalBytes - _position);
+                destination.Span.Slice(0, remaining).Clear();
+                _position += remaining;
+                return remaining;
+            }
         }
     }
 
@@ -135,4 +316,44 @@ namespace Lidarr.Plugin.Common.Tests
             return data;
         }
     }
+    internal sealed class TestDownloadClient : BaseStreamingDownloadClient<TestSettings>
+    {
+        public TestDownloadClient(TestSettings settings, IAudioMetadataApplier? applier) : base(settings, null!, applier!)
+        {
+        }
+
+        protected override string ServiceName => "Test";
+        protected override string ProtocolName => "http";
+
+        protected override Task<bool> AuthenticateAsync() => Task.FromResult(true);
+        protected override Task<StreamingAlbum> GetAlbumAsync(string albumId) => Task.FromResult(new StreamingAlbum());
+        protected override Task<StreamingTrack> GetTrackAsync(string trackId) => Task.FromResult(new StreamingTrack());
+        protected override Task<string> GetStreamUrlAsync(string trackId, string quality) => Task.FromResult(string.Empty);
+        protected override ValidationResult ValidateDownloadSettings(TestSettings settings) => new ValidationResult();
+
+        public Task InvokeApplyMetadataAsync(string filePath, StreamingTrack metadata) => ApplyMetadataTagsAsync(filePath, metadata);
+    }
+
+    internal sealed class TestSettings : BaseStreamingSettings
+    {
+    }
+
+    internal sealed class CapturingMetadataApplier : IAudioMetadataApplier
+    {
+        public bool WasCalled { get; private set; }
+        public string? FilePath { get; private set; }
+        public StreamingTrack? Metadata { get; private set; }
+        public CancellationToken CancellationToken { get; private set; }
+
+        public Task ApplyAsync(string filePath, StreamingTrack metadata, CancellationToken cancellationToken = default)
+        {
+            WasCalled = true;
+            FilePath = filePath;
+            Metadata = metadata;
+            CancellationToken = cancellationToken;
+            return Task.CompletedTask;
+        }
+    }
+
 }
+
