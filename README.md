@@ -3,8 +3,9 @@
 Shared utilities, patterns, and resilient infrastructure for building Lidarr streaming plugins. The library complements the host-owned `Lidarr.Plugin.Abstractions` contract so each plugin can focus on service-specific logic.
 
 [![Build Status](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/ci.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions)
-[![NuGet Version](https://img.shields.io/nuget/v/Lidarr.Plugin.Common.svg)](https://www.nuget.org/packages/Lidarr.Plugin.Common/)
-[![Downloads](https://img.shields.io/nuget/dt/Lidarr.Plugin.Common.svg)](https://www.nuget.org/packages/Lidarr.Plugin.Common/)
+<!-- TODO(#12): Restore NuGet badges once the package is published. -->
+![NuGet Status](https://img.shields.io/badge/NuGet-coming--soon-lightgrey.svg)
+![Downloads](https://img.shields.io/badge/Downloads-pending-lightgrey.svg)
 
 ## Packages at a glance
 
@@ -74,4 +75,5 @@ All documentation lives under [`docs/`](docs/README.md) and is organised as a kn
 
 ## License
 Licensed under the MIT License. See [LICENSE](LICENSE).
+
 
