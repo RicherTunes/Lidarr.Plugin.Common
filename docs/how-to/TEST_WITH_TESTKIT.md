@@ -4,15 +4,21 @@ The `Lidarr.Plugin.Common.TestKit` package bundles the fixture, HTTP simulators,
 
 ## 1. Reference the TestKit
 
+Use the NuGet package in plugin test projects:
+
 ```xml
 <ItemGroup>
-  <ProjectReference Include="..\testkit\Lidarr.Plugin.Common.TestKit.csproj" />
-  <ProjectReference Include="..\src\Lidarr.Plugin.Common.csproj" />
-  <ProjectReference Include="..\src\Abstractions\Lidarr.Plugin.Abstractions.csproj" />
+  <PackageReference Include="Lidarr.Plugin.Common.TestKit" Version="1.1.4" />
 </ItemGroup>
 ```
 
-When you publish the TestKit to NuGet, replace the `ProjectReference` with a `PackageReference` targeting the latest version.
+When developing inside this repository you can temporarily reference the project directly:
+
+```xml
+<ItemGroup>
+  <ProjectReference Include="..\\testkit\\Lidarr.Plugin.Common.TestKit.csproj" />
+</ItemGroup>
+```
 
 ## 2. Load a plugin in isolation
 
@@ -62,7 +68,7 @@ var response = await client.GetAsync("https://api.example.test/ping");
 
 ## 5. Assert results consistently
 
-`PluginAssertions` contains reusable guards for download results and quality fallback checks:
+`PluginAssertions` contains reusable guards for download outcomes and quality fallback checks:
 
 ```csharp
 using Lidarr.Plugin.Common.TestKit.Assertions;

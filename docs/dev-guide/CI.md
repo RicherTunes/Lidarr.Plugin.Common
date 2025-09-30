@@ -14,7 +14,7 @@ This repository ships with a multi-stage GitHub Actions pipeline that keeps the 
 - `dotnet format --verify-no-changes`
 - `dotnet build -warnaserror`
 - `dotnet test` for all TFMs with XPlat coverage
-- `dotnet pack` (dry run)
+- `dotnet pack` (dry run) for both `Lidarr.Plugin.Common` and `Lidarr.Plugin.Common.TestKit`
 - Public API analyzer baselines (`RS0016`, `RS0026`)
 - Snippet extraction via `dotnet run --project tools/DocTools/SnippetVerifier`
 
@@ -34,15 +34,17 @@ This repository ships with a multi-stage GitHub Actions pipeline that keeps the 
 1. `dotnet format --verify-no-changes`
 2. `dotnet test -c Release --collect:"XPlat Code Coverage"`
 3. `dotnet pack src/Lidarr.Plugin.Common.csproj -c Release /p:ContinuousIntegrationBuild=true`
-4. `dotnet run --project tools/DocTools/SnippetVerifier`
-5. `pwsh tools/DocTools/lint-docs.ps1`
-6. `pwsh tools/ManifestCheck.ps1 -ProjectPath plugins/<Plugin>/<Plugin>.csproj -ManifestPath plugins/<Plugin>/plugin.json`
-7. `Import-Module ./tools/PluginPack.psm1; New-PluginPackage -Csproj plugins/<Plugin>/<Plugin>.csproj -Manifest plugins/<Plugin>/plugin.json`
+4. `dotnet pack testkit/Lidarr.Plugin.Common.TestKit.csproj -c Release /p:ContinuousIntegrationBuild=true`
+5. `dotnet run --project tools/DocTools/SnippetVerifier`
+6. `pwsh tools/DocTools/lint-docs.ps1`
+7. `pwsh tools/ManifestCheck.ps1 -ProjectPath plugins/<Plugin>/<Plugin>.csproj -ManifestPath plugins/<Plugin>/plugin.json`
+8. `Import-Module ./tools/PluginPack.psm1; New-PluginPackage -Csproj plugins/<Plugin>/<Plugin>.csproj -Manifest plugins/<Plugin>/plugin.json`
 
 ## Maintenance
 
 - Dependabot keeps Actions/NuGet dependencies current.
 - Update `PublicAPI.*.txt` whenever the public surface changes.
 - Keep docs automation in sync with [`docs/dev-guide/TESTING_DOCS.md`](TESTING_DOCS.md).
+
 
 
