@@ -33,6 +33,8 @@ All notable changes to the shared library are documented here. The format follow
 ## [1.1.4] - 2025-09-30
 
 ### Added
+- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
+- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
 - `HostGateRegistry` centralizes per-host semaphore management for both HTTP extensions and the generic resilience executor, with shared internals access for tests.
 - `HttpClientExtensions.SendWithResilienceAsync` wires timeout metadata from `StreamingApiRequestBuilder` without duplicating request construction.
 - API compatibility guard in CI: the pack job now runs  `Microsoft.DotNet.ApiCompat` against the latest release before uploading artifacts.
@@ -49,6 +51,8 @@ All notable changes to the shared library are documented here. The format follow
 ## [1.1.3] - 2025-09-03
 
 ### Added
+- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
+- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
 - `BaseStreamingIndexer`: streaming search helpers (`SearchAlbumsStreamAsync`, `SearchTracksStreamAsync`, `FetchPagedAsync<T>`) plus deduplication on title/artist/year.
 - `BaseStreamingDownloadClient`: overridable retry hook with `Retry-After` handling and jittered backoff; configurable retry counts per service.
 
@@ -58,6 +62,8 @@ All notable changes to the shared library are documented here. The format follow
 ## [1.1.2] - 2025-09-03
 
 ### Added
+- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
+- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
 - Preview detection improvements: duration threshold (default ~90s), extended URL markers, additional heuristics.
 - Validation enhancements: `ValidateFileSignature` for FLAC/OGG/MP4/M4A/WAV and richer overloads of `ValidateDownloadedFile`.
 - Hashing/signing utilities: `ComputeSHA256`, `ComputeHmacSha256`, and `IRequestSigner` implementations (`Md5ConcatSigner`, `HmacSha256Signer`).
@@ -73,6 +79,8 @@ All notable changes to the shared library are documented here. The format follow
 ## [1.1.1] - 2025-09-03
 
 ### Added
+- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
+- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
 - Context-specific sanitizers: `Sanitize.UrlComponent`, `Sanitize.PathSegment`, `Sanitize.DisplayText`, `Sanitize.IsSafePath`.
 - HTTP resilience: `HttpClientExtensions.ExecuteWithResilienceAsync` with 429/Retry-After awareness, jittered backoff, retry budgets, and per-host concurrency gating.
 - OAuth token refresh: `OAuthDelegatingHandler` for bearer injection and single-flight refresh on 401.
@@ -89,6 +97,8 @@ All notable changes to the shared library are documented here. The format follow
 ## [1.1.0] - 2025-08-30
 
 ### Added
+- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
+- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
 - OAuth/PKCE authentication base classes and token lifecycle helpers.
 - Core streaming indexer/download client frameworks.
 - Performance and memory management helpers (batch manager, monitors).
@@ -99,6 +109,8 @@ All notable changes to the shared library are documented here. The format follow
 ## [1.0.0] - 2025-08-26
 
 ### Added
+- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
+- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
 - Base classes: `BaseStreamingSettings`, `BaseStreamingIndexer<T>`, `BaseStreamingDownloadClient<T>`, `BaseStreamingAuthenticationService<T>`.
 - Services: `StreamingResponseCache`, `StreamingApiRequestBuilder`, `QualityMapper`, `PerformanceMonitor`, `StreamingPluginModule`.
 - Models: `StreamingArtist`, `StreamingAlbum`, `StreamingTrack`, `StreamingQuality`, `StreamingQualityTier`.
@@ -132,4 +144,6 @@ All notable changes to the shared library are documented here. The format follow
 - **Feature Requests**: Discuss in GitHub Discussions.
 - **Community**: Join the streaming plugin developer community.
 - **Documentation**: See `README.md` and the `docs/` folder.
+
+
 

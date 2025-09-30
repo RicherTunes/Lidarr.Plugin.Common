@@ -1,0 +1,23 @@
+{
+  "id": "123456789",
+  "title": "Signal (Preview)",
+  "duration": 92,
+  "explicit": false,
+  "isrc": "USQX91501234",
+  "streamStartDate": "2024-04-01T00:00:00Z",
+  "streamReady": true,
+  "allowStreaming": true,
+  "allowDownload": false,
+  "audioQuality": "HI_RES",
+  "mediaMetadata": {
+    "previewAvailable": true,
+    "previewSeconds": 30,
+    "peakAmplitude": -3.2
+  },
+  "album": {
+    "id": "987654321",
+    "title": "Signal",
+    "artist": "Aurora Lines",
+    "numberOfTracks": 10
+  }
+}

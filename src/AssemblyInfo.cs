@@ -1,0 +1,15 @@
+using System.Reflection;
+
+[assembly: AssemblyCompany("RicherTunes")]
+#if DEBUG
+[assembly: AssemblyConfiguration("Debug")]
+#else
+[assembly: AssemblyConfiguration("Release")]
+#endif
+[assembly: AssemblyProduct("Lidarr.Plugin.Common")]
+[assembly: AssemblyTitle("Lidarr.Plugin.Common")]
+[assembly: AssemblyDescription("Shared library for building Lidarr streaming service plugins. Reduces development time by 60%+ through battle-tested utilities, models, and patterns.")]
+[assembly: AssemblyVersion("1.1.4.0")]
+[assembly: AssemblyFileVersion("1.1.4.0")]
+[assembly: AssemblyInformationalVersion("1.1.4")]
+[assembly: AssemblyMetadata("RepositoryUrl", "https://github.com/RicherTunes/Lidarr.Plugin.Common.git")]

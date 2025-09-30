@@ -1,0 +1,49 @@
+{
+  "album": {
+    "id": "5099969949056",
+    "title": "Live in Reykjavik",
+    "artist": "Polar Echoes",
+    "release_date_original": "2023-11-17",
+    "tracks_count": 24,
+    "hires": true,
+    "hires_streamable": true,
+    "maximum_sampling_rate": 192000,
+    "maximum_bit_depth": 24,
+    "genre": "Post-rock",
+    "label": "Northern Lights Records",
+    "discs": [
+      {
+        "disc_number": 1,
+        "track_count": 12
+      },
+      {
+        "disc_number": 2,
+        "track_count": 12
+      }
+    ]
+  },
+  "tracks": [
+    {
+      "id": "track-1",
+      "title": "Aurora",
+      "duration": 428,
+      "track_number": 1,
+      "disc_number": 1,
+      "version": null,
+      "maximum_sampling_rate": 192000,
+      "maximum_bit_depth": 24,
+      "media_number": 1
+    },
+    {
+      "id": "track-13",
+      "title": "Solar Storm",
+      "duration": 512,
+      "track_number": 1,
+      "disc_number": 2,
+      "version": "Live",
+      "maximum_sampling_rate": 48000,
+      "maximum_bit_depth": 16,
+      "media_number": 2
+    }
+  ]
+}
