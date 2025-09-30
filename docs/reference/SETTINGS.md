@@ -52,6 +52,42 @@ public sealed class MySettingsProvider : ISettingsProvider
 
 ```
 
+## Bridge implementation
+
+The easiest way to satisfy `ISettingsProvider` is to inherit from `StreamingPlugin<TModule, TSettings>`. The bridge exposes your strongly typed settings to DI as a singleton while presenting the host with the dictionary contract.
+
+```csharp
+public sealed class QobuzPlugin : StreamingPlugin<QobuzModule, QobuzSettings>
+{
+    protected override IEnumerable<SettingDefinition> DescribeSettings()
+    {
+        yield return new SettingDefinition
+        {
+            Key = nameof(QobuzSettings.AppId),
+            DisplayName = "Application ID",
+            DataType = SettingDataType.String,
+            IsRequired = true,
+            Description = "API identifier issued by Qobuz"
+        };
+    }
+
+    protected override PluginValidationResult ValidateSettings(QobuzSettings settings)
+        => string.IsNullOrWhiteSpace(settings.AppId)
+            ? PluginValidationResult.Failure(new[] { "AppId is required." })
+            : PluginValidationResult.Success();
+}
+```
+
+The bridge:
+
+- Loads `plugin.json` and keeps the manifest handy.
+- Maps public writable properties on `TSettings` to dictionary keys.
+- Handles conversion from JSON primitives (`JsonElement`) to the correct CLR type.
+- Applies new settings in-place when the host calls `Apply`, so existing services pick up changes.
+- Provides hooks (`ConfigureDefaults`, `ValidateSettings`, `OnSettingsApplied`) for custom behaviour.
+
+> Prefer flat settings objects. Nested objects are currently unsupported and require custom logic.
+
 ## Recommended keys
 
 | Key | Type | Required | Notes |
@@ -75,4 +111,5 @@ public sealed class MySettingsProvider : ISettingsProvider
 - [Plugin manifest](MANIFEST.md)
 - [Migration guide](../migration/FROM_LEGACY.md)
 - [Developer guide → Settings](../dev-guide/DEVELOPER_GUIDE.md#settings)
+
 

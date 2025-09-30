@@ -59,9 +59,11 @@ See the [manifest reference](../reference/MANIFEST.md) for every field.
 
 ## 4. Implement the plugin entry point
 
-- Create an `IPlugin` implementation using only Abstractions types.
-- Inject dependencies through constructors or factories that are defined in Abstractions.
+- Derive from `StreamingPlugin<TModule, TSettings>` to get a ready-made `IPlugin` bridge.
+- Return indexer/download adapters from `CreateIndexerAsync` and `CreateDownloadClientAsync`.
+- Document settings via `DescribeSettings()` and validate them in `ValidateSettings()`.
 - Keep Common-dependent code inside the plugin AssemblyLoadContext.
+- For a full example see [Use the streaming plugin bridge](USE_STREAMING_PLUGIN.md).
 
 ## 5. Add tests early
 
@@ -88,4 +90,5 @@ Copy the output to the host’s plugin directory or package it per distribution 
 - [ ] README/notes updated with any settings or prerequisites.
 
 Next steps: implement features via the other how-to guides (indexer, download client, OAuth, logging).
+
 
