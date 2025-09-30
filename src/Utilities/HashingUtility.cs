@@ -60,4 +60,3 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
-

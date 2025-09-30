@@ -7,7 +7,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-
+using Lidarr.Plugin.Common.Utilities;
 namespace Lidarr.Plugin.Common.Services.Http
 {
     /// <summary>
@@ -33,12 +33,7 @@ namespace Lidarr.Plugin.Common.Services.Http
             }
 
             var originalHeaders = response.Content.Headers.Select(h => h).ToList();
-#if NET8_0_OR_GREATER
-            var payload = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
-#else
-            var payload = await response.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
-#endif
+            var payload = await HttpContentLightUp.ReadAsByteArrayAsync(response.Content, cancellationToken).ConfigureAwait(false);
 
             // Always reset the response content to a seekable stream after inspection.
             var bufferStream = new MemoryStream(payload, writable: false);
@@ -89,3 +84,8 @@ namespace Lidarr.Plugin.Common.Services.Http
         }
     }
 }
+
+
+
+
+

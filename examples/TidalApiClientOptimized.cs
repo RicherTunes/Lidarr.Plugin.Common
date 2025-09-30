@@ -5,7 +5,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services;
 using Lidarr.Plugin.Common.Services.Http;
-using Lidarr.Plugin.Common.Models;
+using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Tidalarr.Settings;
 

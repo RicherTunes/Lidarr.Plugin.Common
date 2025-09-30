@@ -1,0 +1,129 @@
+using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
+using System.Runtime.CompilerServices;
+using System.Threading;
+using System.Threading.Tasks;
+using Lidarr.Plugin.Abstractions.Contracts;
+using Lidarr.Plugin.Abstractions.Manifest;
+using Lidarr.Plugin.Abstractions.Models;
+
+#nullable enable
+
+namespace GeneratedPlugins
+{
+    public sealed class {{PLUGIN_ID}}Plugin : IPlugin
+    {
+        private readonly PluginManifest _manifest = new PluginManifest
+        {
+            Id = "{{LOWER_ID}}",
+            Name = "{{PLUGIN_ID}}",
+            Version = "{{PLUGIN_VERSION}}",
+            ApiVersion = "{{API_VERSION}}",
+            CommonVersion = "{{COMMON_VERSION}}",
+            MinHostVersion = "2.12.0",
+            EntryAssembly = "{{ASSEMBLY_NAME}}",
+            Capabilities = new[] { "Search" },
+            RequiredSettings = new[] { "BaseUrl" }
+        };
+
+        public PluginManifest Manifest => _manifest;
+
+        public ValueTask InitializeAsync(IPluginContext context, CancellationToken cancellationToken = default)
+            => ValueTask.CompletedTask;
+
+        public ValueTask<IIndexer?> CreateIndexerAsync(CancellationToken cancellationToken = default)
+            => new ValueTask<IIndexer?>(new TestIndexer("{{PLUGIN_ID}}", "{{COMMON_VERSION}}"));
+
+        public ValueTask<IDownloadClient?> CreateDownloadClientAsync(CancellationToken cancellationToken = default)
+            => new ValueTask<IDownloadClient?>((IDownloadClient?)null);
+
+        public ISettingsProvider SettingsProvider { get; } = new TestSettingsProvider();
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    internal sealed class TestIndexer : IIndexer
+    {
+        private readonly string _pluginId;
+        private readonly string _commonVersion;
+
+        public TestIndexer(string pluginId, string commonVersion)
+        {
+            _pluginId = pluginId;
+            _commonVersion = commonVersion;
+        }
+
+        public ValueTask<PluginValidationResult> InitializeAsync(CancellationToken cancellationToken = default)
+            => new ValueTask<PluginValidationResult>(PluginValidationResult.Success());
+
+        public ValueTask<IReadOnlyList<StreamingAlbum>> SearchAlbumsAsync(string query, CancellationToken cancellationToken = default)
+            => new ValueTask<IReadOnlyList<StreamingAlbum>>(new List<StreamingAlbum> { CreateAlbum(query) });
+
+        public async IAsyncEnumerable<StreamingAlbum> SearchAlbumsStreamAsync(string query, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            yield return CreateAlbum(query);
+            await Task.CompletedTask;
+        }
+
+        public ValueTask<IReadOnlyList<StreamingTrack>> SearchTracksAsync(string query, CancellationToken cancellationToken = default)
+            => new ValueTask<IReadOnlyList<StreamingTrack>>(new List<StreamingTrack> { CreateTrack(CreateAlbum(query), query) });
+
+        public async IAsyncEnumerable<StreamingTrack> SearchTracksStreamAsync(string query, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            yield return CreateTrack(CreateAlbum(query), query);
+            await Task.CompletedTask;
+        }
+
+        public ValueTask<StreamingAlbum?> GetAlbumAsync(string albumId, CancellationToken cancellationToken = default)
+            => new ValueTask<StreamingAlbum?>(CreateAlbum(albumId));
+
+        private StreamingAlbum CreateAlbum(string query)
+        {
+            var album = new StreamingAlbum
+            {
+                Id = $"{{_pluginId}}:{query}",
+                Title = $"{{_pluginId}} Album",
+                Artist = new StreamingArtist { Id = "artist", Name = "Test Artist" },
+                Label = "Test Label"
+            };
+            album.Genres.Add("Test");
+            album.CoverArtUrls["large"] = "https://example.com/art.jpg";
+            album.ExternalIds["commonVersion"] = Lidarr.Plugin.Common.CommonVersion.Value;
+            return album;
+        }
+
+        private StreamingTrack CreateTrack(StreamingAlbum album, string query)
+        {
+            return new StreamingTrack
+            {
+                Id = $"track:{query}",
+                Title = $"{query} Track",
+                Album = album,
+                Artist = album.Artist,
+                Duration = TimeSpan.FromMinutes(4)
+            };
+        }
+
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+    }
+
+    internal sealed class TestSettingsProvider : ISettingsProvider
+    {
+        public IReadOnlyCollection<SettingDefinition> Describe() => new ReadOnlyCollection<SettingDefinition>(new[]
+        {
+            new SettingDefinition { Key = "BaseUrl", DisplayName = "Base URL", Description = "API endpoint", DataType = SettingDataType.String, IsRequired = true }
+        });
+
+        public IReadOnlyDictionary<string, object?> GetDefaults() => new ReadOnlyDictionary<string, object?>(new Dictionary<string, object?>
+        {
+            ["BaseUrl"] = "https://example.com/api"
+        });
+
+        public PluginValidationResult Validate(IDictionary<string, object?> settings)
+            => settings.ContainsKey("BaseUrl") ? PluginValidationResult.Success() : PluginValidationResult.Failure(new[] { "BaseUrl required" });
+
+        public PluginValidationResult Apply(IDictionary<string, object?> settings)
+            => PluginValidationResult.Success();
+    }
+}

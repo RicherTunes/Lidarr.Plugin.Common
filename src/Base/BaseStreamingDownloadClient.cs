@@ -11,7 +11,7 @@ using FluentValidation.Results;
 using Microsoft.Extensions.Logging;
 using File = System.IO.File;
 using Lidarr.Plugin.Common.Base;
-using Lidarr.Plugin.Common.Models;
+using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Services.Performance;
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Common.Interfaces;
@@ -518,23 +518,16 @@ namespace Lidarr.Plugin.Common.Base
                     var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
                     var downloadedBytes = existingBytes;
 
-#if NET8_0_OR_GREATER
-                    using (var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false))
-#else
-                    using (var contentStream = await response.Content.ReadAsStreamAsync().ConfigureAwait(false))
-#endif
+                    using (var contentStream = await HttpContentLightUp.ReadAsStreamAsync(response.Content, cancellationToken).ConfigureAwait(false))
                     {
-#if !NET8_0_OR_GREATER
-                        cancellationToken.ThrowIfCancellationRequested();
-#endif
                         using (var fileStream = new FileStream(tempFilePath, fileMode, FileAccess.Write, FileShare.None, BufferSize, useAsync: true))
                         {
                             var buffer = new byte[BufferSize];
                             int bytesRead;
 
-                            while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken)) > 0)
+                            while ((bytesRead = await contentStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
                             {
-                                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken);
+                                await fileStream.WriteAsync(buffer.AsMemory(0, bytesRead), cancellationToken).ConfigureAwait(false);
                                 downloadedBytes += bytesRead;
 
                                 if (progress != null && totalExpected > 0)
@@ -544,8 +537,7 @@ namespace Lidarr.Plugin.Common.Base
                                 }
                             }
 
-                            // Flush to disk for atomicity
-                            await fileStream.FlushAsync(cancellationToken);
+                            await fileStream.FlushAsync(cancellationToken).ConfigureAwait(false);
                             try { fileStream.Flush(true); } catch { /* best effort */ }
                         }
                     }
@@ -556,7 +548,7 @@ namespace Lidarr.Plugin.Common.Base
                     // Atomic move to final location (overwrite if exists)
                     try
                     {
-                        File.Move(tempFilePath, outputFilePath, overwrite: true);
+                        FileSystemUtility.MoveFile(tempFilePath, outputFilePath, true);
                     }
                     catch
                     {
@@ -622,11 +614,11 @@ namespace Lidarr.Plugin.Common.Base
                     var ra = response.Headers?.RetryAfter;
                     if (ra != null)
                     {
-                        if (ra.Delta.HasValue) return ra.Delta.Value + TimeSpan.FromMilliseconds(Random.Shared.Next(50, 250));
+                        if (ra.Delta.HasValue) return ra.Delta.Value + TimeSpan.FromMilliseconds(RandomProvider.Next(50, 250));
                         if (ra.Date.HasValue)
                         {
                             var delta = ra.Date.Value - DateTimeOffset.UtcNow;
-                            if (delta > TimeSpan.Zero) return delta + TimeSpan.FromMilliseconds(Random.Shared.Next(50, 250));
+                            if (delta > TimeSpan.Zero) return delta + TimeSpan.FromMilliseconds(RandomProvider.Next(50, 250));
                         }
                     }
                 }
@@ -634,7 +626,7 @@ namespace Lidarr.Plugin.Common.Base
             }
 
             var baseDelay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, Math.Max(1, attempt))));
-            var jitter = TimeSpan.FromMilliseconds(Random.Shared.Next(50, 250));
+            var jitter = TimeSpan.FromMilliseconds(RandomProvider.Next(50, 250));
             return baseDelay + jitter;
         }
 
@@ -752,54 +744,7 @@ namespace Lidarr.Plugin.Common.Base
         #endregion
     }
 
-    #region Supporting Classes
-
-    /// <summary>
-    /// Represents an active download item
-    /// </summary>
-    public class StreamingDownloadItem
-    {
-        public string Id { get; set; }
-        public string AlbumId { get; set; }
-        public StreamingAlbum Album { get; set; }
-        public string OutputPath { get; set; }
-        public DateTime StartedAt { get; set; }
-        public DateTime? CompletedAt { get; set; }
-        public double Progress { get; set; }
-        public string CurrentTrack { get; set; }
-        public bool IsCompleted { get; set; }
-        public bool Success { get; set; }
-        public string ErrorMessage { get; set; }
-        public StreamingDownloadStatus Status { get; set; }
-        public DateTime LastUpdated { get; set; }
-        public CancellationTokenSource CancellationToken { get; set; }
-    }
-
-    /// <summary>
-    /// Download result for a single track
-    /// </summary>
-    public class StreamingDownloadResult
-    {
-        public bool Success { get; set; }
-        public string FilePath { get; set; }
-        public string ErrorMessage { get; set; }
-        public TimeSpan Duration { get; set; }
-        public long FileSize { get; set; }
-        public Dictionary<string, object> Metadata { get; set; } = new Dictionary<string, object>();
-    }
-
-    /// <summary>
-    /// Download status enumeration
-    /// </summary>
-    public enum StreamingDownloadStatus
-    {
-        Queued,
-        Downloading,
-        Completed,
-        Failed,
-        Cancelled
-    }
-
-    #endregion
 }
+
+
 
