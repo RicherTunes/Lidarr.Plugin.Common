@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
+    <TargetFrameworks>net8.0;net6.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
@@ -43,15 +43,39 @@
   <!-- Exclude disabled files from compilation -->
   <ItemGroup>
     <Compile Remove="**\*.disabled\**\*.cs" />
+    <Compile Remove="Abstractions\**\*.cs" />
+    <EmbeddedResource Remove="Abstractions\**\*" />
+    <None Remove="Abstractions\**\*" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="Compat\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)'=='net6.0'">
+    <Compile Include="Compat\net6\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)'=='net8.0'">
+    <Compile Include="Compat\net8\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
   </ItemGroup>
   <!-- Exclude CLI framework files when not explicitly included -->
   <ItemGroup Condition="'$(IncludeCLIFramework)' != 'true'">
     <Compile Remove="CLI\**\*.cs" />
   </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="Abstractions/Lidarr.Plugin.Abstractions.csproj" />
+  </ItemGroup>
+
   <!-- Core Dependencies -->
   <ItemGroup>
     <PackageReference Include="FluentValidation" Version="9.5.4" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
+    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)'=='net6.0'">
     <PackageReference Include="System.Text.Json" Version="6.0.11" />
@@ -92,8 +116,10 @@
     <None Include="..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\CHANGELOG.md" Pack="true" PackagePath="\" />
     <None Include="..\docs\**\*" Pack="true" PackagePath="docs\" />
-    <None Include="..\examples\**\*" Pack="true" PackagePath="examples\" />
+    <None Include="..\examples\**\*" Pack="true" PackagePath="examples\" Exclude="..\examples\**\bin\**;..\examples\**\obj\**" />
   </ItemGroup>
 </Project>
+
+
 
 
