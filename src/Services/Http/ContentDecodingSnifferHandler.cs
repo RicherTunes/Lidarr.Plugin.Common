@@ -8,6 +8,7 @@ using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Utilities;
+
 namespace Lidarr.Plugin.Common.Services.Http
 {
     /// <summary>
@@ -15,6 +16,8 @@ namespace Lidarr.Plugin.Common.Services.Http
     /// </summary>
     public sealed class ContentDecodingSnifferHandler : DelegatingHandler
     {
+        private const long MaxInspectionBytes = 1_048_576; // 1 MiB
+
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
@@ -25,33 +28,38 @@ namespace Lidarr.Plugin.Common.Services.Http
                 return response;
             }
 
-            var encodings = response.Content.Headers.ContentEncoding;
-            if (encodings != null && encodings.Count > 0)
+            if (HasDeclaredEncoding(response.Content.Headers))
             {
-                // Server already declared the encoding; trust the handler pipeline.
                 return response;
             }
 
+            var declaredLength = GetDeclaredLength(response.Content);
+            if (!declaredLength.HasValue || declaredLength.Value > MaxInspectionBytes)
+            {
+                // Unknown or large payloads are left untouched to avoid buffering unbounded data.
+                return response;
+            }
+
+            var originalContent = response.Content;
             var originalHeaders = response.Content.Headers.Select(h => h).ToList();
-            var payload = await HttpContentLightUp.ReadAsByteArrayAsync(response.Content, cancellationToken).ConfigureAwait(false);
 
-            // Always reset the response content to a seekable stream after inspection.
-            var bufferStream = new MemoryStream(payload, writable: false);
-            SetContent(response, bufferStream, originalHeaders);
+            var payload = await HttpContentLightUp.ReadAsByteArrayAsync(originalContent, cancellationToken).ConfigureAwait(false);
+            originalContent.Dispose();
 
-            if (payload.Length < 2)
+            if (payload.Length == 0)
             {
+                SetContent(response, Stream.Null, originalHeaders);
                 return response;
             }
 
-            var magic0 = payload[0];
-            var magic1 = payload[1];
-            if (magic0 != 0x1F || magic1 != 0x8B)
+            if (!IsGzip(payload))
             {
+                var passthrough = new MemoryStream(payload, writable: false);
+                SetContent(response, passthrough, originalHeaders);
                 return response;
             }
 
-            bufferStream.Position = 0;
+            using var bufferStream = new MemoryStream(payload, writable: false);
             using var gzip = new GZipStream(bufferStream, CompressionMode.Decompress, leaveOpen: true);
             var inflated = new MemoryStream();
             await gzip.CopyToAsync(inflated, cancellationToken).ConfigureAwait(false);
@@ -61,9 +69,26 @@ namespace Lidarr.Plugin.Common.Services.Http
             return response;
         }
 
+        private static bool HasDeclaredEncoding(HttpContentHeaders headers)
+        {
+            return headers.ContentEncoding is { Count: > 0 };
+        }
+
+        private static long? GetDeclaredLength(HttpContent content)
+        {
+            return content.Headers.ContentLength;
+        }
+
+        private static bool IsGzip(byte[] payload)
+        {
+            return payload.Length >= 2 && payload[0] == 0x1F && payload[1] == 0x8B;
+        }
+
         private static void SetContent(HttpResponseMessage response, Stream stream, List<KeyValuePair<string, IEnumerable<string>>> originalHeaders, bool treatAsJson = false)
         {
-            var newContent = new StreamContent(stream);
+            response.Content?.Dispose();
+
+            var newContent = stream == Stream.Null ? new StreamContent(Stream.Null) : new StreamContent(stream);
             foreach (var header in originalHeaders)
             {
                 if (header.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase) ||
@@ -84,8 +109,4 @@ namespace Lidarr.Plugin.Common.Services.Http
         }
     }
 }
-
-
-
-
 

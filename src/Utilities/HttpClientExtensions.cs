@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Reflection;
 using System.Linq;
+using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.Json;
@@ -359,21 +360,8 @@ namespace Lidarr.Plugin.Common.Utilities
 
         private static bool IsSensitiveParameter(string parameterName)
         {
-            var lowerName = parameterName?.ToLowerInvariant() ?? string.Empty;
-            return lowerName.Contains("token") ||
-                   lowerName.Contains("secret") ||
-                   lowerName.Contains("password") ||
-                   lowerName.Contains("auth") ||
-                   lowerName.Contains("credential") ||
-                   lowerName.Contains("key") ||
-                   lowerName == "request_sig" ||
-                   lowerName == "sid" ||
-                   lowerName.Contains("session") ||
-                   lowerName.Contains("cookie") ||
-                   lowerName.Contains("signature") ||
-                   lowerName == "app_secret";
+            return SensitiveKeys.IsSensitive(parameterName);
         }
-
         private static string MaskValue(string value)
         {
             if (string.IsNullOrWhiteSpace(value))

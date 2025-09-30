@@ -3,7 +3,6 @@ using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Text;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Http;
@@ -34,65 +33,19 @@ namespace Lidarr.Plugin.Common.Tests
             public string Title { get; set; } = string.Empty;
         }
 
-        private static FieldInfo GetHostGatesField() => typeof(HttpClientExtensions).GetField("_hostGates", BindingFlags.NonPublic | BindingFlags.Static) ?? throw new InvalidOperationException("Host gate registry not found.");
-
-        private static (int Limit, SemaphoreSlim Semaphore) GetHostGateState(string host)
+        private static (SemaphoreSlim Semaphore, int Limit) GetHostGateState(string host)
         {
-            var field = GetHostGatesField();
-            var gates = field.GetValue(null) ?? throw new InvalidOperationException("Host gate dictionary unavailable.");
-            var tryGetValue = field.FieldType.GetMethod("TryGetValue") ?? throw new InvalidOperationException("Unable to locate TryGetValue on host gate registry.");
-            var args = new object?[] { host, null };
-            var found = (bool)tryGetValue.Invoke(gates, args)!;
-            if (!found || args[1] is null)
+            if (!HostGateRegistry.TryGetState(host, out var state))
             {
                 throw new InvalidOperationException($"Host gate for '{host}' not found.");
             }
 
-            var gate = args[1]!;
-            var gateType = gate.GetType();
-            var limitProperty = gateType.GetProperty("Limit") ?? throw new InvalidOperationException("Host gate limit property missing.");
-            var semaphoreProperty = gateType.GetProperty("Semaphore") ?? throw new InvalidOperationException("Host gate semaphore property missing.");
-            var limit = (int)limitProperty.GetValue(gate)!;
-            var semaphore = (SemaphoreSlim)semaphoreProperty.GetValue(gate)!;
-            return (limit, semaphore);
+            return state;
         }
 
         private static void ClearHostGate(string host)
         {
-            var field = GetHostGatesField();
-            var gates = field.GetValue(null);
-            if (gates == null)
-            {
-                return;
-            }
-
-            MethodInfo? tryRemove = null;
-            foreach (var method in field.FieldType.GetMethods())
-            {
-                var parameters = method.GetParameters();
-                if (method.Name == "TryRemove" && parameters.Length == 2 && parameters[0].ParameterType == typeof(string))
-                {
-                    tryRemove = method;
-                    break;
-                }
-            }
-
-            if (tryRemove == null)
-            {
-                return;
-            }
-
-            var args = new object?[] { host, null };
-            var removed = (bool)tryRemove.Invoke(gates, args)!;
-            if (removed && args[1] is not null)
-            {
-                var gate = args[1]!;
-                var semaphoreProperty = gate.GetType().GetProperty("Semaphore") ?? throw new InvalidOperationException("Host gate semaphore property missing.");
-                if (semaphoreProperty.GetValue(gate) is SemaphoreSlim semaphore)
-                {
-                    semaphore.Dispose();
-                }
-            }
+            HostGateRegistry.Clear(host);
         }
 
         [Fact]
@@ -136,7 +89,6 @@ namespace Lidarr.Plugin.Common.Tests
             {
                 ClearHostGate(host);
             }
-
         }
 
         [Fact]
