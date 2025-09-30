@@ -1,5 +1,7 @@
 # How-to: Test a Plugin with the Isolation Loader
 
+If you prefer to reuse the shared fixtures and HTTP simulators, see [Leverage the Common TestKit](TEST_WITH_TESTKIT.md).
+
 A plugin test suite should load the plugin the same way the host does: through `PluginLoader` and a dedicated `AssemblyLoadContext`. Use this guide when you see `No test is available` or when you need confidence that side-by-side `Lidarr.Plugin.Common` versions work.
 
 ## 1. Add a test project next to the plugin

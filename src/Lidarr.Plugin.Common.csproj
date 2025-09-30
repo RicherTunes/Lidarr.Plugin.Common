@@ -6,6 +6,7 @@
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <AssemblyName>Lidarr.Plugin.Common</AssemblyName>
     <RootNamespace>Lidarr.Plugin.Common</RootNamespace>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <!-- Disable central package management for independent repository -->
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
@@ -48,6 +49,9 @@
     <None Remove="Abstractions\**\*" />
   </ItemGroup>
   <ItemGroup>
+  </ItemGroup>
+
+  <ItemGroup>
     <Compile Remove="Compat\**\*.cs" />
   </ItemGroup>
 
@@ -68,13 +72,16 @@
     <Compile Remove="CLI\**\*.cs" />
   </ItemGroup>
   <ItemGroup>
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="Abstractions/Lidarr.Plugin.Abstractions.csproj" />
   </ItemGroup>
 
   <!-- Core Dependencies -->
   <ItemGroup>
     <PackageReference Include="FluentValidation" Version="9.5.4" />
-    <PackageReference Include="Microsoft.DotNet.PackageValidation" Version="8.0.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.DotNet.PackageValidation" Version="1.0.0-preview.7.21379.12" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
   </ItemGroup>
@@ -113,6 +120,9 @@
     <PackageReference Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
   </ItemGroup>
   <ItemGroup>
+  </ItemGroup>
+
+  <ItemGroup>
     <None Remove="..\docs\**\*" />
     <None Remove="..\examples\**\*" />
   </ItemGroup>
@@ -122,6 +132,12 @@
     <None Include="..\CHANGELOG.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
+
+
+
+
+
+
 
 
 

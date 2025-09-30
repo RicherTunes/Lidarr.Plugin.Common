@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
+    <TargetFramework>net8.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
@@ -18,5 +18,6 @@
   <ItemGroup>
     <ProjectReference Include="..\src\Lidarr.Plugin.Common.csproj" />
     <ProjectReference Include="..\src\Abstractions\Lidarr.Plugin.Abstractions.csproj" />
+    <ProjectReference Include="..\testkit\Lidarr.Plugin.Common.TestKit.csproj" />
   </ItemGroup>
 </Project>
