@@ -16,6 +16,7 @@ Pick the guide that matches what you need to do.
 ## How-to (do the thing)
 
 - [Create a plugin project](how-to/CREATE_PLUGIN.md)
+- [Test a plugin with the isolation loader](how-to/TEST_PLUGIN.md)
 - [Implement an indexer](how-to/IMPLEMENT_INDEXER.md)
 - [Use the shared download orchestrator](how-to/USE_DOWNLOAD_ORCHESTRATOR.md)
 - [Authenticate with OAuth](how-to/AUTHENTICATE_OAUTH.md)
@@ -47,4 +48,5 @@ Pick the guide that matches what you need to do.
 - [Doc testing & snippet verification](dev-guide/TESTING_DOCS.md)
 
 Need something else? Open an issue or PR so the documentation evolves with the code.
+
 
