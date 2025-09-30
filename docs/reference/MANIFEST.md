@@ -3,6 +3,7 @@
 The host inspects `plugin.json` before loading a plugin. This page is the single source of truth for every field, validation rule, and compatibility check.
 
 ## Fields
+
 | Property | Type | Required | Description |
 |----------|------|----------|-------------|
 | `id` | string | ✓ | Stable, lowercase identifier for the plugin. Used as a registry key. |
@@ -19,6 +20,7 @@ The host inspects `plugin.json` before loading a plugin. This page is the single
 | `author` | string | – | Attribution. |
 
 ## Truth table
+
 | Scenario | Loader outcome |
 |----------|----------------|
 | `apiVersion` major equals host Abstractions major | Load proceeds. |
@@ -28,7 +30,9 @@ The host inspects `plugin.json` before loading a plugin. This page is the single
 | Required field missing/empty | `PluginManifest.Load` throws `InvalidOperationException` describing the field. |
 
 ## Example
+
 ```json
+
 {
   "id": "myplugin",
   "name": "My Plugin",
@@ -42,10 +46,12 @@ The host inspects `plugin.json` before loading a plugin. This page is the single
   "description": "Search and download from My Service",
   "author": "Your Name"
 }
+
 ```
 
 ## Validation rules
 `PluginManifest` normalises SemVer values before comparison. It removes pre-release/build metadata and ensures missing patch numbers default to zero. Validation occurs in this order:
+
 1. Ensure required fields are present (`id`, `name`, `version`, `apiVersion`).
 2. Parse `version` and `minHostVersion` (if provided) as SemVer.
 3. Validate `apiVersion` matches `major.x` format.
@@ -56,13 +62,16 @@ The host inspects `plugin.json` before loading a plugin. This page is the single
 See `tests/PluginManifestTests.cs` for unit coverage and `tests/PluginLoaderEdgeTests.cs` for integration-level guards.
 
 ## Author checklist
+
 - [ ] Keep `id` immutable across releases.
 - [ ] Update `commonVersion` to reflect the Common DLL shipped with your plugin.
 - [ ] Populate `requiredSettings` so hosts can surface missing configuration early.
 - [ ] Include `minHostVersion` when you rely on new host features.
 
 ## Related docs
+
 - [Architecture](../concepts/ARCHITECTURE.md)
 - [Compatibility matrix](../concepts/COMPATIBILITY.md)
 - [Settings reference](SETTINGS.md)
 - [Migration guides](../migration/FROM_LEGACY.md)
+
