@@ -2,9 +2,11 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Abstractions.Contracts;
 using Lidarr.Plugin.Abstractions.Hosting;
+using Lidarr.Plugin.Abstractions.Manifest;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
 
@@ -49,13 +51,18 @@ namespace IsolationHostSample
             {
                 foreach (var pluginDirectory in pluginDirectories)
                 {
+                    // snippet:alc-loader
                     var request = new PluginLoadRequest
                     {
                         PluginDirectory = pluginDirectory,
                         HostVersion = hostVersion,
                         ContractVersion = contractVersion,
                         PluginContext = new DefaultPluginContext(hostVersion, loggerFactory),
-                        SharedAssemblies = new[] { "Lidarr.Plugin.Abstractions", "Microsoft.Extensions.Logging.Abstractions" }
+                        SharedAssemblies = new[]
+                        {
+                            "Lidarr.Plugin.Abstractions",
+                            "Microsoft.Extensions.Logging.Abstractions"
+                        }
                     };
 
                     Console.WriteLine($"-> Loading '{Path.GetFileName(pluginDirectory)}'...");
@@ -63,6 +70,7 @@ namespace IsolationHostSample
                     handles.Add(handle);
 
                     Console.WriteLine($"   Manifest: {handle.Plugin.Manifest.Name} v{handle.Plugin.Manifest.Version} (Common {handle.Plugin.Manifest.CommonVersion ?? "n/a"})");
+                    // end-snippet
                 }
 
                 Console.WriteLine();
@@ -82,5 +90,52 @@ namespace IsolationHostSample
                 GC.Collect();
             }
         }
+    }
+
+    internal sealed class ShimPluginExample : IPlugin
+    {
+        private PluginHandle? _payloadHandle;
+
+        public PluginManifest Manifest { get; } = new()
+        {
+            Id = "shim.sample",
+            Name = "Shim Sample",
+            Version = "1.0.0",
+            ApiVersion = "1.x",
+            EntryAssembly = "ShimPlugin.dll"
+        };
+
+        // snippet:shim-plugin
+        public async ValueTask InitializeAsync(IPluginContext context, CancellationToken cancellationToken = default)
+        {
+            var payloadDirectory = Path.Combine(Path.GetDirectoryName(typeof(ShimPluginExample).Assembly.Location)!, "payload");
+            var request = new PluginLoadRequest
+            {
+                PluginDirectory = payloadDirectory,
+                HostVersion = context.HostVersion,
+                ContractVersion = typeof(IPlugin).Assembly.GetName().Version!,
+                PluginContext = context,
+                SharedAssemblies = new[]
+                {
+                    "Lidarr.Plugin.Abstractions",
+                    "Microsoft.Extensions.Logging.Abstractions"
+                }
+            };
+
+            _payloadHandle = await PluginLoader.LoadAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+
+        public ValueTask<IIndexer?> CreateIndexerAsync(CancellationToken cancellationToken = default)
+            => _payloadHandle?.Plugin.CreateIndexerAsync(cancellationToken) ?? ValueTask.FromResult<IIndexer?>(null);
+
+        public ValueTask<IDownloadClient?> CreateDownloadClientAsync(CancellationToken cancellationToken = default)
+            => _payloadHandle?.Plugin.CreateDownloadClientAsync(cancellationToken) ?? ValueTask.FromResult<IDownloadClient?>(null);
+
+        public ISettingsProvider SettingsProvider
+            => _payloadHandle?.Plugin.SettingsProvider ?? throw new InvalidOperationException("Payload not initialised");
+
+        public ValueTask DisposeAsync()
+            => _payloadHandle?.DisposeAsync() ?? ValueTask.CompletedTask;
+        // end-snippet
     }
 }
