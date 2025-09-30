@@ -74,6 +74,7 @@
   <!-- Core Dependencies -->
   <ItemGroup>
     <PackageReference Include="FluentValidation" Version="9.5.4" />
+    <PackageReference Include="Microsoft.DotNet.PackageValidation" Version="8.0.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
   </ItemGroup>
