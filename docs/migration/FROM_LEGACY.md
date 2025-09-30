@@ -27,7 +27,7 @@ Example:
 - `minHostVersion` is the minimum Lidarr host version you support.
 - `commonVersion` is informational; it helps diagnose mixed dependency sets.
 
-See `docs/PLUGIN_MANIFEST.md` for the full schema and validation rules.
+See `../reference/MANIFEST.md` for the full schema and validation rules.
 
 ## 3. Make sure only Abstractions types cross the boundary
 - Public plugin entry points (`IPlugin`, `IIndexer`, `IDownloadClient`, DTOs, settings providers) should use Abstractions types only.
@@ -49,6 +49,7 @@ See `docs/PLUGIN_MANIFEST.md` for the full schema and validation rules.
 Each plugin lives in its own folder with its private dependencies. The host shares only `Lidarr.Plugin.Abstractions` and optional logging abstractions.
 
 ## 6. Optional: Shim if the host cannot change
-When the host loader is fixed, ship a stub that spins up a private AssemblyLoadContext. See `docs/PLUGIN_ISOLATION.md` for the full shim example.
+When the host loader is fixed, ship a stub that spins up a private AssemblyLoadContext. See `../concepts/PLUGIN_ISOLATION.md` for the full shim example.
 
 Following these steps ensures your plugin survives side-by-side loading, hot reloads, and future host upgrades without hard process restarts.
+
