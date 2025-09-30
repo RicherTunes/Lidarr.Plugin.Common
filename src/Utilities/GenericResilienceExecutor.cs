@@ -101,7 +101,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
         private static TimeSpan GetJitter()
         {
-            var ms = Random.Shared.Next(50, 250);
+            var ms = RandomProvider.Next(50, 250);
             return TimeSpan.FromMilliseconds(ms);
         }
     }

@@ -7,7 +7,7 @@ using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Interfaces;
-using Lidarr.Plugin.Common.Models;
+using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Utilities;
 
 namespace Lidarr.Plugin.Common.Services.Download
@@ -46,8 +46,15 @@ namespace Lidarr.Plugin.Common.Services.Download
             _streamProvider = streamProvider;
         }
 
-        public async Task<DownloadResult> DownloadAlbumAsync(string albumId, string outputDirectory, StreamingQuality quality = null, IProgress<DownloadProgress> progress = null)
+        public Task<DownloadResult> DownloadAlbumAsync(string albumId, string outputDirectory, StreamingQuality quality = null, IProgress<DownloadProgress> progress = null)
         {
+            return DownloadAlbumAsync(albumId, outputDirectory, quality, progress, CancellationToken.None);
+        }
+
+        public virtual async Task<DownloadResult> DownloadAlbumAsync(string albumId, string outputDirectory, StreamingQuality quality, IProgress<DownloadProgress> progress, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var album = await _getAlbumAsync(albumId).ConfigureAwait(false);
             if (album == null) throw new InvalidOperationException($"Album not found: {albumId}");
 
@@ -61,9 +68,12 @@ namespace Lidarr.Plugin.Common.Services.Download
 
             foreach (var trackId in trackIds ?? Array.Empty<string>())
             {
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var track = await _getTrackAsync(trackId).ConfigureAwait(false);
                 var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
-                var tr = await DownloadTrackInternalAsync(trackId, track, trackPath, quality, progress, done, total).ConfigureAwait(false);
+
+                var tr = await DownloadTrackInternalAsync(trackId, track, trackPath, quality, progress, done, total, cancellationToken).ConfigureAwait(false);
                 result.TrackResults.Add(new TrackDownloadResult
                 {
                     TrackId = trackId,
@@ -85,14 +95,20 @@ namespace Lidarr.Plugin.Common.Services.Download
             return result;
         }
 
-        public async Task<TrackDownloadResult> DownloadTrackAsync(string trackId, string outputPath, StreamingQuality? quality = null)
+        public Task<TrackDownloadResult> DownloadTrackAsync(string trackId, string outputPath, StreamingQuality? quality = null)
         {
-            var track = await _getTrackAsync(trackId).ConfigureAwait(false);
-            if (track == null) throw new InvalidOperationException($"Track not found: {trackId}");
-            return await DownloadTrackInternalAsync(trackId, track, outputPath, quality, null, 0, 1).ConfigureAwait(false);
+            return DownloadTrackAsync(trackId, outputPath, quality, CancellationToken.None);
         }
 
-        private async Task<TrackDownloadResult> DownloadTrackInternalAsync(string trackId, StreamingTrack track, string outputPath, StreamingQuality? quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks)
+        public virtual async Task<TrackDownloadResult> DownloadTrackAsync(string trackId, string outputPath, StreamingQuality? quality, CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var track = await _getTrackAsync(trackId).ConfigureAwait(false);
+            if (track == null) throw new InvalidOperationException($"Track not found: {trackId}");
+            return await DownloadTrackInternalAsync(trackId, track, outputPath, quality, null, 0, 1, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task<TrackDownloadResult> DownloadTrackInternalAsync(string trackId, StreamingTrack track, string outputPath, StreamingQuality? quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks, CancellationToken cancellationToken)
         {
             // If a chunk-based stream provider is supplied, use it
             if (_streamProvider != null)
@@ -101,7 +117,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
                     var tempPath = outputPath + ".partial";
-                    var streamResult = await _streamProvider.GetStreamAsync(trackId, quality).ConfigureAwait(false);
+                    var streamResult = await _streamProvider.GetStreamAsync(trackId, quality, cancellationToken).ConfigureAwait(false);
                     var totalExpected = streamResult.TotalBytes ?? 0;
                     if (!string.IsNullOrWhiteSpace(streamResult.SuggestedExtension))
                     {
@@ -110,12 +126,12 @@ namespace Lidarr.Plugin.Common.Services.Download
 
                     using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, useAsync: true))
                     {
-                        await CopyWithProgressAsync(streamResult.Stream, fs, totalExpected, (fraction, bps, eta) =>
+                        await CopyWithProgressAsync(streamResult.Stream, fs, totalExpected, cancellationToken, (fraction, bps, eta) =>
                         {
                             ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
                         }).ConfigureAwait(false);
                     }
-                    try { File.Move(tempPath, outputPath, overwrite: true); }
+                    try { FileSystemUtility.MoveFile(tempPath, outputPath, true); }
                     catch { if (File.Exists(outputPath)) File.Delete(outputPath); File.Move(tempPath, outputPath); }
 
                     return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = new FileInfo(outputPath).Length, ActualQuality = quality };
@@ -127,11 +143,14 @@ namespace Lidarr.Plugin.Common.Services.Download
             }
 
             // Fallback to URL-based path with resume tracking
-            return await DownloadViaUrlAsync(trackId, track, outputPath, quality, progress, completedBefore, totalTracks).ConfigureAwait(false);
+            return await DownloadViaUrlAsync(trackId, track, outputPath, quality, progress, completedBefore, totalTracks, cancellationToken).ConfigureAwait(false);
         }
 
-        private async Task<TrackDownloadResult> DownloadViaUrlAsync(string trackId, StreamingTrack track, string outputPath, StreamingQuality? quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks)
+
+        private async Task<TrackDownloadResult> DownloadViaUrlAsync(string trackId, StreamingTrack track, string outputPath, StreamingQuality? quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+
             var (url, extension) = await _getStreamAsync(trackId, quality).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(url)) return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Empty stream URL" };
             if (!string.IsNullOrWhiteSpace(extension)) outputPath = Path.ChangeExtension(outputPath, extension.TrimStart('.'));
@@ -139,10 +158,14 @@ namespace Lidarr.Plugin.Common.Services.Download
             try
             {
                 Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
+                cancellationToken.ThrowIfCancellationRequested();
+
                 var tempPath = outputPath + ".partial";
                 var resumePath = tempPath + ".resume.json";
 
-                long existingBytes = 0; string? etag = null; DateTimeOffset? lastModified = null;
+                long existingBytes = 0;
+                string? etag = null;
+                DateTimeOffset? lastModified = null;
                 if (File.Exists(tempPath))
                 {
                     try { existingBytes = new FileInfo(tempPath).Length; } catch { existingBytes = 0; }
@@ -170,12 +193,17 @@ namespace Lidarr.Plugin.Common.Services.Download
                     else if (lastModified.HasValue) req.Headers.TryAddWithoutValidation("If-Range", lastModified.Value.ToString("R"));
                 }
 
-                using var resp = await _httpClient.ExecuteWithResilienceAsync(req).ConfigureAwait(false);
+                using var resp = await _httpClient.ExecuteWithResilienceAsync(req, cancellationToken: cancellationToken).ConfigureAwait(false);
                 resp.EnsureSuccessStatusCode();
 
                 var totalHeader = resp.Content.Headers.ContentLength;
                 var isPartial = resp.StatusCode == System.Net.HttpStatusCode.PartialContent;
-                try { if (resp.Headers.ETag != null) etag = resp.Headers.ETag.Tag; if (resp.Content?.Headers?.LastModified.HasValue == true) lastModified = resp.Content.Headers.LastModified; } catch { }
+                try
+                {
+                    if (resp.Headers.ETag != null) etag = resp.Headers.ETag.Tag;
+                    if (resp.Content?.Headers?.LastModified.HasValue == true) lastModified = resp.Content.Headers.LastModified;
+                }
+                catch { }
 
                 var totalExpected = isPartial && totalHeader.HasValue ? existingBytes + totalHeader.Value : (totalHeader ?? 0);
                 if (existingBytes > 0 && !isPartial)
@@ -186,39 +214,46 @@ namespace Lidarr.Plugin.Common.Services.Download
                 }
 
                 var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
-                using (var content = await resp.Content.ReadAsStreamAsync().ConfigureAwait(false))
+                using (var content = await HttpContentLightUp.ReadAsStreamAsync(resp.Content, cancellationToken).ConfigureAwait(false))
                 using (var fs = new FileStream(tempPath, fileMode, FileAccess.Write, FileShare.None, 8192, useAsync: true))
                 {
                     long startBytes = existingBytes;
-                    await CopyWithProgressAsync(content, fs, totalExpected, (fraction, bps, eta) =>
+                    await CopyWithProgressAsync(content, fs, totalExpected, cancellationToken, (fraction, bps, eta) =>
                     {
                         ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
                         TryWriteResumeCheckpoint(resumePath, (long)(startBytes + fraction * Math.Max(1, totalExpected)), totalExpected, etag, lastModified?.UtcDateTime);
                     }).ConfigureAwait(false);
                 }
 
-                try { File.Move(tempPath, outputPath, overwrite: true); }
+                try { FileSystemUtility.MoveFile(tempPath, outputPath, true); }
                 catch { if (File.Exists(outputPath)) File.Delete(outputPath); File.Move(tempPath, outputPath); }
                 try { if (File.Exists(resumePath)) File.Delete(resumePath); } catch { }
 
                 return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = new FileInfo(outputPath).Length, ActualQuality = quality };
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {
                 return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = ex.Message };
             }
         }
-
-        private static async Task CopyWithProgressAsync(Stream input, Stream output, long totalExpected, Action<double, long, TimeSpan?> onProgress)
+        private static async Task CopyWithProgressAsync(Stream input, Stream output, long totalExpected, CancellationToken cancellationToken, Action<double, long, TimeSpan?> onProgress)
         {
             var buffer = new byte[8192];
-            long written = 0; long windowBytes = 0; var interval = 500;
+            long written = 0;
+            long windowBytes = 0;
+            var interval = 500;
             var last = System.Diagnostics.Stopwatch.StartNew();
             int read;
-            while ((read = await input.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0)
+            while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
             {
-                await output.WriteAsync(buffer, 0, read).ConfigureAwait(false);
-                written += read; windowBytes += read;
+                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                written += read;
+                windowBytes += read;
+
                 if (last.ElapsedMilliseconds >= interval)
                 {
                     var seconds = Math.Max(0.001, last.Elapsed.TotalSeconds);
@@ -235,9 +270,9 @@ namespace Lidarr.Plugin.Common.Services.Download
                     last.Restart();
                 }
             }
+
             onProgress(1, 0, TimeSpan.Zero);
         }
-
         private static void ReportProgress(IProgress<DownloadProgress>? progress, int completed, int total, string? currentTrack, double fractionOfCurrent, long bytesPerSecond, TimeSpan? eta)
         {
             if (progress == null) return;
@@ -296,3 +331,4 @@ namespace Lidarr.Plugin.Common.Services.Download
         }
     }
 }
+

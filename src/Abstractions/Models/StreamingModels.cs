@@ -2,7 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 
-namespace Lidarr.Plugin.Common.Models
+namespace Lidarr.Plugin.Abstractions.Models
 {
     /// <summary>
     /// Generic representation of an artist from any streaming service.
@@ -12,17 +12,17 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// Unique identifier from the streaming service.
         /// </summary>
-        public string Id { get; set; }
+        public string Id { get; set; } = string.Empty;
 
         /// <summary>
         /// Artist name.
         /// </summary>
-        public string Name { get; set; }
+        public string Name { get; set; } = string.Empty;
 
         /// <summary>
         /// Biography or description.
         /// </summary>
-        public string Biography { get; set; }
+        public string Biography { get; set; } = string.Empty;
 
         /// <summary>
         /// Genres associated with this artist.
@@ -32,7 +32,7 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// Country or origin.
         /// </summary>
-        public string Country { get; set; }
+        public string Country { get; set; } = string.Empty;
 
         /// <summary>
         /// Artist image URLs by size.
@@ -58,7 +58,7 @@ namespace Lidarr.Plugin.Common.Models
                 return ImageUrls[preferredSize];
 
             // Fallback to any available image
-            return ImageUrls.Values.FirstOrDefault();
+            return ImageUrls.Values.FirstOrDefault() ?? string.Empty;
         }
     }
 
@@ -70,17 +70,17 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// Unique identifier from the streaming service.
         /// </summary>
-        public string Id { get; set; }
+        public string Id { get; set; } = string.Empty;
 
         /// <summary>
         /// Album title.
         /// </summary>
-        public string Title { get; set; }
+        public string Title { get; set; } = string.Empty;
 
         /// <summary>
         /// Primary artist.
         /// </summary>
-        public StreamingArtist Artist { get; set; }
+        public StreamingArtist Artist { get; set; } = new StreamingArtist();
 
         /// <summary>
         /// Additional artists (collaborations, features).
@@ -115,17 +115,17 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// Record label.
         /// </summary>
-        public string Label { get; set; }
+        public string Label { get; set; } = string.Empty;
 
         /// <summary>
         /// UPC/EAN barcode.
         /// </summary>
-        public string Upc { get; set; }
+        public string Upc { get; set; } = string.Empty;
 
         /// <summary>
         /// MusicBrainz album ID (if known).
         /// </summary>
-        public string MusicBrainzId { get; set; }
+        public string MusicBrainzId { get; set; } = string.Empty;
 
         /// <summary>
         /// Cross-service external IDs (e.g., {"qobuz":"123", "tidal":"456"}).
@@ -197,21 +197,19 @@ namespace Lidarr.Plugin.Common.Models
                     return CoverArtUrls[size];
             }
 
-            return CoverArtUrls.Values.FirstOrDefault();
+            return CoverArtUrls.Values.FirstOrDefault() ?? string.Empty;
         }
 
         /// <summary>
         /// Gets the highest available audio quality.
         /// </summary>
-        public StreamingQuality GetBestQuality()
+        public StreamingQuality? GetBestQuality()
         {
-            if (!AvailableQualities.Any())
-                return null;
-
-            return AvailableQualities.OrderByDescending(q => q.BitDepth ?? 0)
-                                   .ThenByDescending(q => q.SampleRate ?? 0)
-                                   .ThenByDescending(q => q.Bitrate ?? 0)
-                                   .First();
+            return AvailableQualities
+                .OrderByDescending(q => q.BitDepth ?? 0)
+                .ThenByDescending(q => q.SampleRate ?? 0)
+                .ThenByDescending(q => q.Bitrate ?? 0)
+                .FirstOrDefault();
         }
     }
 
@@ -223,22 +221,22 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// Unique identifier from the streaming service.
         /// </summary>
-        public string Id { get; set; }
+        public string Id { get; set; } = string.Empty;
 
         /// <summary>
         /// Track title.
         /// </summary>
-        public string Title { get; set; }
+        public string Title { get; set; } = string.Empty;
 
         /// <summary>
         /// Primary artist.
         /// </summary>
-        public StreamingArtist Artist { get; set; }
+        public StreamingArtist Artist { get; set; } = new StreamingArtist();
 
         /// <summary>
         /// Album this track belongs to.
         /// </summary>
-        public StreamingAlbum Album { get; set; }
+        public StreamingAlbum Album { get; set; } = new StreamingAlbum();
 
         /// <summary>
         /// Track number within the album.
@@ -263,12 +261,12 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// ISRC code.
         /// </summary>
-        public string Isrc { get; set; }
+        public string Isrc { get; set; } = string.Empty;
 
         /// <summary>
         /// MusicBrainz track ID (if known).
         /// </summary>
-        public string MusicBrainzId { get; set; }
+        public string MusicBrainzId { get; set; } = string.Empty;
 
         /// <summary>
         /// Cross-service external IDs (e.g., {"qobuz":"trk-123", "tidal":"789"}).
@@ -288,7 +286,7 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// Preview URL (30-90 second snippet).
         /// </summary>
-        public string PreviewUrl { get; set; }
+        public string PreviewUrl { get; set; } = string.Empty;
 
         /// <summary>
         /// Popularity/play count (service-specific scale).
@@ -315,19 +313,18 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// Gets the highest available audio quality for this track.
         /// </summary>
-        public StreamingQuality GetBestQuality()
+        public StreamingQuality? GetBestQuality()
         {
-            // Use album quality if track-specific not available
-            if (!AvailableQualities.Any() && Album?.AvailableQualities.Any() == true)
-                return Album.GetBestQuality();
+            if (AvailableQualities.Any())
+            {
+                return AvailableQualities
+                    .OrderByDescending(q => q.BitDepth ?? 0)
+                    .ThenByDescending(q => q.SampleRate ?? 0)
+                    .ThenByDescending(q => q.Bitrate ?? 0)
+                    .FirstOrDefault();
+            }
 
-            if (!AvailableQualities.Any())
-                return null;
-
-            return AvailableQualities.OrderByDescending(q => q.BitDepth ?? 0)
-                                   .ThenByDescending(q => q.SampleRate ?? 0)
-                                   .ThenByDescending(q => q.Bitrate ?? 0)
-                                   .First();
+            return Album?.GetBestQuality();
         }
     }
 
@@ -339,17 +336,17 @@ namespace Lidarr.Plugin.Common.Models
         /// <summary>
         /// Service-specific quality identifier.
         /// </summary>
-        public string Id { get; set; }
+        public string Id { get; set; } = string.Empty;
 
         /// <summary>
         /// Human-readable quality name.
         /// </summary>
-        public string Name { get; set; }
+        public string Name { get; set; } = string.Empty;
 
         /// <summary>
         /// Audio format (MP3, FLAC, AAC, etc.).
         /// </summary>
-        public string Format { get; set; }
+        public string Format { get; set; } = string.Empty;
 
         /// <summary>
         /// Bitrate in kbps (for lossy formats).
@@ -454,15 +451,15 @@ namespace Lidarr.Plugin.Common.Models
     /// </summary>
     public class StreamingSearchResult
     {
-        public string Id { get; set; }
-        public string Title { get; set; }
-        public string Artist { get; set; }
-        public string Album { get; set; }
+        public string Id { get; set; } = string.Empty;
+        public string Title { get; set; } = string.Empty;
+        public string Artist { get; set; } = string.Empty;
+        public string Album { get; set; } = string.Empty;
         public StreamingSearchType Type { get; set; }
         public DateTime? ReleaseDate { get; set; }
-        public string Genre { get; set; }
-        public string Label { get; set; }
-        public string CoverArtUrl { get; set; }
+        public string Genre { get; set; } = string.Empty;
+        public string Label { get; set; } = string.Empty;
+        public string CoverArtUrl { get; set; } = string.Empty;
         public int? TrackCount { get; set; }
         public TimeSpan? Duration { get; set; }
         public Dictionary<string, object> Metadata { get; set; } = new Dictionary<string, object>();
