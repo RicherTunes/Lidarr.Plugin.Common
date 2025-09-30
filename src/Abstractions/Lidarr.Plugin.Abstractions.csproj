@@ -1,45 +1,31 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net6.0</TargetFrameworks>
+    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>Lidarr.Plugin.Abstractions</AssemblyName>
     <RootNamespace>Lidarr.Plugin.Abstractions</RootNamespace>
-    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
-    <PackageId>Lidarr.Plugin.Abstractions</PackageId>
-    <Version>1.0.0</Version>
-    <PackageVersion>1.0.0</PackageVersion>
-    <Title>Lidarr Plugin Abstractions</Title>
-    <Authors>RicherTunes Community</Authors>
-    <Company>RicherTunes</Company>
-    <Description>Stable cross-AssemblyLoadContext contracts shared between Lidarr host and streaming plugins.</Description>
-    <PackageLicenseExpression>MIT</PackageLicenseExpression>
-    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
-    <PackageProjectUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common</PackageProjectUrl>
-    <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
-    <RepositoryType>git</RepositoryType>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
-    <GeneratePackageOnBuild>true</GeneratePackageOnBuild>
-    <IncludeSymbols>true</IncludeSymbols>
-    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
-    <PublishRepositoryUrl>true</PublishRepositoryUrl>
-    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <NoWarn>SA1200;SA1633;CS1591</NoWarn>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
   </PropertyGroup>
 
-  <ItemGroup>
-    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
+  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
+    <AdditionalFiles Include="PublicAPI\net6.0\PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI\net6.0\PublicAPI.Unshipped.txt" />
+    <PublicAPIShipped Include="PublicAPI\net6.0\PublicAPI.Shipped.txt"><TargetFramework>net6.0</TargetFramework></PublicAPIShipped>
+    <PublicAPIUnshipped Include="PublicAPI\net6.0\PublicAPI.Unshipped.txt"><TargetFramework>net6.0</TargetFramework></PublicAPIUnshipped>
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)'=='net6.0'">
-    <AdditionalFiles Include="PublicAPI.Shipped.net6.0.txt" Link="PublicAPI.Shipped.txt" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)'=='net8.0'">
-    <AdditionalFiles Include="PublicAPI.Shipped.net8.0.txt" Link="PublicAPI.Shipped.txt" />
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+    <AdditionalFiles Include="PublicAPI\net8.0\PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI\net8.0\PublicAPI.Unshipped.txt" />
+    <PublicAPIShipped Include="PublicAPI\net8.0\PublicAPI.Shipped.txt"><TargetFramework>net8.0</TargetFramework></PublicAPIShipped>
+    <PublicAPIUnshipped Include="PublicAPI\net8.0\PublicAPI.Unshipped.txt"><TargetFramework>net8.0</TargetFramework></PublicAPIUnshipped>
   </ItemGroup>
 
   <ItemGroup>
@@ -47,12 +33,12 @@
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)'=='net6.0'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
     <PackageReference Include="System.Text.Json" Version="6.0.11" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)'=='net8.0'">
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
   </ItemGroup>

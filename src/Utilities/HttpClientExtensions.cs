@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Reflection;
 using System.Linq;
@@ -10,6 +9,7 @@ using System.Text.Json;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Lidarr.Plugin.Common.Services.Http;
 
 namespace Lidarr.Plugin.Common.Utilities
 {
@@ -18,42 +18,7 @@ namespace Lidarr.Plugin.Common.Utilities
     /// </summary>
     public static class HttpClientExtensions
     {
-        private sealed class HostGate
-        {
-            public HostGate(SemaphoreSlim semaphore, int limit)
-            {
-                Semaphore = semaphore;
-                Limit = limit;
-            }
 
-            public SemaphoreSlim Semaphore { get; }
-
-            public int Limit { get; private set; }
-
-            public void UpdateLimit(int limit) => Limit = limit;
-        }
-
-        private static readonly ConcurrentDictionary<string, HostGate> _hostGates = new();
-
-        private static SemaphoreSlim GetHostGate(string? host, int requestedLimit)
-        {
-            host ??= "__unknown__";
-            return _hostGates.AddOrUpdate(
-                host,
-                _ => new HostGate(new SemaphoreSlim(requestedLimit, int.MaxValue), requestedLimit),
-                (_, existing) =>
-                {
-                    if (requestedLimit > existing.Limit)
-                    {
-                        var delta = requestedLimit - existing.Limit;
-                        existing.Semaphore.Release(delta);
-                        existing.UpdateLimit(requestedLimit);
-                    }
-
-                    return existing;
-                })
-                .Semaphore;
-        }
         /// <summary>
         /// Executes an HTTP request with built-in retry logic and error handling.
         /// </summary>
@@ -81,7 +46,7 @@ namespace Lidarr.Plugin.Common.Utilities
         /// exponential backoff with jitter, per-host concurrency gating, and retry budget.
         /// The provided request is cloned per attempt to allow safe retries.
         /// </summary>
-        public static async Task<HttpResponseMessage> ExecuteWithResilienceAsync(
+        public static Task<HttpResponseMessage> ExecuteWithResilienceAsync(
             this HttpClient httpClient,
             HttpRequestMessage request,
             int maxRetries = 5,
@@ -89,13 +54,89 @@ namespace Lidarr.Plugin.Common.Utilities
             int maxConcurrencyPerHost = 6,
             CancellationToken cancellationToken = default)
         {
+            return ExecuteWithResilienceAsyncCore(
+                httpClient,
+                request,
+                maxRetries,
+                retryBudget,
+                maxConcurrencyPerHost,
+                perRequestTimeout: null,
+                cancellationToken);
+        }
+
+        public static Task<HttpResponseMessage> ExecuteWithResilienceAsync(
+            this HttpClient httpClient,
+            HttpRequestMessage request,
+            int maxRetries,
+            TimeSpan? retryBudget,
+            int maxConcurrencyPerHost,
+            TimeSpan? perRequestTimeout,
+            CancellationToken cancellationToken)
+        {
+            return ExecuteWithResilienceAsyncCore(
+                httpClient,
+                request,
+                maxRetries,
+                retryBudget,
+                maxConcurrencyPerHost,
+                perRequestTimeout,
+                cancellationToken);
+        }
+
+        public static async Task<HttpResponseMessage> SendWithResilienceAsync(
+            this HttpClient httpClient,
+            Services.Http.StreamingApiRequestBuilder builder,
+            int maxRetries = 5,
+            TimeSpan? retryBudget = null,
+            int maxConcurrencyPerHost = 6,
+            CancellationToken cancellationToken = default)
+        {
+            if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
+            if (builder == null) throw new ArgumentNullException(nameof(builder));
+
+            var request = builder.Build();
+            var info = builder.BuildForLogging();
+
+            try
+            {
+                return await httpClient.ExecuteWithResilienceAsync(
+                    request,
+                    maxRetries,
+                    retryBudget,
+                    maxConcurrencyPerHost,
+                    info.Timeout,
+                    cancellationToken).ConfigureAwait(false);
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+        private static async Task<HttpResponseMessage> ExecuteWithResilienceAsyncCore(
+            HttpClient httpClient,
+            HttpRequestMessage request,
+            int maxRetries,
+            TimeSpan? retryBudget,
+            int maxConcurrencyPerHost,
+            TimeSpan? perRequestTimeout,
+            CancellationToken cancellationToken)
+        {
             retryBudget ??= TimeSpan.FromSeconds(60);
+            using var timeoutCts = perRequestTimeout.HasValue
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+                : null;
+            if (perRequestTimeout.HasValue)
+            {
+                timeoutCts!.CancelAfter(perRequestTimeout.Value);
+            }
+
+            var effectiveToken = timeoutCts?.Token ?? cancellationToken;
             var deadline = DateTime.UtcNow + retryBudget.Value;
             var attempt = 0;
             var host = request.RequestUri?.Host;
-            var gate = GetHostGate(host, Math.Max(1, maxConcurrencyPerHost));
+            var gate = HostGateRegistry.Get(host, Math.Max(1, maxConcurrencyPerHost));
 
-            await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
             try
             {
                 while (true)
@@ -103,45 +144,40 @@ namespace Lidarr.Plugin.Common.Utilities
                     attempt++;
 
                     using var attemptRequest = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
-                    var response = await httpClient.SendAsync(attemptRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                    var response = await httpClient.SendAsync(
+                        attemptRequest,
+                        HttpCompletionOption.ResponseHeadersRead,
+                        effectiveToken).ConfigureAwait(false);
 
                     if ((int)response.StatusCode >= 200 && (int)response.StatusCode < 300)
                     {
-                        // Success; caller disposes response
                         return response;
                     }
 
-                    // Determine if retryable
                     var status = (int)response.StatusCode;
                     var retryable = status == 408 || status == 429 || (status >= 500 && status <= 599);
                     if (!retryable || attempt >= maxRetries)
                     {
-                        return response; // let caller handle non-retryable or last attempt
+                        return response;
                     }
 
-                    // Compute delay from headers or backoff
-                    var delay = GetRetryDelay(response) ?? TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt))) + GetJitter();
-                    response.Dispose(); // dispose before waiting
+                    var delay = GetRetryDelay(response)
+                               ?? TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt))) + GetJitter();
+                    response.Dispose();
 
-                    // Respect retry budget
                     var now = DateTime.UtcNow;
                     if (now + delay > deadline)
                     {
-                        // Budget exceeded; stop retrying
-                        break;
+                        return response;
                     }
 
-                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                    await Task.Delay(delay, effectiveToken).ConfigureAwait(false);
                 }
             }
             finally
             {
                 gate.Release();
             }
-
-            // Final attempt without retry or return last response -> do one last send
-            using var finalRequest = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
-            return await httpClient.SendAsync(finalRequest, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
         }
 
         /// <summary>
@@ -439,6 +475,10 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
+
+
+
+
 
 
 
