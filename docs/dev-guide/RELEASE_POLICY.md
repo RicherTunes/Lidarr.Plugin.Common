@@ -29,7 +29,7 @@ This repository ships two NuGet packages:
    - `Lidarr.Plugin.Abstractions` (if updated).
    - `Lidarr.Plugin.Common`.
 6. **Communicate**:
-   - Announce Abstractions bumps to plugin authors with the migration checklist (`docs/PLUGIN_MIGRATION.md`).
+   - Announce Abstractions bumps to plugin authors with the migration checklist (`../migration/FROM_LEGACY.md`).
    - For Common updates, highlight notable changes but remind authors they can upgrade at their own pace.
 
 ## Checklist before release
@@ -41,3 +41,4 @@ This repository ships two NuGet packages:
 - [ ] Packages pack locally (`dotnet pack`).
 
 This process keeps the ABI stable for the host while allowing plugins and shared implementation code to evolve independently without assembly conflicts.
+

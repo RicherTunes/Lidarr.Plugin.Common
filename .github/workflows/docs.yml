@@ -1,0 +1,31 @@
+name: Docs
+
+on:
+  pull_request:
+    paths:
+      - 'docs/**'
+      - 'examples/IsolationHostSample/**'
+      - 'tools/DocTools/**'
+      - '!docs/dev-guide/CI.md'
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/**'
+      - 'examples/IsolationHostSample/**'
+      - 'tools/DocTools/**'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore tools
+        run: dotnet tool restore
+      - name: Snippet verification
+        run: dotnet run --project tools/DocTools/SnippetVerifier/SnippetVerifier.csproj
+      - name: Placeholder lint step
+        run: echo "TODO: add markdownlint/vale/cspell"
