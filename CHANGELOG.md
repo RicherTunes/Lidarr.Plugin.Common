@@ -30,6 +30,22 @@ All notable changes to the shared library are documented here. The format follow
 ### Reminder
 - Maintainers must keep host assemblies in sync with Lidarr 2.14.2.4786 before shipping plugin updates; see `docs/UNIFIED_PLUGIN_PIPELINE.md` for the complete process.
 
+## [1.1.4] - 2025-09-30
+
+### Added
+- `HostGateRegistry` centralizes per-host semaphore management for both HTTP extensions and the generic resilience executor, with shared internals access for tests.
+- `HttpClientExtensions.SendWithResilienceAsync` wires timeout metadata from `StreamingApiRequestBuilder` without duplicating request construction.
+- API compatibility guard in CI: the pack job now runs  `Microsoft.DotNet.ApiCompat` against the latest release before uploading artifacts.
+
+### Changed
+- `HttpClientExtensions` and `GenericResilienceExecutor` now support optional per-request timeouts and reuse pooled host gates instead of maintaining divergent dictionaries.
+- `StreamingResponseCache` enforces `MaxCacheSize` by trimming the oldest entries and shares the sensitive-parameter mask with HTTP logging utilities.
+- `ContentDecodingSnifferHandler` inspects only small payloads, avoids double buffering, and promotes mislabelled gzip responses to `application/json` without copying large streams.
+- Packaging excludes  `docs/**` and `examples/**` from the nupkg to reduce install size; package metadata bumped to v1.1.4 with updated release notes.
+
+### Deprecated
+- `AdaptiveRateLimiter` is marked `[Obsolete]` with guidance to adopt `UniversalAdaptiveRateLimiter`; this will be removed in 1.3.
+
 ## [1.1.3] - 2025-09-03
 
 ### Added

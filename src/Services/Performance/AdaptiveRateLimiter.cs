@@ -7,7 +7,7 @@ using System.Threading.Tasks;
 
 namespace Lidarr.Plugin.Common.Services.Performance
 {
-    [Obsolete("Use IUniversalAdaptiveRateLimiter instead.", false)]
+    [Obsolete("Use UniversalAdaptiveRateLimiter. This type will be removed in 1.3.", false)]
     public interface IAdaptiveRateLimiter
     {
         Task<bool> WaitIfNeededAsync(string endpoint, CancellationToken cancellationToken = default);
@@ -81,3 +81,4 @@ namespace Lidarr.Plugin.Common.Services.Performance
         public int TotalEndpoints { get; set; }
     }
 }
+
