@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <PublicApiUseSourcesForCodeFix>false</PublicApiUseSourcesForCodeFix>
     <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
@@ -57,7 +58,16 @@
       <AdditionalFiles Remove="**/PublicAPI.Unshipped.txt" />
     </ItemGroup>
 
-    <ItemGroup>
+    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)'=='true'">
+      <AdditionalFiles Include="$(_ApiShippedSrc)">
+        <Link>PublicAPI.Shipped.txt</Link>
+      </AdditionalFiles>
+      <AdditionalFiles Include="$(_ApiUnshippedSrc)">
+        <Link>PublicAPI.Unshipped.txt</Link>
+      </AdditionalFiles>
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)'!='true'">
       <AdditionalFiles Include="$(_ApiShippedObj)">
         <Link>PublicAPI.Shipped.txt</Link>
       </AdditionalFiles>
@@ -78,3 +88,5 @@
     <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 </Project>
+
+
