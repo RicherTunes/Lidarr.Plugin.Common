@@ -1,3 +1,5 @@
+# snippet:manifest-ci
+# snippet-skip-compile
 param(
     [Parameter(Mandatory = True)]
     [string],
@@ -100,3 +102,5 @@ foreach ( in ) {
 }
 
 Write-Host "Manifest validation succeeded for ''." -ForegroundColor Green
+# end-snippet
+

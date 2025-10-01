@@ -41,6 +41,8 @@ namespace Lidarr.Plugin.Common.Tests
             public string Title { get; set; } = string.Empty;
         }
 
+        // snippet:guard-stream
+        // snippet-skip-compile
         private sealed class GuardStream : Stream
         {
             private readonly byte[] _data;
@@ -106,6 +108,7 @@ namespace Lidarr.Plugin.Common.Tests
             public override void SetLength(long value) => throw new NotSupportedException();
             public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
+        // end-snippet
 
 
         private static (SemaphoreSlim Semaphore, int Limit) GetHostGateState(string host)
@@ -186,6 +189,8 @@ namespace Lidarr.Plugin.Common.Tests
                 perRequestTimeout: TimeSpan.FromMilliseconds(50),
                 cancellationToken: CancellationToken.None));
         }
+// snippet:resilience-cancel
+        // snippet-skip-compile
         [Fact]
         public async Task ExecuteWithResilienceAsync_RespectsCallerCancellation()
         {
@@ -211,6 +216,7 @@ namespace Lidarr.Plugin.Common.Tests
 
             ClearHostGate(host);
         }
+        // end-snippet
 
 
         [Fact]
@@ -277,6 +283,7 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal(payloadText, body);
             Assert.Equal(2, guardStream.FirstReadCount);
         }
+        // end-snippet
         [Fact]
         public async Task ContentDecodingSniffer_StripsEncodingHeadersAfterInflate()
         {
@@ -314,7 +321,10 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal("text/plain", response.Content.Headers.ContentType?.MediaType);
             Assert.Equal("{\"name\":\"sniffer\"}", payload);
         }
+        // end-snippet
 
+// snippet:sniffer-passthrough
+        // snippet-skip-compile
         [Fact]
         public async Task ContentDecodingSniffer_PreservesContentLengthForPassthrough()
         {
@@ -346,6 +356,7 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal("plain payload", payload);
             Assert.Equal(2, guardStream.FirstReadCount);
         }
+        // end-snippet
 
 
 

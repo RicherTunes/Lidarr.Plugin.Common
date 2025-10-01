@@ -1,3 +1,5 @@
+# snippet-skip-compile
+# snippet:plugin-pack
 function Get-PluginOutput {
     [CmdletBinding()]
     param(
@@ -71,3 +73,5 @@ function New-PluginPackage {
 }
 
 Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage
+# end-snippet
+

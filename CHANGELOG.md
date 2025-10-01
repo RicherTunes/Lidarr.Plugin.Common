@@ -43,6 +43,7 @@ All notable changes to the shared library are documented here. The format follow
 - `HttpClientExtensions` and `GenericResilienceExecutor` now accept an optional `perRequestTimeout`, raising `TimeoutException` when it elapses while still honouring caller cancellations, and they reuse the shared host gate registry.
 - `StreamingResponseCache` enforces `MaxCacheSize` by trimming the oldest entries and shares the sensitive-parameter mask with HTTP logging utilities.
 - `ContentDecodingSnifferHandler` peeks only the gzip header, clears `Content-Encoding`/`Content-Length` after inflation, and streams large non-gzip bodies without buffering.
+- Documentation consolidated into single-source manuals (isolation, manifests, bridge, packaging) with schema validation and docs CI.
 - Packaging excludes  `docs/**` and `examples/**` from the nupkg to reduce install size; package metadata bumped to v1.1.4 with updated release notes.
 
 ### Deprecated

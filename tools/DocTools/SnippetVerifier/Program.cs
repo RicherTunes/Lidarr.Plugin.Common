@@ -137,24 +137,34 @@ internal static class Program
 
     private static string? ExtractTaggedSnippet(string source, string tag)
     {
-        var startMarker = "// snippet:" + tag;
-        var endMarker = "// end-snippet";
+        var startMarkers = new[]
+        {
+            "// snippet:" + tag,
+            "# snippet:" + tag
+        };
+        var endMarkers = new[]
+        {
+            "// end-snippet",
+            "# end-snippet"
+        };
+
         using var reader = new StringReader(source);
         string? line;
         bool inSnippet = false;
         var lines = new List<string>();
         while ((line = reader.ReadLine()) is not null)
         {
+            var trimmed = line.Trim();
             if (!inSnippet)
             {
-                if (line.Trim().Equals(startMarker, StringComparison.Ordinal))
+                if (Array.Exists(startMarkers, marker => trimmed.Equals(marker, StringComparison.Ordinal)))
                 {
                     inSnippet = true;
                 }
                 continue;
             }
 
-            if (line.Trim().Equals(endMarker, StringComparison.Ordinal))
+            if (Array.Exists(endMarkers, marker => trimmed.Equals(marker, StringComparison.Ordinal)))
             {
                 return string.Join(Environment.NewLine, lines);
             }
@@ -166,10 +176,17 @@ internal static class Program
     }
 
     private static bool ShouldCompile(string snippet)
-        => snippet.Contains("class ", StringComparison.Ordinal) ||
-           snippet.Contains("namespace ", StringComparison.Ordinal) ||
-           snippet.Contains("struct ", StringComparison.Ordinal) ||
-           snippet.Contains("interface ", StringComparison.Ordinal);
+    {
+        if (snippet.Contains("snippet-skip-compile", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return snippet.Contains("class ", StringComparison.Ordinal) ||
+               snippet.Contains("namespace ", StringComparison.Ordinal) ||
+               snippet.Contains("struct ", StringComparison.Ordinal) ||
+               snippet.Contains("interface ", StringComparison.Ordinal);
+    }
 
     private static IReadOnlyList<string> CompileSnippet(string snippet)
     {

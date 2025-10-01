@@ -1,0 +1,8 @@
+extends: substitution
+message: "Avoid '{match}'. Choose a precise verb."
+level: error
+ignorecase: true
+swap:
+  just: ''
+  simply: ''
+  obviously: ''
