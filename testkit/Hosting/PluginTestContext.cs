@@ -120,7 +120,7 @@ public sealed class TestLoggerFactory : ILoggerFactory
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) where TState : notnull
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             if (formatter is null)
             {
@@ -182,7 +182,7 @@ internal sealed class TestLoggerProvider : ILoggerProvider
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) where TState : notnull
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
         {
             if (formatter is null)
             {
@@ -217,5 +217,6 @@ internal sealed class NullScope : IDisposable
     {
     }
 }
+
 
 
