@@ -48,8 +48,9 @@
     <_ApiSrcDir>PublicAPI/$(TargetFramework)/</_ApiSrcDir>
     <_ApiShippedSrc>$(_ApiSrcDir)PublicAPI.Shipped.txt</_ApiShippedSrc>
     <_ApiUnshippedSrc>$(_ApiSrcDir)PublicAPI.Unshipped.txt</_ApiUnshippedSrc>
-    <_ApiShippedObj>$(IntermediateOutputPath)PublicAPI.Shipped.txt</_ApiShippedObj>
-    <_ApiUnshippedObj>$(IntermediateOutputPath)PublicAPI.Unshipped.txt</_ApiUnshippedObj>
+    <_ApiObjDir>$([System.IO.Path]::Combine('$(BaseIntermediateOutputPath)', '$(Configuration)', '$(TargetFramework)'))</_ApiObjDir>
+    <_ApiShippedObj>$([System.IO.Path]::Combine('$(_ApiObjDir)', 'PublicAPI.Shipped.txt'))</_ApiShippedObj>
+    <_ApiUnshippedObj>$([System.IO.Path]::Combine('$(_ApiObjDir)', 'PublicAPI.Unshipped.txt'))</_ApiUnshippedObj>
   </PropertyGroup>
   <!-- Exclude disabled files from compilation -->
   <ItemGroup>
@@ -145,6 +146,8 @@
     <Error Condition="!Exists('$(_ApiUnshippedSrc)')"
            Text="Missing Public API baseline: $(_ApiUnshippedSrc)" />
 
+    <MakeDir Directories="$(_ApiObjDir)" />
+
     <Copy SourceFiles="$(_ApiShippedSrc)"
           DestinationFiles="$(_ApiShippedObj)"
           OverwriteReadOnlyFiles="true" />
@@ -175,3 +178,5 @@
     <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 </Project>
+
+
