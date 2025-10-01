@@ -124,7 +124,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          dotnet tool install --global Microsoft.DotNet.ApiCompat --version 8.0.0
+          dotnet tool install --global microsoft.dotnet.apicompat.tool --version 9.0.305
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
           PREV_TAG=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo "")
           if [ -z "$PREV_TAG" ]; then
             echo "No previous release detected; skipping API compatibility check."
@@ -138,12 +139,13 @@ jobs:
             echo "Previous package not found; skipping."
             exit 0
           fi
-          dotnet apicompat -b "$PREV_PACKAGE" -c "$CURRENT_PACKAGE"
+          apicompat -b "$PREV_PACKAGE" -c "$CURRENT_PACKAGE"
       - name: Upload nupkg
         uses: actions/upload-artifact@v4
         with:
           name: nupkg
           path: dist/*.nupkg
+
 
 
 
