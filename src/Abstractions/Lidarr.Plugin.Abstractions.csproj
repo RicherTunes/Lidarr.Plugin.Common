@@ -42,9 +42,8 @@
 
   <Target Name="PreparePublicApiBaselines" BeforeTargets="GenerateReferenceAssemblySource;CoreCompile">
     <PropertyGroup>
-      <_ApiIntermediate>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)'))</_ApiIntermediate>
-      <_ApiShippedObj>$([System.IO.Path]::Combine('$(_ApiIntermediate)', 'PublicAPI.Shipped.txt'))</_ApiShippedObj>
-      <_ApiUnshippedObj>$([System.IO.Path]::Combine('$(_ApiIntermediate)', 'PublicAPI.Unshipped.txt'))</_ApiUnshippedObj>
+      <_ApiShippedObj>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)PublicAPI.Shipped.txt'))</_ApiShippedObj>
+      <_ApiUnshippedObj>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)PublicAPI.Unshipped.txt'))</_ApiUnshippedObj>
     </PropertyGroup>
 
     <Error Condition="!Exists('$(_ApiShippedSrc)')" Text="Missing Public API baseline: $(_ApiShippedSrc)" />
@@ -59,11 +58,17 @@
     </ItemGroup>
 
     <ItemGroup>
-      <AdditionalFiles Include="$(_ApiShippedObj)" />
-      <AdditionalFiles Include="$(_ApiUnshippedObj)" />
+      <AdditionalFiles Include="$(_ApiShippedObj)">
+        <Link>PublicAPI.Shipped.txt</Link>
+      </AdditionalFiles>
+      <AdditionalFiles Include="$(_ApiUnshippedObj)">
+        <Link>PublicAPI.Unshipped.txt</Link>
+      </AdditionalFiles>
     </ItemGroup>
 
     <Message Importance="High" Text="TFM=$(TargetFramework) AdditionalFiles: @(AdditionalFiles -> '%(Identity)')" />
+    <Message Importance="High" Text="TFM=$(TargetFramework) PublicAPI.Shipped size=$([System.IO.File]::ReadAllText('$(_ApiShippedObj)').Length)" />
+    <Message Importance="High" Text="TFM=$(TargetFramework) PublicAPI.Unshipped size=$([System.IO.File]::ReadAllText('$(_ApiUnshippedObj)').Length)" />
   </Target>
 
   <ItemGroup>
