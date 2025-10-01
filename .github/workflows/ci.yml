@@ -58,6 +58,11 @@ jobs:
       - name: Dotnet format (verify)
         run: dotnet format --verify-no-changes
 
+      - name: Public API drift (net8)
+        run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0
+      - name: Public API drift (net6)
+        run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net6.0
+
       - name: Build (Release, warnings as errors)
         run: dotnet build -c Release -warnaserror -p:EnableNETAnalyzers=true -p:RunAnalyzersDuringBuild=true -p:TreatWarningsAsErrors=true
 
@@ -84,6 +89,16 @@ jobs:
           targetdir: "coverage-report"
           reporttypes: "MarkdownSummary;HtmlInline_AzurePipelines"
           toolpath: "reportgenerator"
+      - name: Collect Abstractions binlog on failure
+        if: failure()
+        run: dotnet build src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -bl:abs.binlog
+
+      - name: Upload Abstractions binlog
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: msbuild-binlog-${{ matrix.os }}
+          path: abs.binlog
 
   report_tests:
     name: Publish Test Results
