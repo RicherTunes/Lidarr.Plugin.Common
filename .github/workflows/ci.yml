@@ -78,7 +78,7 @@ jobs:
 
       - name: Generate coverage summary
         if: success()
-        uses: danielpalme/ReportGenerator-GitHub-Action@5.2.4
+        uses: danielpalme/ReportGenerator-GitHub-Action@5.4.16
         with:
           reports: "**/TestResults/*/coverage.cobertura.xml"
           targetdir: "coverage-report"
