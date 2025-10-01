@@ -33,8 +33,6 @@
     <_PublicApiRoot>PublicAPI/$(TargetFramework)/</_PublicApiRoot>
     <_PublicApiShippedSrc>$(_PublicApiRoot)PublicAPI.Shipped.txt</_PublicApiShippedSrc>
     <_PublicApiUnshippedSrc>$(_PublicApiRoot)PublicAPI.Unshipped.txt</_PublicApiUnshippedSrc>
-    <_PublicApiShippedObj>$(IntermediateOutputPath)PublicAPI.Shipped.txt</_PublicApiShippedObj>
-    <_PublicApiUnshippedObj>$(IntermediateOutputPath)PublicAPI.Unshipped.txt</_PublicApiUnshippedObj>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -43,6 +41,11 @@
   </PropertyGroup>
 
   <Target Name="PreparePublicApiBaselines" BeforeTargets="CoreCompile;GenerateReferenceAssemblySource">
+    <PropertyGroup>
+      <_PublicApiIntermediate>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)'))</_PublicApiIntermediate>
+      <_PublicApiShippedObj>$(_PublicApiIntermediate)PublicAPI.Shipped.txt</_PublicApiShippedObj>
+      <_PublicApiUnshippedObj>$(_PublicApiIntermediate)PublicAPI.Unshipped.txt</_PublicApiUnshippedObj>
+    </PropertyGroup>
     <Error Condition="!Exists('$(_PublicApiShippedSrc)')" Text="Missing Public API baseline: $(_PublicApiShippedSrc)" />
     <Error Condition="!Exists('$(_PublicApiUnshippedSrc)')" Text="Missing Public API baseline: $(_PublicApiUnshippedSrc)" />
 
