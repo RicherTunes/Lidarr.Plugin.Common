@@ -89,6 +89,64 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task ExecuteWithResilience_ThrowsTimeoutExceptionWhenPerRequestTimeoutExceeded()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "http://timeout.test/resource");
+
+            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send = async (req, ct) =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200), ct);
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            };
+
+            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = r => Task.FromResult(new HttpRequestMessage(r.Method, r.RequestUri));
+
+            await Assert.ThrowsAsync<TimeoutException>(() => GenericResilienceExecutor.ExecuteWithResilienceAsync<HttpRequestMessage, HttpResponseMessage>(
+                request,
+                send,
+                clone,
+                r => r.RequestUri?.Host,
+                r => (int)r.StatusCode,
+                _ => null,
+                maxRetries: 1,
+                retryBudget: TimeSpan.FromSeconds(1),
+                maxConcurrencyPerHost: 1,
+                perRequestTimeout: TimeSpan.FromMilliseconds(50),
+                cancellationToken: CancellationToken.None));
+        }
+        [Fact]
+        public async Task ExecuteWithResilience_CallerCancellationPropagates()
+        {
+            var request = new HttpRequestMessage(HttpMethod.Get, "http://cancelled.test/resource");
+
+            Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send = async (req, ct) =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), ct);
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            };
+
+            Func<HttpRequestMessage, Task<HttpRequestMessage>> clone = r => Task.FromResult(new HttpRequestMessage(r.Method, r.RequestUri));
+
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => GenericResilienceExecutor.ExecuteWithResilienceAsync<HttpRequestMessage, HttpResponseMessage>(
+                request,
+                send,
+                clone,
+                r => r.RequestUri?.Host,
+                r => (int)r.StatusCode,
+                _ => null,
+                maxRetries: 1,
+                retryBudget: TimeSpan.FromSeconds(1),
+                maxConcurrencyPerHost: 2,
+                perRequestTimeout: TimeSpan.FromSeconds(5),
+                cancellationToken: cts.Token));
+        }
+
+
+
+        [Fact]
         public async Task ExecuteWithResilience_IncreasesHostGateOnHigherConcurrency()
         {
             var request = new HttpRequestMessage(HttpMethod.Get, "http://host-gate.test/resource");

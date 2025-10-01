@@ -122,6 +122,9 @@ namespace Lidarr.Plugin.Common.Utilities
             TimeSpan? perRequestTimeout,
             CancellationToken cancellationToken)
         {
+            if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
+            if (request == null) throw new ArgumentNullException(nameof(request));
+
             retryBudget ??= TimeSpan.FromSeconds(60);
             using var timeoutCts = perRequestTimeout.HasValue
                 ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
@@ -145,10 +148,24 @@ namespace Lidarr.Plugin.Common.Utilities
                     attempt++;
 
                     using var attemptRequest = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
-                    var response = await httpClient.SendAsync(
-                        attemptRequest,
-                        HttpCompletionOption.ResponseHeadersRead,
-                        effectiveToken).ConfigureAwait(false);
+
+                    HttpResponseMessage response;
+                    try
+                    {
+                        response = await httpClient.SendAsync(
+                                attemptRequest,
+                                HttpCompletionOption.ResponseHeadersRead,
+                                effectiveToken)
+                            .ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException ex) when (perRequestTimeout.HasValue &&
+                                                               timeoutCts!.IsCancellationRequested &&
+                                                               !cancellationToken.IsCancellationRequested)
+                    {
+                        throw new TimeoutException(
+                            $"HTTP request to {request.RequestUri} exceeded the per-request timeout of {perRequestTimeout.Value}.",
+                            ex);
+                    }
 
                     if ((int)response.StatusCode >= 200 && (int)response.StatusCode < 300)
                     {
@@ -164,7 +181,6 @@ namespace Lidarr.Plugin.Common.Utilities
 
                     var delay = GetRetryDelay(response)
                                ?? TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt))) + GetJitter();
-                    response.Dispose();
 
                     var now = DateTime.UtcNow;
                     if (now + delay > deadline)
@@ -172,6 +188,7 @@ namespace Lidarr.Plugin.Common.Utilities
                         return response;
                     }
 
+                    response.Dispose();
                     await Task.Delay(delay, effectiveToken).ConfigureAwait(false);
                 }
             }
@@ -224,6 +241,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
             return result;
         }
+
         /// <summary>
         /// Posts JSON data and returns a deserialized response.
         /// </summary>

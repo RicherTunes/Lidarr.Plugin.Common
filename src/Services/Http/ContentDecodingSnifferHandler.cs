@@ -7,7 +7,6 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
-using Lidarr.Plugin.Common.Utilities;
 
 namespace Lidarr.Plugin.Common.Services.Http
 {
@@ -16,7 +15,7 @@ namespace Lidarr.Plugin.Common.Services.Http
     /// </summary>
     public sealed class ContentDecodingSnifferHandler : DelegatingHandler
     {
-        private const long MaxInspectionBytes = 1_048_576; // 1 MiB
+        private const int GzipHeaderLength = 2;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -33,40 +32,51 @@ namespace Lidarr.Plugin.Common.Services.Http
                 return response;
             }
 
-            var declaredLength = GetDeclaredLength(response.Content);
-            if (!declaredLength.HasValue || declaredLength.Value > MaxInspectionBytes)
-            {
-                // Unknown or large payloads are left untouched to avoid buffering unbounded data.
-                return response;
-            }
-
             var originalContent = response.Content;
-            var originalHeaders = response.Content.Headers.Select(h => h).ToList();
+            var originalHeaders = originalContent.Headers
+                .Select(static h => new KeyValuePair<string, IEnumerable<string>>(h.Key, h.Value))
+                .ToList();
 
-            var payload = await HttpContentLightUp.ReadAsByteArrayAsync(originalContent, cancellationToken).ConfigureAwait(false);
-            originalContent.Dispose();
+            var stream = await originalContent.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
-            if (payload.Length == 0)
+            var prefixBuffer = new byte[GzipHeaderLength];
+            var bytesRead = await ReadPrefixAsync(stream, prefixBuffer, cancellationToken).ConfigureAwait(false);
+
+            if (bytesRead < GzipHeaderLength)
             {
-                SetContent(response, Stream.Null, originalHeaders);
-                return response;
-            }
-
-            if (!IsGzip(payload))
-            {
-                var passthrough = new MemoryStream(payload, writable: false);
+                var passthrough = new PrefixStream(prefixBuffer, bytesRead, stream);
                 SetContent(response, passthrough, originalHeaders);
                 return response;
             }
 
-            using var bufferStream = new MemoryStream(payload, writable: false);
-            using var gzip = new GZipStream(bufferStream, CompressionMode.Decompress, leaveOpen: true);
-            var inflated = new MemoryStream();
-            await gzip.CopyToAsync(inflated, cancellationToken).ConfigureAwait(false);
-            inflated.Position = 0;
+            if (!IsGzip(prefixBuffer.AsSpan(0, bytesRead)))
+            {
+                var passthrough = new PrefixStream(prefixBuffer, bytesRead, stream);
+                SetContent(response, passthrough, originalHeaders);
+                return response;
+            }
 
-            SetContent(response, inflated, originalHeaders, treatAsJson: true);
+            var concatenated = new PrefixStream(prefixBuffer, bytesRead, stream);
+            var gzipStream = new GZipStream(concatenated, CompressionMode.Decompress);
+            SetContent(response, gzipStream, originalHeaders, treatAsJson: true, preserveContentLength: false);
             return response;
+        }
+
+        private static async Task<int> ReadPrefixAsync(Stream stream, byte[] buffer, CancellationToken cancellationToken)
+        {
+            var total = 0;
+            while (total < buffer.Length)
+            {
+                var read = await stream.ReadAsync(buffer, total, buffer.Length - total, cancellationToken).ConfigureAwait(false);
+                if (read == 0)
+                {
+                    break;
+                }
+
+                total += read;
+            }
+
+            return total;
         }
 
         private static bool HasDeclaredEncoding(HttpContentHeaders headers)
@@ -74,25 +84,28 @@ namespace Lidarr.Plugin.Common.Services.Http
             return headers.ContentEncoding is { Count: > 0 };
         }
 
-        private static long? GetDeclaredLength(HttpContent content)
+        private static bool IsGzip(ReadOnlySpan<byte> header)
         {
-            return content.Headers.ContentLength;
+            return header.Length >= GzipHeaderLength && header[0] == 0x1F && header[1] == 0x8B;
         }
 
-        private static bool IsGzip(byte[] payload)
+        private static void SetContent(
+            HttpResponseMessage response,
+            Stream stream,
+            List<KeyValuePair<string, IEnumerable<string>>> originalHeaders,
+            bool treatAsJson = false,
+            bool preserveContentLength = true)
         {
-            return payload.Length >= 2 && payload[0] == 0x1F && payload[1] == 0x8B;
-        }
+            var newContent = new StreamContent(stream ?? Stream.Null);
 
-        private static void SetContent(HttpResponseMessage response, Stream stream, List<KeyValuePair<string, IEnumerable<string>>> originalHeaders, bool treatAsJson = false)
-        {
-            response.Content?.Dispose();
-
-            var newContent = stream == Stream.Null ? new StreamContent(Stream.Null) : new StreamContent(stream);
             foreach (var header in originalHeaders)
             {
-                if (header.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase) ||
-                    header.Key.Equals("Content-Encoding", StringComparison.OrdinalIgnoreCase))
+                if (header.Key.Equals("Content-Encoding", StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (!preserveContentLength && header.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
@@ -107,6 +120,102 @@ namespace Lidarr.Plugin.Common.Services.Http
 
             response.Content = newContent;
         }
+
+        private sealed class PrefixStream : Stream
+        {
+            private readonly byte[] _prefix;
+            private readonly int _prefixLength;
+            private int _position;
+            private readonly Stream _inner;
+
+            public PrefixStream(byte[] prefix, int prefixLength, Stream inner)
+            {
+                _prefix = prefix ?? Array.Empty<byte>();
+                _prefixLength = Math.Min(_prefix.Length, Math.Max(prefixLength, 0));
+                _inner = inner ?? throw new ArgumentNullException(nameof(inner));
+            }
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position
+            {
+                get => throw new NotSupportedException();
+                set => throw new NotSupportedException();
+            }
+
+            public override void Flush() => _inner.Flush();
+            public override Task FlushAsync(CancellationToken cancellationToken) => _inner.FlushAsync(cancellationToken);
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                ValidateReadArgs(buffer, offset, count);
+
+                var read = 0;
+                if (_position < _prefixLength)
+                {
+                    var toCopy = Math.Min(count, _prefixLength - _position);
+                    Array.Copy(_prefix, _position, buffer, offset, toCopy);
+                    _position += toCopy;
+                    offset += toCopy;
+                    count -= toCopy;
+                    read += toCopy;
+                }
+
+                if (count > 0)
+                {
+                    read += _inner.Read(buffer, offset, count);
+                }
+
+                return read;
+            }
+
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            {
+                ValidateReadArgs(buffer, offset, count);
+
+                var read = 0;
+                if (_position < _prefixLength)
+                {
+                    var toCopy = Math.Min(count, _prefixLength - _position);
+                    Array.Copy(_prefix, _position, buffer, offset, toCopy);
+                    _position += toCopy;
+                    offset += toCopy;
+                    count -= toCopy;
+                    read += toCopy;
+
+                    if (count == 0)
+                    {
+                        return read;
+                    }
+                }
+
+                var innerRead = await _inner.ReadAsync(buffer, offset, count, cancellationToken).ConfigureAwait(false);
+                return read + innerRead;
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+            protected override void Dispose(bool disposing)
+            {
+                if (disposing)
+                {
+                    _inner.Dispose();
+                }
+
+                base.Dispose(disposing);
+            }
+
+            private static void ValidateReadArgs(byte[] buffer, int offset, int count)
+            {
+                if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+                if (offset < 0) throw new ArgumentOutOfRangeException(nameof(offset));
+                if (count < 0) throw new ArgumentOutOfRangeException(nameof(count));
+                if (buffer.Length - offset < count) throw new ArgumentException("Invalid offset/count combination", nameof(count));
+            }
+        }
     }
 }
-
