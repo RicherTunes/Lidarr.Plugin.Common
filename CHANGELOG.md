@@ -40,9 +40,9 @@ All notable changes to the shared library are documented here. The format follow
 - API compatibility guard in CI: the pack job now runs  `Microsoft.DotNet.ApiCompat` against the latest release before uploading artifacts.
 
 ### Changed
-- `HttpClientExtensions` and `GenericResilienceExecutor` now support optional per-request timeouts and reuse pooled host gates instead of maintaining divergent dictionaries.
+- `HttpClientExtensions` and `GenericResilienceExecutor` now accept an optional `perRequestTimeout`, raising `TimeoutException` when it elapses while still honouring caller cancellations, and they reuse the shared host gate registry.
 - `StreamingResponseCache` enforces `MaxCacheSize` by trimming the oldest entries and shares the sensitive-parameter mask with HTTP logging utilities.
-- `ContentDecodingSnifferHandler` inspects only small payloads, avoids double buffering, and promotes mislabelled gzip responses to `application/json` without copying large streams.
+- `ContentDecodingSnifferHandler` peeks only the gzip header, clears `Content-Encoding`/`Content-Length` after inflation, and streams large non-gzip bodies without buffering.
 - Packaging excludes  `docs/**` and `examples/**` from the nupkg to reduce install size; package metadata bumped to v1.1.4 with updated release notes.
 
 ### Deprecated
@@ -144,6 +144,7 @@ All notable changes to the shared library are documented here. The format follow
 - **Feature Requests**: Discuss in GitHub Discussions.
 - **Community**: Join the streaming plugin developer community.
 - **Documentation**: See `README.md` and the `docs/` folder.
+
 
 
 
