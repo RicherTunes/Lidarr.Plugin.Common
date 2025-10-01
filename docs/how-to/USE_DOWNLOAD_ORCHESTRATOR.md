@@ -55,6 +55,8 @@ The orchestrator reports progress via `DownloadProgress` delegates (subscribe if
 ## 4. Harden the HTTP pipeline
 
 - Wrap your `HttpClient` in `HttpClientExtensions.ExecuteWithResilienceAsync`.
+- Set `perRequestTimeout` on resilience calls when the service enforces strict SLAs; exceeding it throws `TimeoutException`.
+- Keep `ContentDecodingSnifferHandler` in the handler chain so mislabelled gzip responses inflate cleanly (it clears `Content-Encoding`/`Content-Length` for you).
 - Use `OAuthDelegatingHandler` or another `IStreamingTokenProvider`-backed handler if tokens expire.
 - Optionally rate-limit with `IUniversalAdaptiveRateLimiter`.
 
