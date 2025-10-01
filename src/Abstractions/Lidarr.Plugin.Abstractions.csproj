@@ -30,9 +30,9 @@
   </ItemGroup>
 
   <PropertyGroup>
-    <_PublicApiRoot>PublicAPI/$(TargetFramework)/</_PublicApiRoot>
-    <_PublicApiShippedSrc>$(_PublicApiRoot)PublicAPI.Shipped.txt</_PublicApiShippedSrc>
-    <_PublicApiUnshippedSrc>$(_PublicApiRoot)PublicAPI.Unshipped.txt</_PublicApiUnshippedSrc>
+    <_ApiSrcDir>PublicAPI/$(TargetFramework)/</_ApiSrcDir>
+    <_ApiShippedSrc>$(_ApiSrcDir)PublicAPI.Shipped.txt</_ApiShippedSrc>
+    <_ApiUnshippedSrc>$(_ApiSrcDir)PublicAPI.Unshipped.txt</_ApiUnshippedSrc>
   </PropertyGroup>
 
   <PropertyGroup>
@@ -40,23 +40,27 @@
     <GenerateReferenceAssemblyDependsOn>PreparePublicApiBaselines;$(GenerateReferenceAssemblyDependsOn)</GenerateReferenceAssemblyDependsOn>
   </PropertyGroup>
 
-  <Target Name="PreparePublicApiBaselines" BeforeTargets="CoreCompile;GenerateReferenceAssemblySource">
+  <Target Name="PreparePublicApiBaselines" BeforeTargets="GenerateReferenceAssemblySource;CoreCompile">
     <PropertyGroup>
-      <_PublicApiIntermediate>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)'))</_PublicApiIntermediate>
-      <_PublicApiShippedObj>$(_PublicApiIntermediate)PublicAPI.Shipped.txt</_PublicApiShippedObj>
-      <_PublicApiUnshippedObj>$(_PublicApiIntermediate)PublicAPI.Unshipped.txt</_PublicApiUnshippedObj>
+      <_ApiIntermediate>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)'))</_ApiIntermediate>
+      <_ApiShippedObj>$([System.IO.Path]::Combine('$(_ApiIntermediate)', 'PublicAPI.Shipped.txt'))</_ApiShippedObj>
+      <_ApiUnshippedObj>$([System.IO.Path]::Combine('$(_ApiIntermediate)', 'PublicAPI.Unshipped.txt'))</_ApiUnshippedObj>
     </PropertyGroup>
-    <Error Condition="!Exists('$(_PublicApiShippedSrc)')" Text="Missing Public API baseline: $(_PublicApiShippedSrc)" />
-    <Error Condition="!Exists('$(_PublicApiUnshippedSrc)')" Text="Missing Public API baseline: $(_PublicApiUnshippedSrc)" />
 
-    <Copy SourceFiles="$(_PublicApiShippedSrc)" DestinationFiles="$(_PublicApiShippedObj)" OverwriteReadOnlyFiles="true" />
-    <Copy SourceFiles="$(_PublicApiUnshippedSrc)" DestinationFiles="$(_PublicApiUnshippedObj)" OverwriteReadOnlyFiles="true" />
+    <Error Condition="!Exists('$(_ApiShippedSrc)')" Text="Missing Public API baseline: $(_ApiShippedSrc)" />
+    <Error Condition="!Exists('$(_ApiUnshippedSrc)')" Text="Missing Public API baseline: $(_ApiUnshippedSrc)" />
+
+    <Copy SourceFiles="$(_ApiShippedSrc)" DestinationFiles="$(_ApiShippedObj)" OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="$(_ApiUnshippedSrc)" DestinationFiles="$(_ApiUnshippedObj)" OverwriteReadOnlyFiles="true" />
 
     <ItemGroup>
       <AdditionalFiles Remove="**/PublicAPI.Shipped.txt" />
       <AdditionalFiles Remove="**/PublicAPI.Unshipped.txt" />
-      <AdditionalFiles Include="$(_PublicApiShippedObj)" />
-      <AdditionalFiles Include="$(_PublicApiUnshippedObj)" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <AdditionalFiles Include="$(_ApiShippedObj)" />
+      <AdditionalFiles Include="$(_ApiUnshippedObj)" />
     </ItemGroup>
 
     <Message Importance="High" Text="TFM=$(TargetFramework) AdditionalFiles: @(AdditionalFiles -> '%(Identity)')" />
