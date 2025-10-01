@@ -10,8 +10,8 @@ Pick the guide that matches what you need to do.
 ## Concepts (know how it works)
 
 - [Architecture](concepts/ARCHITECTURE.md)
-- [Plugin isolation](concepts/PLUGIN_ISOLATION.md)
-- [Compatibility matrix](concepts/COMPATIBILITY.md)
+- [Plugin isolation](PLUGIN_ISOLATION.md)
+- [Compatibility matrix](COMPATIBILITY.md)
 
 ## How-to (do the thing)
 
@@ -24,8 +24,8 @@ Pick the guide that matches what you need to do.
 
 ## Reference (facts)
 
-- [Abstractions package overview](reference/ABSTRACTIONS.md)
-- [Manifest schema](reference/MANIFEST.md)
+- [Abstractions package overview](ABSTRACTIONS.md)
+- [Manifest schema](PLUGIN_MANIFEST.md)
 - [Settings and configuration keys](reference/SETTINGS.md)
 - [Public API baselines](reference/PUBLIC_API_BASELINES.md)
 
