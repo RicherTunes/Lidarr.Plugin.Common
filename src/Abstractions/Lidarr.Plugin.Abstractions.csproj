@@ -22,14 +22,47 @@
   <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
     <PackageReference Include="System.Text.Json" Version="6.0.11" />
-    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Shipped.txt" />
-    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Unshipped.txt" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
-    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Shipped.txt" />
-    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <_PublicApiRoot>PublicAPI/$(TargetFramework)/</_PublicApiRoot>
+    <_PublicApiShippedSrc>$(_PublicApiRoot)PublicAPI.Shipped.txt</_PublicApiShippedSrc>
+    <_PublicApiUnshippedSrc>$(_PublicApiRoot)PublicAPI.Unshipped.txt</_PublicApiUnshippedSrc>
+    <_PublicApiShippedObj>$(IntermediateOutputPath)PublicAPI.Shipped.txt</_PublicApiShippedObj>
+    <_PublicApiUnshippedObj>$(IntermediateOutputPath)PublicAPI.Unshipped.txt</_PublicApiUnshippedObj>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <CoreCompileDependsOn>PreparePublicApiBaselines;$(CoreCompileDependsOn)</CoreCompileDependsOn>
+    <GenerateReferenceAssemblyDependsOn>PreparePublicApiBaselines;$(GenerateReferenceAssemblyDependsOn)</GenerateReferenceAssemblyDependsOn>
+  </PropertyGroup>
+
+  <Target Name="PreparePublicApiBaselines" BeforeTargets="CoreCompile;GenerateReferenceAssemblySource">
+    <Error Condition="!Exists('$(_PublicApiShippedSrc)')" Text="Missing Public API baseline: $(_PublicApiShippedSrc)" />
+    <Error Condition="!Exists('$(_PublicApiUnshippedSrc)')" Text="Missing Public API baseline: $(_PublicApiUnshippedSrc)" />
+
+    <Copy SourceFiles="$(_PublicApiShippedSrc)" DestinationFiles="$(_PublicApiShippedObj)" OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="$(_PublicApiUnshippedSrc)" DestinationFiles="$(_PublicApiUnshippedObj)" OverwriteReadOnlyFiles="true" />
+
+    <ItemGroup>
+      <AdditionalFiles Remove="**/PublicAPI.Shipped.txt" />
+      <AdditionalFiles Remove="**/PublicAPI.Unshipped.txt" />
+      <AdditionalFiles Include="$(_PublicApiShippedObj)" />
+      <AdditionalFiles Include="$(_PublicApiUnshippedObj)" />
+    </ItemGroup>
+
+    <Message Importance="High" Text="TFM=$(TargetFramework) AdditionalFiles: @(AdditionalFiles -> '%(Identity)')" />
+  </Target>
+
+  <ItemGroup>
+    <None Remove="PublicAPI.Shipped.txt" />
+    <None Remove="PublicAPI.Unshipped.txt" />
+    <AdditionalFiles Remove="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 </Project>
