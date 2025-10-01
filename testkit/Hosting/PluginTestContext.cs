@@ -112,7 +112,7 @@ public sealed class TestLoggerFactory : ILoggerFactory
 
         public MultiplexLogger(ILogger[] loggers) => _loggers = loggers;
 
-        public IDisposable BeginScope<TState>(TState state)
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull
         {
             var scopes = _loggers.Select(logger => logger.BeginScope(state) ?? NullScope.Instance).ToArray();
             return new Scope(scopes);
@@ -120,11 +120,16 @@ public sealed class TestLoggerFactory : ILoggerFactory
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) where TState : notnull
         {
             if (formatter is null)
             {
                 throw new ArgumentNullException(nameof(formatter));
+            }
+
+            if (state is null)
+            {
+                throw new ArgumentNullException(nameof(state));
             }
 
             foreach (var logger in _loggers)
@@ -173,15 +178,20 @@ internal sealed class TestLoggerProvider : ILoggerProvider
             _sink = sink;
         }
 
-        public IDisposable BeginScope<TState>(TState state) => NullScope.Instance;
+        public IDisposable BeginScope<TState>(TState state) where TState : notnull => NullScope.Instance;
 
         public bool IsEnabled(LogLevel logLevel) => true;
 
-        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) where TState : notnull
         {
             if (formatter is null)
             {
                 throw new ArgumentNullException(nameof(formatter));
+            }
+
+            if (state is null)
+            {
+                throw new ArgumentNullException(nameof(state));
             }
 
             var message = formatter(state, exception);
@@ -207,4 +217,5 @@ internal sealed class NullScope : IDisposable
     {
     }
 }
+
 
