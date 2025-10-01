@@ -22,14 +22,14 @@
   <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
     <PackageReference Include="System.Text.Json" Version="6.0.11" />
-    <AdditionalFiles Include="PublicAPI\net6.0\PublicAPI.Shipped.txt" Link="PublicAPI.Shipped.txt" />
-    <AdditionalFiles Include="PublicAPI\net6.0\PublicAPI.Unshipped.txt" Link="PublicAPI.Unshipped.txt" />
+    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Unshipped.txt" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
-    <AdditionalFiles Include="PublicAPI\net8.0\PublicAPI.Shipped.txt" Link="PublicAPI.Shipped.txt" />
-    <AdditionalFiles Include="PublicAPI\net8.0\PublicAPI.Unshipped.txt" Link="PublicAPI.Unshipped.txt" />
+    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Unshipped.txt" />
   </ItemGroup>
 </Project>
