@@ -71,6 +71,11 @@
     </ItemGroup>
   </Target>
 
+  <Target Name="VerifyPublicApiAdditionalFiles" BeforeTargets="Csc">
+    <Error Condition="$([System.Int32]::Parse('@(AdditionalFiles->Count())')) != 2"
+           Text="Public API baselines not applied for $(TargetFramework). AdditionalFiles: @(AdditionalFiles)" />
+  </Target>
+
   <ItemGroup>
     <None Remove="PublicAPI.Shipped.txt" />
     <None Remove="PublicAPI.Unshipped.txt" />
@@ -78,6 +83,7 @@
     <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 </Project>
+
 
 
 
