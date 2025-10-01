@@ -109,7 +109,20 @@ namespace Lidarr.Plugin.Common.Utilities
                     attempt++;
 
                     var attemptRequest = await cloneRequestAsync(request).ConfigureAwait(false);
-                    var response = await sendAsync(attemptRequest, effectiveToken).ConfigureAwait(false);
+
+                    TResponse response;
+                    try
+                    {
+                        response = await sendAsync(attemptRequest, effectiveToken).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException ex) when (perRequestTimeout.HasValue &&
+                                                               timeoutCts!.IsCancellationRequested &&
+                                                               !cancellationToken.IsCancellationRequested)
+                    {
+                        throw new TimeoutException(
+                            $"Request exceeded the per-request timeout of {perRequestTimeout.Value}.",
+                            ex);
+                    }
 
                     var status = getStatusCode(response);
                     var retryable = status == (int)HttpStatusCode.RequestTimeout
@@ -130,6 +143,11 @@ namespace Lidarr.Plugin.Common.Utilities
                         return response;
                     }
 
+                    if (response is IDisposable disposable)
+                    {
+                        disposable.Dispose();
+                    }
+
                     await Task.Delay(delay, effectiveToken).ConfigureAwait(false);
                 }
             }
@@ -138,6 +156,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 gate.Release();
             }
         }
+
 
         private static TimeSpan GetJitter()
         {

@@ -1,7 +1,9 @@
 using System;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -15,16 +17,22 @@ namespace Lidarr.Plugin.Common.Tests
     {
         private sealed class StubHandler : DelegatingHandler
         {
-            private readonly Func<HttpRequestMessage, Task<HttpResponseMessage>> _handler;
+            private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;
 
             public StubHandler(Func<HttpRequestMessage, Task<HttpResponseMessage>> handler)
             {
-                _handler = handler;
+                if (handler == null) throw new ArgumentNullException(nameof(handler));
+                _handler = (req, _) => handler(req);
+            }
+
+            public StubHandler(Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> handler)
+            {
+                _handler = handler ?? throw new ArgumentNullException(nameof(handler));
             }
 
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
-                return _handler(request);
+                return _handler(request, cancellationToken);
             }
         }
 
@@ -32,6 +40,73 @@ namespace Lidarr.Plugin.Common.Tests
         {
             public string Title { get; set; } = string.Empty;
         }
+
+        private sealed class GuardStream : Stream
+        {
+            private readonly byte[] _data;
+            private int _position;
+            private bool _allowExtended;
+
+            public GuardStream(byte[] data)
+            {
+                _data = data ?? Array.Empty<byte>();
+            }
+
+            public int FirstReadCount { get; private set; }
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => _data.Length;
+
+            public override long Position
+            {
+                get => _position;
+                set => throw new NotSupportedException();
+            }
+
+            public override void Flush()
+            {
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                if (buffer == null) throw new ArgumentNullException(nameof(buffer));
+                if (offset < 0 || count < 0 || buffer.Length - offset < count) throw new ArgumentOutOfRangeException();
+
+                if (!_allowExtended)
+                {
+                    FirstReadCount = count;
+                    if (count > 2)
+                    {
+                        throw new InvalidOperationException($"Expected sniffer to read at most 2 bytes but requested {count}.");
+                    }
+
+                    _allowExtended = true;
+                }
+
+                var remaining = _data.Length - _position;
+                if (remaining <= 0)
+                {
+                    return 0;
+                }
+
+                var toCopy = Math.Min(count, remaining);
+                Array.Copy(_data, _position, buffer, offset, toCopy);
+                _position += toCopy;
+                return toCopy;
+            }
+
+            public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            {
+                return Task.FromResult(Read(buffer, offset, count));
+            }
+
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        }
+
 
         private static (SemaphoreSlim Semaphore, int Limit) GetHostGateState(string host)
         {
@@ -92,6 +167,53 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task ExecuteWithResilienceAsync_ThrowsTimeoutExceptionWhenPerRequestTimeoutExceeded()
+        {
+            var handler = new StubHandler(async (req, ct) =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(200), ct);
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+            using var client = new HttpClient(handler);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://timeout.test/data");
+
+            await Assert.ThrowsAsync<TimeoutException>(() => client.ExecuteWithResilienceAsync(
+                request,
+                maxRetries: 1,
+                retryBudget: TimeSpan.FromSeconds(1),
+                maxConcurrencyPerHost: 1,
+                perRequestTimeout: TimeSpan.FromMilliseconds(50),
+                cancellationToken: CancellationToken.None));
+        }
+        [Fact]
+        public async Task ExecuteWithResilienceAsync_RespectsCallerCancellation()
+        {
+            var host = $"cancel-{Guid.NewGuid():N}.example";
+            var handler = new StubHandler(async (req, ct) =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(100), ct);
+                return new HttpResponseMessage(HttpStatusCode.OK);
+            });
+
+            using var client = new HttpClient(handler);
+            using var request = new HttpRequestMessage(HttpMethod.Get, $"https://{host}/resource");
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => client.ExecuteWithResilienceAsync(
+                request,
+                maxRetries: 1,
+                retryBudget: TimeSpan.FromSeconds(1),
+                maxConcurrencyPerHost: 2,
+                perRequestTimeout: TimeSpan.FromSeconds(5),
+                cancellationToken: cts.Token));
+
+            ClearHostGate(host);
+        }
+
+
+        [Fact]
         public async Task ContentDecodingSniffer_InflatesMislabelledGzip()
         {
             await using var compressedStream = new MemoryStream();
@@ -124,6 +246,108 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal("application/json", contentType);
             Assert.Equal("{\"hello\":\"world\"}", payload);
         }
+
+        [Fact]
+        public async Task ContentDecodingSniffer_PeeksOnlyHeaderBytesForPlainContent()
+        {
+            var payloadText = @"{""guard"":true}";
+            var payloadBytes = Encoding.UTF8.GetBytes(payloadText);
+            var guardStream = new GuardStream(payloadBytes);
+
+            var handler = new ContentDecodingSnifferHandler
+            {
+                InnerHandler = new StubHandler((_, __) =>
+                {
+                    var response = new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StreamContent(guardStream)
+                    };
+                    response.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json");
+                    response.Content.Headers.ContentLength = payloadBytes.Length;
+                    return Task.FromResult(response);
+                })
+            };
+
+            using var client = new HttpClient(handler);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "http://example.com/plain");
+
+            var response = await client.SendAsync(request);
+            var body = await response.Content.ReadAsStringAsync();
+
+            Assert.Equal(payloadText, body);
+            Assert.Equal(2, guardStream.FirstReadCount);
+        }
+        [Fact]
+        public async Task ContentDecodingSniffer_StripsEncodingHeadersAfterInflate()
+        {
+            await using var compressedStream = new MemoryStream();
+            await using (var gzip = new GZipStream(compressedStream, CompressionLevel.SmallestSize, leaveOpen: true))
+            {
+                var payloadBytes = Encoding.UTF8.GetBytes("{\"name\":\"sniffer\"}");
+                await gzip.WriteAsync(payloadBytes);
+            }
+            var compressedLength = compressedStream.Length;
+            compressedStream.Position = 0;
+
+            var handler = new ContentDecodingSnifferHandler
+            {
+                InnerHandler = new StubHandler(_ =>
+                {
+                    var response = new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StreamContent(compressedStream)
+                    };
+                    response.Content.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+                    response.Content.Headers.ContentLength = compressedStream.Length;
+                    return Task.FromResult(response);
+                })
+            };
+
+            using var client = new HttpClient(handler);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "http://example.com/sniff");
+
+            var response = await client.SendAsync(request);
+            var payload = await response.Content.ReadAsStringAsync();
+
+            Assert.Empty(response.Content.Headers.ContentEncoding);
+            Assert.NotEqual(compressedLength, response.Content.Headers.ContentLength);
+            Assert.Equal("text/plain", response.Content.Headers.ContentType?.MediaType);
+            Assert.Equal("{\"name\":\"sniffer\"}", payload);
+        }
+
+        [Fact]
+        public async Task ContentDecodingSniffer_PreservesContentLengthForPassthrough()
+        {
+            var payloadBytes = Encoding.UTF8.GetBytes("plain payload");
+            var guardStream = new GuardStream(payloadBytes);
+
+            var handler = new ContentDecodingSnifferHandler
+            {
+                InnerHandler = new StubHandler(_ =>
+                {
+                    var response = new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StreamContent(guardStream)
+                    };
+                    response.Content.Headers.ContentType = new MediaTypeHeaderValue("text/plain");
+                    response.Content.Headers.ContentLength = payloadBytes.Length;
+                    return Task.FromResult(response);
+                })
+            };
+
+            using var client = new HttpClient(handler);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "http://example.com/plain-length");
+
+            var response = await client.SendAsync(request);
+            var payload = await response.Content.ReadAsStringAsync();
+
+            Assert.Equal(payloadBytes.Length, response.Content.Headers.ContentLength);
+            Assert.Equal("text/plain", response.Content.Headers.ContentType?.MediaType);
+            Assert.Equal("plain payload", payload);
+            Assert.Equal(2, guardStream.FirstReadCount);
+        }
+
+
 
         [Fact]
         public async Task GetJsonAsync_ThrowsWhenContentNotJson()

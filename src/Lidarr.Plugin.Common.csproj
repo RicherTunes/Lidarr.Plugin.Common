@@ -20,6 +20,7 @@
     <Description>Shared library for building Lidarr streaming service plugins. Reduces development time by 60%+ through battle-tested utilities, models, and patterns.</Description>
     <Copyright>Copyright © 2025 RicherTunes Community</Copyright>
     <PackageProjectUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common</PackageProjectUrl>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
