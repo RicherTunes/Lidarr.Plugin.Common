@@ -114,7 +114,7 @@ namespace Lidarr.Plugin.Common.Tests
                 perRequestTimeout: TimeSpan.FromMilliseconds(50),
                 cancellationToken: CancellationToken.None));
         }
-// snippet-skip-compile
+        // snippet-skip-compile
         // snippet:generic-cancel
         [Fact]
         public async Task ExecuteWithResilience_CallerCancellationPropagates()
