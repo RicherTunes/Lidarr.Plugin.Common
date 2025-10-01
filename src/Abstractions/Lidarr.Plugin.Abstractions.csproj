@@ -14,18 +14,6 @@
     <FileVersion>1.0.0.0</FileVersion>
   </PropertyGroup>
 
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net6.0'">
-    <PublicApiSuffix>net6.0</PublicApiSuffix>
-  </PropertyGroup>
-
-  <PropertyGroup Condition="'$(TargetFramework)' == 'net8.0'">
-    <PublicApiSuffix>net8.0</PublicApiSuffix>
-  </PropertyGroup>
-
-  <PropertyGroup>
-    <CoreCompileDependsOn>PreparePublicApiBaselines;$(CoreCompileDependsOn)</CoreCompileDependsOn>
-  </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
@@ -34,36 +22,14 @@
   <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
     <PackageReference Include="System.Text.Json" Version="6.0.11" />
+    <AdditionalFiles Include="PublicAPI\net6.0\PublicAPI.Shipped.txt" Link="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI\net6.0\PublicAPI.Unshipped.txt" Link="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
+    <AdditionalFiles Include="PublicAPI\net8.0\PublicAPI.Shipped.txt" Link="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Include="PublicAPI\net8.0\PublicAPI.Unshipped.txt" Link="PublicAPI.Unshipped.txt" />
   </ItemGroup>
-
-  <Target Name="PreparePublicApiBaselines">
-    <ItemGroup>
-      <_PublicApiShipped Include="PublicAPI\$(PublicApiSuffix)\PublicAPI.Shipped.txt" />
-      <_PublicApiUnshipped Include="PublicAPI\$(PublicApiSuffix)\PublicAPI.Unshipped.txt" />
-    </ItemGroup>
-
-    <Error Text="Missing Public API baseline: %(_PublicApiShipped.Identity)" Condition="!Exists('%(_PublicApiShipped.Identity)')" />
-    <Error Text="Missing Public API baseline: %(_PublicApiUnshipped.Identity)" Condition="!Exists('%(_PublicApiUnshipped.Identity)')" />
-
-    <PropertyGroup>
-      <_PublicApiIntermediate>$(IntermediateOutputPath)</_PublicApiIntermediate>
-      <_PublicApiShippedCopy>$(_PublicApiIntermediate)PublicAPI.Shipped.txt</_PublicApiShippedCopy>
-      <_PublicApiUnshippedCopy>$(_PublicApiIntermediate)PublicAPI.Unshipped.txt</_PublicApiUnshippedCopy>
-    </PropertyGroup>
-
-    <Copy SourceFiles="%(_PublicApiShipped.Identity)" DestinationFiles="$(_PublicApiShippedCopy)" OverwriteReadOnlyFiles="true" />
-    <Copy SourceFiles="%(_PublicApiUnshipped.Identity)" DestinationFiles="$(_PublicApiUnshippedCopy)" OverwriteReadOnlyFiles="true" />
-
-    <ItemGroup>
-      <AdditionalFiles Remove="**/PublicAPI.Shipped*.txt" />
-      <AdditionalFiles Remove="**/PublicAPI.Unshipped*.txt" />
-      <AdditionalFiles Include="$(_PublicApiShippedCopy)" />
-      <AdditionalFiles Include="$(_PublicApiUnshippedCopy)" />
-    </ItemGroup>
-  </Target>
 </Project>
