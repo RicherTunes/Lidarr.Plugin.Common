@@ -169,12 +169,7 @@ namespace Lidarr.Plugin.Common.Base
 
         private static bool IsSensitiveParameter(string parameterName)
         {
-            var lowerName = parameterName?.ToLowerInvariant() ?? "";
-            return lowerName.Contains("token") ||
-                   lowerName.Contains("secret") ||
-                   lowerName.Contains("password") ||
-                   lowerName.Contains("auth") ||
-                   lowerName.Contains("key");
+            return SensitiveKeys.IsSensitive(parameterName);
         }
 
         private static bool ContainsSqlInjectionPatterns(string input)
@@ -257,12 +252,7 @@ namespace Lidarr.Plugin.Common.Base
 
         private static bool IsSensitiveProperty(string propertyName)
         {
-            var lower = propertyName.ToLowerInvariant();
-            return lower.Contains("password") ||
-                   lower.Contains("token") ||
-                   lower.Contains("secret") ||
-                   lower.Contains("key") ||
-                   lower.Contains("auth");
+            return SensitiveKeys.IsSensitive(propertyName);
         }
     }
 }
