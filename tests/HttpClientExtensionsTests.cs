@@ -189,7 +189,7 @@ namespace Lidarr.Plugin.Common.Tests
                 perRequestTimeout: TimeSpan.FromMilliseconds(50),
                 cancellationToken: CancellationToken.None));
         }
-// snippet:resilience-cancel
+        // snippet:resilience-cancel
         // snippet-skip-compile
         [Fact]
         public async Task ExecuteWithResilienceAsync_RespectsCallerCancellation()
@@ -323,7 +323,7 @@ namespace Lidarr.Plugin.Common.Tests
         }
         // end-snippet
 
-// snippet:sniffer-passthrough
+        // snippet:sniffer-passthrough
         // snippet-skip-compile
         [Fact]
         public async Task ContentDecodingSniffer_PreservesContentLengthForPassthrough()
