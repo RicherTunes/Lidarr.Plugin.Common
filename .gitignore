@@ -54,3 +54,8 @@ artifacts/
 .DS_Store
 Thumbs.db
 Desktop.ini
+# Local package inspection artifacts
+_nupkg_extract/
+# Local package output
+/dist/
+
