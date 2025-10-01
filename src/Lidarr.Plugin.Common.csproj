@@ -42,6 +42,15 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
   </PropertyGroup>
+
+  <PropertyGroup>
+    <PublicApiUseSourcesForCodeFix>false</PublicApiUseSourcesForCodeFix>
+    <_ApiSrcDir>PublicAPI/$(TargetFramework)/</_ApiSrcDir>
+    <_ApiShippedSrc>$(_ApiSrcDir)PublicAPI.Shipped.txt</_ApiShippedSrc>
+    <_ApiUnshippedSrc>$(_ApiSrcDir)PublicAPI.Unshipped.txt</_ApiUnshippedSrc>
+    <_ApiShippedObj>$(IntermediateOutputPath)PublicAPI.Shipped.txt</_ApiShippedObj>
+    <_ApiUnshippedObj>$(IntermediateOutputPath)PublicAPI.Unshipped.txt</_ApiUnshippedObj>
+  </PropertyGroup>
   <!-- Exclude disabled files from compilation -->
   <ItemGroup>
     <Compile Remove="**\*.disabled\**\*.cs" />
@@ -64,10 +73,6 @@
     <Compile Include="Compat\net8\**\*.cs" />
   </ItemGroup>
 
-  <ItemGroup>
-    <AdditionalFiles Include="PublicAPI.Shipped.txt" />
-    <AdditionalFiles Include="PublicAPI.Unshipped.txt" />
-  </ItemGroup>
   <!-- Exclude CLI framework files when not explicitly included -->
   <ItemGroup Condition="'$(IncludeCLIFramework)' != 'true'">
     <Compile Remove="CLI\**\*.cs" />
@@ -132,22 +137,41 @@
     <None Include="..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\CHANGELOG.md" Pack="true" PackagePath="\" />
   </ItemGroup>
+
+  <Target Name="PreparePublicApiBaselines"
+          BeforeTargets="GenerateReferenceAssemblySource;CoreCompile">
+    <Error Condition="!Exists('$(_ApiShippedSrc)')"
+           Text="Missing Public API baseline: $(_ApiShippedSrc)" />
+    <Error Condition="!Exists('$(_ApiUnshippedSrc)')"
+           Text="Missing Public API baseline: $(_ApiUnshippedSrc)" />
+
+    <Copy SourceFiles="$(_ApiShippedSrc)"
+          DestinationFiles="$(_ApiShippedObj)"
+          OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="$(_ApiUnshippedSrc)"
+          DestinationFiles="$(_ApiUnshippedObj)"
+          OverwriteReadOnlyFiles="true" />
+
+    <ItemGroup>
+      <AdditionalFiles Remove="**/PublicAPI.Shipped.txt" />
+      <AdditionalFiles Remove="**/PublicAPI.Unshipped.txt" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' == 'true'">
+      <AdditionalFiles Include="$(_ApiShippedSrc)" />
+      <AdditionalFiles Include="$(_ApiUnshippedSrc)" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' != 'true'">
+      <AdditionalFiles Include="$(_ApiShippedObj)" />
+      <AdditionalFiles Include="$(_ApiUnshippedObj)" />
+    </ItemGroup>
+  </Target>
+
+  <ItemGroup>
+    <None Remove="PublicAPI.Shipped.txt" />
+    <None Remove="PublicAPI.Unshipped.txt" />
+    <AdditionalFiles Remove="PublicAPI.Shipped.txt" />
+    <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
 </Project>
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
