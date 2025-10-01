@@ -1,52 +1,53 @@
-name: Docs
+name: docs
 
 on:
   pull_request:
     paths:
       - "docs/**"
-      - "README.md"
-      - "examples/IsolationHostSample/**"
-      - "tools/DocTools/**"
-      - "!docs/dev-guide/CI.md"
-  push:
-    branches: [ main ]
-    paths:
-      - "docs/**"
-      - "README.md"
-      - "examples/IsolationHostSample/**"
-      - "tools/DocTools/**"
+      - "examples/**"
+      - ".github/workflows/docs.yml"
+      - ".markdownlint.yaml"
+      - ".vale.ini"
+      - "cspell.json"
 
 jobs:
-  verify:
+  docs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: "8.0.x"
-
-      - name: Restore tools
-        run: dotnet tool restore
-
-      - name: Snippet verification
-        run: dotnet run --project tools/DocTools/SnippetVerifier/SnippetVerifier.csproj
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: "20"
 
-      - name: markdownlint
-        run: npx --yes markdownlint-cli2 "README.md" "docs/**/*.md"
+      - name: Install markdownlint-cli2
+        run: npm install --global markdownlint-cli2
 
-      - name: cspell
-        run: npx --yes cspell lint --no-must-find-files README.md docs/**/*.md
+      - name: Markdownlint
+        run: markdownlint-cli2 "**/*.md" --config .markdownlint.yaml
 
-      - name: lychee link check
+      - name: Spell check
+        uses: streetsidesoftware/cspell-action@v6
+        with:
+          config: cspell.json
+          files: |
+            **/*.md
+
+      - name: Vale
+        uses: errata-ai/vale-action@v2
+        with:
+          files: "docs/**/*.md"
+
+      - name: Link check
         uses: lycheeverse/lychee-action@v2
         with:
-          args: --no-progress --max-concurrency 4 README.md docs/**/*.md
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          args: >-
+            --no-progress
+            --retry-wait 2000
+            --max-retries 2
+            --exclude-mail
+            docs/**/*.md README.md
+
+      - name: Snippet verifier
+        run: dotnet run --project tools/DocTools/SnippetVerifier/SnippetVerifier.csproj

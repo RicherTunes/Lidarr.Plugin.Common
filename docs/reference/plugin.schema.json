@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lidarr Plugin Manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["id", "name", "version", "apiVersion", "minHostVersion"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "pattern": "^[a-z0-9-]+$",
+      "description": "Stable plugin identifier (lowercase)."
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 164,
+      "description": "Display name."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-.+)?$",
+      "description": "Plugin SemVer version."
+    },
+    "apiVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.x$",
+      "description": "Required Abstractions major (major.x format)."
+    },
+    "minHostVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-.+)?$",
+      "description": "Minimum supported host version."
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "net6.0",
+          "net8.0"
+        ]
+      },
+      "uniqueItems": true
+    },
+    "commonVersion": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-.+)?$",
+      "description": "Informational Common package version shipped with the plugin."
+    }
+  }
+}

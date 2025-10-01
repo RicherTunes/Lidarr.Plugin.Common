@@ -1,79 +1,49 @@
 # Lidarr.Plugin.Common
 
-Shared utilities, patterns, and resilient infrastructure for building Lidarr streaming plugins. The library complements the host-owned `Lidarr.Plugin.Abstractions` contract so each plugin can focus on service-specific logic.
+Shared utilities, resilience policies, and packaging helpers for Lidarr streaming plugins. `Lidarr.Plugin.Abstractions` stays host-owned; each plugin ships its own copy of `Lidarr.Plugin.Common` inside a private AssemblyLoadContext.
 
 [![Build Status](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/ci.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions)
-<!-- TODO(#12): Restore NuGet badges once the package is published. -->
-![NuGet Status](https://img.shields.io/badge/NuGet-coming--soon-lightgrey.svg)
-![Downloads](https://img.shields.io/badge/Downloads-pending-lightgrey.svg)
+[![Docs Status](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/docs.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/docs.yml)
 
-## Packages at a glance
+## Choose your adventure
 
-- **`Lidarr.Plugin.Abstractions`** – Stable host ABI. Interfaces, DTOs, and loader helpers that must be shared across AssemblyLoadContexts. See the [Abstractions overview](docs/reference/ABSTRACTIONS.md).
-- **`Lidarr.Plugin.Common`** – Plugin-owned implementation helpers (HTTP, retry policies, orchestration, caching). Each plugin ships its own version inside its private AssemblyLoadContext. See the [architecture guide](docs/concepts/ARCHITECTURE.md).
+### Plugin authors
+- [Create a plugin project](docs/how-to/CREATE_PLUGIN.md)
+- [Use the streaming plugin bridge](docs/PLUGIN_BRIDGE.md)
+- [Map settings with the bridge](docs/SETTINGS_PROVIDER.md)
+- [Test with the shared TestKit](docs/TESTING_WITH_TESTKIT.md)
+- [Package with PluginPack.psm1](docs/PACKAGING.md)
 
-## Choose your path
+### Host maintainers
+- [AssemblyLoadContext isolation](docs/PLUGIN_ISOLATION.md)
+- [Plugin manifest schema & validation](docs/PLUGIN_MANIFEST.md)
+- [Compatibility matrix & EOL policy](docs/COMPATIBILITY.md)
+- [Migration checklist for legacy plugins](docs/migration/PLUGIN_MIGRATION.md)
 
-- **Building a plugin?** Start with the [plugin author quick start](docs/quickstart/PLUGIN_AUTHOR.md) and task guides in [`docs/how-to`](docs/how-to/).
-- **Maintaining the host?** Review [plugin isolation](docs/concepts/PLUGIN_ISOLATION.md), the [manifest reference](docs/reference/MANIFEST.md), and the [compatibility matrix](docs/concepts/COMPATIBILITY.md).
-- **Contributing to the library?** Follow the [developer guide](docs/dev-guide/DEVELOPER_GUIDE.md), [release policy](docs/dev-guide/RELEASE_POLICY.md), and [docs automation](docs/dev-guide/TESTING_DOCS.md).
+### Library contributors
+- [Abstractions overview & API baselines](docs/ABSTRACTIONS.md)
+- [Developer guide](docs/dev-guide/DEVELOPER_GUIDE.md)
+- [Docs & tooling guide](docs/dev-guide/TESTING_DOCS.md)
+- [Packaging playbook](docs/PACKAGING.md)
 
-## Quick start (plugin project)
-
-```bash
-
-# Add the shared helpers to your plugin
-dotnet add package Lidarr.Plugin.Common
-
-# Reference the host ABI for compile-time contracts only
-dotnet add package Lidarr.Plugin.Abstractions --version 1.0.0
-
-```
-
-Recommended `.csproj` fragment:
-
-```xml
-
-<PropertyGroup>
-  <TargetFramework>net8.0</TargetFramework>
-  <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-</PropertyGroup>
-
-<ItemGroup>
-  <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.0.0" PrivateAssets="all" ExcludeAssets="runtime;native;contentfiles" />
-  <PackageReference Include="Lidarr.Plugin.Common" Version="1.1.4" />
-</ItemGroup>
-
-```
-
-See [CREATE_PLUGIN.md](docs/how-to/CREATE_PLUGIN.md) for the full walkthrough and the [isolation host sample](docs/examples/ISOLATION_HOST_SAMPLE.md) for loading plugins in collectible AssemblyLoadContexts.
-
-## Documentation
-All documentation lives under [`docs/`](docs/README.md) and is organised as a knowledge base:
-
-- **Quick start** – choose a persona-specific onboarding flow.
-- **Concepts** – isolation, architecture, compatibility, and versioning invariants.
-- **How-to** – task-focused guides (logging, OAuth, orchestrators, etc.).
-- **Reference** – manifest schema, settings, and public API baseline policy.
-- **Migration** – legacy upgrades and breaking-change archive.
-- **Dev guide** – contribution standards, CI, release process, and documentation tooling.
-
-## Tooling & verification
-
-- `dotnet build` / `dotnet test` – standard library verification across net6.0 and net8.0.
-- `dotnet run --project tools/DocTools/SnippetVerifier` – compiles all tagged documentation snippets.
-- `pwsh tools/DocTools/lint-docs.ps1` – runs markdown lint, spell check, and link validation.
-- GitHub Actions `ci.yml` (code) and `docs.yml` (documentation) enforce the same checks in CI.
+## Documentation workflow
+- Markdown lives under `docs/`; every page is the single source for its topic.
+- Code samples use snippet includes (` ```csharp file=...`) verified by `tools/DocTools/SnippetVerifier`.
+- Run the docs toolchain locally:
+  ```bash
+  # lint + spell check + links + snippets
+  gh workflow run docs.yml --ref <branch>
+  # or run manually
+  dotnet run --project tools/DocTools/SnippetVerifier
+  ```
+- GitHub Actions `docs.yml` enforces markdownlint, Vale, cspell, link checking, and snippet compilation on every documentation PR.
 
 ## Repository layout
-
-- `src/` – library source (Common + Abstractions).
-- `examples/` – runnable samples and plugin scaffolding.
-- `tests/` – unit and integration tests.
-- `docs/` – documentation hub (see [`docs/README.md`](docs/README.md)).
-- `tools/` – repo tooling (snippet verifier, docs lint script).
+- `src/` – library source (`Lidarr.Plugin.Common`, `Lidarr.Plugin.Abstractions`).
+- `tests/` – unit/integration tests.
+- `examples/` – sample hosts, plugin bridge snippets, manifest helpers.
+- `docs/` – knowledge base described above.
+- `tools/` – Snippet verifier, manifest/package automation, docs lint scripts.
 
 ## License
-Licensed under the MIT License. See [LICENSE](LICENSE).
-
-
+MIT – see [LICENSE](LICENSE).
