@@ -132,11 +132,14 @@ jobs:
             exit 0
           fi
           mkdir -p prev
-          gh release download "$PREV_TAG" -p "Lidarr.Plugin.Common.*.nupkg" -D prev
+          if ! gh release download "$PREV_TAG" -p "Lidarr.Plugin.Common.*.nupkg" -D prev; then
+            echo "Previous release found but no matching nupkg; skipping API compatibility."
+            exit 0
+          fi
           PREV_PACKAGE=$(ls prev/Lidarr.Plugin.Common.*.nupkg | head -n 1)
           CURRENT_PACKAGE=$(ls dist/Lidarr.Plugin.Common.*.nupkg | head -n 1)
-          if [ -z "$PREV_PACKAGE" ]; then
-            echo "Previous package not found; skipping."
+          if [ -z "$PREV_PACKAGE" ] || [ -z "$CURRENT_PACKAGE" ]; then
+            echo "Missing package for API compatibility; skipping."
             exit 0
           fi
           apicompat -b "$PREV_PACKAGE" -c "$CURRENT_PACKAGE"
