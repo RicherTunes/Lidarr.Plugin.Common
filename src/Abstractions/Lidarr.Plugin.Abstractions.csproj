@@ -1,6 +1,5 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <PublicApiUseSourcesForCodeFix>false</PublicApiUseSourcesForCodeFix>
     <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
@@ -13,6 +12,15 @@
     <NoWarn>SA1200;SA1633;CS1591</NoWarn>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
+  </PropertyGroup>
+
+  <PropertyGroup>
+    <PublicApiUseSourcesForCodeFix>false</PublicApiUseSourcesForCodeFix>
+    <_ApiSrcDir>PublicAPI/$(TargetFramework)/</_ApiSrcDir>
+    <_ApiShippedSrc>$(_ApiSrcDir)PublicAPI.Shipped.txt</_ApiShippedSrc>
+    <_ApiUnshippedSrc>$(_ApiSrcDir)PublicAPI.Unshipped.txt</_ApiUnshippedSrc>
+    <_ApiShippedObj>$(IntermediateOutputPath)PublicAPI.Shipped.txt</_ApiShippedObj>
+    <_ApiUnshippedObj>$(IntermediateOutputPath)PublicAPI.Unshipped.txt</_ApiUnshippedObj>
   </PropertyGroup>
 
   <ItemGroup>
@@ -30,55 +38,34 @@
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
   </ItemGroup>
 
-  <PropertyGroup>
-    <_ApiSrcDir>PublicAPI/$(TargetFramework)/</_ApiSrcDir>
-    <_ApiShippedSrc>$(_ApiSrcDir)PublicAPI.Shipped.txt</_ApiShippedSrc>
-    <_ApiUnshippedSrc>$(_ApiSrcDir)PublicAPI.Unshipped.txt</_ApiUnshippedSrc>
-  </PropertyGroup>
+  <Target Name="PreparePublicApiBaselines"
+          BeforeTargets="GenerateReferenceAssemblySource;CoreCompile">
+    <Error Condition="!Exists('$(_ApiShippedSrc)')"
+           Text="Missing Public API baseline: $(_ApiShippedSrc)" />
+    <Error Condition="!Exists('$(_ApiUnshippedSrc)')"
+           Text="Missing Public API baseline: $(_ApiUnshippedSrc)" />
 
-  <PropertyGroup>
-    <CoreCompileDependsOn>PreparePublicApiBaselines;$(CoreCompileDependsOn)</CoreCompileDependsOn>
-    <GenerateReferenceAssemblyDependsOn>PreparePublicApiBaselines;$(GenerateReferenceAssemblyDependsOn)</GenerateReferenceAssemblyDependsOn>
-  </PropertyGroup>
-
-  <Target Name="PreparePublicApiBaselines" BeforeTargets="GenerateReferenceAssemblySource;CoreCompile">
-    <PropertyGroup>
-      <_ApiShippedObj>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)PublicAPI.Shipped.txt'))</_ApiShippedObj>
-      <_ApiUnshippedObj>$([System.IO.Path]::GetFullPath('$(IntermediateOutputPath)PublicAPI.Unshipped.txt'))</_ApiUnshippedObj>
-    </PropertyGroup>
-
-    <Error Condition="!Exists('$(_ApiShippedSrc)')" Text="Missing Public API baseline: $(_ApiShippedSrc)" />
-    <Error Condition="!Exists('$(_ApiUnshippedSrc)')" Text="Missing Public API baseline: $(_ApiUnshippedSrc)" />
-
-    <Copy SourceFiles="$(_ApiShippedSrc)" DestinationFiles="$(_ApiShippedObj)" OverwriteReadOnlyFiles="true" />
-    <Copy SourceFiles="$(_ApiUnshippedSrc)" DestinationFiles="$(_ApiUnshippedObj)" OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="$(_ApiShippedSrc)"
+          DestinationFiles="$(_ApiShippedObj)"
+          OverwriteReadOnlyFiles="true" />
+    <Copy SourceFiles="$(_ApiUnshippedSrc)"
+          DestinationFiles="$(_ApiUnshippedObj)"
+          OverwriteReadOnlyFiles="true" />
 
     <ItemGroup>
       <AdditionalFiles Remove="**/PublicAPI.Shipped.txt" />
       <AdditionalFiles Remove="**/PublicAPI.Unshipped.txt" />
     </ItemGroup>
 
-    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)'=='true'">
-      <AdditionalFiles Include="$(_ApiShippedSrc)">
-        <Link>PublicAPI.Shipped.txt</Link>
-      </AdditionalFiles>
-      <AdditionalFiles Include="$(_ApiUnshippedSrc)">
-        <Link>PublicAPI.Unshipped.txt</Link>
-      </AdditionalFiles>
+    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' == 'true'">
+      <AdditionalFiles Include="$(_ApiShippedSrc)" />
+      <AdditionalFiles Include="$(_ApiUnshippedSrc)" />
     </ItemGroup>
 
-    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)'!='true'">
-      <AdditionalFiles Include="$(_ApiShippedObj)">
-        <Link>PublicAPI.Shipped.txt</Link>
-      </AdditionalFiles>
-      <AdditionalFiles Include="$(_ApiUnshippedObj)">
-        <Link>PublicAPI.Unshipped.txt</Link>
-      </AdditionalFiles>
+    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' != 'true'">
+      <AdditionalFiles Include="$(_ApiShippedObj)" />
+      <AdditionalFiles Include="$(_ApiUnshippedObj)" />
     </ItemGroup>
-
-    <Message Importance="High" Text="TFM=$(TargetFramework) AdditionalFiles: @(AdditionalFiles -> '%(Identity)')" />
-    <Message Importance="High" Text="TFM=$(TargetFramework) PublicAPI.Shipped size=$([System.IO.File]::ReadAllText('$(_ApiShippedObj)').Length)" />
-    <Message Importance="High" Text="TFM=$(TargetFramework) PublicAPI.Unshipped size=$([System.IO.File]::ReadAllText('$(_ApiUnshippedObj)').Length)" />
   </Target>
 
   <ItemGroup>
@@ -88,5 +75,3 @@
     <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 </Project>
-
-
