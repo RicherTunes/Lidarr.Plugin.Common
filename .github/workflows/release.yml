@@ -33,9 +33,33 @@ jobs:
         run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage"
 
       - name: Pack
-        run: >
-          dotnet pack src/Lidarr.Plugin.Common.csproj
-          -c Release -o dist /p:ContinuousIntegrationBuild=true
+        run: |
+          dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
+          dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
+
+      - name: API compatibility (Abstractions vs previous)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dotnet tool update --global microsoft.dotnet.apicompat.tool --version 9.0.305
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          PREV_TAG=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous release detected; skipping API compatibility."
+            exit 0
+          fi
+          mkdir -p prev
+          if ! gh release download "$PREV_TAG" -p "Lidarr.Plugin.Abstractions.*.nupkg" -D prev; then
+            echo "Previous release found but no Abstractions package; skipping API compatibility."
+            exit 0
+          fi
+          CURRENT_PACKAGE=$(ls dist/Lidarr.Plugin.Abstractions.*.nupkg | head -n 1)
+          PREV_PACKAGE=$(ls prev/Lidarr.Plugin.Abstractions.*.nupkg | head -n 1)
+          if [ -z "$PREV_PACKAGE" ] || [ -z "$CURRENT_PACKAGE" ]; then
+            echo "Missing package for API compatibility; skipping."
+            exit 0
+          fi
+          apicompat package --package "$CURRENT_PACKAGE" --baseline-package "$PREV_PACKAGE"
 
       - name: Publish to NuGet.org
         if: startsWith(github.ref, 'refs/tags/v')

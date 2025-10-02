@@ -1,131 +1,67 @@
-# How-to: Use the Streaming Plugin Bridge
+# How-to: Test `StreamingPlugin<TModule, TSettings>`
 
-StreamingPlugin<TModule, TSettings> removes most of the boilerplate you had to write to satisfy IPlugin. Derive from it, register your services in a StreamingPluginModule, and focus on business logic.
+This guide shows the minimal steps to load your plugin in a collectible `AssemblyLoadContext`, resolve services, and run smoke tests without fighting the infrastructure.
 
-## 1. Define settings
+## 1. Expose services from your plugin
 
-`csharp
-using Lidarr.Plugin.Common.Base;
+Add an accessor so tests can reach the DI container. The sample plugin inherits from `StreamingPlugin<TModule, TSettings>` and implements a simple indexer.
 
-public sealed class TidalarrSettings : BaseStreamingSettings
-{
-    public string ClientId { get; set; } = string.Empty;
-    public string ClientSecret { get; set; } = string.Empty;
-}
-`
+```csharp file=../../examples/StreamingPluginSample/SampleStreamingPlugin.cs#streaming-plugin-entry
+```
 
-Defaults come from the base type (cache duration, rate limits, country code). Override ConfigureDefaults in the bridge if you need different values.
+```csharp file=../../examples/StreamingPluginSample/SampleStreamingPlugin.cs#streaming-plugin-module
+```
 
-## 2. Register services in a module
+```csharp file=../../examples/StreamingPluginSample/SampleStreamingPlugin.cs#streaming-plugin-settings
+```
 
-`csharp
-using Lidarr.Plugin.Common.Services.Registration;
-using Microsoft.Extensions.DependencyInjection;
+```csharp file=../../examples/StreamingPluginSample/SampleStreamingPlugin.cs#streaming-plugin-indexer
+```
 
-public sealed class TidalarrModule : StreamingPluginModule
-{
-    public override string ServiceName => "Tidal";
-    public override string Description => "Lossless streaming provider";
-    public override string Author => "RicherTunes";
+> Tip: if your plugin already returns `null` for an unsupported feature (e.g., no download client), keep doing so. The host will handle the absence gracefully.
 
-    protected override void ConfigureServices(IServiceCollection services)
-    {
-        services.AddSingleton<TidalApiClient>();
-        services.AddTransient<TidalIndexer>();    // implements BaseStreamingIndexer<TidalarrSettings>
-        services.AddTransient<TidalDownloadClient>(); // implements BaseStreamingDownloadClient<TidalarrSettings>
-    }
-}
-`
+## 2. Drop in the reusable fixture
 
-## 3. Derive from the bridge
+Copy the fixture into your test project (for example `tests/MyPlugin.Tests/PluginLoadFixture.cs`). The only thing you must customise is the plugin build path.
 
-`csharp
-using System.Threading;
-using System.Threading.Tasks;
-using Lidarr.Plugin.Abstractions.Contracts;
-using Lidarr.Plugin.Common.Hosting;
+```csharp file=../../tests/Common.SampleTests/PluginLoadFixture.cs#streaming-plugin-fixture
+```
 
-public sealed class TidalarrPlugin : StreamingPlugin<TidalarrModule, TidalarrSettings>
-{
-    protected override IEnumerable<SettingDefinition> DescribeSettings()
-    {
-        yield return new SettingDefinition
-        {
-            Key = nameof(TidalarrSettings.ClientId),
-            DisplayName = "Client ID",
-            Description = "OAuth client identifier issued by Tidal",
-            DataType = SettingDataType.String,
-            IsRequired = true
-        };
-        yield return new SettingDefinition
-        {
-            Key = nameof(TidalarrSettings.ClientSecret),
-            DisplayName = "Client Secret",
-            Description = "OAuth client secret",
-            DataType = SettingDataType.Password,
-            IsRequired = true
-        };
-    }
+The fixture looks for `plugins/MyPlugin/bin/Debug/net8.0/MyPlugin.dll`. Adjust the path to match your project layout or read it from an environment variable if your CI publishes elsewhere.
 
-    protected override PluginValidationResult ValidateSettings(TidalarrSettings settings)
-    {
-        if (string.IsNullOrWhiteSpace(settings.ClientId))
-        {
-            return PluginValidationResult.Failure(new[] { "ClientId is required." });
-        }
+## 3. Add a smoke test and remove the skip once ready
 
-        if (string.IsNullOrWhiteSpace(settings.ClientSecret))
-        {
-            return PluginValidationResult.Failure(new[] { "ClientSecret is required." });
-        }
+```csharp file=../../tests/Common.SampleTests/PluginLoadFixture.cs#streaming-plugin-smoke-test
+```
 
-        return PluginValidationResult.Success();
-    }
+- Until your plugin build output exists, keep the `[Fact(Skip = ...)]` to prevent the fixture from running.
+- After `dotnet publish` succeeds, remove the skip so the fixture loads the plugin and captures the DI container.
+- From there, write targeted tests that resolve services and exercise indexer or download client logic.
 
-    protected override ValueTask<IIndexer?> CreateIndexerAsync(TidalarrSettings settings, IServiceProvider services, CancellationToken ct)
-    {
-        // Resolve your adapter that implements Lidarr.Plugin.Abstractions.Contracts.IIndexer
-        var indexer = services.GetRequiredService<TidalIndexerAdapter>();
-        return ValueTask.FromResult<IIndexer?>(indexer);
-    }
+## 4. Run the loop
 
-    protected override ValueTask<IDownloadClient?> CreateDownloadClientAsync(TidalarrSettings settings, IServiceProvider services, CancellationToken ct)
-    {
-        var client = services.GetRequiredService<TidalDownloadClientAdapter>();
-        return ValueTask.FromResult<IDownloadClient?>(client);
-    }
-}
-`
+```bash
 
-### What the bridge gives you
+# 1. Build the plugin into the location your fixture expects
+ dotnet publish plugins/MyPlugin/MyPlugin.csproj -c Debug -f net8.0 -o plugins/MyPlugin/bin/Debug/net8.0
 
-- Loads plugin.json automatically (defaults to the file next to the plugin assembly).
-- Creates a singleton TSettings instance, applies defaults, and exposes it through DI.
-- Implements ISettingsProvider using reflection, so the host sees key/value dictionaries while your code works with TSettings.
-- Registers ILoggerFactory, typed ILogger<T>, and the host context inside your service provider.
-- Keeps settings up to date: when the host calls Apply, the existing settings instance is mutated so any consumers resolve the new values.
+# 2. Execute tests (fixture loads the published plugin)
+ dotnet test tests/MyPlugin.Tests/MyPlugin.Tests.csproj -c Debug
 
-### Lifecycle hooks you can override
+```
 
-| Method | Purpose |
-|--------|---------|
-| ConfigureDefaults(TSettings settings) | Adjust default values before anything resolves your settings. |
-| DescribeSettings() | Return SettingDefinition entries for host UI. |
-| ValidateSettings(TSettings settings) | Perform custom validation, return warnings or errors. |
-| OnSettingsApplied(TSettings settings) | React to settings changes (e.g., refresh cached tokens). |
-| ConfigureServices(IServiceCollection, IPluginContext, TSettings) | Add more DI registrations beyond the module. |
-| OnInitializedAsync(IPluginContext, CancellationToken) | Async initialization after DI is ready. |
+### Validation checklist
+- [ ] Plugin assembly publishes next to its dependencies (set `CopyLocalLockFileAssemblies=true`).
+- [ ] Fixture resolves `IServiceProvider` either via `IServiceProviderAccessor` or reflection fallback.
+- [ ] Tests dispose the plugin so the collectible load context unloads cleanly (look for zero lingering handles).
+- [ ] Integration tests assert at least one real call path (indexer, download client, or other service).
 
-## Settings dictionary format
+### Troubleshooting
 
-The bridge maps public writable properties on TSettings directly to dictionary keys (PascalCase by default). You can keep keys aligned with property names or transform them before returning SettingDefinition.DisplayName. Nested objects are not supported yet—prefer flat settings objects.
+| Symptom | Fix |
+| --- | --- |
+| `DirectoryNotFoundException` from the fixture | Ensure `dotnet publish` output matches the path in `buildOutput` (step 4). |
+| `InvalidOperationException: Plugin must expose IServiceProvider` | Implement the sample `IServiceProviderAccessor` interface and forward to the base `Services` property. |
+| Types from `Lidarr.Plugin.Abstractions` mismatch | Restore dependencies using the same Common version that built your plugin and rebuild. |
 
-## Thread safety
-
-The bridge updates the shared settings instance under a lock. If you cache values locally, subscribe to settings changes via OnSettingsApplied and refresh your caches there.
-
-## Next steps
-
-- Pair the bridge with the [settings guide](../reference/SETTINGS.md) to document each key.
-- Use the [testing harness](TEST_PLUGIN.md) to exercise the plugin through PluginLoader.
-- Add adapters from your existing BaseStreamingIndexer/BaseStreamingDownloadClient types to the new abstractions—start with simple wrappers, then share them across plugins.
+Once this harness passes, you have a safety net for every change to your streaming plugin.

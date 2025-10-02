@@ -13,10 +13,13 @@
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all" />
     <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.10.0" />
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\Lidarr.Plugin.Common.csproj" />
+    <ProjectReference Include="..\src\Lidarr.Plugin.Common.csproj">
+      <AdditionalProperties>IncludeCLIFramework=true</AdditionalProperties>
+    </ProjectReference>
     <ProjectReference Include="..\src\Abstractions\Lidarr.Plugin.Abstractions.csproj" />
     <ProjectReference Include="..\testkit\Lidarr.Plugin.Common.TestKit.csproj" />
   </ItemGroup>

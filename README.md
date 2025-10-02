@@ -10,9 +10,11 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 ### Plugin authors
 - [Create a plugin project](docs/how-to/CREATE_PLUGIN.md)
 - [Use the streaming plugin bridge](docs/PLUGIN_BRIDGE.md)
+- [Test a streaming plugin end-to-end](docs/how-to/USE_STREAMING_PLUGIN.md)
 - [Map settings with the bridge](docs/SETTINGS_PROVIDER.md)
 - [Test with the shared TestKit](docs/TESTING_WITH_TESTKIT.md)
 - [Package with PluginPack.psm1](docs/PACKAGING.md)
+- [FAQ for plugin authors](docs/FAQ_FOR_PLUGIN_AUTHORS.md)
 
 ### Host maintainers
 - [AssemblyLoadContext isolation](docs/PLUGIN_ISOLATION.md)
@@ -25,6 +27,7 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 - [Developer guide](docs/dev-guide/DEVELOPER_GUIDE.md)
 - [Docs & tooling guide](docs/dev-guide/TESTING_DOCS.md)
 - [Packaging playbook](docs/PACKAGING.md)
+- [Upgrade checklist for releases](docs/UPGRADING.md)
 
 ## Documentation workflow
 - Markdown lives under `docs/`; every page is the single source for its topic.

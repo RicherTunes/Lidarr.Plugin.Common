@@ -4,10 +4,14 @@ The repository uses `Microsoft.CodeAnalysis.PublicApiAnalyzers` to ensure any ch
 
 ## Files
 
-- `src/Abstractions/PublicAPI.Shipped.txt`
-- `src/Abstractions/PublicAPI.Unshipped.txt`
-- `src/PublicAPI.Shipped.txt`
-- `src/PublicAPI.Unshipped.txt`
+- `src/Abstractions/PublicAPI/net6.0/PublicAPI.Shipped.txt`
+- `src/Abstractions/PublicAPI/net6.0/PublicAPI.Unshipped.txt`
+- `src/Abstractions/PublicAPI/net8.0/PublicAPI.Shipped.txt`
+- `src/Abstractions/PublicAPI/net8.0/PublicAPI.Unshipped.txt`
+- `src/PublicAPI/net6.0/PublicAPI.Shipped.txt`
+- `src/PublicAPI/net6.0/PublicAPI.Unshipped.txt`
+- `src/PublicAPI/net8.0/PublicAPI.Shipped.txt`
+- `src/PublicAPI/net8.0/PublicAPI.Unshipped.txt`
 
 `Shipped` files describe the APIs released in the latest NuGet version. `Unshipped` files accumulate new APIs until the next release.
 
@@ -15,18 +19,16 @@ The repository uses `Microsoft.CodeAnalysis.PublicApiAnalyzers` to ensure any ch
 
 1. Modify code.
 2. Run `dotnet build` or `dotnet test`.
-3. If RS0016 / RS0026 warnings appear, update the baseline using the helper tool:
+3. If RS0016 / RS0026 warnings appear, update the baseline using the helper script:
 
-   ```bash
-
-   dotnet tool restore
-   dotnet generate-public-api src/Abstractions/Lidarr.Plugin.Abstractions.csproj
-   dotnet generate-public-api src/Lidarr.Plugin.Common.csproj
-
+   ```powershell
+   ./tools/Update-PublicApiBaselines.ps1 -Project src/Abstractions/Lidarr.Plugin.Abstractions.csproj
+   ./tools/Update-PublicApiBaselines.ps1 -Project src/Lidarr.Plugin.Common.csproj
    ```
 
 4. Review the diff to ensure only intentional APIs are added or removed.
-5. Move entries from `Unshipped` to `Shipped` during release prep.
+5. Keep the `PublicAPI/<tfm>/` files committed to source control so CI and downstream builds stay aligned.
+6. Move entries from `Unshipped` to `Shipped` during release prep.
 
 ## Policy
 
@@ -39,4 +41,3 @@ The repository uses `Microsoft.CodeAnalysis.PublicApiAnalyzers` to ensure any ch
 - [Architecture](../concepts/ARCHITECTURE.md)
 - [Release policy](../dev-guide/RELEASE_POLICY.md)
 - [Docs tooling](../dev-guide/TESTING_DOCS.md)
-
