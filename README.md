@@ -4,6 +4,7 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 [![Build Status](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/ci.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions)
 [![Docs Status](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/docs.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/docs.yml)
+[![Release CI](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/release.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/release.yml)
 
 ## Choose your adventure
 
@@ -15,6 +16,7 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 - [Test with the shared TestKit](docs/TESTING_WITH_TESTKIT.md)
 - [Package with PluginPack.psm1](docs/PACKAGING.md)
 - [FAQ for plugin authors](docs/FAQ_FOR_PLUGIN_AUTHORS.md)
+- [Bump the submodule in downstream repos](docs/how-to/BUMP_SUBMODULE.md)
 
 ### Host maintainers
 - [AssemblyLoadContext isolation](docs/PLUGIN_ISOLATION.md)

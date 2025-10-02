@@ -1,0 +1,56 @@
+name-template: 'v$NEXT_PATCH_VERSION'
+tag-template: 'v$NEXT_PATCH_VERSION'
+version-resolver:
+  major:
+    labels:
+      - breaking-change
+  minor:
+    labels:
+      - feature
+      - enhancement
+  patch:
+    labels:
+      - bug
+      - fix
+      - chore
+categories:
+  - title: 🚀 Features
+    labels:
+      - feature
+      - enhancement
+  - title: 🛠 Fixes
+    labels:
+      - bug
+      - fix
+  - title: 📚 Docs
+    labels:
+      - docs
+  - title: 🧱 Chore
+    labels:
+      - chore
+change-template: '- $TITLE (#$NUMBER)' 
+no-changes-template: '- No user-facing changes in this cycle.'
+exclude-labels:
+  - skip-changelog
+  - dependencies
+prerelease: false
+include-pre-releases: false
+
+template: |
+  ## Summary
+  _Write the one-paragraph upgrade note here._
+
+  ## Highlights
+  $CHANGES
+
+  ## Breaking changes
+  - _None_
+
+  ## Deprecations
+  - _None_
+
+  ## Dependency changes
+  - _None_
+
+  ## Contributors
+  $CONTRIBUTORS
