@@ -11,8 +11,8 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <Version>1.1.4</Version>
-    <PackageVersion>1.1.4</PackageVersion>
+    <Version>1.1.5</Version>
+    <PackageVersion>1.1.5</PackageVersion>
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
     <Authors>RicherTunes Community</Authors>
@@ -24,7 +24,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.1.4: Host gate registry, cancellation-aware HTTP helpers, cache hygiene, and packaging trims.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.1.5: CLI config persistence fixes, typed conversions, and new coverage.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <!-- Build Configuration -->

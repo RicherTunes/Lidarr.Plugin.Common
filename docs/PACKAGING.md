@@ -1,8 +1,8 @@
 # Packaging Plugins
 
-`tools/PluginPack.psm1` standardises how plugins are published: build, validate manifests, strip host-owned assemblies, and zip artifacts for distribution.
+`tools/PluginPack.psm1` standardises how plugins are published: build, validate manifests, strip host-owned assemblies, and zip artifacts for distribution. The default flow is **folder-based** packaging; merging is optional and opt-in.
 
-## Build & package
+## Folder packaging (recommended)
 
 ```powershell file=../tools/PluginPack.psm1#plugin-pack
 ```
@@ -14,6 +14,28 @@ Import-Module ../tools/PluginPack.psm1
 $artifact = New-PluginPackage -Csproj plugins/Tidalarr/Tidalarr.csproj -Manifest plugins/Tidalarr/plugin.json
 Write-Host "Created $artifact"
 ```
+
+This produces `artifacts/packages/<pluginId>-<version>-<tfm>.zip` containing the publish folder (minus `Lidarr.Plugin.Abstractions`). No ILRepack step runs, logs stay quiet, and dependencies remain side-by-side with the plugin.
+
+## Optional: merge plugin-private assemblies
+
+Some teams prefer a single DLL payload. Enable that per build:
+
+```powershell
+New-PluginPackage -Csproj plugins/Tidalarr/Tidalarr.csproj `
+                  -Manifest plugins/Tidalarr/plugin.json `
+                  -MergeAssemblies `
+                  -IlRepackRsp ../tools/ilrepack.rsp `
+                  -InternalizeExclude ../tools/internalize.exclude
+```
+
+Defaults baked into `ilrepack.rsp`:
+- Runs in parallel with wildcard support.
+- Uses the publish directory as the `/lib` path.
+- Writes to `<AssemblyName>.merged.dll` and swaps it into place.
+- Excludes `System.*`, `Microsoft.*`, and `Lidarr.Plugin.Abstractions` from merge candidates.
+
+Tweak the `.rsp` or exclude file if you need extra filters, but keep `Lidarr.Plugin.Abstractions` out of the merged output.
 
 ## CI flow
 

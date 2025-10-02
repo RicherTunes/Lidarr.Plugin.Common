@@ -123,6 +123,8 @@ dotnet restore src/Lidarr.Plugin.Common.csproj
 dotnet build src/Lidarr.Plugin.Common.csproj --configuration Debug
 dotnet test tests/ --verbosity normal
 
+> API compatibility runs in CI via the `apicompat` tool—no local PackageValidation packages required.
+
 # Run examples validation
 cd examples/
 # Validate examples compile and work correctly
