@@ -1,106 +1,105 @@
 # snippet:manifest-ci
 # snippet-skip-compile
 param(
-    [Parameter(Mandatory = True)]
-    [string],
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectPath,
 
-    [Parameter(Mandatory = True)]
-    [string],
+    [Parameter(Mandatory = $true)]
+    [string]$ManifestPath,
 
-    [string] = "Lidarr.Plugin.Abstractions"
+    [string]$AbstractionsPackage = 'Lidarr.Plugin.Abstractions'
 )
 
-Continue = 'Stop'
+$ErrorActionPreference = 'Stop'
 
-if (!(Test-Path )) {
-    throw "Project file '' not found."
+if (-not (Test-Path -LiteralPath $ProjectPath)) {
+    throw "Project file '$ProjectPath' not found."
 }
 
-if (!(Test-Path )) {
-    throw "Manifest file '' not found."
+if (-not (Test-Path -LiteralPath $ManifestPath)) {
+    throw "Manifest file '$ManifestPath' not found."
 }
 
-[xml] = Get-Content 
- = @{ msb = 'http://schemas.microsoft.com/developer/msbuild/2003' }
+[xml]$project = Get-Content -LiteralPath $ProjectPath
+$ns = @{ msb = 'http://schemas.microsoft.com/developer/msbuild/2003' }
 
- = .SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:Version', )
-if (-not ) {
-     = .SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:AssemblyVersion', )
+$versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:Version', $ns)
+if (-not $versionNode) {
+    $versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:AssemblyVersion', $ns)
 }
-if (-not ) {
-    throw "Unable to resolve Version from ''."
+if (-not $versionNode) {
+    throw "Unable to resolve Version from '$ProjectPath'."
 }
- = .InnerText.Trim()
+$projectVersion = $versionNode.InnerText.Trim()
 
- = Get-Content  -Raw | ConvertFrom-Json
+$manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
 
-if (-not .version) {
-    throw "Manifest at '' is missing 'version'."
-}
-
- = .SelectSingleNode("//msb:Project/msb:ItemGroup/msb:PackageReference[@Include='']", )
-if (-not ) {
-    throw "Project '' must reference ."
-}
- = .Version
-if (-not ) {
-    throw "PackageReference to  must specify Version."
-}
- = ( -split '\.')[0]
-
- = @()
- = @()
-
-if (.version -ne ) {
-     += "Manifest version '' does not match project Version ''."
+if (-not $manifest.version) {
+    throw "Manifest at '$ManifestPath' is missing 'version'."
 }
 
-if (-not .apiVersion) {
-     += "Manifest missing 'apiVersion'."
-} elseif (.apiVersion -notmatch '^\d+\.x$') {
-     += "apiVersion must be in 'major.x' form (e.g. '1.x')."
-} else {
-     = (.apiVersion -split '\.')[0]
-    if ( -ne ) {
-         += "apiVersion major  does not match  major ."
+$packageReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:PackageReference[@Include='$AbstractionsPackage']", $ns)
+if (-not $packageReference) {
+    throw "Project '$ProjectPath' must reference $AbstractionsPackage."
+}
+$packageVersion = $packageReference.Version
+if (-not $packageVersion) {
+    throw "PackageReference to $AbstractionsPackage must specify Version."
+}
+$packageMajor = ($packageVersion -split '\.')[0]
+
+$errors = @()
+$warnings = @()
+
+if ($manifest.version -ne $projectVersion) {
+    $errors += "Manifest version '$($manifest.version)' does not match project Version '$projectVersion'."
+}
+
+if (-not $manifest.apiVersion) {
+    $errors += "Manifest missing 'apiVersion'."
+}
+elseif ($manifest.apiVersion -notmatch '^\d+\.x$') {
+    $errors += "apiVersion must be in 'major.x' form (e.g. '1.x')."
+}
+else {
+    $apiMajor = ($manifest.apiVersion -split '\.')[0]
+    if ($apiMajor -ne $packageMajor) {
+        $errors += "apiVersion major $apiMajor does not match $AbstractionsPackage major $packageMajor."
     }
 }
 
-if (-not .minHostVersion) {
-     += "minHostVersion is not set; host compatibility cannot be enforced."
+if (-not $manifest.minHostVersion) {
+    $warnings += "minHostVersion is not set; host compatibility cannot be enforced."
 }
 
-if (.targets) {
-     = .SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFrameworks', )
-    if (-not ) {
-         = .SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFramework', )
-         = if () { .InnerText } else { '' }
-    } else {
-         = .InnerText
+if ($manifest.targets) {
+    $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFrameworks', $ns)
+    if (-not $tfmNode) {
+        $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFramework', $ns)
     }
+    $projectTfms = if ($tfmNode) { $tfmNode.InnerText.Split(';') | ForEach-Object { $_.Trim() } } else { @() }
 
-     = @()
-    foreach ( in .targets) {
-        if (-not ( -split ';' | Where-Object { .Trim() -eq  })) {
-             += 
+    $missing = @()
+    foreach ($target in $manifest.targets) {
+        if ($projectTfms -notcontains $target) {
+            $missing += $target
         }
     }
-    if (.Count -gt 0) {
-         += "Project is missing TargetFramework(s):  referenced in manifest.targets."
+    if ($missing.Count -gt 0) {
+        $errors += "Project is missing TargetFramework(s): $($missing -join ', ') referenced in manifest.targets."
     }
 }
 
-if (.Count -gt 0) {
-    foreach ( in ) {
-        Write-Error 
+if ($errors.Count -gt 0) {
+    foreach ($error in $errors) {
+        Write-Error $error
     }
     throw "Manifest validation failed."
 }
 
-foreach ( in ) {
-    Write-Warning 
+foreach ($warning in $warnings) {
+    Write-Warning $warning
 }
 
-Write-Host "Manifest validation succeeded for ''." -ForegroundColor Green
+Write-Host "Manifest validation succeeded for '$ManifestPath'." -ForegroundColor Green
 # end-snippet
-

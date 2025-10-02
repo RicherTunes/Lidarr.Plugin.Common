@@ -30,6 +30,16 @@ All notable changes to the shared library are documented here. The format follow
 ### Reminder
 - Maintainers must keep host assemblies in sync with Lidarr 2.14.2.4786 before shipping plugin updates; see `docs/UNIFIED_PLUGIN_PIPELINE.md` for the complete process.
 
+## [1.1.5] - 2025-10-01
+
+### Changed
+- CLI `config` commands now persist settings through `PluginHost`, perform invariant culture conversions, and mask sensitive values consistently across .NET 6.0 and .NET 8.0 builds.
+- `config show` renders a snapshot built from the settings metadata rather than a fixed list, so new properties appear automatically.
+- `config reset` clears persisted storage and rewrites default settings via the host cache, preventing stale values in subsequent runs.
+
+### Added
+- Added `ConfigCommandTests` to cover typed configuration updates, invalid value handling, secret masking, and reset behaviour.
+
 ## [1.1.4] - 2025-09-30
 
 ### Added
@@ -145,6 +155,7 @@ All notable changes to the shared library are documented here. The format follow
 - **Feature Requests**: Discuss in GitHub Discussions.
 - **Community**: Join the streaming plugin developer community.
 - **Documentation**: See `README.md` and the `docs/` folder.
+
 
 
 

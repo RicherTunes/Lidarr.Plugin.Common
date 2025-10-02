@@ -1,6 +1,7 @@
 using System;
 using System.CommandLine;
 using System.Threading.Tasks;
+using System.Threading;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
@@ -137,6 +138,9 @@ namespace Lidarr.Plugin.Common.CLI
                 new PluginHost<TSettings>(
                     CreateIndexerAsync,
                     CreateDownloadClientAsync,
+                    sp.GetRequiredService<IConfigService>(),
+                    sp.GetRequiredService<IConfiguration>(),
+                    ServiceName,
                     sp.GetRequiredService<ILogger<PluginHost<TSettings>>>()
                 )
             );
@@ -202,6 +206,8 @@ namespace Lidarr.Plugin.Common.CLI
         Task<BaseStreamingIndexer<TSettings>> GetIndexerAsync();
         Task<BaseStreamingDownloadClient<TSettings>> GetDownloadClientAsync();
         Task<TSettings> GetSettingsAsync();
+        Task SaveSettingsAsync(TSettings settings);
+        Task<TSettings> ReloadSettingsAsync();
     }
 
     public class PluginHost<TSettings> : IPluginHost<TSettings>
@@ -209,18 +215,30 @@ namespace Lidarr.Plugin.Common.CLI
     {
         private readonly Func<TSettings, Task<BaseStreamingIndexer<TSettings>>> _indexerFactory;
         private readonly Func<TSettings, Task<BaseStreamingDownloadClient<TSettings>>> _downloadClientFactory;
+        private readonly IConfigService _configService;
+        private readonly IConfiguration _configuration;
         private readonly ILogger _logger;
+        private readonly string _settingsKey;
+        private readonly SemaphoreSlim _settingsLock = new(1, 1);
         private TSettings _cachedSettings;
 
         public PluginHost(
             Func<TSettings, Task<BaseStreamingIndexer<TSettings>>> indexerFactory,
             Func<TSettings, Task<BaseStreamingDownloadClient<TSettings>>> downloadClientFactory,
-            ILogger logger)
+            IConfigService configService,
+            IConfiguration configuration,
+            string serviceName,
+            ILogger<PluginHost<TSettings>> logger)
         {
-            _indexerFactory = indexerFactory;
-            _downloadClientFactory = downloadClientFactory;
-            _logger = logger;
+            _indexerFactory = indexerFactory ?? throw new ArgumentNullException(nameof(indexerFactory));
+            _downloadClientFactory = downloadClientFactory ?? throw new ArgumentNullException(nameof(downloadClientFactory));
+            _configService = configService ?? throw new ArgumentNullException(nameof(configService));
+            _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
+            _settingsKey = string.IsNullOrWhiteSpace(serviceName) ? typeof(TSettings).Name : serviceName;
+            _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         }
+
+        private string SettingsStorageKey => $"{_settingsKey}.settings";
 
         public async Task<BaseStreamingIndexer<TSettings>> GetIndexerAsync()
         {
@@ -236,17 +254,85 @@ namespace Lidarr.Plugin.Common.CLI
 
         public async Task<TSettings> GetSettingsAsync()
         {
-            if (_cachedSettings == null)
+            if (_cachedSettings != null)
             {
-                // Load from config file or create defaults
-                _cachedSettings = new TSettings();
-                // TODO: Load from configuration
+                return _cachedSettings;
             }
-            
-            return _cachedSettings;
+
+            await _settingsLock.WaitAsync();
+            try
+            {
+                if (_cachedSettings == null)
+                {
+                    var settings = new TSettings();
+
+                    try
+                    {
+                        _configuration.GetSection($"Streaming:{_settingsKey}")?.Bind(settings);
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Unable to bind appsettings configuration for {ServiceName}.", _settingsKey);
+                    }
+
+                    try
+                    {
+                        var persisted = await _configService.LoadAsync<TSettings>(SettingsStorageKey);
+                        if (persisted != null)
+                        {
+                            settings = persisted;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        _logger.LogWarning(ex, "Unable to load persisted CLI settings for {ServiceName}.", _settingsKey);
+                    }
+
+                    _cachedSettings = settings;
+                }
+
+                return _cachedSettings;
+            }
+            finally
+            {
+                _settingsLock.Release();
+            }
+        }
+
+        public async Task SaveSettingsAsync(TSettings settings)
+        {
+            if (settings == null)
+            {
+                throw new ArgumentNullException(nameof(settings));
+            }
+
+            await _settingsLock.WaitAsync();
+            try
+            {
+                _cachedSettings = settings;
+                await _configService.SaveAsync(SettingsStorageKey, settings);
+            }
+            finally
+            {
+                _settingsLock.Release();
+            }
+        }
+
+        public async Task<TSettings> ReloadSettingsAsync()
+        {
+            await _settingsLock.WaitAsync();
+            try
+            {
+                _cachedSettings = null;
+            }
+            finally
+            {
+                _settingsLock.Release();
+            }
+
+            return await GetSettingsAsync();
         }
     }
-
     #endregion
 }
 

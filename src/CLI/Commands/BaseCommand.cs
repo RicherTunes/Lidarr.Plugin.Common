@@ -1,6 +1,8 @@
 using System;
 using System.Collections.Generic;
 using System.CommandLine;
+using System.ComponentModel;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -316,34 +318,28 @@ namespace Lidarr.Plugin.Common.CLI.Commands
         protected override Command CreateCommand()
         {
             var configCommand = new Command("config", "Manage configuration settings");
-
-            // config show
             var showCommand = new Command("show", "Show current configuration");
-            showCommand.SetHandler(async () => 
-                await ExecuteWithErrorHandlingAsync(HandleShowConfigAsync));
+            showCommand.SetHandler(() => ExecuteWithErrorHandlingAsync(HandleShowConfigAsync));
 
-            // config set
             var setCommand = new Command("set", "Set configuration value");
             var keyArgument = new Argument<string>("key", "Configuration key");
             var valueArgument = new Argument<string>("value", "Configuration value");
             setCommand.AddArgument(keyArgument);
             setCommand.AddArgument(valueArgument);
-            setCommand.SetHandler(async (string key, string value) => 
-                await ExecuteWithErrorHandlingAsync(() => HandleSetConfigAsync(key, value)),
+            setCommand.SetHandler((string key, string value) =>
+                ExecuteWithErrorHandlingAsync(() => HandleSetConfigAsync(key, value)),
                 keyArgument, valueArgument);
 
-            // config get
             var getCommand = new Command("get", "Get configuration value");
             var getKeyArgument = new Argument<string>("key", "Configuration key");
             getCommand.AddArgument(getKeyArgument);
-            getCommand.SetHandler(async (string key) => 
-                await ExecuteWithErrorHandlingAsync(() => HandleGetConfigAsync(key)),
+            getCommand.SetHandler((string key) =>
+                ExecuteWithErrorHandlingAsync(() => HandleGetConfigAsync(key)),
                 getKeyArgument);
 
-            // config reset
             var resetCommand = new Command("reset", "Reset all configuration");
-            resetCommand.SetHandler(async () => 
-                await ExecuteWithErrorHandlingAsync(HandleResetConfigAsync));
+            resetCommand.SetHandler(() =>
+                ExecuteWithErrorHandlingAsync(HandleResetConfigAsync));
 
             configCommand.AddCommand(showCommand);
             configCommand.AddCommand(setCommand);
@@ -356,52 +352,188 @@ namespace Lidarr.Plugin.Common.CLI.Commands
         private async Task<int> HandleShowConfigAsync()
         {
             var settings = await PluginHost.GetSettingsAsync();
-            
-            UI.ShowStatus("Current Configuration", new Dictionary<string, object>
-            {
-                ["Service"] = typeof(TSettings).Name.Replace("Settings", ""),
-                ["Email"] = settings.Email ?? "Not set",
-                ["Organize by Artist"] = settings.OrganizeByArtist
-            });
+            var snapshot = BuildSettingsSnapshot(settings);
 
+            UI.ShowStatus("Current Configuration", snapshot);
             return 0;
         }
 
         private async Task<int> HandleSetConfigAsync(string key, string value)
         {
-            await ConfigService.SaveAsync($"setting.{key}", value);
-            UI.WriteSuccess($"Configuration '{key}' set to '{value}'");
+            var property = ResolveSettingsProperty(key);
+            if (property is null)
+            {
+                UI.WriteWarning($"Configuration '{key}' is not a recognized setting. Available keys: {GetAvailableSettingNames()}");
+                return 1;
+            }
+
+            if (property.IsReadOnly)
+            {
+                UI.WriteWarning($"Configuration '{property.Name}' is read-only.");
+                return 1;
+            }
+
+            var settings = await PluginHost.GetSettingsAsync();
+
+            object? converted;
+            try
+            {
+                converted = ConvertSettingValue(property, value);
+            }
+            catch (Exception ex) when (ex is FormatException or ArgumentException or NotSupportedException)
+            {
+                UI.WriteError($"Value '{value}' is not valid for '{property.Name}' ({property.PropertyType.Name}).");
+                return 1;
+            }
+
+            property.SetValue(settings, converted);
+            await PluginHost.SaveSettingsAsync(settings);
+
+            UI.WriteSuccess($"Configuration '{property.Name}' set to '{FormatSettingValue(converted)}'");
             return 0;
         }
 
         private async Task<int> HandleGetConfigAsync(string key)
         {
-            var value = await ConfigService.LoadAsync<string>($"setting.{key}");
-            if (value != null)
+            var property = ResolveSettingsProperty(key);
+            if (property is null)
             {
-                UI.WriteLine($"{key}: {value}");
+                UI.WriteWarning($"Configuration '{key}' is not a recognized setting. Available keys: {GetAvailableSettingNames()}");
+                return 1;
             }
-            else
-            {
-                UI.WriteWarning($"Configuration '{key}' not found");
-            }
+
+            var settings = await PluginHost.GetSettingsAsync();
+            var value = property.GetValue(settings);
+            var displayValue = ShouldMaskProperty(property)
+                ? MaskSensitiveValue(value)
+                : FormatSettingValue(value);
+
+            UI.WriteLine($"{property.Name}: {displayValue}");
             return 0;
         }
 
         private async Task<int> HandleResetConfigAsync()
         {
-            if (UI.Confirm("Are you sure you want to reset all configuration?"))
+            if (!UI.Confirm("Are you sure you want to reset all configuration?"))
             {
-                await ConfigService.ClearAllAsync();
-                UI.WriteSuccess("Configuration reset successfully");
-                return 0;
+                UI.WriteLine("Reset cancelled");
+                return 1;
             }
-            
-            UI.WriteLine("Reset cancelled");
-            return 1;
+
+            await ConfigService.ClearAllAsync();
+            await PluginHost.SaveSettingsAsync(new TSettings());
+
+            UI.WriteSuccess("Configuration reset successfully");
+            return 0;
+        }
+
+        private static PropertyDescriptor? ResolveSettingsProperty(string key)
+        {
+            if (string.IsNullOrWhiteSpace(key))
+            {
+                return null;
+            }
+
+            return TypeDescriptor
+                .GetProperties(typeof(TSettings))
+                .Cast<PropertyDescriptor>()
+                .FirstOrDefault(p => string.Equals(p.Name, key, StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static object? ConvertSettingValue(PropertyDescriptor property, string value)
+        {
+            if (property.PropertyType == typeof(string))
+            {
+                return value;
+            }
+
+            var converter = property.Converter ?? TypeDescriptor.GetConverter(property.PropertyType);
+            if (converter != null && converter.CanConvertFrom(typeof(string)))
+            {
+                return converter.ConvertFrom(null, CultureInfo.InvariantCulture, value);
+            }
+
+            if (property.PropertyType.IsEnum)
+            {
+                return Enum.Parse(property.PropertyType, value, true);
+            }
+
+            return Convert.ChangeType(value, property.PropertyType, CultureInfo.InvariantCulture);
+        }
+
+        private static string FormatSettingValue(object? value)
+        {
+            if (value is null)
+            {
+                return "[not set]";
+            }
+
+            if (value is string str)
+            {
+                return string.IsNullOrWhiteSpace(str) ? "[not set]" : str;
+            }
+
+            if (value is bool boolean)
+            {
+                return boolean ? "true" : "false";
+            }
+
+            if (value is IFormattable formattable)
+            {
+                return formattable.ToString(null, CultureInfo.InvariantCulture) ?? "[not set]";
+            }
+
+            return value.ToString() ?? "[not set]";
+        }
+
+        private static bool ShouldMaskProperty(PropertyDescriptor? property)
+        {
+            var name = property?.Name;
+            if (string.IsNullOrEmpty(name))
+            {
+                return false;
+            }
+
+            return name.IndexOf("password", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   name.IndexOf("token", StringComparison.OrdinalIgnoreCase) >= 0 ||
+                   name.IndexOf("secret", StringComparison.OrdinalIgnoreCase) >= 0;
+        }
+
+        private static string MaskSensitiveValue(object? value)
+        {
+            return value is string str && string.IsNullOrWhiteSpace(str)
+                ? "[not set]"
+                : "[masked]";
+        }
+
+        private static Dictionary<string, object> BuildSettingsSnapshot(TSettings settings)
+        {
+            var result = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
+            foreach (var property in TypeDescriptor.GetProperties(typeof(TSettings))
+                         .Cast<PropertyDescriptor>()
+                         .OrderBy(p => p.Name, StringComparer.OrdinalIgnoreCase))
+            {
+                var propertyValue = property.GetValue(settings);
+                result[property.Name] = ShouldMaskProperty(property)
+                    ? MaskSensitiveValue(propertyValue)
+                    : FormatSettingValue(propertyValue);
+            }
+
+            return result;
+        }
+
+        private static string GetAvailableSettingNames()
+        {
+            var names = TypeDescriptor.GetProperties(typeof(TSettings))
+                .Cast<PropertyDescriptor>()
+                .Where(p => !p.IsReadOnly)
+                .Select(p => p.Name)
+                .OrderBy(n => n, StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            return names.Length == 0 ? "(none)" : string.Join(", ", names);
         }
     }
-
     /// <summary>
     /// Queue command for managing downloads
     /// </summary>
@@ -726,3 +858,7 @@ namespace Lidarr.Plugin.Common.CLI.Commands
 
     #endregion
 }
+
+
+
+
