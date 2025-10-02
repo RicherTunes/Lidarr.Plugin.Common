@@ -2,6 +2,31 @@
 
 All notable changes to the shared library are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Release entry format
+
+Each release entry should include:
+- **Upgrade note** – a one-paragraph summary plugin authors can skim.
+- **Highlights** – bullets for the most relevant fixes or features.
+- Quick facts for breaking changes, deprecations, and dependency updates.
+- A [Full diff](...) link comparing the previous tag to the new one.
+
+Template to copy when drafting a release:
+
+```md
+## [x.y.z] - YYYY-MM-DD
+**Upgrade note:** <one-sentence summary>
+
+**Highlights**
+- Bullet for key change
+- Bullet for key change
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/vX.Y.(Z-1)...vX.Y.Z)
+```
+
 - Carved out `Lidarr.Plugin.Abstractions` as the host-owned ABI package with public API analyzers and AssemblyLoadContext guidance.
 - `NuGet.config` maps TagLibSharp packages to the public Lidarr Azure Artifacts feed so CI restores `TagLibSharp-Lidarr` 2.2.0.27.
 - `Directory.Build.props` pins `<AssemblyVersion>`/`<FileVersion>` to `10.0.0.35686` (Lidarr 2.14.2.4786 host) so every downstream plugin consumes matching binaries.
@@ -31,34 +56,35 @@ All notable changes to the shared library are documented here. The format follow
 - Maintainers must keep host assemblies in sync with Lidarr 2.14.2.4786 before shipping plugin updates; see `docs/UNIFIED_PLUGIN_PIPELINE.md` for the complete process.
 
 ## [1.1.5] - 2025-10-01
+**Upgrade note:** No public API changes. CLI `config` commands now persist settings consistently and surface the latest metadata across hosts.
 
-### Changed
-- CLI `config` commands now persist settings through `PluginHost`, perform invariant culture conversions, and mask sensitive values consistently across .NET 6.0 and .NET 8.0 builds.
-- `config show` renders a snapshot built from the settings metadata rather than a fixed list, so new properties appear automatically.
-- `config reset` clears persisted storage and rewrites default settings via the host cache, preventing stale values in subsequent runs.
+**Highlights**
+- CLI `config` commands persist settings through `PluginHost`, apply invariant culture conversions, and mask sensitive values the same way on .NET 6.0 and .NET 8.0.
+- `config show` renders output from the settings metadata so new properties appear automatically.
+- `config reset` clears persisted storage, rewrites defaults from the host cache, and avoids stale state on reruns.
+- Added `ConfigCommandTests` to cover typed updates, invalid values, secret masking, and reset behaviour.
 
-### Added
-- Added `ConfigCommandTests` to cover typed configuration updates, invalid value handling, secret masking, and reset behaviour.
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
 
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.4...v1.1.5)
 ## [1.1.4] - 2025-09-30
+**Upgrade note:** No public API changes. New TestKit and resilience upgrades make plugin integration tests and HTTP handling more reliable.
 
-### Added
-- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
-- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
-- `HostGateRegistry` centralizes per-host semaphore management for both HTTP extensions and the generic resilience executor, with shared internals access for tests.
-- `HttpClientExtensions.SendWithResilienceAsync` wires timeout metadata from `StreamingApiRequestBuilder` without duplicating request construction.
-- API compatibility guard in CI: the pack job now runs  `Microsoft.DotNet.ApiCompat` against the latest release before uploading artifacts.
+**Highlights**
+- Introduced `Lidarr.Plugin.Common.TestKit` with reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context.
+- Added `docs/how-to/TEST_WITH_TESTKIT.md` plus sample `PluginSandboxTests` harness.
+- Centralised host semaphore management in `HostGateRegistry` and shared it with the generic resilience executor.
+- HTTP helpers accept per-request timeouts, raise `TimeoutException`, and reuse the host gate registry; response cache trims oldest entries when over size limits.
+- `ContentDecodingSnifferHandler` peeks only the gzip header, clears encoding metadata after inflation, and streams large bodies without buffering.
+- Packaging excludes `docs/**` and `examples/**` from the nupkg, with updated release notes and metadata.
 
-### Changed
-- `HttpClientExtensions` and `GenericResilienceExecutor` now accept an optional `perRequestTimeout`, raising `TimeoutException` when it elapses while still honouring caller cancellations, and they reuse the shared host gate registry.
-- `StreamingResponseCache` enforces `MaxCacheSize` by trimming the oldest entries and shares the sensitive-parameter mask with HTTP logging utilities.
-- `ContentDecodingSnifferHandler` peeks only the gzip header, clears `Content-Encoding`/`Content-Length` after inflation, and streams large non-gzip bodies without buffering.
-- Documentation consolidated into single-source manuals (isolation, manifests, bridge, packaging) with schema validation and docs CI.
-- Packaging excludes  `docs/**` and `examples/**` from the nupkg to reduce install size; package metadata bumped to v1.1.4 with updated release notes.
+**Breaking changes:** None
+**Deprecations:** `AdaptiveRateLimiter` (removal planned for 1.3)
+**Dependency changes:** Updated Microsoft.Extensions.* and System.Text.Json patch versions across net6.0/net8.0 builds
 
-### Deprecated
-- `AdaptiveRateLimiter` is marked `[Obsolete]` with guidance to adopt `UniversalAdaptiveRateLimiter`; this will be removed in 1.3.
-
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.3...v1.1.4)
 ## [1.1.3] - 2025-09-03
 
 ### Added
@@ -155,8 +181,3 @@ All notable changes to the shared library are documented here. The format follow
 - **Feature Requests**: Discuss in GitHub Discussions.
 - **Community**: Join the streaming plugin developer community.
 - **Documentation**: See `README.md` and the `docs/` folder.
-
-
-
-
-
