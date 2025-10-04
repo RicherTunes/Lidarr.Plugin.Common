@@ -137,7 +137,9 @@ namespace Lidarr.Plugin.Common.Tests
                 new HttpRequestMessage(HttpMethod.Get, $"https://{host}/one"),
                 maxRetries: 0,
                 retryBudget: TimeSpan.FromSeconds(1),
-                maxConcurrencyPerHost: 1))
+                maxConcurrencyPerHost: 1,
+                perRequestTimeout: null,
+                cancellationToken: CancellationToken.None))
             {
             }
 
@@ -153,7 +155,9 @@ namespace Lidarr.Plugin.Common.Tests
                     new HttpRequestMessage(HttpMethod.Get, $"https://{host}/two"),
                     maxRetries: 0,
                     retryBudget: TimeSpan.FromSeconds(1),
-                    maxConcurrencyPerHost: 4))
+                    maxConcurrencyPerHost: 4,
+                    perRequestTimeout: null,
+                    cancellationToken: CancellationToken.None))
                 {
                 }
 

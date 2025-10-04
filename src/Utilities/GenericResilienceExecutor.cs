@@ -19,22 +19,19 @@ namespace Lidarr.Plugin.Common.Utilities
             Func<TRequest, string?> getHost,
             Func<TResponse, int> getStatusCode,
             Func<TResponse, TimeSpan?> getRetryAfterDelay,
-            int maxRetries = 5,
-            TimeSpan? retryBudget = null,
-            int maxConcurrencyPerHost = 6,
+            ResiliencePolicy policy,
             CancellationToken cancellationToken = default)
         {
-            return ExecuteWithResilienceAsync(
+            if (policy == null) throw new ArgumentNullException(nameof(policy));
+
+            return ExecuteWithResilienceAsyncCore(
                 request,
                 sendAsync,
                 cloneRequestAsync,
                 getHost,
                 getStatusCode,
                 getRetryAfterDelay,
-                maxRetries,
-                retryBudget,
-                maxConcurrencyPerHost,
-                perRequestTimeout: null,
+                policy,
                 cancellationToken);
         }
 
@@ -51,20 +48,22 @@ namespace Lidarr.Plugin.Common.Utilities
             TimeSpan? perRequestTimeout,
             CancellationToken cancellationToken)
         {
-            return ExecuteWithResilienceAsyncCore(
+            var policy = ResiliencePolicy.Default.With(
+                maxRetries: maxRetries,
+                retryBudget: retryBudget ?? ResiliencePolicy.Default.RetryBudget,
+                maxConcurrencyPerHost: maxConcurrencyPerHost,
+                perRequestTimeout: perRequestTimeout ?? ResiliencePolicy.Default.PerRequestTimeout);
+
+            return ExecuteWithResilienceAsync(
                 request,
                 sendAsync,
                 cloneRequestAsync,
                 getHost,
                 getStatusCode,
                 getRetryAfterDelay,
-                maxRetries,
-                retryBudget,
-                maxConcurrencyPerHost,
-                perRequestTimeout,
+                policy,
                 cancellationToken);
         }
-
         private static async Task<TResponse> ExecuteWithResilienceAsyncCore<TRequest, TResponse>(
             TRequest request,
             Func<TRequest, CancellationToken, Task<TResponse>> sendAsync,
@@ -72,10 +71,7 @@ namespace Lidarr.Plugin.Common.Utilities
             Func<TRequest, string?> getHost,
             Func<TResponse, int> getStatusCode,
             Func<TResponse, TimeSpan?> getRetryAfterDelay,
-            int maxRetries,
-            TimeSpan? retryBudget,
-            int maxConcurrencyPerHost,
-            TimeSpan? perRequestTimeout,
+            ResiliencePolicy policy,
             CancellationToken cancellationToken)
         {
             if (sendAsync == null) throw new ArgumentNullException(nameof(sendAsync));
@@ -83,23 +79,22 @@ namespace Lidarr.Plugin.Common.Utilities
             if (getHost == null) throw new ArgumentNullException(nameof(getHost));
             if (getStatusCode == null) throw new ArgumentNullException(nameof(getStatusCode));
             if (getRetryAfterDelay == null) throw new ArgumentNullException(nameof(getRetryAfterDelay));
+            if (policy == null) throw new ArgumentNullException(nameof(policy));
 
-            retryBudget ??= TimeSpan.FromSeconds(60);
-
-            using var timeoutCts = perRequestTimeout.HasValue
+            using var timeoutCts = policy.PerRequestTimeout.HasValue
                 ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
                 : null;
-            if (perRequestTimeout.HasValue)
+            if (policy.PerRequestTimeout.HasValue)
             {
-                timeoutCts!.CancelAfter(perRequestTimeout.Value);
+                timeoutCts!.CancelAfter(policy.PerRequestTimeout.Value);
             }
 
             var effectiveToken = timeoutCts?.Token ?? cancellationToken;
-            var deadline = DateTime.UtcNow + retryBudget.Value;
+            var deadline = DateTime.UtcNow + policy.RetryBudget;
             var attempt = 0;
 
             var host = getHost(request);
-            var gate = HostGateRegistry.Get(host, Math.Max(1, maxConcurrencyPerHost));
+            var gate = HostGateRegistry.Get(host, Math.Max(1, policy.MaxConcurrencyPerHost));
             await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
 
             try
@@ -115,12 +110,12 @@ namespace Lidarr.Plugin.Common.Utilities
                     {
                         response = await sendAsync(attemptRequest, effectiveToken).ConfigureAwait(false);
                     }
-                    catch (OperationCanceledException ex) when (perRequestTimeout.HasValue &&
+                    catch (OperationCanceledException ex) when (policy.PerRequestTimeout.HasValue &&
                                                                timeoutCts!.IsCancellationRequested &&
                                                                !cancellationToken.IsCancellationRequested)
                     {
                         throw new TimeoutException(
-                            $"Request exceeded the per-request timeout of {perRequestTimeout.Value}.",
+                            $"Request exceeded the per-request timeout of {policy.PerRequestTimeout.Value}.",
                             ex);
                     }
 
@@ -129,13 +124,13 @@ namespace Lidarr.Plugin.Common.Utilities
                                    || status == (int)HttpStatusCode.TooManyRequests
                                    || (status >= 500 && status <= 599);
 
-                    if (!retryable || attempt >= maxRetries)
+                    if (!retryable || attempt >= policy.MaxRetries)
                     {
                         return response;
                     }
 
-                    var delay = getRetryAfterDelay(response)
-                               ?? TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt))) + GetJitter();
+                    var retryAfter = getRetryAfterDelay(response);
+                    var delay = retryAfter ?? policy.ComputeDelay(attempt) + policy.ComputeJitter();
 
                     var now = DateTime.UtcNow;
                     if (now + delay > deadline)
@@ -155,13 +150,6 @@ namespace Lidarr.Plugin.Common.Utilities
             {
                 gate.Release();
             }
-        }
-
-
-        private static TimeSpan GetJitter()
-        {
-            var ms = RandomProvider.Next(50, 250);
-            return TimeSpan.FromMilliseconds(ms);
         }
     }
 }

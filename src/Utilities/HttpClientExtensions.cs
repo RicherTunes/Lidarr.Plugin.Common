@@ -43,29 +43,6 @@ namespace Lidarr.Plugin.Common.Utilities
                 $"HTTP {request.Method} to {request.RequestUri}");
         }
 
-        /// <summary>
-        /// Executes an HTTP request with enhanced resilience: 429/Retry-After awareness,
-        /// exponential backoff with jitter, per-host concurrency gating, and retry budget.
-        /// The provided request is cloned per attempt to allow safe retries.
-        /// </summary>
-        public static Task<HttpResponseMessage> ExecuteWithResilienceAsync(
-            this HttpClient httpClient,
-            HttpRequestMessage request,
-            int maxRetries = 5,
-            TimeSpan? retryBudget = null,
-            int maxConcurrencyPerHost = 6,
-            CancellationToken cancellationToken = default)
-        {
-            return ExecuteWithResilienceAsyncCore(
-                httpClient,
-                request,
-                maxRetries,
-                retryBudget,
-                maxConcurrencyPerHost,
-                perRequestTimeout: null,
-                cancellationToken);
-        }
-
         public static Task<HttpResponseMessage> ExecuteWithResilienceAsync(
             this HttpClient httpClient,
             HttpRequestMessage request,
@@ -169,7 +146,17 @@ namespace Lidarr.Plugin.Common.Utilities
             var deadline = DateTime.UtcNow + retryBudget.Value;
             var attempt = 0;
             var host = request.RequestUri?.Host;
-            var gate = HostGateRegistry.Get(host, Math.Max(1, maxConcurrencyPerHost));
+            string hostKey = host ?? "__unknown__";
+            try
+            {
+                if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ProfileKey, out string profile) && !string.IsNullOrWhiteSpace(profile))
+                {
+                    hostKey = hostKey + "|" + profile;
+                }
+            }
+            catch { }
+
+            var gate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
 
             await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
             try
