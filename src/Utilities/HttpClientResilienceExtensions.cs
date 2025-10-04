@@ -34,8 +34,14 @@ namespace Lidarr.Plugin.Common.Utilities
             var isGet = request.Method == HttpMethod.Get;
             if (!isGet)
             {
-                var p = resilience.Get("default");
-                return await httpClient.ExecuteWithResilienceAsync(request, p, cancellationToken).ConfigureAwait(false);
+                var s = resilience.Get("default");
+                return await httpClient.ExecuteWithResilienceAsync(
+                    request,
+                    s.MaxRetries,
+                    s.RetryBudget,
+                    s.MaxConcurrencyPerHost,
+                    s.PerRequestTimeout,
+                    cancellationToken).ConfigureAwait(false);
             }
 
             // Derive endpoint + parameters for cache key
