@@ -1,5 +1,3 @@
-using Lidarr.Plugin.Common.Utilities;
-
 namespace Lidarr.Plugin.Common.Interfaces
 {
     /// <summary>
@@ -8,7 +6,19 @@ namespace Lidarr.Plugin.Common.Interfaces
     /// </summary>
     public interface IResiliencePolicyProvider
     {
-        ResiliencePolicy Get(string profileName);
+        ResilienceProfileSettings Get(string profileName);
     }
 }
 
+namespace Lidarr.Plugin.Common.Interfaces
+{
+    /// <summary>Lightweight, engine-agnostic resilience settings.</summary>
+    public sealed class ResilienceProfileSettings
+    {
+        public string Name { get; init; } = "default";
+        public int MaxRetries { get; init; } = 5;
+        public TimeSpan? RetryBudget { get; init; } = TimeSpan.FromSeconds(60);
+        public int MaxConcurrencyPerHost { get; init; } = 6;
+        public TimeSpan? PerRequestTimeout { get; init; }
+    }
+}
