@@ -84,6 +84,8 @@ namespace Lidarr.Plugin.Common.Utilities
                 cancellationToken);
         }
 
+        
+
         public static async Task<HttpResponseMessage> SendWithResilienceAsync(
             this HttpClient httpClient,
             Services.Http.StreamingApiRequestBuilder builder,
@@ -422,7 +424,7 @@ namespace Lidarr.Plugin.Common.Utilities
             return clone;
         }
 
-        private static readonly MethodInfo HttpRequestOptionsSetMethod = typeof(HttpRequestOptions)
+        private static readonly MethodInfo HttpRequestOptionsSetMethod = typeof(System.Net.Http.HttpRequestOptions)
             .GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .First(m => m.Name == "Set" && m.IsGenericMethodDefinition && m.GetParameters().Length == 2);
 
