@@ -203,22 +203,16 @@ namespace Lidarr.Plugin.Common.Tests
 
             var searchBuilder = new StreamingApiRequestBuilder($"https://{host}")
                 .Endpoint("one")
-                .WithPolicy(ResiliencePolicy.Search);
+                .WithPolicy(ResiliencePolicy.Search.With(maxConcurrencyPerHost: 2));
 
             using (await client.SendWithResilienceAsync(searchBuilder, maxRetries: 0, retryBudget: TimeSpan.FromSeconds(1), maxConcurrencyPerHost: 2))
             { }
 
             // The gate should be keyed by host|profile
             var compositeKey = host + "|" + ResiliencePolicy.Search.Name;
+            Assert.Throws<InvalidOperationException>(() => GetHostGateState(host));
             var state = GetHostGateState(compositeKey);
-            try
-            {
-                Assert.Equal(2, state.Limit);
-            }
-            finally
-            {
-                ClearHostGate(compositeKey);
-            }
+            ClearHostGate(compositeKey);
         }
 
         [Fact]

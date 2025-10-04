@@ -17,24 +17,32 @@ namespace Lidarr.Plugin.Common.Services.Caching
         private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _keysByEndpoint;
         private readonly object _cleanupLock = new object();
         private DateTime _lastCleanup = DateTime.UtcNow;
+        private readonly ICachePolicyProvider? _policyProvider;
+        private static readonly IReadOnlyDictionary<string, string> EmptyParameters = new Dictionary<string, string>();
 
         protected TimeSpan DefaultCacheDuration { get; set; } = TimeSpan.FromMinutes(15);
         protected int MaxCacheSize { get; set; } = 1000;
         protected TimeSpan CleanupInterval { get; set; } = TimeSpan.FromMinutes(5);
         protected Microsoft.Extensions.Logging.ILogger Logger { get; set; }
 
-        protected StreamingResponseCache(Microsoft.Extensions.Logging.ILogger logger = null)
+        protected StreamingResponseCache(Microsoft.Extensions.Logging.ILogger logger = null, ICachePolicyProvider? policyProvider = null)
         {
             _cache = new ConcurrentDictionary<string, CacheItem>();
             _keysByEndpoint = new ConcurrentDictionary<string, ConcurrentDictionary<string, byte>>(StringComparer.OrdinalIgnoreCase);
             Logger = logger;
+            _policyProvider = policyProvider;
         }
 
         /// <inheritdoc/>
         public T? Get<T>(string endpoint, Dictionary<string, string> parameters) where T : class
         {
-            if (!ShouldCache(endpoint))
+            parameters ??= new Dictionary<string, string>();
+            var policy = ResolvePolicy(endpoint, parameters);
+            if (!policy.ShouldCache)
+            {
+                CleanupExpiredItems();
                 return null;
+            }
 
             var cacheKey = GenerateCacheKey(endpoint, parameters);
 
@@ -42,6 +50,24 @@ namespace Lidarr.Plugin.Common.Services.Caching
             {
                 if (cacheItem.ExpiresAt > DateTime.UtcNow)
                 {
+                    // Sliding expiration support
+                    if (policy.SlidingExpiration.HasValue && policy.SlidingExpiration.Value > TimeSpan.Zero)
+                    {
+                        var now = DateTime.UtcNow;
+                        var proposed = now.Add(policy.SlidingExpiration.Value);
+                        DateTime? absoluteCap = null;
+                        if (policy.AbsoluteExpiration.HasValue && policy.AbsoluteExpiration.Value > TimeSpan.Zero)
+                        {
+                            absoluteCap = cacheItem.CreatedAt.Add(policy.AbsoluteExpiration.Value);
+                        }
+
+                        var newExpiry = absoluteCap.HasValue ? (proposed < absoluteCap.Value ? proposed : absoluteCap.Value) : proposed;
+                        if (newExpiry > cacheItem.ExpiresAt)
+                        {
+                            cacheItem.ExpiresAt = newExpiry;
+                        }
+                    }
+
                     OnCacheHit(endpoint, cacheKey);
                     return cacheItem.Value as T;
                 }
@@ -50,39 +76,81 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 {
                     RemoveKeyFromEndpointIndex(removedItem.Endpoint, cacheKey);
                 }
+                else
+                {
+                    RemoveKeyFromEndpointIndex(cacheItem.Endpoint, cacheKey);
+                }
             }
 
             OnCacheMiss(endpoint, cacheKey);
-
-            // Periodic cleanup
             CleanupExpiredItems();
-
             return null;
         }
 
         /// <inheritdoc/>
         public void Set<T>(string endpoint, Dictionary<string, string> parameters, T value) where T : class
         {
-            var duration = GetCacheDuration(endpoint);
-            Set(endpoint, parameters, value, duration);
+            if (value == null)
+            {
+                return;
+            }
+
+            parameters ??= new Dictionary<string, string>();
+            var policy = ResolvePolicy(endpoint, parameters);
+            if (!policy.ShouldCache)
+            {
+                return;
+            }
+
+            SetInternal(endpoint, parameters, value, policy.Duration, policy);
         }
 
         /// <inheritdoc/>
         public void Set<T>(string endpoint, Dictionary<string, string> parameters, T value, TimeSpan duration) where T : class
         {
-            if (!ShouldCache(endpoint) || value == null)
+            if (value == null)
+            {
                 return;
+            }
 
+            parameters ??= new Dictionary<string, string>();
+            var policy = ResolvePolicy(endpoint, parameters);
+            if (!policy.ShouldCache)
+            {
+                return;
+            }
+
+            SetInternal(endpoint, parameters, value, duration, policy);
+        }
+
+        private void SetInternal<T>(string endpoint, Dictionary<string, string> parameters, T value, TimeSpan duration, CachePolicy policy) where T : class
+        {
             var cacheKey = GenerateCacheKey(endpoint, parameters);
             var cacheSeed = BuildCacheKeySeed(endpoint, parameters);
             var normalizedEndpoint = NormalizeEndpointKey(endpoint);
-            var expiresAt = DateTime.UtcNow.Add(duration);
+            var createdAt = DateTime.UtcNow;
+            var expiresAt = createdAt.Add(duration);
+            if (policy.AbsoluteExpiration.HasValue)
+            {
+                var absolute = createdAt.Add(policy.AbsoluteExpiration.Value);
+                if (absolute < expiresAt)
+                {
+                    expiresAt = absolute;
+                }
+            }
+
+            if (expiresAt <= createdAt)
+            {
+                expiresAt = createdAt;
+            }
+
+            var appliedDuration = expiresAt - createdAt;
 
             var cacheItem = new CacheItem
             {
                 Value = value,
                 ExpiresAt = expiresAt,
-                CreatedAt = DateTime.UtcNow,
+                CreatedAt = createdAt,
                 Endpoint = normalizedEndpoint,
                 CacheKey = cacheKey,
                 CacheKeySeed = cacheSeed
@@ -96,14 +164,48 @@ namespace Lidarr.Plugin.Common.Services.Caching
 
             AddKeyToEndpointIndex(normalizedEndpoint, cacheKey);
             EnsureCacheWithinLimit();
-            OnCacheSet(endpoint, cacheKey, duration);
+            OnCacheSet(endpoint, cacheKey, appliedDuration);
+        }
+
+        protected virtual CachePolicy ResolvePolicy(string endpoint, Dictionary<string, string> parameters)
+        {
+            if (_policyProvider != null)
+            {
+                var effectiveParameters = parameters ?? new Dictionary<string, string>();
+                return _policyProvider.GetPolicy(endpoint ?? string.Empty, effectiveParameters);
+            }
+
+            if (!ShouldCache(endpoint))
+            {
+                return CachePolicy.Disabled;
+            }
+
+            var duration = GetCacheDuration(endpoint);
+            return CachePolicy.Default.With(duration: duration);
+        }
+
+
+        /// <inheritdoc/>
+        public virtual bool ShouldCache(string endpoint)
+        {
+            if (_policyProvider != null)
+            {
+                return _policyProvider.GetPolicy(endpoint ?? string.Empty, EmptyParameters).ShouldCache;
+            }
+
+            return true;
         }
 
         /// <inheritdoc/>
-        public abstract bool ShouldCache(string endpoint);
+        public virtual TimeSpan GetCacheDuration(string endpoint)
+        {
+            if (_policyProvider != null)
+            {
+                return _policyProvider.GetPolicy(endpoint ?? string.Empty, EmptyParameters).Duration;
+            }
 
-        /// <inheritdoc/>
-        public abstract TimeSpan GetCacheDuration(string endpoint);
+            return DefaultCacheDuration;
+        }
 
         /// <inheritdoc/>
         public virtual string GenerateCacheKey(string endpoint, Dictionary<string, string> parameters)
@@ -358,8 +460,16 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 .Select(p => $"{p.Key}={p.Value}")
                 .ToArray();
 
+            // If callers supply a non-PII scope in parameters (e.g., "scope"), include it in the seed.
+            // This enables opt-in per-scope cache variance even before policy-level wiring.
+            string scopeComponent = string.Empty;
+            if (parameters.TryGetValue("scope", out var scopeVal) && !string.IsNullOrWhiteSpace(scopeVal))
+            {
+                scopeComponent = "|scope:" + scopeVal;
+            }
+
             var paramString = string.Join("&", relevantParams);
-            return $"{GetServiceName()}|{endpoint}|{paramString}";
+            return $"{GetServiceName()}|{endpoint}|{paramString}{scopeComponent}";
         }
 
         protected virtual string HashCacheKeySeed(string seed)

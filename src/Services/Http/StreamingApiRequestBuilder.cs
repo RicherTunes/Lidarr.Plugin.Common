@@ -16,7 +16,8 @@ namespace Lidarr.Plugin.Common.Services.Http
     {
         private readonly string _baseUrl;
         private readonly Dictionary<string, string> _headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        private readonly Dictionary<string, string> _queryParams = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        // Preserve multivalue query semantics by storing pairs instead of a map.
+        private readonly List<KeyValuePair<string, string>> _queryParams = new List<KeyValuePair<string, string>>();
         private HttpMethod _method = HttpMethod.Get;
         private object _bodyContent;
         private string _endpoint;
@@ -122,9 +123,9 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder Query(string name, string value)
         {
-            if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(value))
+            if (!string.IsNullOrEmpty(name))
             {
-                _queryParams[name] = value;
+                _queryParams.Add(new KeyValuePair<string, string>(name, value ?? string.Empty));
             }
             return this;
         }
@@ -136,7 +137,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         {
             if (!string.IsNullOrEmpty(name))
             {
-                _queryParams[name] = value.ToString();
+                _queryParams.Add(new KeyValuePair<string, string>(name, value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
             }
             return this;
         }
@@ -148,7 +149,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         {
             if (!string.IsNullOrEmpty(name))
             {
-                _queryParams[name] = value.ToString().ToLowerInvariant();
+                _queryParams.Add(new KeyValuePair<string, string>(name, value ? "true" : "false"));
             }
             return this;
         }
@@ -162,9 +163,9 @@ namespace Lidarr.Plugin.Common.Services.Http
             {
                 foreach (var param in parameters)
                 {
-                    if (!string.IsNullOrEmpty(param.Key) && !string.IsNullOrEmpty(param.Value))
+                    if (!string.IsNullOrEmpty(param.Key))
                     {
-                        _queryParams[param.Key] = param.Value;
+                        _queryParams.Add(new KeyValuePair<string, string>(param.Key, param.Value ?? string.Empty));
                     }
                 }
             }
@@ -305,7 +306,10 @@ namespace Lidarr.Plugin.Common.Services.Http
         {
             var url = BuildUrl();
             var maskedHeaders = HttpClientExtensions.MaskSensitiveParams(_headers);
-            var maskedQueryParams = HttpClientExtensions.MaskSensitiveParams(_queryParams);
+            var maskedQueryParams = HttpClientExtensions.MaskSensitiveParams(
+                new Dictionary<string, string>(_queryParams
+                    .GroupBy(p => p.Key, StringComparer.OrdinalIgnoreCase)
+                    .ToDictionary(g => g.Key, g => g.Last().Value, StringComparer.OrdinalIgnoreCase)));
 
             return new StreamingApiRequestInfo
             {
@@ -339,11 +343,12 @@ namespace Lidarr.Plugin.Common.Services.Http
             }
 
             var ordered = _queryParams
-                .OrderBy(kvp => kvp.Key, StringComparer.Ordinal)
-                .Select(kvp =>
+                .OrderBy(p => p.Key, StringComparer.Ordinal)
+                .ThenBy(p => p.Value, StringComparer.Ordinal)
+                .Select(p =>
                 {
-                    var k = Uri.EscapeDataString(kvp.Key ?? string.Empty);
-                    var v = Uri.EscapeDataString(kvp.Value ?? string.Empty);
+                    var k = Uri.EscapeDataString(p.Key ?? string.Empty);
+                    var v = Uri.EscapeDataString(p.Value ?? string.Empty);
                     return $"{k}={v}";
                 });
 
