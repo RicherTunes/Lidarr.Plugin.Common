@@ -22,7 +22,6 @@ namespace Lidarr.Plugin.Common.Utilities
             this HttpClient httpClient,
             HttpRequestMessage request,
             IResiliencePolicyProvider resilience,
-            Services.Caching.CachePolicy policy, // allow callers to resolve their policy
             IStreamingResponseCache cache,
             IConditionalRequestState? conditionalState = null,
             CancellationToken cancellationToken = default)
@@ -30,7 +29,6 @@ namespace Lidarr.Plugin.Common.Utilities
             if (httpClient is null) throw new ArgumentNullException(nameof(httpClient));
             if (request is null) throw new ArgumentNullException(nameof(request));
             if (resilience is null) throw new ArgumentNullException(nameof(resilience));
-            if (policy is null) throw new ArgumentNullException(nameof(policy));
             if (cache is null) throw new ArgumentNullException(nameof(cache));
 
             var isGet = request.Method == HttpMethod.Get;
@@ -56,12 +54,19 @@ namespace Lidarr.Plugin.Common.Utilities
             }
 
             // Try cached body for potential 304 path
-            var cached = policy.ShouldCache ? cache.Get<CachedHttpResponse>(endpoint, parameters) : null;
+            var shouldCache = cache.ShouldCache(endpoint);
+            var cacheDuration = cache.GetCacheDuration(endpoint);
+            var cached = shouldCache ? cache.Get<CachedHttpResponse>(endpoint, parameters) : null;
 
             var profile = request.Options.TryGetValue(new HttpRequestOptionsKey<string>("arr.plugin.http.profile"), out var prof) ? prof : "default";
-            var resiliencePolicy = resilience.Get(profile);
-
-            using var response = await httpClient.ExecuteWithResilienceAsync(request, resiliencePolicy, cancellationToken).ConfigureAwait(false);
+            var r = resilience.Get(profile);
+            using var response = await httpClient.ExecuteWithResilienceAsync(
+                request,
+                r.MaxRetries,
+                r.RetryBudget,
+                r.MaxConcurrencyPerHost,
+                r.PerRequestTimeout,
+                cancellationToken).ConfigureAwait(false);
 
             if (response.StatusCode == HttpStatusCode.NotModified && cached is { } cachedHit)
             {
@@ -93,7 +98,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
             // Cache successful GET (respect private/no-store)
             var cc = response.Headers.CacheControl;
-            var canCache = policy.ShouldCache && !(cc?.NoStore ?? false) && !(cc?.Private ?? false);
+            var canCache = shouldCache && !(cc?.NoStore ?? false) && !(cc?.Private ?? false);
 
             var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
             var contentType = response.Content.Headers.ContentType?.ToString();
@@ -110,7 +115,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     ETag = etag,
                     LastModified = lastMod,
                     StoredAt = DateTimeOffset.UtcNow
-                }, policy.Duration);
+                }, cacheDuration);
             }
 
             if (conditionalState != null && (!string.IsNullOrEmpty(etag) || lastMod.HasValue))
@@ -171,4 +176,3 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
-
