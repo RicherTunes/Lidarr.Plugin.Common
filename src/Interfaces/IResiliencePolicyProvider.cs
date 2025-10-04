@@ -1,3 +1,5 @@
+using System;
+
 namespace Lidarr.Plugin.Common.Interfaces
 {
     /// <summary>
