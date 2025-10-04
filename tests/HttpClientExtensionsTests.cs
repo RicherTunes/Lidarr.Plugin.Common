@@ -195,6 +195,33 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task ExecuteWithResilienceAsync_UsesProfileInHostGateKey_WhenProvided()
+        {
+            var host = $"profile-{Guid.NewGuid():N}.example";
+            var handler = new StubHandler(_ => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)));
+            using var client = new HttpClient(handler);
+
+            var searchBuilder = new StreamingApiRequestBuilder($"https://{host}")
+                .Endpoint("one")
+                .WithPolicy(ResiliencePolicy.Search);
+
+            using (await client.SendWithResilienceAsync(searchBuilder, maxRetries: 0, retryBudget: TimeSpan.FromSeconds(1), maxConcurrencyPerHost: 2))
+            { }
+
+            // The gate should be keyed by host|profile
+            var compositeKey = host + "|" + ResiliencePolicy.Search.Name;
+            var state = GetHostGateState(compositeKey);
+            try
+            {
+                Assert.Equal(2, state.Limit);
+            }
+            finally
+            {
+                ClearHostGate(compositeKey);
+            }
+        }
+
+        [Fact]
         public async Task SendWithResilienceAsync_HonorsBuilderPolicy_WhenPresent()
         {
             var handler = new StubHandler(async (req, ct) =>
