@@ -50,6 +50,7 @@ namespace Lidarr.Plugin.Common.Tests
                 maxRetries: 3,
                 retryBudget: TimeSpan.FromSeconds(10),
                 maxConcurrencyPerHost: 2,
+                perRequestTimeout: null,
                 cancellationToken: CancellationToken.None);
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
@@ -82,6 +83,7 @@ namespace Lidarr.Plugin.Common.Tests
                 maxRetries: 5,
                 retryBudget: TimeSpan.FromMilliseconds(10),
                 maxConcurrencyPerHost: 1,
+                perRequestTimeout: null,
                 cancellationToken: CancellationToken.None);
 
             Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
@@ -180,6 +182,7 @@ namespace Lidarr.Plugin.Common.Tests
                     maxRetries: 1,
                     retryBudget: TimeSpan.FromSeconds(5),
                     maxConcurrencyPerHost: 6,
+                    perRequestTimeout: null,
                     cancellationToken: CancellationToken.None);
             }
 
@@ -247,6 +250,7 @@ namespace Lidarr.Plugin.Common.Tests
                         maxRetries: 1,
                         retryBudget: TimeSpan.FromSeconds(5),
                         maxConcurrencyPerHost: requestedLimit,
+                        perRequestTimeout: null,
                         cancellationToken: CancellationToken.None);
                 }
 

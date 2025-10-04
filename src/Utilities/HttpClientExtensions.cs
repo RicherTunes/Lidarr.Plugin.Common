@@ -296,6 +296,24 @@ namespace Lidarr.Plugin.Common.Utilities
         }
 
         /// <summary>
+        /// Builds a URL with query parameters from a sequence of pairs (supports multivalue keys).
+        /// </summary>
+        public static string BuildUrlWithParams(string baseUrl, IEnumerable<KeyValuePair<string, string>> parameters)
+        {
+            if (parameters == null)
+                return baseUrl;
+
+            var list = parameters as IList<KeyValuePair<string, string>> ?? parameters.ToList();
+            if (list.Count == 0) return baseUrl;
+
+            var queryString = string.Join("&",
+                list.Select(p => $"{Uri.EscapeDataString(p.Key ?? string.Empty)}={Uri.EscapeDataString(p.Value ?? string.Empty)}"));
+
+            var separator = baseUrl.Contains('?') ? "&" : "?";
+            return $"{baseUrl}{separator}{queryString}";
+        }
+
+        /// <summary>
         /// Adds standard headers for streaming service API calls.
         /// </summary>
         public static HttpRequestMessage AddStandardHeaders(
