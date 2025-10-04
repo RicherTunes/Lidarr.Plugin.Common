@@ -11,6 +11,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Http;
+using Lidarr.Plugin.Common.Utilities;
 
 namespace Lidarr.Plugin.Common.Utilities
 {
@@ -84,6 +85,27 @@ namespace Lidarr.Plugin.Common.Utilities
                 cancellationToken);
         }
 
+        /// <summary>
+        /// Overload that accepts a ResiliencePolicy and maps it to the core implementation.
+        /// Keeps call sites minimal and avoids argument order mistakes.
+        /// </summary>
+        public static Task<HttpResponseMessage> ExecuteWithResilienceAsync(
+            this HttpClient httpClient,
+            HttpRequestMessage request,
+            ResiliencePolicy policy,
+            CancellationToken cancellationToken = default)
+        {
+            if (policy == null) throw new ArgumentNullException(nameof(policy));
+            return ExecuteWithResilienceAsyncCore(
+                httpClient,
+                request,
+                policy.MaxRetries,
+                policy.RetryBudget,
+                policy.MaxConcurrencyPerHost,
+                policy.PerRequestTimeout,
+                cancellationToken);
+        }
+
         public static async Task<HttpResponseMessage> SendWithResilienceAsync(
             this HttpClient httpClient,
             Services.Http.StreamingApiRequestBuilder builder,
@@ -100,6 +122,15 @@ namespace Lidarr.Plugin.Common.Utilities
 
             try
             {
+                // Prefer policy-based execution when the builder specifies it.
+                if (builder.Policy != null)
+                {
+                    return await httpClient.ExecuteWithResilienceAsync(
+                        request,
+                        builder.Policy,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
                 return await httpClient.ExecuteWithResilienceAsync(
                     request,
                     maxRetries,
@@ -422,7 +453,7 @@ namespace Lidarr.Plugin.Common.Utilities
             return clone;
         }
 
-        private static readonly MethodInfo HttpRequestOptionsSetMethod = typeof(HttpRequestOptions)
+        private static readonly MethodInfo HttpRequestOptionsSetMethod = typeof(System.Net.Http.HttpRequestOptions)
             .GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .First(m => m.Name == "Set" && m.IsGenericMethodDefinition && m.GetParameters().Length == 2);
 

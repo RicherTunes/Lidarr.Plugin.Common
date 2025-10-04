@@ -21,6 +21,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         private object _bodyContent;
         private string _endpoint;
         private TimeSpan? _timeout;
+        private ResiliencePolicy _policy;
 
         public StreamingApiRequestBuilder(string baseUrl)
         {
@@ -202,6 +203,17 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// <summary>
         /// Sets common headers for music streaming APIs.
         /// </summary>
+        /// <summary>
+        /// Applies a resilience policy profile to the request.
+        /// </summary>
+        public StreamingApiRequestBuilder WithPolicy(ResiliencePolicy policy)
+        {
+            _policy = policy ?? throw new ArgumentNullException(nameof(policy));
+            return this;
+        }
+
+        internal ResiliencePolicy? Policy => _policy;
+
         public StreamingApiRequestBuilder WithStreamingDefaults(string userAgent = null)
         {
             _headers["Accept"] = "application/json";
@@ -260,6 +272,28 @@ namespace Lidarr.Plugin.Common.Services.Http
                 }
             }
 
+            // Attach standardized request metadata via HttpRequestMessage.Options
+            try
+            {
+                var endpointForOptions = string.IsNullOrWhiteSpace(_endpoint) ? string.Empty : "/" + _endpoint;
+                request.Options.Set(PluginHttpOptions.EndpointKey, endpointForOptions);
+
+                if (_policy != null)
+                {
+                    request.Options.Set(PluginHttpOptions.ProfileKey, _policy.Name);
+                }
+
+                var canonicalQuery = BuildCanonicalQueryString();
+                if (!string.IsNullOrEmpty(canonicalQuery))
+                {
+                    request.Options.Set(PluginHttpOptions.ParametersKey, canonicalQuery);
+                }
+            }
+            catch
+            {
+                // Options are best-effort; avoid throwing from builder
+            }
+
             return request;
         }
 
@@ -280,7 +314,8 @@ namespace Lidarr.Plugin.Common.Services.Http
                 Headers = maskedHeaders,
                 QueryParameters = maskedQueryParams,
                 HasBody = _bodyContent != null,
-                Timeout = _timeout
+                Timeout = _timeout,
+                PolicyName = _policy?.Name
             };
         }
 
@@ -295,6 +330,25 @@ namespace Lidarr.Plugin.Common.Services.Http
 
             return url;
         }
+
+        private string BuildCanonicalQueryString()
+        {
+            if (_queryParams == null || _queryParams.Count == 0)
+            {
+                return string.Empty;
+            }
+
+            var ordered = _queryParams
+                .OrderBy(kvp => kvp.Key, StringComparer.Ordinal)
+                .Select(kvp =>
+                {
+                    var k = Uri.EscapeDataString(kvp.Key ?? string.Empty);
+                    var v = Uri.EscapeDataString(kvp.Value ?? string.Empty);
+                    return $"{k}={v}";
+                });
+
+            return string.Join("&", ordered);
+        }
     }
 
     /// <summary>
@@ -307,6 +361,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         public Dictionary<string, string> Headers { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, string> QueryParameters { get; set; } = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         public bool HasBody { get; set; }
+        public string? PolicyName { get; set; }
         public TimeSpan? Timeout { get; set; }
 
         public override string ToString()
@@ -335,6 +390,11 @@ namespace Lidarr.Plugin.Common.Services.Http
             if (HasBody)
             {
                 sb.AppendLine("Body: [PRESENT]");
+            }
+
+            if (!string.IsNullOrEmpty(PolicyName))
+            {
+                sb.AppendLine($"Policy: {PolicyName}");
             }
 
             if (Timeout.HasValue)
