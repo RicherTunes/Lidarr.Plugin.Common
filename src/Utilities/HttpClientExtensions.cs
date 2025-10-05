@@ -412,6 +412,31 @@ namespace Lidarr.Plugin.Common.Utilities
             return maskedParams;
         }
 
+        /// <summary>
+        /// Builds a stable dedup key for GET requests based on request metadata.
+        /// Includes authority, endpoint, canonical query parameters, optional auth scope, and profile.
+        /// </summary>
+        public static string BuildRequestDedupKey(HttpRequestMessage request)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            var method = request.Method?.Method?.ToUpperInvariant() ?? "GET";
+            var authority = request.RequestUri != null
+                ? ($"{(request.RequestUri.Scheme ?? "http").ToLowerInvariant()}://{request.RequestUri.Host.ToLowerInvariant()}{(request.RequestUri.IsDefaultPort ? string.Empty : ":" + request.RequestUri.Port.ToString(System.Globalization.CultureInfo.InvariantCulture))}")
+                : "";
+
+            string endpoint = string.Empty;
+            string profile = string.Empty;
+            string canonical = string.Empty;
+            string scope = string.Empty;
+            try { request.Options.TryGetValue(Services.Http.PluginHttpOptions.EndpointKey, out endpoint); } catch { }
+            try { request.Options.TryGetValue(Services.Http.PluginHttpOptions.ProfileKey, out profile); } catch { }
+            try { request.Options.TryGetValue(Services.Http.PluginHttpOptions.ParametersKey, out canonical); } catch { }
+            try { request.Options.TryGetValue(Services.Http.PluginHttpOptions.AuthScopeKey, out scope); } catch { }
+
+            var parts = new[] { method, authority, endpoint ?? string.Empty, canonical ?? string.Empty, scope ?? string.Empty, profile ?? string.Empty };
+            return HashingUtility.ComputeSHA256(string.Join("\n", parts));
+        }
+
         private static bool IsSensitiveParameter(string parameterName)
         {
             return SensitiveKeys.IsSensitive(parameterName);
