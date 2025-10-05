@@ -337,22 +337,7 @@ namespace Lidarr.Plugin.Common.Services.Http
 
         private string BuildCanonicalQueryString()
         {
-            if (_queryParams == null || _queryParams.Count == 0)
-            {
-                return string.Empty;
-            }
-
-            var ordered = _queryParams
-                .OrderBy(p => p.Key, StringComparer.Ordinal)
-                .ThenBy(p => p.Value, StringComparer.Ordinal)
-                .Select(p =>
-                {
-                    var k = Uri.EscapeDataString(p.Key ?? string.Empty);
-                    var v = Uri.EscapeDataString(p.Value ?? string.Empty);
-                    return $"{k}={v}";
-                });
-
-            return string.Join("&", ordered);
+            return Lidarr.Plugin.Common.Utilities.QueryCanonicalizer.Canonicalize(_queryParams);
         }
     }
 
