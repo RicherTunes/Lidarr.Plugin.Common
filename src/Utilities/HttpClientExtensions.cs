@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Http;
 using Lidarr.Plugin.Common.Utilities;
+using Lidarr.Plugin.Common.Services.Deduplication;
 
 namespace Lidarr.Plugin.Common.Utilities
 {
@@ -121,6 +122,112 @@ namespace Lidarr.Plugin.Common.Utilities
                 request.Dispose();
             }
         }
+
+        /// <summary>
+        /// Sends a request with resilience and singleflight deduplication for identical GETs.
+        /// Deduplication shares a buffered HTTP record (status, headers-of-interest, content bytes) across callers,
+        /// and rebuilds a fresh HttpResponseMessage per consumer to avoid shared disposal issues.
+        /// </summary>
+        public static async Task<HttpResponseMessage> SendWithResilienceAsync(
+            this HttpClient httpClient,
+            Services.Http.StreamingApiRequestBuilder builder,
+            RequestDeduplicator deduplicator,
+            int maxRetries = 5,
+            TimeSpan? retryBudget = null,
+            int maxConcurrencyPerHost = 6,
+            CancellationToken cancellationToken = default)
+        {
+            if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
+            if (builder == null) throw new ArgumentNullException(nameof(builder));
+            if (deduplicator == null) throw new ArgumentNullException(nameof(deduplicator));
+
+            var request = builder.Build();
+            var info = builder.BuildForLogging();
+
+            try
+            {
+                var method = request.Method?.Method?.ToUpperInvariant() ?? "GET";
+                // Only dedupe GET-like requests
+                if (!string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+                {
+                    // fall back to normal path
+                    if (builder.Policy != null)
+                    {
+                        return await httpClient.ExecuteWithResilienceAsync(request, builder.Policy, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    return await httpClient.ExecuteWithResilienceAsync(
+                        request,
+                        maxRetries,
+                        retryBudget,
+                        maxConcurrencyPerHost,
+                        info.Timeout,
+                        cancellationToken).ConfigureAwait(false);
+                }
+
+                var key = BuildRequestDedupKey(request);
+                var record = await deduplicator.GetOrCreateAsync(key, async () =>
+                {
+                    // Send once and buffer response into a small immutable record
+                    using var resp = builder.Policy != null
+                        ? await httpClient.ExecuteWithResilienceAsync(request, builder.Policy, cancellationToken).ConfigureAwait(false)
+                        : await httpClient.ExecuteWithResilienceAsync(request, maxRetries, retryBudget, maxConcurrencyPerHost, info.Timeout, cancellationToken).ConfigureAwait(false);
+
+                    var status = (int)resp.StatusCode;
+                    var reason = resp.ReasonPhrase;
+
+                    // Snapshot response headers of interest
+                    var headerPairs = resp.Headers?.SelectMany(h => h.Value.Select(v => new KeyValuePair<string, string>(h.Key, v))).ToArray() ?? Array.Empty<KeyValuePair<string, string>>();
+                    var contentHeaderPairs = resp.Content?.Headers?.SelectMany(h => h.Value.Select(v => new KeyValuePair<string, string>(h.Key, v))).ToArray() ?? Array.Empty<KeyValuePair<string, string>>();
+
+                    var bytes = resp.Content != null ? await resp.Content.ReadAsByteArrayAsync().ConfigureAwait(false) : Array.Empty<byte>();
+                    var mediaType = resp.Content?.Headers?.ContentType?.MediaType;
+                    var encoding = resp.Content?.Headers?.ContentType?.CharSet;
+
+                    return new HttpRecord(status, reason, headerPairs, contentHeaderPairs, bytes, mediaType, encoding);
+                }, cancellationToken).ConfigureAwait(false);
+
+                // Rebuild a fresh HttpResponseMessage per consumer
+                var rebuilt = new HttpResponseMessage((HttpStatusCode)record.StatusCode)
+                {
+                    ReasonPhrase = record.ReasonPhrase,
+                    Content = new ByteArrayContent(record.ContentBytes)
+                };
+
+                foreach (var h in record.Headers)
+                {
+                    rebuilt.Headers.TryAddWithoutValidation(h.Key, h.Value);
+                }
+                foreach (var ch in record.ContentHeaders)
+                {
+                    rebuilt.Content.Headers.TryAddWithoutValidation(ch.Key, ch.Value);
+                }
+
+                if (!string.IsNullOrWhiteSpace(record.MediaType))
+                {
+                    rebuilt.Content.Headers.ContentType = new MediaTypeHeaderValue(record.MediaType);
+                    if (!string.IsNullOrWhiteSpace(record.Charset))
+                    {
+                        rebuilt.Content.Headers.ContentType.CharSet = record.Charset;
+                    }
+                }
+
+                return rebuilt;
+            }
+            finally
+            {
+                request.Dispose();
+            }
+        }
+
+        private readonly record struct HttpRecord(
+            int StatusCode,
+            string? ReasonPhrase,
+            KeyValuePair<string, string>[] Headers,
+            KeyValuePair<string, string>[] ContentHeaders,
+            byte[] ContentBytes,
+            string? MediaType,
+            string? Charset);
         private static async Task<HttpResponseMessage> ExecuteWithResilienceAsyncCore(
             HttpClient httpClient,
             HttpRequestMessage request,
