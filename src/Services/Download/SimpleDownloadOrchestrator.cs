@@ -193,7 +193,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                     else if (lastModified.HasValue) req.Headers.TryAddWithoutValidation("If-Range", lastModified.Value.ToString("R"));
                 }
 
-                using var resp = await _httpClient.ExecuteWithResilienceAsync(req, cancellationToken: cancellationToken).ConfigureAwait(false);
+                using var resp = await _httpClient.ExecuteWithResilienceAsync(req, ResiliencePolicy.Streaming, cancellationToken).ConfigureAwait(false);
                 resp.EnsureSuccessStatusCode();
 
                 var totalHeader = resp.Content.Headers.ContentLength;
