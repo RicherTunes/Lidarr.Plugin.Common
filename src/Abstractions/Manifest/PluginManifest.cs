@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Lidarr.Plugin.Abstractions.Capabilities;
 
 namespace Lidarr.Plugin.Abstractions.Manifest
 {
@@ -78,6 +79,26 @@ namespace Lidarr.Plugin.Abstractions.Manifest
         /// </summary>
         [JsonPropertyName("capabilities")]
         public IReadOnlyList<string> Capabilities { get; init; } = Array.Empty<string>();
+        [JsonIgnore]
+        public PluginCapability CapabilityFlags
+        {
+            get
+            {
+                return PluginCapabilityExtensions.FromManifestValues(Capabilities ?? Array.Empty<string>(), out _);
+            }
+        }
+
+        [JsonIgnore]
+        public IReadOnlyList<string> UnknownCapabilities
+        {
+            get
+            {
+                PluginCapabilityExtensions.FromManifestValues(Capabilities ?? Array.Empty<string>(), out var unknown);
+                return unknown;
+            }
+        }
+
+        public bool SupportsCapability(PluginCapability capability) => CapabilityFlags.HasCapability(capability);
 
         /// <summary>
         /// Required settings keys that the host must provide.

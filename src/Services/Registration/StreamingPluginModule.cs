@@ -4,6 +4,7 @@ using System.Linq;
 using System.Reflection;
 using Lidarr.Plugin.Common.Base;
 using Lidarr.Plugin.Common.Interfaces;
+using Lidarr.Plugin.Abstractions.Capabilities;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Lidarr.Plugin.Common.Services.Registration
@@ -82,6 +83,25 @@ namespace Lidarr.Plugin.Common.Services.Registration
         /// Registers all services required by this streaming plugin.
         /// This method is called by Lidarr during plugin initialization.
         /// </summary>
+
+        /// <summary>
+        /// Allows derived modules to advertise additional capability flags.
+        /// </summary>
+        protected virtual PluginCapability GetAdditionalCapabilities() => PluginCapability.None;
+
+        /// <summary>
+        /// Computes the capability flags exposed by this module.
+        /// </summary>
+        public virtual PluginCapability GetCapabilities()
+        {
+            var capabilities = GetAdditionalCapabilities();
+            if (HasIndexer()) capabilities |= PluginCapability.ProvidesIndexer;
+            if (HasDownloadClient()) capabilities |= PluginCapability.ProvidesDownloadClient;
+            if (SupportsCaching()) capabilities |= PluginCapability.SupportsCaching;
+            if (SupportsAuthentication()) capabilities |= PluginCapability.SupportsAuthentication;
+            if (SupportsQualitySelection()) capabilities |= PluginCapability.SupportsQualitySelection;
+            return capabilities;
+        }
         public virtual void RegisterServices()
         {
             RegisterCoreServices();
@@ -243,6 +263,7 @@ namespace Lidarr.Plugin.Common.Services.Registration
                 AssemblyName = GetType().Assembly.GetName().Name,
                 HasIndexer = HasIndexer(),
                 HasDownloadClient = HasDownloadClient(),
+                Capabilities = GetCapabilities(),
                 SupportedFeatures = GetSupportedFeatures(),
                 RequiredSettings = GetRequiredSettings()
             };
@@ -263,15 +284,8 @@ namespace Lidarr.Plugin.Common.Services.Registration
         /// </summary>
         protected virtual List<string> GetSupportedFeatures()
         {
-            var features = new List<string>();
-
-            if (HasIndexer()) features.Add("Search");
-            if (HasDownloadClient()) features.Add("Download");
-            if (SupportsCaching()) features.Add("Caching");
-            if (SupportsAuthentication()) features.Add("Authentication");
-            if (SupportsQualitySelection()) features.Add("Quality Selection");
-
-            return features;
+            var capabilityNames = GetCapabilities().ToDisplayNames();
+            return capabilityNames.Count == 0 ? new List<string>() : new List<string>(capabilityNames);
         }
 
         /// <summary>
@@ -335,6 +349,7 @@ namespace Lidarr.Plugin.Common.Services.Registration
         public string AssemblyName { get; set; }
         public bool HasIndexer { get; set; }
         public bool HasDownloadClient { get; set; }
+        public PluginCapability Capabilities { get; set; }
         public List<string> SupportedFeatures { get; set; } = new List<string>();
         public List<string> RequiredSettings { get; set; } = new List<string>();
     }
@@ -393,3 +408,4 @@ namespace Lidarr.Plugin.Common.Services.Registration
         Scoped
     }
 }
+

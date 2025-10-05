@@ -339,9 +339,7 @@ namespace Lidarr.Plugin.Common.Base
         {
             using var response = await GetHttpClient().ExecuteWithResilienceAsync(
                 request,
-                maxRetries: 5,
-                retryBudget: TimeSpan.FromSeconds(60),
-                maxConcurrencyPerHost: 6
+                ResiliencePolicy.Lookup
             );
 
             response.EnsureSuccessStatusCode();
