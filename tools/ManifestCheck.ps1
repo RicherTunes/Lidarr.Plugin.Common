@@ -7,7 +7,9 @@ param(
     [Parameter(Mandatory = $true)]
     [string]$ManifestPath,
 
-    [string]$AbstractionsPackage = 'Lidarr.Plugin.Abstractions'
+    [string]$AbstractionsPackage = 'Lidarr.Plugin.Abstractions',
+
+    [switch]$Strict
 )
 
 $ErrorActionPreference = 'Stop'
@@ -21,11 +23,13 @@ if (-not (Test-Path -LiteralPath $ManifestPath)) {
 }
 
 [xml]$project = Get-Content -LiteralPath $ProjectPath
-$ns = @{ msb = 'http://schemas.microsoft.com/developer/msbuild/2003' }
+# Use a real XmlNamespaceManager for robust MSBuild parsing
+$nsmgr = New-Object System.Xml.XmlNamespaceManager($project.NameTable)
+$nsmgr.AddNamespace('msb', 'http://schemas.microsoft.com/developer/msbuild/2003')
 
-$versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:Version', $ns)
+$versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:Version', $nsmgr)
 if (-not $versionNode) {
-    $versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:AssemblyVersion', $ns)
+    $versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:AssemblyVersion', $nsmgr)
 }
 if (-not $versionNode) {
     throw "Unable to resolve Version from '$ProjectPath'."
@@ -38,15 +42,27 @@ if (-not $manifest.version) {
     throw "Manifest at '$ManifestPath' is missing 'version'."
 }
 
-$packageReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:PackageReference[@Include='$AbstractionsPackage']", $ns)
-if (-not $packageReference) {
-    throw "Project '$ProjectPath' must reference $AbstractionsPackage."
+$packageReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:PackageReference[@Include='$AbstractionsPackage']", $nsmgr)
+$projectReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:ProjectReference[contains(@Include, 'Lidarr.Plugin.Abstractions.csproj') or contains(@Include, 'Abstractions')]", $nsmgr)
+
+$packageMajor = $null
+$packageVersion = $null
+$usingProjectRef = $false
+
+if ($packageReference) {
+    $packageVersion = $packageReference.Version
+    if (-not $packageVersion) {
+        throw "PackageReference to $AbstractionsPackage must specify Version."
+    }
+    $packageMajor = ($packageVersion -split '\.')[0]
 }
-$packageVersion = $packageReference.Version
-if (-not $packageVersion) {
-    throw "PackageReference to $AbstractionsPackage must specify Version."
+elseif ($projectReference) {
+    # Fall back to manifest.commonVersion for in-repo abstractions; emit MAN001 warning (or error in Strict)
+    $usingProjectRef = $true
 }
-$packageMajor = ($packageVersion -split '\.')[0]
+else {
+    throw "Project '$ProjectPath' must reference $AbstractionsPackage either as a PackageReference or ProjectReference."
+}
 
 $errors = @()
 $warnings = @()
@@ -63,8 +79,23 @@ elseif ($manifest.apiVersion -notmatch '^\d+\.x$') {
 }
 else {
     $apiMajor = ($manifest.apiVersion -split '\.')[0]
-    if ($apiMajor -ne $packageMajor) {
-        $errors += "apiVersion major $apiMajor does not match $AbstractionsPackage major $packageMajor."
+    if ($packageMajor) {
+        if ($apiMajor -ne $packageMajor) {
+            $errors += "apiVersion major $apiMajor does not match $AbstractionsPackage major $packageMajor."
+        }
+    } elseif ($usingProjectRef) {
+        if (-not $manifest.commonVersion) {
+            $msg = "MAN001: Using in-repo $AbstractionsPackage via ProjectReference; 'manifest.commonVersion' is required to validate apiVersion."
+            if ($Strict) { $errors += $msg } else { $warnings += $msg }
+        } else {
+            $commonMajor = ($manifest.commonVersion -split '\.')[0]
+            if ($apiMajor -ne $commonMajor) {
+                $msg = "MAN001: apiVersion major $apiMajor does not match manifest.commonVersion major $commonMajor (ProjectReference in use)."
+                if ($Strict) { $errors += $msg } else { $warnings += $msg }
+            } else {
+                $warnings += "MAN001: ProjectReference to in-repo abstractions detected; using manifest.commonVersion '$($manifest.commonVersion)' for validation."
+            }
+        }
     }
 }
 
@@ -73,9 +104,9 @@ if (-not $manifest.minHostVersion) {
 }
 
 if ($manifest.targets) {
-    $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFrameworks', $ns)
+    $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFrameworks', $nsmgr)
     if (-not $tfmNode) {
-        $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFramework', $ns)
+        $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFramework', $nsmgr)
     }
     $projectTfms = if ($tfmNode) { $tfmNode.InnerText.Split(';') | ForEach-Object { $_.Trim() } } else { @() }
 

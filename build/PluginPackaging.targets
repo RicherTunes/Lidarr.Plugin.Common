@@ -60,6 +60,106 @@
     <RemoveDir Directories="$(OutputPath)runtimes" Condition="Exists('$(OutputPath)runtimes')" />
   </Target>
 
+  <!-- Compute SHA-256 using an inline C# task -->
+  <UsingTask TaskName="ComputeSha256" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <InputFile ParameterType="System.String" Required="true" />
+      <Hash Output="true" ParameterType="System.String" />
+    </ParameterGroup>
+    <Task>
+      <Reference Include="System" />
+      <Reference Include="System.Core" />
+      <Reference Include="System.Security.Cryptography" />
+      <Using Namespace="System" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Security.Cryptography" />
+      <Code Type="Fragment" Language="cs">
+        <![CDATA[
+          if (!File.Exists(InputFile)) {
+            throw new FileNotFoundException("Input file not found", InputFile);
+          }
+          using var stream = File.OpenRead(InputFile);
+          using var sha = SHA256.Create();
+          var hashBytes = sha.ComputeHash(stream);
+          Hash = BitConverter.ToString(hashBytes).Replace("-", string.Empty).ToLowerInvariant();
+        ]]>
+      </Code>
+    </Task>
+  </UsingTask>
+
+  <!-- Emit manifest.json and sha256 next to the packaged outputs; basic closure check -->
+  <Target Name="WritePluginPackageMetadata" AfterTargets="RepackPlugin" Condition="'$(PluginPackagingDisable)' != 'true'">
+    <ItemGroup>
+      <_MergedDependencies Include="@(PluginMergeDependency)" />
+      <_ResidualDll Include="$(OutputPath)*.dll" Exclude="$(OutputPath)$(PluginAssemblyFileName)" />
+      <!-- Residual assemblies we should not ship -->
+      <_BlockedResidual Include="@(_ResidualDll)"
+                        Condition="$([System.String]::Copy('%(Filename)').StartsWith('System.')) Or $([System.String]::Copy('%(Filename)').StartsWith('Microsoft.')) Or $([System.String]::Copy('%(Filename)').StartsWith('Lidarr.'))" />
+    </ItemGroup>
+
+    <ComputeSha256 InputFile="$(OutputPath)$(PluginAssemblyFileName)">
+      <Output TaskParameter="Hash" PropertyName="_PluginSha256" />
+    </ComputeSha256>
+
+    <WriteLinesToFile File="$(OutputPath)$(AssemblyName).zip.sha256"
+                      Lines="$(_PluginSha256)"
+                      Overwrite="true" />
+
+    <UsingTask TaskName="WriteJsonManifest" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\\Microsoft.Build.Tasks.Core.dll">
+      <ParameterGroup>
+        <OutputPath ParameterType="System.String" Required="true" />
+        <AssemblyName ParameterType="System.String" Required="true" />
+        <PdbName ParameterType="System.String" Required="true" />
+        <Version ParameterType="System.String" Required="true" />
+        <TargetFramework ParameterType="System.String" Required="true" />
+        <Commit ParameterType="System.String" Required="false" />
+        <Dependencies ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="false" />
+      </ParameterGroup>
+      <Task>
+        <Reference Include="System" />
+        <Reference Include="System.Core" />
+        <Using Namespace="System" />
+        <Using Namespace="System.IO" />
+        <Using Namespace="System.Linq" />
+        <Code Type="Fragment" Language="cs">
+          <![CDATA[
+            var deps = (Dependencies ?? Array.Empty<Microsoft.Build.Framework.ITaskItem>())
+              .Select(d => d.ItemSpec)
+              .Select(Path.GetFileName)
+              .Where(s => !string.IsNullOrEmpty(s))
+              .ToArray();
+            var path = Path.Combine(OutputPath, "manifest.json");
+            using var sw = new StreamWriter(path, false);
+            sw.WriteLine("{");
+            sw.WriteLine($"  \"assembly\": \"{AssemblyName}\",");
+            sw.WriteLine($"  \"pdb\": \"{PdbName}\",");
+            sw.WriteLine($"  \"version\": \"{Version}\",");
+            sw.WriteLine($"  \"targetFramework\": \"{TargetFramework}\",");
+            sw.WriteLine($"  \"commit\": \"{Commit}\",");
+            sw.WriteLine("  \"mergedDependencies\": [");
+            for (int i = 0; i < deps.Length; i++) {
+              var comma = (i < deps.Length - 1) ? "," : string.Empty;
+              sw.WriteLine($"    \"{deps[i]}\"{comma}");
+            }
+            sw.WriteLine("  ]");
+            sw.WriteLine("}");
+          ]]>
+        </Code>
+      </Task>
+    </UsingTask>
+
+    <WriteJsonManifest OutputPath="$(OutputPath)"
+                       AssemblyName="$(PluginAssemblyFileName)"
+                       PdbName="$(PluginSymbolFileName)"
+                       Version="$(Version)"
+                       TargetFramework="$(TargetFramework)"
+                       Commit="$(SourceRevisionId)"
+                       Dependencies="@(_MergedDependencies)" />
+
+    <Error Text="Blocked residual assemblies present in output: @(_BlockedResidual)"
+           Condition="'@(_BlockedResidual)' != ''" />
+  </Target>
+
   <Target Name="DeployPluginArtifacts" AfterTargets="RepackPlugin" Condition="'$(EnablePluginDeployment)' == 'true' and '$(LidarrPluginDeployPath)' != ''">
     <ItemGroup>
       <PluginDeploymentFiles Include="$(OutputPath)$(PluginAssemblyFileName)" />
