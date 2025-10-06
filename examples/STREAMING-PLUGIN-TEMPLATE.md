@@ -214,6 +214,32 @@ if (PreviewDetectionUtility.IsLikelyPreview(url, durationSeconds, restrictionMes
 var ok = ValidationUtilities.ValidateDownloadedFile(path, null, null, validateSignature: true);
 ```
 
+### Resilient HTTP batches (adapter)
+```csharp
+// Prefer the batch adapter to avoid double-retries when sending many HTTP requests
+var policy = ResiliencePolicy.Lookup;
+var reqs = new List<HttpRequestMessage>
+{
+    new(HttpMethod.Get, "/albums/123"),
+    new(HttpMethod.Get, "/albums/456")
+};
+
+var svc = new Lidarr.Plugin.Common.Services.Network.NetworkResilienceService(logger);
+var result = await svc.ExecuteHttpBatchAsync(
+    operationId: $"album-batch-{DateTime.UtcNow:yyyyMMddHHmmss}",
+    requests: reqs,
+    httpClient: httpClient,
+    policy: policy,
+    options: Lidarr.Plugin.Common.Services.Network.NetworkResilienceOptions.Default,
+    progress: null,
+    cancellationToken: CancellationToken.None);
+
+if (!result.IsSuccessful)
+{
+    // inspect result.Failures; retries were already handled per-request by the HTTP executor
+}
+```
+
 ### Base Classes (Inherit and override)
 ```csharp
 // Settings
