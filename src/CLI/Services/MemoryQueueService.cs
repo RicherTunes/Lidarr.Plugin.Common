@@ -65,6 +65,12 @@ namespace Lidarr.Plugin.Common.CLI.Services
             throw new KeyNotFoundException($"Queue item '{itemId}' not found.");
         }
 
+        public Task<CliDownloadItem?> TryGetItemAsync(string itemId)
+        {
+            _queue.TryGetValue(itemId, out var item);
+            return Task.FromResult(item);
+        }
+
         public Task UpdateItemAsync(string itemId, DownloadStatus status, int progressPercent = 0, string statusMessage = null)
         {
             if (_queue.TryGetValue(itemId, out var item))
