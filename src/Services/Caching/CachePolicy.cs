@@ -17,6 +17,16 @@ public sealed class CachePolicy
         /// When true, caches should vary lookups by a caller-provided scope (e.g., user/tenant).
         /// </summary>
         public bool VaryByScope { get; }
+        /// <summary>
+        /// Optional coalescing window for sliding expiration updates. When set, the cache will
+        /// extend TTL at most once per this window to avoid stampedes.
+        /// </summary>
+        public TimeSpan? SlidingRefreshWindow { get; }
+        /// <summary>
+        /// When true, attach conditional validators (ETag/Last-Modified) from cached entries automatically
+        /// to enable 304 revalidation without external state.
+        /// </summary>
+        public bool EnableConditionalRevalidation { get; }
 
         public static CachePolicy Disabled { get; } = new CachePolicy(
             name: "disabled",
@@ -45,7 +55,9 @@ public sealed class CachePolicy
             bool shouldCache,
             TimeSpan duration,
             TimeSpan? slidingExpiration = null,
-            TimeSpan? absoluteExpiration = null)
+            TimeSpan? absoluteExpiration = null,
+            TimeSpan? slidingRefreshWindow = null,
+            bool enableConditionalRevalidation = false)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -73,6 +85,8 @@ public sealed class CachePolicy
             SlidingExpiration = slidingExpiration;
             AbsoluteExpiration = absoluteExpiration;
             VaryByScope = false;
+            SlidingRefreshWindow = slidingRefreshWindow;
+            EnableConditionalRevalidation = enableConditionalRevalidation;
         }
 
         /// <summary>
@@ -84,8 +98,10 @@ public sealed class CachePolicy
             TimeSpan duration,
             TimeSpan? slidingExpiration,
             TimeSpan? absoluteExpiration,
-            bool varyByScope)
-            : this(name, shouldCache, duration, slidingExpiration, absoluteExpiration)
+            bool varyByScope,
+            TimeSpan? slidingRefreshWindow = null,
+            bool enableConditionalRevalidation = false)
+            : this(name, shouldCache, duration, slidingExpiration, absoluteExpiration, slidingRefreshWindow, enableConditionalRevalidation)
         {
             VaryByScope = varyByScope;
         }
@@ -99,7 +115,9 @@ public sealed class CachePolicy
             TimeSpan? duration = null,
             TimeSpan? slidingExpiration = null,
             TimeSpan? absoluteExpiration = null,
-            bool? varyByScope = null)
+            bool? varyByScope = null,
+            TimeSpan? slidingRefreshWindow = null,
+            bool? enableConditionalRevalidation = null)
         {
             return new CachePolicy(
                 name ?? Name,
@@ -107,7 +125,9 @@ public sealed class CachePolicy
                 duration ?? Duration,
                 slidingExpiration ?? SlidingExpiration,
                 absoluteExpiration ?? AbsoluteExpiration,
-                varyByScope ?? VaryByScope);
+                varyByScope ?? VaryByScope,
+                slidingRefreshWindow ?? SlidingRefreshWindow,
+                enableConditionalRevalidation ?? EnableConditionalRevalidation);
         }
     }
 }

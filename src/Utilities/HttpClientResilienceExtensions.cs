@@ -78,6 +78,29 @@ namespace Lidarr.Plugin.Common.Utilities
                     if (v.LastModified.HasValue) request.Headers.TryAddWithoutValidation("If-Modified-Since", v.LastModified.Value.ToString("R"));
                 }
             }
+            else
+            {
+                try
+                {
+                    // If policy enables conditional revalidation and we have a cached entry, attach validators from cache.
+                    if (cache is StreamingResponseCache impl && impl.IsConditionalRevalidationEnabled(endpoint, parameters))
+                    {
+                        var cachedForValidation = cache.Get<CachedHttpResponse>(endpoint, parameters);
+                        if (cachedForValidation != null)
+                        {
+                            if (!string.IsNullOrEmpty(cachedForValidation.ETag))
+                            {
+                                request.Headers.TryAddWithoutValidation("If-None-Match", cachedForValidation.ETag);
+                            }
+                            if (cachedForValidation.LastModified.HasValue)
+                            {
+                                request.Headers.TryAddWithoutValidation("If-Modified-Since", cachedForValidation.LastModified.Value.ToString("R"));
+                            }
+                        }
+                    }
+                }
+                catch { /* best-effort; ignore validator attach errors */ }
+            }
 
             // Try cached body for potential 304 path
             var shouldCache = cache.ShouldCache(endpoint);
@@ -86,16 +109,24 @@ namespace Lidarr.Plugin.Common.Utilities
 
             var profile = request.Options.TryGetValue(new HttpRequestOptionsKey<string>("arr.plugin.http.profile"), out var prof) ? prof : "default";
             var r = resilience.Get(profile);
-            using var response = await httpClient.ExecuteWithResilienceAsync(
+            var totalCap = r.MaxTotalConcurrencyPerHost > 0 ? r.MaxTotalConcurrencyPerHost : r.MaxConcurrencyPerHost;
+            using var response = await httpClient.ExecuteWithResilienceAsyncInternal(
                 request,
                 r.MaxRetries,
                 r.RetryBudget,
                 r.MaxConcurrencyPerHost,
+                totalCap,
                 r.PerRequestTimeout,
                 cancellationToken).ConfigureAwait(false);
+            // Note: the aggregate per-host cap is applied inside ExecuteWithResilienceAsyncCore when called via policy overload.
 
-            if (response.StatusCode == HttpStatusCode.NotModified && cached is { } cachedHit)
+            if (response.StatusCode == HttpStatusCode.NotModified)
             {
+                var cachedHit = cached ?? (shouldCache ? cache.Get<CachedHttpResponse>(endpoint, parameters) : null);
+                if (cachedHit is null)
+                {
+                    return response; // nothing cached; surface 304
+                }
                 // synthetic 200 from cache
                 var ok = new HttpResponseMessage(HttpStatusCode.OK)
                 {
@@ -116,6 +147,11 @@ namespace Lidarr.Plugin.Common.Utilities
                 // Prefer standardized header; include legacy for transition
                 ok.Headers.TryAddWithoutValidation(Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.RevalidatedHeader, Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.RevalidatedValue);
                 ok.Headers.TryAddWithoutValidation(Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.LegacyRevalidatedHeader, Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.RevalidatedValue);
+                // Refresh TTL without rewriting payload
+                if (shouldCache)
+                {
+                    cache.Set(endpoint, parameters, cachedHit, cacheDuration);
+                }
                 return ok;
             }
 
@@ -177,12 +213,20 @@ namespace Lidarr.Plugin.Common.Utilities
                 // Include the canonical string directly to ensure cache key invariants match dedup
                 var dict = ParseQuery(qp);
                 dict[Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ParametersKey.Key] = qp ?? string.Empty;
+                if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.AuthScopeKey, out string? scope) && !string.IsNullOrWhiteSpace(scope))
+                {
+                    dict["scope"] = scope;
+                }
                 return (ep ?? NormalizePath(request.RequestUri), dict);
             }
             if (request.Options.TryGetValue(new HttpRequestOptionsKey<string>("arr.plugin.http.endpoint"), out ep) && request.Options.TryGetValue(new HttpRequestOptionsKey<string>("arr.plugin.http.params"), out qp))
             {
                 var dict = ParseQuery(qp);
                 dict[Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ParametersKey.Key] = qp ?? string.Empty;
+                if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.AuthScopeKey, out string? scope) && !string.IsNullOrWhiteSpace(scope))
+                {
+                    dict["scope"] = scope;
+                }
                 return (ep ?? NormalizePath(request.RequestUri), dict);
             }
             return (NormalizePath(request.RequestUri), ParseQuery(request.RequestUri?.Query ?? string.Empty));
