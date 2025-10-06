@@ -26,6 +26,11 @@ namespace Lidarr.Plugin.Common.CLI.Services
         Task<T> GetAsync<T>(string key);
 
         /// <summary>
+        /// Try to get a state value; returns null when not found or mismatched type.
+        /// </summary>
+        Task<T?> TryGetAsync<T>(string key);
+
+        /// <summary>
         /// Check if state exists for key
         /// </summary>
         Task<bool> ExistsAsync(string key);

@@ -58,6 +58,15 @@ namespace Lidarr.Plugin.Common.CLI.Services
             throw new KeyNotFoundException($"State value '{key}' not found or not of type {typeof(T).Name}.");
         }
 
+        public Task<T?> TryGetAsync<T>(string key)
+        {
+            if (_state.TryGetValue(key, out var value) && value is T typedValue)
+            {
+                return Task.FromResult<T?>(typedValue);
+            }
+            return Task.FromResult<T?>(default);
+        }
+
         public Task<bool> ExistsAsync(string key)
         {
             return Task.FromResult(_state.ContainsKey(key));
