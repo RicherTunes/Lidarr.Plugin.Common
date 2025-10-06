@@ -83,7 +83,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 policy.PerRequestTimeout,
                 cancellationToken);
         }
-        
+
 
         public static async Task<HttpResponseMessage> SendWithResilienceAsync(
             this HttpClient httpClient,
