@@ -32,6 +32,11 @@ namespace Lidarr.Plugin.Common.CLI.Services
         Task<CliDownloadItem> GetItemAsync(string itemId);
 
         /// <summary>
+        /// Try to get specific queue item by ID; returns null when not found.
+        /// </summary>
+        Task<CliDownloadItem?> TryGetItemAsync(string itemId);
+
+        /// <summary>
         /// Update queue item status and progress
         /// </summary>
         Task UpdateItemAsync(string itemId, DownloadStatus status, int progressPercent = 0, string statusMessage = null);
