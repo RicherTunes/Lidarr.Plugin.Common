@@ -403,10 +403,52 @@ namespace Lidarr.Plugin.Common.Utilities
                             try
                             {
                                 var loc = response.Headers.Location;
-                                currentUri = loc.IsAbsoluteUri ? loc : new Uri(attemptRequest.RequestUri!, loc);
-                                // Update host keys for new location
-                                host = currentUri.Host;
-                                hostKey = host ?? "__unknown__";
+                                var targetUri = loc.IsAbsoluteUri ? loc : new Uri(attemptRequest.RequestUri!, loc);
+
+                                // If the redirect crosses hosts, release current gates and reacquire for the new host
+                                var newHost = targetUri.Host;
+                                var crossingHosts = !string.Equals(newHost, host, StringComparison.OrdinalIgnoreCase);
+
+                                if (crossingHosts)
+                                {
+                                    try
+                                    {
+#if NET8_0_OR_GREATER
+                                        // Decrement inflight for old host before moving
+                                        Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
+#endif
+                                    }
+                                    catch { }
+
+                                    // Release current gates before acquiring new ones
+                                    try { gate.Release(); } catch { }
+                                    try { aggregateGate.Release(); } catch { }
+
+                                    host = newHost;
+                                    hostKey = host ?? "__unknown__";
+                                    if (!string.IsNullOrWhiteSpace(profileTag)) hostKey = hostKey + "|" + profileTag;
+
+                                    // Acquire new gates for redirected host
+                                    var newAggregate = HostGateRegistry.GetAggregate(host, aggregateEffective);
+                                    await newAggregate.WaitAsync(effectiveToken).ConfigureAwait(false);
+                                    var newGate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
+                                    await newGate.WaitAsync(effectiveToken).ConfigureAwait(false);
+
+                                    // Swap references so finalizer releases the currently-held gates
+                                    aggregateGate = newAggregate;
+                                    gate = newGate;
+
+                                    try
+                                    {
+#if NET8_0_OR_GREATER
+                                        // Increment inflight for new host
+                                        Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
+#endif
+                                    }
+                                    catch { }
+                                }
+
+                                currentUri = targetUri;
                                 response.Dispose();
                                 // Continue immediately without backoff; do not count against retry budget
                                 continue;
