@@ -93,7 +93,9 @@ namespace Lidarr.Plugin.Common.Utilities
                 {
                     ok.Content.Headers.LastModified = cachedHit.LastModified;
                 }
-                ok.Headers.TryAddWithoutValidation("X-Arr-Cache", "revalidated");
+                // Prefer standardized header; include legacy for transition
+                ok.Headers.TryAddWithoutValidation(Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.RevalidatedHeader, Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.RevalidatedValue);
+                ok.Headers.TryAddWithoutValidation(Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.LegacyRevalidatedHeader, Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.RevalidatedValue);
                 return ok;
             }
 
@@ -150,8 +152,11 @@ namespace Lidarr.Plugin.Common.Utilities
         private static (string Endpoint, Dictionary<string, string> Parameters) DeriveEndpointAndParams(HttpRequestMessage request)
         {
             // Prefer options
-            if (request.Options.TryGetValue(new HttpRequestOptionsKey<string>("arr.plugin.http.endpoint"), out var ep)
-                && request.Options.TryGetValue(new HttpRequestOptionsKey<string>("arr.plugin.http.params"), out var qp))
+            if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.EndpointKey, out var ep) && request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ParametersKey, out var qp))
+            {
+                return (ep ?? NormalizePath(request.RequestUri), ParseQuery(qp));
+            }
+            if (request.Options.TryGetValue(new HttpRequestOptionsKey<string>("arr.plugin.http.endpoint"), out ep) && request.Options.TryGetValue(new HttpRequestOptionsKey<string>("arr.plugin.http.params"), out qp))
             {
                 return (ep ?? NormalizePath(request.RequestUri), ParseQuery(qp));
             }
