@@ -13,6 +13,11 @@
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
   </PropertyGroup>
+  <!-- Make PublicAPI baselines visible to analyzer tools (e.g., dotnet format) without relying on build targets -->
+  <ItemGroup>
+    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt')" />
+  </ItemGroup>
 
   <PropertyGroup>
     <PublicApiUseSourcesForCodeFix>false</PublicApiUseSourcesForCodeFix>
