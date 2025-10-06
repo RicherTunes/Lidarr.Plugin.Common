@@ -59,6 +59,28 @@ namespace Lidarr.Plugin.Common.Utilities
                 maxRetries,
                 retryBudget,
                 maxConcurrencyPerHost,
+                maxConcurrencyPerHost,
+                perRequestTimeout,
+                cancellationToken);
+        }
+
+        internal static Task<HttpResponseMessage> ExecuteWithResilienceAsyncInternal(
+            this HttpClient httpClient,
+            HttpRequestMessage request,
+            int maxRetries,
+            TimeSpan? retryBudget,
+            int maxConcurrencyPerHost,
+            int maxTotalConcurrencyPerHost,
+            TimeSpan? perRequestTimeout,
+            CancellationToken cancellationToken)
+        {
+            return ExecuteWithResilienceAsyncCore(
+                httpClient,
+                request,
+                maxRetries,
+                retryBudget,
+                maxConcurrencyPerHost,
+                maxTotalConcurrencyPerHost,
                 perRequestTimeout,
                 cancellationToken);
         }
@@ -80,6 +102,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 policy.MaxRetries,
                 policy.RetryBudget,
                 policy.MaxConcurrencyPerHost,
+                policy.MaxTotalConcurrencyPerHost,
                 policy.PerRequestTimeout,
                 cancellationToken);
         }
@@ -235,6 +258,7 @@ namespace Lidarr.Plugin.Common.Utilities
             int maxRetries,
             TimeSpan? retryBudget,
             int maxConcurrencyPerHost,
+            int maxTotalConcurrencyPerHost,
             TimeSpan? perRequestTimeout,
             CancellationToken cancellationToken)
         {
@@ -265,7 +289,10 @@ namespace Lidarr.Plugin.Common.Utilities
             catch { }
 
             var gate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
+            var aggregateEffective = Math.Max(1, maxTotalConcurrencyPerHost);
+            var aggregateGate = HostGateRegistry.GetAggregate(host, aggregateEffective);
 
+            await aggregateGate.WaitAsync(effectiveToken).ConfigureAwait(false);
             await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
             try
             {
@@ -327,6 +354,7 @@ namespace Lidarr.Plugin.Common.Utilities
             finally
             {
                 gate.Release();
+                aggregateGate.Release();
             }
         }
 

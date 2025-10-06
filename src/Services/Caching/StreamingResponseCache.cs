@@ -45,7 +45,8 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 return null;
             }
 
-            var cacheKey = GenerateCacheKey(endpoint, parameters);
+            var effectiveParams = ApplyPolicyParameters(parameters, policy);
+            var cacheKey = GenerateCacheKey(endpoint, effectiveParams);
 
             if (_cache.TryGetValue(cacheKey, out var cacheItem))
             {
@@ -63,9 +64,20 @@ namespace Lidarr.Plugin.Common.Services.Caching
                         }
 
                         var newExpiry = absoluteCap.HasValue ? (proposed < absoluteCap.Value ? proposed : absoluteCap.Value) : proposed;
-                        if (newExpiry > cacheItem.ExpiresAt)
+                        var throttle = policy.SlidingRefreshWindow;
+                        var canExtend = true;
+                        if (throttle.HasValue && throttle.Value > TimeSpan.Zero)
                         {
+                            var sinceLast = now - cacheItem.LastExtendedAt;
+                            canExtend = sinceLast >= throttle.Value;
+                        }
+
+                        if (canExtend && newExpiry > cacheItem.ExpiresAt)
+                        {
+                            var old = cacheItem.ExpiresAt;
                             cacheItem.ExpiresAt = newExpiry;
+                            cacheItem.LastExtendedAt = now;
+                            OnSlidingExtended(endpoint, cacheKey, old, newExpiry);
                         }
                     }
 
@@ -110,7 +122,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 return;
             }
 
-            SetInternal(endpoint, parameters, value, policy.Duration, policy);
+            SetInternal(endpoint, ApplyPolicyParameters(parameters, policy), value, policy.Duration, policy);
         }
 
         /// <inheritdoc/>
@@ -135,7 +147,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 return;
             }
 
-            SetInternal(endpoint, parameters, value, duration, policy);
+            SetInternal(endpoint, ApplyPolicyParameters(parameters, policy), value, duration, policy);
         }
 
         private void SetInternal<T>(string endpoint, Dictionary<string, string> parameters, T value, TimeSpan duration, CachePolicy policy) where T : class
@@ -168,7 +180,8 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 CreatedAt = createdAt,
                 Endpoint = normalizedEndpoint,
                 CacheKey = cacheKey,
-                CacheKeySeed = cacheSeed
+                CacheKeySeed = cacheSeed,
+                LastExtendedAt = createdAt
             };
 
             _cache.AddOrUpdate(cacheKey, cacheItem, (key, existing) =>
@@ -197,6 +210,20 @@ namespace Lidarr.Plugin.Common.Services.Caching
 
             var duration = GetCacheDuration(endpoint);
             return CachePolicy.Default.With(duration: duration);
+        }
+
+        // Internal helper for utilities to query endpoint policy flags without exposing provider publicly.
+        internal bool IsConditionalRevalidationEnabled(string endpoint, Dictionary<string, string> parameters)
+        {
+            try
+            {
+                var policy = ResolvePolicy(endpoint, parameters);
+                return policy.EnableConditionalRevalidation && policy.ShouldCache;
+            }
+            catch
+            {
+                return false;
+            }
         }
 
 
@@ -494,8 +521,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
                     .ToArray();
             }
 
-            // If callers supply a non-PII scope in parameters (e.g., "scope"), include it in the seed.
-            // This enables opt-in per-scope cache variance even before policy-level wiring.
+            // If callers supply a non-PII scope in parameters (e.g., "scope"), include it in the seed when present in effective parameters.
             string scopeComponent = string.Empty;
             if (parameters.TryGetValue("scope", out var scopeVal) && !string.IsNullOrWhiteSpace(scopeVal))
             {
@@ -564,6 +590,24 @@ namespace Lidarr.Plugin.Common.Services.Caching
             public string Endpoint { get; set; } = string.Empty;
             public string CacheKey { get; set; } = string.Empty;
             public string CacheKeySeed { get; set; } = string.Empty;
+            public DateTime LastExtendedAt { get; set; }
         }
+
+        private static Dictionary<string, string> ApplyPolicyParameters(Dictionary<string, string> parameters, CachePolicy policy)
+        {
+            // Filter scope unless policy opts into varying by it
+            if (!policy.VaryByScope && parameters.ContainsKey("scope"))
+            {
+                var copy = new Dictionary<string, string>(parameters, StringComparer.Ordinal);
+                copy.Remove("scope");
+                return copy;
+            }
+            return parameters;
+        }
+
+        /// <summary>
+        /// Called when a sliding expiration extension occurs. Allows tests/observers to count coalesced updates.
+        /// </summary>
+        protected virtual void OnSlidingExtended(string endpoint, string cacheKey, DateTime previousExpiry, DateTime newExpiry) { }
     }
 }
