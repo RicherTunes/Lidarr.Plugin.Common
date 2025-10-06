@@ -54,21 +54,8 @@ namespace Lidarr.Plugin.Common.CLI.Services
                 return Task.FromResult(typedValue);
             }
 
-            // Try to convert if types don't match exactly
-            if (value != null)
-            {
-                try
-                {
-                    var convertedValue = (T)Convert.ChangeType(value, typeof(T));
-                    return Task.FromResult(convertedValue);
-                }
-                catch
-                {
-                    // Conversion failed, return default
-                }
-            }
-
-            return Task.FromResult(default(T));
+            // If not found or wrong type, surface a clear error instead of returning null/default for reference types.
+            throw new KeyNotFoundException($"State value '{key}' not found or not of type {typeof(T).Name}.");
         }
 
         public Task<bool> ExistsAsync(string key)

@@ -18,7 +18,7 @@ foreach ($tfm in $Tfms) {
     dotnet build $project -c Release -p:PublicApiUseSourcesForCodeFix=true -f $tfm | Out-Null
 
     Write-Host "🛠️  ${tfm}: applying RS0016/RS0017 fixes"
-    dotnet format $project analyzers --diagnostics RS0016,RS0017 -p:TargetFramework=$tfm -v minimal | Out-Null
+    dotnet format $project analyzers --diagnostics RS0016,RS0017 -p:TargetFramework=$tfm -p:PublicApiUseSourcesForCodeFix=true -p:PublicApiUseSourcesForCodeFix=true -v minimal | Out-Null
 
     $dir = Join-Path $PSScriptRoot "..\src\Abstractions\PublicAPI\$tfm"
     $unshipped = Join-Path $dir 'PublicAPI.Unshipped.txt'

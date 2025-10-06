@@ -67,35 +67,42 @@ namespace Lidarr.Plugin.Common.CLI.UI
 
         public T Select<T>(string prompt, IEnumerable<T> choices, Func<T, string> displaySelector = null)
         {
-            displaySelector ??= (item => item?.ToString() ?? "");
-            
-            var selection = new SelectionPrompt<T>()
+            // Avoid Spectre.Console generic constraint (T : notnull) by projecting to strings and mapping back.
+            displaySelector ??= (item => item?.ToString() ?? string.Empty);
+            var list = choices?.ToList() ?? new List<T>();
+            var labels = list.Select((item, i) => $"{i}: {displaySelector(item)}").ToList();
+
+            var selection = new SelectionPrompt<string>()
                 .Title(prompt)
-                .UseConverter(displaySelector);
+                .AddChoices(labels);
 
-            foreach (var choice in choices)
+            var chosen = AnsiConsole.Prompt(selection);
+            var idxStr = chosen.Split(':')[0];
+            if (int.TryParse(idxStr, out var idx) && idx >= 0 && idx < list.Count)
             {
-                selection.AddChoice(choice);
+                return list[idx];
             }
-
-            return AnsiConsole.Prompt(selection);
+            // Fallback: first or default
+            return list.Count > 0 ? list[0] : default;
         }
 
         public IEnumerable<T> MultiSelect<T>(string prompt, IEnumerable<T> choices, Func<T, string> displaySelector = null)
         {
-            displaySelector ??= (item => item?.ToString() ?? "");
-            
-            var selection = new MultiSelectionPrompt<T>()
+            displaySelector ??= (item => item?.ToString() ?? string.Empty);
+            var list = choices?.ToList() ?? new List<T>();
+            var labels = list.Select((item, i) => $"{i}: {displaySelector(item)}").ToList();
+
+            var selection = new MultiSelectionPrompt<string>()
                 .Title(prompt)
-                .UseConverter(displaySelector)
+                .AddChoices(labels)
                 .InstructionsText("[grey](Press [blue]<space>[/] to toggle, [green]<enter>[/] to accept)[/]");
 
-            foreach (var choice in choices)
-            {
-                selection.AddChoice(choice);
-            }
+            var chosen = AnsiConsole.Prompt(selection);
+            var indices = chosen.Select(c => c.Split(':')[0]).Select(s => int.TryParse(s, out var i) ? i : -1)
+                .Where(i => i >= 0 && i < list.Count)
+                .ToList();
 
-            return AnsiConsole.Prompt(selection);
+            return indices.Select(i => list[i]).ToList();
         }
 
         public void ShowTable<T>(IEnumerable<T> data, params (string header, Func<T, string> getValue)[] columns)
