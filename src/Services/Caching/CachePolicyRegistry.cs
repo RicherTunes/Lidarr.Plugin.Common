@@ -8,7 +8,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
     /// Registry that maps endpoints (and optional predicates) to cache policies.
     /// Later registrations override earlier ones.
     /// </summary>
-    public sealed class CachePolicyRegistry : ICachePolicyProvider
+    internal sealed class CachePolicyRegistry : ICachePolicyProvider
     {
         private readonly List<CachePolicyRule> _rules = new List<CachePolicyRule>();
         private CachePolicy _defaultPolicy;

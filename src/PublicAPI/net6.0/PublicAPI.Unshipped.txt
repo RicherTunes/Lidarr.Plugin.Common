@@ -1,2 +1,5 @@
 #nullable enable
 
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.GetValidSessionAsync() -> System.Threading.Tasks.Task<TSession?>!
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.GetValidSessionAsync() -> System.Threading.Tasks.Task<TSession?>!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.CloneForRetryAsync(System.Net.Http.HttpRequestMessage! request) -> System.Threading.Tasks.Task<System.Net.Http.HttpRequestMessage!>!
