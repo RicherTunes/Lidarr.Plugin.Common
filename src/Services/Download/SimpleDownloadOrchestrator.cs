@@ -131,7 +131,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                             ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
                         }).ConfigureAwait(false);
                     }
-                    try { FileSystemUtility.MoveFile(tempPath, outputPath, true); }
+                    try { FileSystemUtilities.MoveFile(tempPath, outputPath, true); }
                     catch { if (File.Exists(outputPath)) File.Delete(outputPath); File.Move(tempPath, outputPath); }
 
                     return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = new FileInfo(outputPath).Length, ActualQuality = quality };
@@ -225,7 +225,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                     }).ConfigureAwait(false);
                 }
 
-                try { FileSystemUtility.MoveFile(tempPath, outputPath, true); }
+                try { FileSystemUtilities.MoveFile(tempPath, outputPath, true); }
                 catch { if (File.Exists(outputPath)) File.Delete(outputPath); File.Move(tempPath, outputPath); }
                 try { if (File.Exists(resumePath)) File.Delete(resumePath); } catch { }
 
