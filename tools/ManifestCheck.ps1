@@ -9,7 +9,9 @@ param(
 
     [string]$AbstractionsPackage = 'Lidarr.Plugin.Abstractions',
 
-    [switch]$Strict
+    [switch]$Strict,
+
+    [switch]$JsonOutput
 )
 
 $ErrorActionPreference = 'Stop'
@@ -125,16 +127,37 @@ if ($manifest.targets) {
     }
 }
 
-if ($errorList.Count -gt 0) {
-    foreach ($msg in $errorList) {
-        Write-Error $msg
+if ($JsonOutput) {
+    function Parse-Diagnostic {
+        param([string]$Message, [string]$Severity)
+        $id = $null
+        $payload = $Message
+        if ($Message -match '^(?<id>[A-Z]{3}\d{3}):\s*(?<rest>.*)$') {
+            $id = $matches['id']
+            $payload = $matches['rest']
+        }
+        return [pscustomobject]@{
+            id = $id
+            severity = $Severity
+            message = $Message
+            payload = $payload
+        }
     }
-    throw "Manifest validation failed."
-}
 
-foreach ($msg in $warningList) {
-    Write-Warning $msg
-}
+    $out = @()
+    foreach ($msg in $warningList) { $out += (Parse-Diagnostic -Message $msg -Severity 'Warning') }
+    foreach ($msg in $errorList)   { $out += (Parse-Diagnostic -Message $msg -Severity 'Error') }
 
-Write-Host "Manifest validation succeeded for '$ManifestPath'." -ForegroundColor Green
+    $json = $out | ConvertTo-Json -Depth 5
+    Write-Output $json
+    if ($errorList.Count -gt 0) { exit 1 } else { exit 0 }
+}
+else {
+    if ($errorList.Count -gt 0) {
+        foreach ($msg in $errorList) { Write-Error $msg }
+        throw "Manifest validation failed."
+    }
+    foreach ($msg in $warningList) { Write-Warning $msg }
+    Write-Host "Manifest validation succeeded for '$ManifestPath'." -ForegroundColor Green
+}
 # end-snippet

@@ -194,7 +194,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 bool acquired = false;
                 try
                 {
-                    acquired = _mutex.WaitOne(TimeSpan.FromMinutes(1));
+                    acquired = _mutex.WaitOne(TimeSpan.FromSeconds(60));
                 }
                 catch (AbandonedMutexException)
                 {
