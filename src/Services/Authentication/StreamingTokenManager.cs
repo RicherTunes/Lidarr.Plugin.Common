@@ -3,6 +3,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Interfaces;
 using Microsoft.Extensions.Logging;
+using Lidarr.Plugin.Common.Utilities;
 
 namespace Lidarr.Plugin.Common.Services.Authentication
 {
@@ -114,6 +115,8 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 {
                     await PersistSafely(() => _tokenStore!.SaveAsync(envelope, CancellationToken.None)).ConfigureAwait(false);
                 }
+
+                try { Observability.Metrics.AuthRefreshes.Add(1); } catch { }
 
                 SessionRefreshed?.Invoke(this, new SessionRefreshEventArgs<TSession>
                 {
