@@ -64,7 +64,7 @@ jobs:
         run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net6.0
 
       - name: Build (Release, warnings as errors)
-        run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true
+        run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true -m:1
 
       - name: Test (all TFMs) + coverage
         run: >
@@ -130,7 +130,7 @@ jobs:
       - name: Restore (including CLI framework)
         run: dotnet restore -p:IncludeCLIFramework=true
       - name: Build (Release, all TFMs)
-        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:IncludeCLIFramework=true
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:IncludeCLIFramework=true -m:1
       - name: Resolve Docker reference (optional)
         shell: bash
         run: |
