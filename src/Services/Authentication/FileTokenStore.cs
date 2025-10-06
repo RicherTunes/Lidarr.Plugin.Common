@@ -17,6 +17,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         where TSession : class
     {
         private readonly string _filePath;
+        private readonly string _lockName;
         private readonly JsonSerializerOptions _serializerOptions;
         private readonly SemaphoreSlim _gate = new(1, 1);
         private readonly ILogger<FileTokenStore<TSession>>? _logger;
@@ -35,6 +36,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             }
 
             _filePath = Path.GetFullPath(filePath);
+            _lockName = CreateLockName(_filePath);
             _logger = logger;
             _serializerOptions = serializerOptions ?? new JsonSerializerOptions(JsonSerializerDefaults.General)
             {
@@ -54,6 +56,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                using var cp = AcquireCrossProcessLock(_lockName, cancellationToken);
                 if (!File.Exists(_filePath))
                 {
                     return null;
@@ -97,6 +100,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                using var cp = AcquireCrossProcessLock(_lockName, cancellationToken);
                 var persisted = PersistedEnvelope.FromEnvelope(envelope);
                 var tempPath = _filePath + ".tmp";
 
@@ -112,7 +116,22 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 }
 
-                File.Move(tempPath, _filePath, true);
+                // Replace atomically when destination exists; otherwise a simple move is sufficient
+                if (File.Exists(_filePath))
+                {
+                    try
+                    {
+                        File.Replace(tempPath, _filePath, destinationBackupFileName: null);
+                    }
+                    catch (PlatformNotSupportedException)
+                    {
+                        File.Move(tempPath, _filePath, overwrite: true);
+                    }
+                }
+                else
+                {
+                    File.Move(tempPath, _filePath, overwrite: true);
+                }
             }
             catch (Exception ex) when (ex is IOException or JsonException)
             {
@@ -131,6 +150,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                using var cp = AcquireCrossProcessLock(_lockName, cancellationToken);
                 if (File.Exists(_filePath))
                 {
                     File.Delete(_filePath);
@@ -143,6 +163,82 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             finally
             {
                 _gate.Release();
+            }
+        }
+
+        private static string CreateLockName(string filePath)
+        {
+            // Stable name derived from full path; avoids leaking PII by hashing
+            var hash = Lidarr.Plugin.Common.Utilities.HashingUtility.ComputeSHA256(filePath);
+            return $"LPC.TokenStore.{hash.Substring(0, 32)}";
+        }
+
+        private static IDisposable AcquireCrossProcessLock(string name, CancellationToken cancellationToken)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                return new NamedMutexScope(name, cancellationToken);
+            }
+            else
+            {
+                return new FileLockScope(name, cancellationToken);
+            }
+        }
+
+        private sealed class NamedMutexScope : IDisposable
+        {
+            private readonly Mutex _mutex;
+            public NamedMutexScope(string name, CancellationToken cancellationToken)
+            {
+                _mutex = new Mutex(false, name);
+                bool acquired = false;
+                try
+                {
+                    acquired = _mutex.WaitOne(TimeSpan.FromMinutes(1));
+                }
+                catch (AbandonedMutexException)
+                {
+                    acquired = true; // Consider abandoned as acquired to proceed
+                }
+                if (!acquired)
+                {
+                    throw new TimeoutException($"Failed to acquire cross-process token store mutex '{name}'.");
+                }
+                if (cancellationToken.CanBeCanceled)
+                {
+                    cancellationToken.Register(() =>
+                    {
+                        try { _mutex.ReleaseMutex(); } catch { }
+                    });
+                }
+            }
+            public void Dispose()
+            {
+                try { _mutex.ReleaseMutex(); } catch { }
+                _mutex.Dispose();
+            }
+        }
+
+        private sealed class FileLockScope : IDisposable
+        {
+            private readonly FileStream _lockStream;
+            public FileLockScope(string name, CancellationToken cancellationToken)
+            {
+                // Use a lock file in the same directory as the target but based on lock name
+                var tempDir = Path.GetTempPath();
+                var lockPath = Path.Combine(tempDir, name + ".lock");
+                Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
+                _lockStream = new FileStream(lockPath, new FileStreamOptions
+                {
+                    Access = FileAccess.ReadWrite,
+                    Mode = FileMode.OpenOrCreate,
+                    Share = FileShare.None,
+                    Options = FileOptions.DeleteOnClose
+                });
+            }
+            public void Dispose()
+            {
+                try { _lockStream.Dispose(); } catch { }
             }
         }
 
