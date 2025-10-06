@@ -279,11 +279,13 @@ namespace Lidarr.Plugin.Common.Utilities
             var attempt = 0;
             var host = request.RequestUri?.Host;
             string hostKey = host ?? "__unknown__";
+            string profileTag = "default";
             try
             {
                 if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ProfileKey, out string? profile) && !string.IsNullOrWhiteSpace(profile))
                 {
                     hostKey = hostKey + "|" + profile;
+                    profileTag = profile;
                 }
             }
             catch { }
@@ -292,8 +294,20 @@ namespace Lidarr.Plugin.Common.Utilities
             var aggregateEffective = Math.Max(1, maxTotalConcurrencyPerHost);
             var aggregateGate = HostGateRegistry.GetAggregate(host, aggregateEffective);
 
-            await aggregateGate.WaitAsync(effectiveToken).ConfigureAwait(false);
-            await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
+            using (var waitActivity = Observability.Activity.StartActivity("host.gate.wait", ActivityKind.Internal))
+            {
+                waitActivity?.SetTag("net.host", host ?? "__unknown__");
+                waitActivity?.SetTag("profile", profileTag);
+                await aggregateGate.WaitAsync(effectiveToken).ConfigureAwait(false);
+                await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
+            }
+
+            // Track inflight per host (approximate). Increment on acquire; decrement on release.
+            try {
+#if NET8_0_OR_GREATER
+                Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
+#endif
+            } catch { }
             try
             {
                 while (true)
@@ -303,6 +317,23 @@ namespace Lidarr.Plugin.Common.Utilities
                     using var attemptRequest = await CloneForRetryAsync(request).ConfigureAwait(false);
 
                     HttpResponseMessage response;
+                    using var httpActivity = Observability.Activity.StartActivity("http.send", ActivityKind.Client);
+                    if (httpActivity != null)
+                    {
+                        try
+                        {
+                            httpActivity.SetTag("http.request.method", attemptRequest.Method.Method);
+                            if (attemptRequest.RequestUri != null)
+                            {
+                                httpActivity.SetTag("url.scheme", attemptRequest.RequestUri.Scheme);
+                                httpActivity.SetTag("net.peer.name", attemptRequest.RequestUri.Host);
+                                httpActivity.SetTag("url.path", attemptRequest.RequestUri.AbsolutePath);
+                            }
+                            httpActivity.SetTag("retry.attempt", attempt);
+                            httpActivity.SetTag("profile", profileTag);
+                        }
+                        catch { }
+                    }
                     try
                     {
                         response = await httpClient.SendAsync(
@@ -322,6 +353,11 @@ namespace Lidarr.Plugin.Common.Utilities
 
                     if ((int)response.StatusCode >= 200 && (int)response.StatusCode < 300)
                     {
+                        try
+                        {
+                            httpActivity?.SetTag("http.response.status_code", (int)response.StatusCode);
+                        }
+                        catch { }
                         return response;
                     }
 
@@ -330,6 +366,12 @@ namespace Lidarr.Plugin.Common.Utilities
                     var retryable = status == 429 || (status >= 500 && status <= 599);
                     if (!retryable || attempt >= maxRetries)
                     {
+                        try
+                        {
+                            httpActivity?.SetTag("http.response.status_code", status);
+                            httpActivity?.SetTag("resilience.retryable", retryable);
+                        }
+                        catch { }
                         return response;
                     }
 
@@ -340,6 +382,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     var remaining = deadline - now;
                     if (remaining <= TimeSpan.Zero)
                     {
+                        try { httpActivity?.SetTag("resilience.deadline.exhausted", true); } catch { }
                         return response;
                     }
                     if (delay > remaining)
@@ -347,6 +390,18 @@ namespace Lidarr.Plugin.Common.Utilities
                         delay = remaining; // clamp to budget
                     }
 
+                    try
+                    {
+                        Observability.Metrics.RetryCount.Add(1,
+                            new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"),
+                            new KeyValuePair<string, object?>("http.method", request.Method.Method));
+                        httpActivity?.AddEvent(new ActivityEvent("retry", tags: new ActivityTagsCollection
+                        {
+                            { "retry.delay.ms", (long)delay.TotalMilliseconds },
+                            { "retry.reason", status }
+                        }));
+                    }
+                    catch { }
                     response.Dispose();
                     await Task.Delay(delay, effectiveToken).ConfigureAwait(false);
                 }
@@ -355,6 +410,11 @@ namespace Lidarr.Plugin.Common.Utilities
             {
                 gate.Release();
                 aggregateGate.Release();
+                try {
+#if NET8_0_OR_GREATER
+                    Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
+#endif
+                } catch { }
             }
         }
 

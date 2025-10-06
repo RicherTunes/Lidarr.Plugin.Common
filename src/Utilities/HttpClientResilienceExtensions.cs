@@ -152,6 +152,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 {
                     cache.Set(endpoint, parameters, cachedHit, cacheDuration);
                 }
+                try { Observability.Metrics.CacheRevalidate.Add(1, new KeyValuePair<string, object?>("endpoint", endpoint)); } catch { }
                 return ok;
             }
 

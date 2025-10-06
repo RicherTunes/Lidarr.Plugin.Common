@@ -391,6 +391,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// </summary>
         protected virtual void OnCacheHit(string endpoint, string cacheKey)
         {
+            try { Observability.Metrics.CacheHit.Add(1, new KeyValuePair<string, object?>("endpoint", endpoint)); } catch { }
             OnCacheHit(cacheKey);
         }
 
@@ -399,6 +400,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// </summary>
         protected virtual void OnCacheMiss(string endpoint, string cacheKey)
         {
+            try { Observability.Metrics.CacheMiss.Add(1, new KeyValuePair<string, object?>("endpoint", endpoint)); } catch { }
             OnCacheMiss(cacheKey);
         }
 
