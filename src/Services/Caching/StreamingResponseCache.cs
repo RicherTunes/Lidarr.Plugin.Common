@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.Concurrent;
 using System.Linq;
 using Lidarr.Plugin.Common.Interfaces;
+using Microsoft.Extensions.Logging;
 using Lidarr.Plugin.Common.Utilities;
 
 namespace Lidarr.Plugin.Common.Services.Caching
@@ -95,6 +96,13 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 return;
             }
 
+            // Never cache HttpResponseMessage instances (they hold disposables/mutable state)
+            if (value is System.Net.Http.HttpResponseMessage)
+            {
+                Logger?.LogWarning("Ignoring attempt to cache HttpResponseMessage for endpoint '{Endpoint}'. Cache only stores DTOs/value objects.", endpoint);
+                return;
+            }
+
             parameters ??= new Dictionary<string, string>();
             var policy = ResolvePolicy(endpoint, parameters);
             if (!policy.ShouldCache)
@@ -110,6 +118,13 @@ namespace Lidarr.Plugin.Common.Services.Caching
         {
             if (value == null)
             {
+                return;
+            }
+
+            // Never cache HttpResponseMessage instances (they hold disposables/mutable state)
+            if (value is System.Net.Http.HttpResponseMessage)
+            {
+                Logger?.LogWarning("Ignoring attempt to cache HttpResponseMessage for endpoint '{Endpoint}'. Cache only stores DTOs/value objects.", endpoint);
                 return;
             }
 
@@ -454,11 +469,30 @@ namespace Lidarr.Plugin.Common.Services.Caching
             endpoint = NormalizeEndpointKey(endpoint);
             parameters ??= new Dictionary<string, string>();
 
-            var relevantParams = parameters
-                .Where(p => !IsSensitiveParameter(p.Key))
-                .OrderBy(p => p.Key)
-                .Select(p => $"{p.Key}={p.Value}")
-                .ToArray();
+            // Prefer canonical parameter string if provided by the request builder via Options
+            string? canonicalParamString = null;
+            try
+            {
+                if (parameters.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ParametersKey.Key, out var c) && !string.IsNullOrEmpty(c))
+                {
+                    canonicalParamString = c;
+                }
+            }
+            catch { }
+
+            string[] relevantParams;
+            if (!string.IsNullOrEmpty(canonicalParamString))
+            {
+                relevantParams = new[] { canonicalParamString };
+            }
+            else
+            {
+                relevantParams = parameters
+                    .Where(p => !IsSensitiveParameter(p.Key))
+                    .OrderBy(p => p.Key, StringComparer.Ordinal)
+                    .Select(p => $"{p.Key}={p.Value}")
+                    .ToArray();
+            }
 
             // If callers supply a non-PII scope in parameters (e.g., "scope"), include it in the seed.
             // This enables opt-in per-scope cache variance even before policy-level wiring.

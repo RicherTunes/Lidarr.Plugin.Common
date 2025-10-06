@@ -273,7 +273,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 {
                     attempt++;
 
-                    using var attemptRequest = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
+                    using var attemptRequest = await CloneForRetryAsync(request).ConfigureAwait(false);
 
                     HttpResponseMessage response;
                     try
@@ -299,19 +299,25 @@ namespace Lidarr.Plugin.Common.Utilities
                     }
 
                     var status = (int)response.StatusCode;
-                    var retryable = status == 408 || status == 429 || (status >= 500 && status <= 599);
+                    // Do not retry non-429 4xx. Only 429 and 5xx are retryable.
+                    var retryable = status == 429 || (status >= 500 && status <= 599);
                     if (!retryable || attempt >= maxRetries)
                     {
                         return response;
                     }
 
-                    var delay = GetRetryDelay(response)
-                               ?? TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt))) + GetJitter();
-
                     var now = DateTime.UtcNow;
-                    if (now + delay > deadline)
+                    // Prefer Retry-After date over delta; clamp to remaining budget
+                    var requested = GetRetryDelayPreferredDate(response) ?? TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt)));
+                    var delay = requested + GetJitter();
+                    var remaining = deadline - now;
+                    if (remaining <= TimeSpan.Zero)
                     {
                         return response;
+                    }
+                    if (delay > remaining)
+                    {
+                        delay = remaining; // clamp to budget
                     }
 
                     response.Dispose();
@@ -634,22 +640,71 @@ namespace Lidarr.Plugin.Common.Utilities
                 setMethod.Invoke(destination.Options, new[] { keyInstance, value });
             }
         }
-        private static TimeSpan? GetRetryDelay(HttpResponseMessage response)
+        private static TimeSpan? GetRetryDelayPreferredDate(HttpResponseMessage response)
         {
             try
             {
                 var ra = response.Headers?.RetryAfter;
                 if (ra == null) return null;
 
-                if (ra.Delta.HasValue) return ra.Delta.Value;
+                // Prefer absolute date when present
                 if (ra.Date.HasValue)
                 {
                     var delta = ra.Date.Value - DateTimeOffset.UtcNow;
                     if (delta > TimeSpan.Zero) return delta;
                 }
+                if (ra.Delta.HasValue) return ra.Delta.Value;
             }
             catch { /* ignore parse issues */ }
             return null;
+        }
+
+        /// <summary>
+        /// Clone a request for retry, buffering the original content once and reusing across attempts.
+        /// </summary>
+        public static async Task<HttpRequestMessage> CloneForRetryAsync(HttpRequestMessage request)
+        {
+            if (request == null) throw new ArgumentNullException(nameof(request));
+
+            var clone = new HttpRequestMessage(request.Method, request.RequestUri)
+            {
+                Version = request.Version,
+                VersionPolicy = request.VersionPolicy
+            };
+
+            CopyHttpRequestOptions(request, clone);
+
+            foreach (var header in request.Headers)
+            {
+                clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+            }
+
+            if (request.Content != null)
+            {
+                // Buffer once into request.Options, then reuse
+                byte[]? bodyBytes = null;
+                try
+                {
+                    if (!request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.BufferedBodyKey, out bodyBytes) || bodyBytes == null)
+                    {
+                        bodyBytes = await request.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                        request.Options.Set(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.BufferedBodyKey, bodyBytes);
+                    }
+                }
+                catch
+                {
+                    // As a last resort, fall back to reading the stream fresh
+                    bodyBytes = await request.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
+                }
+
+                clone.Content = new ByteArrayContent(bodyBytes ?? Array.Empty<byte>());
+                foreach (var header in request.Content.Headers)
+                {
+                    clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
+            }
+
+            return clone;
         }
 
         private static TimeSpan GetJitter()

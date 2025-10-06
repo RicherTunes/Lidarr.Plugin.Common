@@ -6,7 +6,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
     /// Declarative cache policy describing whether and how long responses should be cached.
     /// Immutable and thread-safe.
     /// </summary>
-    public sealed class CachePolicy
+public sealed class CachePolicy
     {
         public string Name { get; }
         public bool ShouldCache { get; }

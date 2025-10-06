@@ -24,7 +24,7 @@ namespace Lidarr.Plugin.Common.Interfaces
         /// Gets the current valid session, refreshing if necessary and possible.
         /// </summary>
         /// <returns>A valid session or null if authentication is required</returns>
-        Task<TSession> GetValidSessionAsync();
+        Task<TSession?> GetValidSessionAsync();
 
         /// <summary>
         /// Validates if a session is still active with the streaming service.

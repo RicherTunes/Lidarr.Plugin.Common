@@ -16,8 +16,28 @@ namespace Lidarr.Plugin.Common.Utilities
     /// Opt-in helper that composes the existing resilience pipeline with simple GET caching and optional 304 revalidation.
     /// This method is conservative and only caches successful GET responses.
     /// </summary>
-    public static class HttpClientResilienceExtensions
+    internal static class HttpClientResilienceExtensions
     {
+        public static async Task<HttpResponseMessage> ExecuteWithResilienceAndCachingAsync(
+            this HttpClient httpClient,
+            HttpRequestMessage request,
+            IResiliencePolicyProvider resilience,
+            IStreamingResponseCache cache,
+            Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator deduplicator,
+            IConditionalRequestState? conditionalState = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (deduplicator == null) throw new ArgumentNullException(nameof(deduplicator));
+            if (request?.Method == HttpMethod.Get)
+            {
+                var key = HttpClientExtensions.BuildRequestDedupKey(request);
+                return await deduplicator.GetOrCreateAsync(key, () =>
+                    httpClient.ExecuteWithResilienceAndCachingAsync(request, resilience, cache, conditionalState, cancellationToken),
+                    cancellationToken).ConfigureAwait(false);
+            }
+
+            return await httpClient.ExecuteWithResilienceAndCachingAsync(request, resilience, cache, conditionalState, cancellationToken).ConfigureAwait(false);
+        }
         public static async Task<HttpResponseMessage> ExecuteWithResilienceAndCachingAsync(
             this HttpClient httpClient,
             HttpRequestMessage request,
@@ -154,11 +174,16 @@ namespace Lidarr.Plugin.Common.Utilities
             // Prefer options
             if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.EndpointKey, out var ep) && request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ParametersKey, out var qp))
             {
-                return (ep ?? NormalizePath(request.RequestUri), ParseQuery(qp));
+                // Include the canonical string directly to ensure cache key invariants match dedup
+                var dict = ParseQuery(qp);
+                dict[Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ParametersKey.Key] = qp ?? string.Empty;
+                return (ep ?? NormalizePath(request.RequestUri), dict);
             }
             if (request.Options.TryGetValue(new HttpRequestOptionsKey<string>("arr.plugin.http.endpoint"), out ep) && request.Options.TryGetValue(new HttpRequestOptionsKey<string>("arr.plugin.http.params"), out qp))
             {
-                return (ep ?? NormalizePath(request.RequestUri), ParseQuery(qp));
+                var dict = ParseQuery(qp);
+                dict[Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ParametersKey.Key] = qp ?? string.Empty;
+                return (ep ?? NormalizePath(request.RequestUri), dict);
             }
             return (NormalizePath(request.RequestUri), ParseQuery(request.RequestUri?.Query ?? string.Empty));
         }
@@ -180,8 +205,16 @@ namespace Lidarr.Plugin.Common.Utilities
                 var kv = part.Split('=', 2);
                 var k = Uri.UnescapeDataString(kv[0]);
                 var v = kv.Length > 1 ? Uri.UnescapeDataString(kv[1]) : string.Empty;
-                // For cache key, collapse multivalue to last occurrence (callers should canonicalize via Options when needed)
-                dict[k] = v;
+                // For cache key, collapse multivalue by joining with comma when repeated keys appear
+                if (dict.TryGetValue(k, out var existing))
+                {
+                    // Keep values sorted at the end (StreamingResponseCache canonicalization prefers the canonical string when present)
+                    dict[k] = existing + "," + v;
+                }
+                else
+                {
+                    dict[k] = v;
+                }
             }
             return dict;
         }

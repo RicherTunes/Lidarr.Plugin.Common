@@ -22,7 +22,11 @@ namespace Lidarr.Plugin.Common.Utilities
             "request_sig",
             "sid",
             "app_secret",
-            "client_secret"
+            "client_secret",
+            "authorization",
+            "x-api-key",
+            "refresh-token",
+            "cookie"
         };
 
         public static bool IsSensitive(string? parameterName)

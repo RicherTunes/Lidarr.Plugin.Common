@@ -6,7 +6,7 @@ namespace Lidarr.Plugin.Common.Interfaces
     /// <summary>
     /// Provides cache policy selection for a given endpoint and parameter set.
     /// </summary>
-    public interface ICachePolicyProvider
+public interface ICachePolicyProvider
     {
         CachePolicy GetPolicy(string endpoint, IReadOnlyDictionary<string, string> parameters);
     }

@@ -6,7 +6,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
     /// <summary>
     /// Compact DTO for caching successful GET responses.
     /// </summary>
-    public sealed class CachedHttpResponse
+    internal sealed class CachedHttpResponse
     {
         public HttpStatusCode StatusCode { get; init; } = HttpStatusCode.OK;
         public string? ContentType { get; init; }

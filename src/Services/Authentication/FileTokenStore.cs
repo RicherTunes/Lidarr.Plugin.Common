@@ -13,7 +13,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
     /// Persists token envelopes to disk using <see cref="System.Text.Json"/>.
     /// </summary>
     /// <typeparam name="TSession">Session representation type.</typeparam>
-    public sealed class FileTokenStore<TSession> : ITokenStore<TSession>
+    internal sealed class FileTokenStore<TSession> : ITokenStore<TSession>
         where TSession : class
     {
         private readonly string _filePath;

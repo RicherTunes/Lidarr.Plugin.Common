@@ -7,7 +7,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
     /// Configuration options for <see cref="StreamingTokenManager{TSession,TCredentials}"/>.
     /// </summary>
     /// <typeparam name="TSession">Session representation type.</typeparam>
-    public class StreamingTokenManagerOptions<TSession>
+public class StreamingTokenManagerOptions<TSession>
         where TSession : class
     {
         /// <summary>
