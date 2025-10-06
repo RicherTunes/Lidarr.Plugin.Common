@@ -131,11 +131,20 @@ jobs:
         run: dotnet restore
       - name: Build (Release, all TFMs)
         run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror
+      - name: Resolve Docker reference (optional)
+        shell: bash
+        run: |
+          # Prefer repository variables if set; otherwise leave empty
+          echo "DOCKER_TAG=${DOCKER_TAG:-${{ vars.DOCKER_TAG }}}" >> $GITHUB_ENV
+          echo "DOCKER_DIGEST=${DOCKER_DIGEST:-${{ vars.DOCKER_DIGEST }}}" >> $GITHUB_ENV
+          echo "Resolved DockerTag='$DOCKER_TAG'"
+          echo "Resolved DockerDigest='$DOCKER_DIGEST'"
+
       - name: Pack nupkg
         run: |
-          dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
-          dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
-          dotnet pack testkit/Lidarr.Plugin.Common.TestKit.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
+          dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:DockerTag="$DOCKER_TAG" -p:DockerDigest="$DOCKER_DIGEST"
+          dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:DockerTag="$DOCKER_TAG" -p:DockerDigest="$DOCKER_DIGEST"
+          dotnet pack testkit/Lidarr.Plugin.Common.TestKit.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:DockerTag="$DOCKER_TAG" -p:DockerDigest="$DOCKER_DIGEST"
       - name: API compatibility (Abstractions vs previous)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
