@@ -10,6 +10,12 @@ namespace Lidarr.Plugin.Common.Utilities
     /// </summary>
     public static class FileSystemUtilities
     {
+        public static void MoveFile(string sourcePath, string destinationPath, bool overwrite)
+        {
+            if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentNullException(nameof(sourcePath));
+            if (string.IsNullOrWhiteSpace(destinationPath)) throw new ArgumentNullException(nameof(destinationPath));
+            File.Move(sourcePath, destinationPath, overwrite);
+        }
         public static string SanitizeFileName(string fileName, int maxLength = 255)
         {
             // Normalize to NFC to avoid cross-OS inconsistencies

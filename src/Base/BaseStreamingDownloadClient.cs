@@ -548,7 +548,7 @@ namespace Lidarr.Plugin.Common.Base
                     // Atomic move to final location (overwrite if exists)
                     try
                     {
-                        FileSystemUtility.MoveFile(tempFilePath, outputFilePath, true);
+                        FileSystemUtilities.MoveFile(tempFilePath, outputFilePath, true);
                     }
                     catch
                     {

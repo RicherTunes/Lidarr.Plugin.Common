@@ -280,6 +280,7 @@ namespace Lidarr.Plugin.Common.Utilities
             var host = request.RequestUri?.Host;
             string hostKey = host ?? "__unknown__";
             string profileTag = "default";
+            var currentUri = request.RequestUri;
             try
             {
                 if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ProfileKey, out string? profile) && !string.IsNullOrWhiteSpace(profile))
@@ -315,6 +316,10 @@ namespace Lidarr.Plugin.Common.Utilities
                     attempt++;
 
                     using var attemptRequest = await CloneForRetryAsync(request).ConfigureAwait(false);
+                    if (currentUri != null)
+                    {
+                        attemptRequest.RequestUri = currentUri;
+                    }
 
                     HttpResponseMessage response;
                     using var httpActivity = Observability.Activity.StartActivity("http.send", ActivityKind.Client);
@@ -372,6 +377,20 @@ namespace Lidarr.Plugin.Common.Utilities
                             httpActivity?.SetTag("resilience.retryable", retryable);
                         }
                         catch { }
+                        // Handle 307/308 redirects preserving method & body
+                        if ((status == 307 || status == 308) && response.Headers.Location != null)
+                        {
+                            try
+                            {
+                                var loc = response.Headers.Location;
+                                var next = loc.IsAbsoluteUri ? loc : new Uri(attemptRequest.RequestUri!, loc);
+                                currentUri = next;
+                                response.Dispose();
+                                // Continue immediately without backoff; do not count against retry budget
+                                continue;
+                            }
+                            catch { /* fall through to return */ }
+                        }
                         return response;
                     }
 
