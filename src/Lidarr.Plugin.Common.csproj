@@ -120,9 +120,9 @@
   <!-- Production consumers: exclude pre-release dependencies by default -->
   <!-- Development teams: enable with -p:IncludeCLIFramework=true -->
   <ItemGroup Condition="'$(IncludeCLIFramework)' == 'true'">
-    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
-    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
-    <PackageReference Include="Spectre.Console" Version="0.50.0" />
+    <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" PrivateAssets="All" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" PrivateAssets="All" />
+    <PackageReference Include="Spectre.Console" Version="0.50.0" PrivateAssets="All" />
   </ItemGroup>
   <!-- Audio Processing Dependencies -->
   <ItemGroup>
