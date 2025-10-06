@@ -816,8 +816,8 @@ namespace Lidarr.Plugin.Common.CLI.Commands
         {
             // In a real implementation, this would load from persistent storage
             // For now, return empty list as placeholder
-            var history = await _stateService.GetAsync<List<CliDownloadItem>>("download_history");
-            return history?.TakeLast(limit).ToList() ?? new List<CliDownloadItem>();
+            var history = await _stateService.TryGetAsync<List<CliDownloadItem>>("download_history");
+            return (history ?? new List<CliDownloadItem>()).TakeLast(limit).ToList();
         }
 
         private string GetStatusDisplay(DownloadStatus status)
