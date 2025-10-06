@@ -12,6 +12,10 @@ public sealed class ResiliencePolicy
         public int MaxRetries { get; }
         public TimeSpan RetryBudget { get; }
         public int MaxConcurrencyPerHost { get; }
+        /// <summary>
+        /// Aggregate cap across all profiles for a given host. When null, falls back to <see cref="MaxConcurrencyPerHost"/>.
+        /// </summary>
+        public int MaxTotalConcurrencyPerHost { get; }
         public TimeSpan? PerRequestTimeout { get; }
         public TimeSpan InitialBackoff { get; }
         public TimeSpan MaxBackoff { get; }
@@ -83,7 +87,8 @@ public sealed class ResiliencePolicy
             TimeSpan initialBackoff,
             TimeSpan maxBackoff,
             TimeSpan? jitterMin = null,
-            TimeSpan? jitterMax = null)
+            TimeSpan? jitterMax = null,
+            int? maxTotalConcurrencyPerHost = null)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -132,6 +137,7 @@ public sealed class ResiliencePolicy
             MaxRetries = maxRetries;
             RetryBudget = retryBudget;
             MaxConcurrencyPerHost = maxConcurrencyPerHost;
+            MaxTotalConcurrencyPerHost = maxTotalConcurrencyPerHost ?? maxConcurrencyPerHost;
             PerRequestTimeout = perRequestTimeout;
             InitialBackoff = initialBackoff;
             MaxBackoff = maxBackoff;
@@ -148,7 +154,8 @@ public sealed class ResiliencePolicy
             TimeSpan? initialBackoff = null,
             TimeSpan? maxBackoff = null,
             TimeSpan? jitterMin = null,
-            TimeSpan? jitterMax = null)
+            TimeSpan? jitterMax = null,
+            int? maxTotalConcurrencyPerHost = null)
         {
             return new ResiliencePolicy(
                 name ?? Name,
@@ -159,7 +166,8 @@ public sealed class ResiliencePolicy
                 initialBackoff ?? InitialBackoff,
                 maxBackoff ?? MaxBackoff,
                 jitterMin ?? JitterMin,
-                jitterMax ?? JitterMax);
+                jitterMax ?? JitterMax,
+                maxTotalConcurrencyPerHost ?? MaxTotalConcurrencyPerHost);
         }
 
         internal TimeSpan ComputeDelay(int attempt)

@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Concurrent;
 using System.Threading;
 
@@ -13,10 +14,12 @@ namespace Lidarr.Plugin.Common.Utilities
             {
                 Semaphore = new SemaphoreSlim(limit, int.MaxValue);
                 Limit = limit;
+                LastUsedUtc = DateTime.UtcNow;
             }
 
             public SemaphoreSlim Semaphore { get; }
             public int Limit { get; private set; }
+            public DateTime LastUsedUtc { get; private set; }
 
             public void EnsureLimit(int requestedLimit)
             {
@@ -37,9 +40,24 @@ namespace Lidarr.Plugin.Common.Utilities
                     Limit = requestedLimit;
                 }
             }
+
+            public void Touch()
+            {
+                LastUsedUtc = DateTime.UtcNow;
+            }
         }
 
         private static readonly ConcurrentDictionary<string, GateState> Gates = new();
+        private static readonly ConcurrentDictionary<string, GateState> AggregateGates = new();
+        private static readonly TimeSpan IdleTtl = TimeSpan.FromMinutes(10);
+        private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(5);
+        private static readonly Timer Sweeper;
+
+        static HostGateRegistry()
+        {
+            // Background sweeper to dispose idle gates and avoid unbounded growth in long-lived processes.
+            Sweeper = new Timer(_ => Sweep(), null, SweepInterval, SweepInterval);
+        }
 
         public static SemaphoreSlim Get(string? host, int requestedLimit)
         {
@@ -53,6 +71,23 @@ namespace Lidarr.Plugin.Common.Utilities
                     return existing;
                 });
 
+            gate.Touch();
+            return gate.Semaphore;
+        }
+
+        public static SemaphoreSlim GetAggregate(string? host, int requestedLimit)
+        {
+            host ??= "__unknown__";
+            var gate = AggregateGates.AddOrUpdate(
+                host,
+                _ => new GateState(requestedLimit),
+                (_, existing) =>
+                {
+                    existing.EnsureLimit(requestedLimit);
+                    return existing;
+                });
+
+            gate.Touch();
             return gate.Semaphore;
         }
 
@@ -77,6 +112,44 @@ namespace Lidarr.Plugin.Common.Utilities
             if (Gates.TryRemove(host, out var gate))
             {
                 gate.Semaphore.Dispose();
+            }
+            if (AggregateGates.TryRemove(host, out var agg))
+            {
+                agg.Semaphore.Dispose();
+            }
+        }
+
+        private static void Sweep()
+        {
+            try
+            {
+                var now = DateTime.UtcNow;
+                foreach (var kv in Gates)
+                {
+                    var state = kv.Value;
+                    if (state.Semaphore.CurrentCount == state.Limit && (now - state.LastUsedUtc) > IdleTtl)
+                    {
+                        if (Gates.TryRemove(kv.Key, out var removed))
+                        {
+                            removed.Semaphore.Dispose();
+                        }
+                    }
+                }
+                foreach (var kv in AggregateGates)
+                {
+                    var state = kv.Value;
+                    if (state.Semaphore.CurrentCount == state.Limit && (now - state.LastUsedUtc) > IdleTtl)
+                    {
+                        if (AggregateGates.TryRemove(kv.Key, out var removed))
+                        {
+                            removed.Semaphore.Dispose();
+                        }
+                    }
+                }
+            }
+            catch
+            {
+                // best-effort cleanup; ignore sweep errors
             }
         }
     }

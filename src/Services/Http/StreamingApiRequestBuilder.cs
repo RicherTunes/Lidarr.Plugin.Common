@@ -23,6 +23,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         private string _endpoint;
         private TimeSpan? _timeout;
         private ResiliencePolicy _policy;
+        private string _authScopeToken;
 
         public StreamingApiRequestBuilder(string baseUrl)
         {
@@ -215,6 +216,20 @@ namespace Lidarr.Plugin.Common.Services.Http
 
         internal ResiliencePolicy? Policy => _policy;
 
+        /// <summary>
+        /// Stamps a non-PII auth scope token onto the request for cache/dedup variance when policy opts-in.
+        /// The raw scope is hashed via SHA-256 and truncated to 16 hex chars.
+        /// </summary>
+        public StreamingApiRequestBuilder WithAuthScope(string scopeRaw)
+        {
+            if (!string.IsNullOrWhiteSpace(scopeRaw))
+            {
+                var hash = HashingUtility.ComputeSHA256(scopeRaw);
+                _authScopeToken = hash.Length > 16 ? hash.Substring(0, 16) : hash;
+            }
+            return this;
+        }
+
         public StreamingApiRequestBuilder WithStreamingDefaults(string userAgent = null)
         {
             _headers["Accept"] = "application/json";
@@ -288,6 +303,11 @@ namespace Lidarr.Plugin.Common.Services.Http
                 if (!string.IsNullOrEmpty(canonicalQuery))
                 {
                     request.Options.Set(PluginHttpOptions.ParametersKey, canonicalQuery);
+                }
+
+                if (!string.IsNullOrWhiteSpace(_authScopeToken))
+                {
+                    request.Options.Set(PluginHttpOptions.AuthScopeKey, _authScopeToken);
                 }
             }
             catch

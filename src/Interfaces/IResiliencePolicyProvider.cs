@@ -21,6 +21,10 @@ namespace Lidarr.Plugin.Common.Interfaces
         public int MaxRetries { get; init; } = 5;
         public TimeSpan? RetryBudget { get; init; } = TimeSpan.FromSeconds(60);
         public int MaxConcurrencyPerHost { get; init; } = 6;
+        /// <summary>
+        /// Aggregate cap across all profiles for a given host. When 0 or negative, falls back to <see cref="MaxConcurrencyPerHost"/>.
+        /// </summary>
+        public int MaxTotalConcurrencyPerHost { get; init; } = 0;
         public TimeSpan? PerRequestTimeout { get; init; }
     }
 }

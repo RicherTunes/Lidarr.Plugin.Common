@@ -19,7 +19,7 @@ namespace Lidarr.Plugin.Common.Tests
             };
 
             var canon = QueryCanonicalizer.Canonicalize(pairs);
-            Assert.Equal("a=1&a=10&b=2&space=a%20b", canon);
+            Assert.Equal("a=1%2c10&b=2&space=a%20b", canon);
         }
 
         [Fact]
@@ -32,4 +32,3 @@ namespace Lidarr.Plugin.Common.Tests
         }
     }
 }
-

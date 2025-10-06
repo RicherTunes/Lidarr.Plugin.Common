@@ -18,9 +18,15 @@
 
   <ItemGroup>
     <ProjectReference Include="..\src\Lidarr.Plugin.Common.csproj">
-      <AdditionalProperties>IncludeCLIFramework=true</AdditionalProperties>
+      <AdditionalProperties>IncludeCLIFramework=$(IncludeCLIFramework)</AdditionalProperties>
     </ProjectReference>
     <ProjectReference Include="..\src\Abstractions\Lidarr.Plugin.Abstractions.csproj" />
     <ProjectReference Include="..\testkit\Lidarr.Plugin.Common.TestKit.csproj" />
+  </ItemGroup>
+
+  <!-- Exclude CLI-specific tests unless the CLI framework is included -->
+  <ItemGroup Condition="'$(IncludeCLIFramework)' != 'true'">
+    <Compile Remove="CLIServicesTryGetTests.cs" />
+    <Compile Remove="ConfigCommandTests.cs" />
   </ItemGroup>
 </Project>

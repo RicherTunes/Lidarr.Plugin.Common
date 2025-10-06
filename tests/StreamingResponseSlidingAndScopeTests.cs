@@ -49,7 +49,7 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public void Scope_Component_Varies_Cache_Key_When_Present()
         {
-            var policy = CachePolicy.Default;
+            var policy = CachePolicy.Default.With(varyByScope: true);
             var cache = new TestCache(new PolicyProvider(policy));
 
             var p1 = new Dictionary<string, string> { { "q", "beatles" }, { "scope", "user:1" } };
@@ -63,4 +63,3 @@ namespace Lidarr.Plugin.Common.Tests
         }
     }
 }
-
