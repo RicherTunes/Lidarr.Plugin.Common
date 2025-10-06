@@ -64,7 +64,7 @@ jobs:
         run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net6.0
 
       - name: Build (Release, warnings as errors)
-        run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true -p:EnableNETAnalyzers=true -p:RunAnalyzersDuringBuild=true -p:TreatWarningsAsErrors=true
+        run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true
 
       - name: Test (all TFMs) + coverage
         run: >
