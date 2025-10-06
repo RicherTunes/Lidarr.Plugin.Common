@@ -277,10 +277,20 @@ namespace Lidarr.Plugin.Common.Utilities
             var effectiveToken = timeoutCts?.Token ?? cancellationToken;
             var deadline = DateTime.UtcNow + retryBudget.Value;
             var attempt = 0;
-            var host = request.RequestUri?.Host;
+            // Resolve relative URIs against HttpClient.BaseAddress when present
+            Uri? currentUri = request.RequestUri;
+            if (currentUri != null && !currentUri.IsAbsoluteUri)
+            {
+                if (httpClient.BaseAddress == null)
+                {
+                    throw new InvalidOperationException("Relative RequestUri without HttpClient.BaseAddress.");
+                }
+                currentUri = new Uri(httpClient.BaseAddress, currentUri);
+            }
+
+            var host = currentUri?.Host;
             string hostKey = host ?? "__unknown__";
             string profileTag = "default";
-            var currentUri = request.RequestUri;
             try
             {
                 if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ProfileKey, out string? profile) && !string.IsNullOrWhiteSpace(profile))
@@ -316,10 +326,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     attempt++;
 
                     using var attemptRequest = await CloneForRetryAsync(request).ConfigureAwait(false);
-                    if (currentUri != null)
-                    {
-                        attemptRequest.RequestUri = currentUri;
-                    }
+                    if (currentUri != null) { attemptRequest.RequestUri = currentUri; }
 
                     HttpResponseMessage response;
                     using var httpActivity = Observability.Activity.StartActivity("http.send", ActivityKind.Client);
@@ -383,8 +390,10 @@ namespace Lidarr.Plugin.Common.Utilities
                             try
                             {
                                 var loc = response.Headers.Location;
-                                var next = loc.IsAbsoluteUri ? loc : new Uri(attemptRequest.RequestUri!, loc);
-                                currentUri = next;
+                                currentUri = loc.IsAbsoluteUri ? loc : new Uri(attemptRequest.RequestUri!, loc);
+                                // Update host keys for new location
+                                host = currentUri.Host;
+                                hostKey = host ?? "__unknown__";
                                 response.Dispose();
                                 // Continue immediately without backoff; do not count against retry budget
                                 continue;
