@@ -542,15 +542,7 @@ namespace Lidarr.Plugin.Common.Utilities
             string userAgent = null,
             Dictionary<string, string> additionalHeaders = null)
         {
-            if (!string.IsNullOrEmpty(userAgent))
-            {
-                request.Headers.Add("User-Agent", userAgent);
-            }
-
-            // Common headers for streaming APIs
-            request.Headers.Add("Accept", "application/json");
-            // Do not set Accept-Encoding here; rely on the HTTP handler configuration.
-            request.Headers.Add("Accept-Language", "en-US,en;q=0.9");
+            Lidarr.Plugin.Common.Services.Http.StreamingHeaderDefaults.ApplyTo(request, userAgent);
 
             if (additionalHeaders != null)
             {
