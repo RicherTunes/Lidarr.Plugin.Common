@@ -232,15 +232,7 @@ namespace Lidarr.Plugin.Common.Services.Http
 
         public StreamingApiRequestBuilder WithStreamingDefaults(string userAgent = null)
         {
-            _headers["Accept"] = "application/json";
-            // Let the HTTP handler negotiate Accept-Encoding based on AutomaticDecompression settings.
-            _headers["Accept-Language"] = "en-US,en;q=0.9";
-
-            if (!string.IsNullOrEmpty(userAgent))
-            {
-                _headers["User-Agent"] = userAgent;
-            }
-
+            StreamingHeaderDefaults.ApplyTo(_headers, userAgent);
             return this;
         }
 
