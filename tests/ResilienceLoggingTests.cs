@@ -11,7 +11,7 @@ namespace Lidarr.Plugin.Common.Tests
         {
             public ConcurrentQueue<EventId> Events { get; } = new();
 
-            public IDisposable BeginScope<TState>(TState state) => Null;
+            public IDisposable BeginScope<TState>(TState state) where TState : notnull => Null;
             public bool IsEnabled(LogLevel logLevel) => true;
             public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
             {
@@ -46,4 +46,3 @@ namespace Lidarr.Plugin.Common.Tests
         }
     }
 }
-

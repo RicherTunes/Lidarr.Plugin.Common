@@ -27,10 +27,11 @@ if (-not (Test-Path -LiteralPath $ManifestPath)) {
 $nsmgr = New-Object System.Xml.XmlNamespaceManager($project.NameTable)
 $nsmgr.AddNamespace('msb', 'http://schemas.microsoft.com/developer/msbuild/2003')
 
+# Resolve Version with namespace-aware query then fallback to no-namespace projects
 $versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:Version', $nsmgr)
-if (-not $versionNode) {
-    $versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:AssemblyVersion', $nsmgr)
-}
+if (-not $versionNode) { $versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:AssemblyVersion', $nsmgr) }
+if (-not $versionNode) { $versionNode = $project.SelectSingleNode('//Project/PropertyGroup/Version') }
+if (-not $versionNode) { $versionNode = $project.SelectSingleNode('//Project/PropertyGroup/AssemblyVersion') }
 if (-not $versionNode) {
     throw "Unable to resolve Version from '$ProjectPath'."
 }
@@ -43,7 +44,9 @@ if (-not $manifest.version) {
 }
 
 $packageReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:PackageReference[@Include='$AbstractionsPackage']", $nsmgr)
+if (-not $packageReference) { $packageReference = $project.SelectSingleNode("//Project/ItemGroup/PackageReference[@Include='$AbstractionsPackage']") }
 $projectReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:ProjectReference[contains(@Include, 'Lidarr.Plugin.Abstractions.csproj') or contains(@Include, 'Abstractions')]", $nsmgr)
+if (-not $projectReference) { $projectReference = $project.SelectSingleNode("//Project/ItemGroup/ProjectReference[contains(@Include, 'Lidarr.Plugin.Abstractions.csproj') or contains(@Include, 'Abstractions')]") }
 
 $packageMajor = $null
 $packageVersion = $null
@@ -64,50 +67,51 @@ else {
     throw "Project '$ProjectPath' must reference $AbstractionsPackage either as a PackageReference or ProjectReference."
 }
 
-$errors = @()
-$warnings = @()
+$errorList = @()
+$warningList = @()
 
 if ($manifest.version -ne $projectVersion) {
-    $errors += "Manifest version '$($manifest.version)' does not match project Version '$projectVersion'."
+    $errorList += "Manifest version '$($manifest.version)' does not match project Version '$projectVersion'."
 }
 
 if (-not $manifest.apiVersion) {
-    $errors += "Manifest missing 'apiVersion'."
+    $errorList += "Manifest missing 'apiVersion'."
 }
 elseif ($manifest.apiVersion -notmatch '^\d+\.x$') {
-    $errors += "apiVersion must be in 'major.x' form (e.g. '1.x')."
+    $errorList += "apiVersion must be in 'major.x' form (e.g. '1.x')."
 }
 else {
     $apiMajor = ($manifest.apiVersion -split '\.')[0]
     if ($packageMajor) {
         if ($apiMajor -ne $packageMajor) {
-            $errors += "apiVersion major $apiMajor does not match $AbstractionsPackage major $packageMajor."
+            $errorList += "apiVersion major $apiMajor does not match $AbstractionsPackage major $packageMajor."
         }
     } elseif ($usingProjectRef) {
         if (-not $manifest.commonVersion) {
             $msg = "MAN001: Using in-repo $AbstractionsPackage via ProjectReference; 'manifest.commonVersion' is required to validate apiVersion."
-            if ($Strict) { $errors += $msg } else { $warnings += $msg }
+            if ($Strict) { $errorList += $msg } else { $warningList += $msg }
         } else {
             $commonMajor = ($manifest.commonVersion -split '\.')[0]
             if ($apiMajor -ne $commonMajor) {
                 $msg = "MAN001: apiVersion major $apiMajor does not match manifest.commonVersion major $commonMajor (ProjectReference in use)."
-                if ($Strict) { $errors += $msg } else { $warnings += $msg }
+                if ($Strict) { $errorList += $msg } else { $warningList += $msg }
             } else {
-                $warnings += "MAN001: ProjectReference to in-repo abstractions detected; using manifest.commonVersion '$($manifest.commonVersion)' for validation."
+                $msg = "MAN001: ProjectReference to in-repo abstractions detected; using manifest.commonVersion '$($manifest.commonVersion)' for validation."
+                if ($Strict) { $errorList += $msg } else { $warningList += $msg }
             }
         }
     }
 }
 
 if (-not $manifest.minHostVersion) {
-    $warnings += "minHostVersion is not set; host compatibility cannot be enforced."
+    $warningList += "minHostVersion is not set; host compatibility cannot be enforced."
 }
 
 if ($manifest.targets) {
     $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFrameworks', $nsmgr)
-    if (-not $tfmNode) {
-        $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFramework', $nsmgr)
-    }
+    if (-not $tfmNode) { $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFramework', $nsmgr) }
+    if (-not $tfmNode) { $tfmNode = $project.SelectSingleNode('//Project/PropertyGroup/TargetFrameworks') }
+    if (-not $tfmNode) { $tfmNode = $project.SelectSingleNode('//Project/PropertyGroup/TargetFramework') }
     $projectTfms = if ($tfmNode) { $tfmNode.InnerText.Split(';') | ForEach-Object { $_.Trim() } } else { @() }
 
     $missing = @()
@@ -117,19 +121,19 @@ if ($manifest.targets) {
         }
     }
     if ($missing.Count -gt 0) {
-        $errors += "Project is missing TargetFramework(s): $($missing -join ', ') referenced in manifest.targets."
+        $errorList += "Project is missing TargetFramework(s): $($missing -join ', ') referenced in manifest.targets."
     }
 }
 
-if ($errors.Count -gt 0) {
-    foreach ($error in $errors) {
-        Write-Error $error
+if ($errorList.Count -gt 0) {
+    foreach ($msg in $errorList) {
+        Write-Error $msg
     }
     throw "Manifest validation failed."
 }
 
-foreach ($warning in $warnings) {
-    Write-Warning $warning
+foreach ($msg in $warningList) {
+    Write-Warning $msg
 }
 
 Write-Host "Manifest validation succeeded for '$ManifestPath'." -ForegroundColor Green
