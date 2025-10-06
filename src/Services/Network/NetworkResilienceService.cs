@@ -11,8 +11,10 @@ using Lidarr.Plugin.Common.Utilities;
 namespace Lidarr.Plugin.Common.Services.Network
 {
     /// <summary>
-    /// Network resilience service that handles network failures and partitions during batch operations
-    /// Provides atomic operations, rollback capabilities, and intelligent recovery strategies
+    /// Network resilience service for coordinating batch operations and non-HTTP workflows.
+    /// For outbound HTTP, this service delegates to the unified HTTP executor to prevent drift
+    /// and avoid double-retry. Use <see cref="HttpClientExtensions.ExecuteWithResilienceAsync(HttpClient, HttpRequestMessage, ResiliencePolicy, CancellationToken)"/>
+    /// for all HTTP calls; this service remains as a thin adapter for batches and cross-cutting policies.
     /// </summary>
     /// <remarks>
     /// Critical Issue: Network failures during batch operations cause:
