@@ -224,17 +224,36 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             private readonly FileStream _lockStream;
             public FileLockScope(string name, CancellationToken cancellationToken)
             {
-                // Use a lock file in the same directory as the target but based on lock name
+                // Use a lock file in the OS temp directory; exclusive open provides cross-process coordination
                 var tempDir = Path.GetTempPath();
                 var lockPath = Path.Combine(tempDir, name + ".lock");
                 Directory.CreateDirectory(Path.GetDirectoryName(lockPath)!);
-                _lockStream = new FileStream(lockPath, new FileStreamOptions
+
+                var deadline = DateTime.UtcNow + TimeSpan.FromSeconds(60);
+                while (true)
                 {
-                    Access = FileAccess.ReadWrite,
-                    Mode = FileMode.OpenOrCreate,
-                    Share = FileShare.None,
-                    Options = FileOptions.DeleteOnClose
-                });
+                    cancellationToken.ThrowIfCancellationRequested();
+                    try
+                    {
+                        _lockStream = new FileStream(lockPath, new FileStreamOptions
+                        {
+                            Access = FileAccess.ReadWrite,
+                            Mode = FileMode.OpenOrCreate,
+                            Share = FileShare.None,
+                            Options = FileOptions.DeleteOnClose
+                        });
+                        break; // acquired
+                    }
+                    catch (IOException)
+                    {
+                        if (DateTime.UtcNow >= deadline)
+                        {
+                            throw; // give up after timeout; surface original sharing violation
+                        }
+                        // Brief backoff before retrying; use a small sleep to avoid busy-wait
+                        Thread.Sleep(50);
+                    }
+                }
             }
             public void Dispose()
             {
