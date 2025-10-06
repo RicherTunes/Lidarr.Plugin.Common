@@ -83,6 +83,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 policy.PerRequestTimeout,
                 cancellationToken);
         }
+        
 
         public static async Task<HttpResponseMessage> SendWithResilienceAsync(
             this HttpClient httpClient,
@@ -256,7 +257,7 @@ namespace Lidarr.Plugin.Common.Utilities
             string hostKey = host ?? "__unknown__";
             try
             {
-                if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ProfileKey, out string profile) && !string.IsNullOrWhiteSpace(profile))
+                if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ProfileKey, out string? profile) && !string.IsNullOrWhiteSpace(profile))
                 {
                     hostKey = hostKey + "|" + profile;
                 }
@@ -535,12 +536,33 @@ namespace Lidarr.Plugin.Common.Utilities
             string profile = string.Empty;
             string canonical = string.Empty;
             string scope = string.Empty;
-            try { request.Options.TryGetValue(Services.Http.PluginHttpOptions.EndpointKey, out endpoint); } catch { }
-            try { request.Options.TryGetValue(Services.Http.PluginHttpOptions.ProfileKey, out profile); } catch { }
-            try { request.Options.TryGetValue(Services.Http.PluginHttpOptions.ParametersKey, out canonical); } catch { }
-            try { request.Options.TryGetValue(Services.Http.PluginHttpOptions.AuthScopeKey, out scope); } catch { }
 
-            var parts = new[] { method, authority, endpoint ?? string.Empty, canonical ?? string.Empty, scope ?? string.Empty, profile ?? string.Empty };
+            try
+            {
+                if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.EndpointKey, out string? ep) && ep != null)
+                    endpoint = ep;
+            }
+            catch { }
+            try
+            {
+                if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.ProfileKey, out string? pr) && pr != null)
+                    profile = pr;
+            }
+            catch { }
+            try
+            {
+                if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.ParametersKey, out string? ca) && ca != null)
+                    canonical = ca;
+            }
+            catch { }
+            try
+            {
+                if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.AuthScopeKey, out string? sc) && sc != null)
+                    scope = sc;
+            }
+            catch { }
+
+            var parts = new[] { method, authority, endpoint, canonical, scope, profile };
             return HashingUtility.ComputeSHA256(string.Join("\n", parts));
         }
 

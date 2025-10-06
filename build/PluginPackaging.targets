@@ -113,6 +113,8 @@
         <Version ParameterType="System.String" Required="true" />
         <TargetFramework ParameterType="System.String" Required="true" />
         <Commit ParameterType="System.String" Required="false" />
+        <DockerTag ParameterType="System.String" Required="false" />
+        <DockerDigest ParameterType="System.String" Required="false" />
         <Dependencies ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="false" />
       </ParameterGroup>
       <Task>
@@ -142,6 +144,13 @@
               sw.WriteLine($"    \"{deps[i]}\"{comma}");
             }
             sw.WriteLine("  ]");
+            // Optional docker metadata when builds run under CI
+            if (!string.IsNullOrWhiteSpace(DockerTag)) {
+              sw.WriteLine($",\n  \"dockerTag\": \"{DockerTag}\"");
+            }
+            if (!string.IsNullOrWhiteSpace(DockerDigest)) {
+              sw.WriteLine($",\n  \"dockerDigest\": \"{DockerDigest}\"");
+            }
             sw.WriteLine("}");
           ]]>
         </Code>
@@ -154,6 +163,8 @@
                        Version="$(Version)"
                        TargetFramework="$(TargetFramework)"
                        Commit="$(SourceRevisionId)"
+                       DockerTag="$(DockerTag)"
+                       DockerDigest="$(DockerDigest)"
                        Dependencies="@(_MergedDependencies)" />
 
     <Error Text="Blocked residual assemblies present in output: @(_BlockedResidual)"
