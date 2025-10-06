@@ -6,6 +6,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
+using Lidarr.Plugin.Common.Utilities;
 
 namespace Lidarr.Plugin.Common.Services.Network
 {
@@ -54,6 +55,86 @@ namespace Lidarr.Plugin.Common.Services.Network
             _healthMonitor = new NetworkHealthMonitor(_logger);
             _activeBatchOperations = new Dictionary<string, BatchOperationState>();
             _operationLock = new SemaphoreSlim(1, 1);
+        }
+
+        /// <summary>
+        /// Thin adapter that executes a batch of HTTP requests via the shared HTTP resilience executor.
+        /// Avoids double-retry by delegating all retry behavior to <see cref="HttpClientExtensions.ExecuteWithResilienceAsync(HttpClient, HttpRequestMessage, ResiliencePolicy, CancellationToken)"/>.
+        /// Batch-level checkpoints/circuit-breaker are still honored.
+        /// </summary>
+        public async Task<ResilientBatchResult<HttpResponseMessage>> ExecuteHttpBatchAsync(
+            string operationId,
+            IEnumerable<HttpRequestMessage> requests,
+            HttpClient httpClient,
+            ResiliencePolicy policy,
+            NetworkResilienceOptions options = null,
+            IProgress<BatchProgress> progress = null,
+            CancellationToken cancellationToken = default)
+        {
+            if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
+            if (policy == null) throw new ArgumentNullException(nameof(policy));
+            options ??= NetworkResilienceOptions.Default;
+
+            var requestList = requests?.ToList() ?? new List<HttpRequestMessage>();
+            var total = requestList.Count;
+            var result = new ResilientBatchResult<HttpResponseMessage>
+            {
+                OperationId = operationId,
+                IsSuccessful = true
+            };
+
+            var started = DateTime.UtcNow;
+            for (int i = 0; i < total; i++)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                if (IsCircuitBreakerOpen())
+                {
+                    _logger.LogWarning("Circuit breaker open; aborting HTTP batch '{OperationId}'", operationId);
+                    result.IsSuccessful = false;
+                    result.FailureReason = "Circuit breaker open";
+                    result.CanRetryLater = true;
+                    break;
+                }
+
+                var req = requestList[i];
+                try
+                {
+                    // Delegate resilience to central HTTP path; no local retry here
+                    var resp = await httpClient.ExecuteWithResilienceAsync(req, policy, cancellationToken).ConfigureAwait(false);
+                    RecordSuccess();
+                    result.Results.Add(resp);
+                }
+                catch (Exception ex)
+                {
+                    RecordFailure();
+                    result.IsSuccessful = false;
+                    result.Failures.Add(new BatchItemFailure
+                    {
+                        ItemIndex = i,
+                        Error = ex,
+                        CanRetry = false
+                    });
+
+                    if (!options.ContinueOnFailure)
+                    {
+                        result.FailureReason = ex.Message;
+                        break;
+                    }
+                }
+
+                progress?.Report(new BatchProgress
+                {
+                    CompletedItems = i + 1,
+                    TotalItems = total,
+                    SuccessfulItems = result.Results.Count,
+                    FailedItems = result.Failures.Count,
+                    CurrentItem = i
+                });
+            }
+
+            result.CompletionTime = DateTime.UtcNow - started;
+            return result;
         }
 
         /// <summary>

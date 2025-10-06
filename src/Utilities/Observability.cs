@@ -39,6 +39,12 @@ namespace Lidarr.Plugin.Common.Utilities
                 unit: null,
                 description: "Number of authentication/session refresh operations.");
 
+#pragma warning disable IDE1006
+            public static readonly Counter<long> ResilienceNonDI = Meter.CreateCounter<long>(
+                name: "resilience.non_di",
+                unit: null,
+                description: "Count of non-DI resilience calls (builder without policy). Logged once per process via metric.");
+#pragma warning restore IDE1006
             // Prefer UpDownCounter on NET8+, otherwise omit inflight tracking (callers should #if when using this).
 #if NET8_0_OR_GREATER
             public static readonly UpDownCounter<long> RateLimiterInflight = Meter.CreateUpDownCounter<long>(

@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Http;
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Common.Services.Deduplication;
+using System.ComponentModel;
 
 namespace Lidarr.Plugin.Common.Utilities
 {
@@ -25,6 +26,7 @@ namespace Lidarr.Plugin.Common.Utilities
         /// <summary>
         /// Executes an HTTP request with built-in retry logic and error handling.
         /// </summary>
+        [EditorBrowsable(EditorBrowsableState.Never)]
         public static async Task<HttpResponseMessage> ExecuteWithRetryAsync(
             this HttpClient httpClient,
             HttpRequestMessage request,
@@ -132,6 +134,15 @@ namespace Lidarr.Plugin.Common.Utilities
                         builder.Policy,
                         cancellationToken).ConfigureAwait(false);
                 }
+                // Warn/measure once when callers bypass DI policy path
+                try
+                {
+                    if (Interlocked.Exchange(ref s_nonDiWarned, 1) == 0)
+                    {
+                        Observability.Metrics.ResilienceNonDI.Add(1);
+                    }
+                }
+                catch { }
 
                 return await httpClient.ExecuteWithResilienceAsync(
                     request,
@@ -146,6 +157,8 @@ namespace Lidarr.Plugin.Common.Utilities
                 request.Dispose();
             }
         }
+
+        private static int s_nonDiWarned = 0;
 
         /// <summary>
         /// Sends a request with resilience and singleflight deduplication for identical GETs.
