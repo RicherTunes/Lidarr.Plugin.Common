@@ -9,7 +9,7 @@ namespace Lidarr.Plugin.Common.Interfaces
     /// Persists authentication sessions for streaming providers.
     /// </summary>
     /// <typeparam name="TSession">Type representing the authenticated session token.</typeparam>
-    public interface ITokenStore<TSession>
+public interface ITokenStore<TSession>
         where TSession : class
     {
         /// <summary>
@@ -37,7 +37,7 @@ namespace Lidarr.Plugin.Common.Interfaces
     /// Represents a persisted authentication session together with expiry metadata.
     /// </summary>
     /// <typeparam name="TSession">Type representing the authenticated session token.</typeparam>
-    public sealed class TokenEnvelope<TSession>
+public sealed class TokenEnvelope<TSession>
         where TSession : class
     {
         /// <summary>

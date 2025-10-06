@@ -62,7 +62,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// <summary>
         /// Gets a valid session, refreshing if necessary and supported.
         /// </summary>
-        public virtual async Task<TSession> GetValidSessionAsync()
+        public virtual async Task<TSession?> GetValidSessionAsync()
         {
             var cachedSession = GetCachedSession();
 

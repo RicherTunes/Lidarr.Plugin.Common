@@ -9,7 +9,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
     /// In-memory token store suitable for tests or transient runtime scenarios.
     /// </summary>
     /// <typeparam name="TSession">Session representation type.</typeparam>
-    public sealed class MemoryTokenStore<TSession> : ITokenStore<TSession>
+    internal sealed class MemoryTokenStore<TSession> : ITokenStore<TSession>
         where TSession : class
     {
         private readonly object _sync = new();

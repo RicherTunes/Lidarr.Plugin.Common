@@ -78,8 +78,8 @@ namespace Lidarr.Plugin.Common.Services.Http
                 _refreshLock.Release();
             }
 
-            // Retry once with a fresh token
-            using var retry = await HttpClientExtensions.CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
+            // Retry once with a fresh token (buffer content safely)
+            using var retry = await HttpClientExtensions.CloneForRetryAsync(request).ConfigureAwait(false);
             var fresh = await _tokenProvider.GetAccessTokenAsync().ConfigureAwait(false);
             if (!string.IsNullOrEmpty(fresh))
             {

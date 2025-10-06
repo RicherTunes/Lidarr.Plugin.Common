@@ -6,7 +6,7 @@ namespace Lidarr.Plugin.Common.Utilities
     /// Describes the resilience characteristics used when executing outbound HTTP or HTTP-like requests.
     /// Immutable and thread-safe.
     /// </summary>
-    public sealed class ResiliencePolicy
+public sealed class ResiliencePolicy
     {
         public string Name { get; }
         public int MaxRetries { get; }
