@@ -46,8 +46,10 @@
   </PropertyGroup>
   <!-- Make PublicAPI baselines visible to analyzer tools (e.g., dotnet format) without relying on build targets -->
   <ItemGroup>
-    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/net6.0/PublicAPI.Shipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/net6.0/PublicAPI.Unshipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/net8.0/PublicAPI.Shipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/net8.0/PublicAPI.Unshipped.txt')" />
   </ItemGroup>
 
   <PropertyGroup>
