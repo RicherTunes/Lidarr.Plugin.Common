@@ -8,7 +8,7 @@ namespace Lidarr.Plugin.Common.Interfaces
     /// Optional conditional request validators (e.g., ETag/Last-Modified) storage.
     /// Implemented by plugins that want to enable 304 revalidation for GETs.
     /// </summary>
-    internal interface IConditionalRequestState
+    public interface IConditionalRequestState
     {
         /// <summary>Try get validators for a cache key (may return null if none).</summary>
         ValueTask<(string? ETag, DateTimeOffset? LastModified)?> TryGetValidatorsAsync(string cacheKey, CancellationToken cancellationToken = default);
