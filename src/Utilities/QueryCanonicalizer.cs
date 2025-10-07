@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace Lidarr.Plugin.Common.Utilities
 {
-    internal static class QueryCanonicalizer
+    public static class QueryCanonicalizer
     {
         public static string Canonicalize(IEnumerable<KeyValuePair<string, string>> pairs)
         {
