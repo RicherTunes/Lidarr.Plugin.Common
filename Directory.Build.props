@@ -10,6 +10,7 @@
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+    <Deterministic>true</Deterministic>
     <!-- Map project directories to a stable root to avoid leaking developer paths in PDBs -->
     <PathMap>$(MSBuildProjectDirectory)=/src</PathMap>
   </PropertyGroup>

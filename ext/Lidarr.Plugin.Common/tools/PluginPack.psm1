@@ -205,3 +205,4 @@ function Invoke-PluginMerge {
 
 Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage
 # end-snippet
+
