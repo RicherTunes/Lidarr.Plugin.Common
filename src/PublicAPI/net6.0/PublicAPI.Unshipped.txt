@@ -1,5 +1,17 @@
 #nullable enable
 
+T:Lidarr.Plugin.Common.Utilities.QueryCanonicalizer
+M:Lidarr.Plugin.Common.Utilities.QueryCanonicalizer.Canonicalize(System.Collections.Generic.IEnumerable{System.Collections.Generic.KeyValuePair{System.String,System.String}})
+M:Lidarr.Plugin.Common.Utilities.QueryCanonicalizer.Canonicalize(System.Collections.Generic.IDictionary{System.String,System.Collections.Generic.IEnumerable{System.String}})
+T:Lidarr.Plugin.Common.Services.Http.DefaultProfiles
+F:Lidarr.Plugin.Common.Services.Http.DefaultProfiles.Auth
+F:Lidarr.Plugin.Common.Services.Http.DefaultProfiles.Search
+F:Lidarr.Plugin.Common.Services.Http.DefaultProfiles.Details
+F:Lidarr.Plugin.Common.Services.Http.DefaultProfiles.Catalog
+F:Lidarr.Plugin.Common.Services.Http.DefaultProfiles.Library
+F:Lidarr.Plugin.Common.Services.Http.DefaultProfiles.Download
+F:Lidarr.Plugin.Common.Services.Http.DefaultProfiles.Default
+
 Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.GetValidSessionAsync() -> System.Threading.Tasks.Task<TSession?>!
 virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.GetValidSessionAsync() -> System.Threading.Tasks.Task<TSession?>!
 static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.CloneForRetryAsync(System.Net.Http.HttpRequestMessage! request) -> System.Threading.Tasks.Task<System.Net.Http.HttpRequestMessage!>!
