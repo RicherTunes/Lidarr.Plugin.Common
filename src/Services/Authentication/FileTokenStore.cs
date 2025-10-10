@@ -102,12 +102,14 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             {
                 using var cp = AcquireCrossProcessLock(_lockName, cancellationToken);
                 var persisted = PersistedEnvelope.FromEnvelope(envelope);
-                var tempPath = _filePath + ".tmp";
+
+                // Use a unique temp file name per save to avoid sharing violations
+                var tempPath = _filePath + "." + Guid.NewGuid().ToString("n") + ".tmp";
 
                 await using (var stream = new FileStream(tempPath, new FileStreamOptions
                 {
                     Access = FileAccess.Write,
-                    Mode = FileMode.Create,
+                    Mode = FileMode.CreateNew,
                     Share = FileShare.None,
                     Options = FileOptions.Asynchronous
                 }))
@@ -116,21 +118,34 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 }
 
-                // Replace atomically when destination exists; otherwise a simple move is sufficient
-                if (File.Exists(_filePath))
+                // Replace atomically when destination exists; otherwise a simple move is sufficient.
+                // Add a small retry to mitigate transient Windows file locks (e.g., antivirus/indexer).
+                for (int attempt = 0; ; attempt++)
                 {
                     try
                     {
-                        File.Replace(tempPath, _filePath, destinationBackupFileName: null);
+                        if (File.Exists(_filePath))
+                        {
+                            try
+                            {
+                                File.Replace(tempPath, _filePath, destinationBackupFileName: null);
+                            }
+                            catch (PlatformNotSupportedException)
+                            {
+                                File.Move(tempPath, _filePath, overwrite: true);
+                            }
+                        }
+                        else
+                        {
+                            File.Move(tempPath, _filePath, overwrite: true);
+                        }
+                        break; // success
                     }
-                    catch (PlatformNotSupportedException)
+                    catch (IOException) when (attempt < 10)
                     {
-                        File.Move(tempPath, _filePath, overwrite: true);
+                        Thread.Sleep(50);
+                        continue;
                     }
-                }
-                else
-                {
-                    File.Move(tempPath, _filePath, overwrite: true);
                 }
             }
             catch (Exception ex) when (ex is IOException or JsonException)
