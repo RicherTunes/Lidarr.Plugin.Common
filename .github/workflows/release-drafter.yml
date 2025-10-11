@@ -7,6 +7,9 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review, labeled, unlabeled]
 
+permissions:
+  contents: read
+
 jobs:
   update_draft_release:
     runs-on: ubuntu-latest
