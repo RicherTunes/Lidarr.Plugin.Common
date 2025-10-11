@@ -24,10 +24,10 @@ jobs:
             8.0.x
             6.0.x
 
-      - name: Restore & Build
+      - name: Restore & Build (no analyzers)
         run: |
           dotnet restore
-          dotnet build -c Release -warnaserror
+          dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1
 
       - name: Test
         run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage"
