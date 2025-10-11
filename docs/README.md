@@ -21,6 +21,8 @@ Pick the guide that matches what you need to do.
 - [Use the shared download orchestrator](how-to/USE_DOWNLOAD_ORCHESTRATOR.md)
 - [Authenticate with OAuth](how-to/AUTHENTICATE_OAUTH.md)
 - [Add structured logging](how-to/ADD_LOGGING.md)
+- [Return structured diagnostics (PluginOperationResultJson)](how-to/DIAGNOSTICS_JSON.md)
+- [Cache GETs and enable 304 revalidation](how-to/HTTP_CACHING_AND_REVALIDATION.md)
 
 ## Reference (facts)
 

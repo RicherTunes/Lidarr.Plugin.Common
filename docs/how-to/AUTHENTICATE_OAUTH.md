@@ -33,6 +33,13 @@ var httpClient = HttpClientFactory.Create(new OAuthDelegatingHandler(tokenProvid
 - `OAuthDelegatingHandler` ensures refresh is single-flight and shared across concurrent requests.
 - Configure retry budgets so a failing refresh does not hammer the auth endpoint.
 
+## Persistence and concurrency
+
+- The base authentication service persists token envelopes to disk using a durable token store.
+- Writes are atomic and crash-safe; reads tolerate stale temp files.
+- On Windows, the store uses a named mutex and unique temp files with short retries to avoid transient sharing violations.
+- Secrets are masked in logs by default; keep error messages free of tokens.
+
 ## Testing
 
 - Stub `IStreamingTokenProvider` with in-memory implementations.

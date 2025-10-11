@@ -17,7 +17,8 @@ Metrics
 - Counters
   - cache.hit — increment on cache hit
   - cache.miss — increment on cache miss
-  - cache.revalidate — increment when 304 revalidates and TTL is refreshed
+- cache.revalidate — increment when 304 revalidates and TTL is refreshed
+  - A `XArrCache: revalidated` header (and legacy `X-Arr-Cache`) is also added to synthetic 200 responses built from cached bodies.
   - retry.count — increment on each retry attempt; attributes: net.host, http.method
   - auth.refreshes — increment when an auth/session refresh succeeds
 - UpDownCounter (NET 8+ only)
@@ -32,4 +33,3 @@ Notes
 
 - No telemetry is emitted unless you wire a listener/exporter.
 - Tags/attributes adhere to OpenTelemetry semantic conventions where applicable.
-

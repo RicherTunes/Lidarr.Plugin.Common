@@ -4,7 +4,7 @@ This repository ships with a multi-stage GitHub Actions pipeline that keeps the 
 
 ## Code workflows
 
-- **CI** (`.github/workflows/ci.yml`) runs on Ubuntu and Windows with .NET 6/8. It verifies formatting, builds, tests, gathers coverage, and runs a dry-pack.
+- **CI** (`.github/workflows/ci.yml`) runs on Ubuntu and Windows with .NET 6/8. It verifies formatting, builds, tests, gathers coverage, and runs a dry-pack. It also annotates PRs with test results.
 - **PR validation** (`.github/workflows/pr-validation.yml`) adds targeted smoke checks for pull requests (fast feedback subset of CI).
 - **Release** (`.github/workflows/release.yml`) publishes tagged artifacts to NuGet.
 - **Docs** (`.github/workflows/docs.yml`) runs snippet verification, markdownlint, cspell, and lychee link checking whenever documentation changes.
@@ -23,6 +23,28 @@ This repository ships with a multi-stage GitHub Actions pipeline that keeps the 
 - Coverage collected via `coverlet.collector`
 - Cobertura + TRX artifacts published per OS matrix entry
 - Coverage summary comment fails the job if coverage < 60%, warns below 80%
+
+## PR test result annotations
+
+The `Publish Test Results` job uses `EnricoMi/publish-unit-test-result-action`. It needs permissions to create check runs on pull requests:
+
+```yaml
+jobs:
+  report_tests:
+    if: always()
+    permissions:
+      contents: read
+      checks: write
+      pull-requests: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+      - uses: EnricoMi/publish-unit-test-result-action@v2
+        if: github.event_name == 'pull_request'
+        with:
+          files: artifacts/**/TestResults/*.trx
+```
 
 ## Releases
 
