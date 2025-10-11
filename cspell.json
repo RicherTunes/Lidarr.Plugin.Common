@@ -54,7 +54,8 @@
     "multidisc",
     "lifecycles",
     "Zipkin",
-    "revalidations"
+    "revalidations",
+    "singleflight"
   ],
   "ignorePaths": [
     "**/bin",

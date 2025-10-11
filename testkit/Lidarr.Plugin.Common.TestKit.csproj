@@ -8,7 +8,7 @@
     <IsPackable>true</IsPackable>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <PackageId>Lidarr.Plugin.Common.TestKit</PackageId>
-    <Version>1.1.5</Version>
+    <Version>1.1.7</Version>
     <Authors>RicherTunes Community</Authors>
     <Company>RicherTunes</Company>
     <Description>Shared testing utilities for Lidarr streaming plugins, including AssemblyLoadContext fixtures, HTTP test handlers, and manifest/data helpers.</Description>
