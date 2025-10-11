@@ -15,7 +15,7 @@ Latest: v1.1.6 — October 11, 2025
 - Windows token store: atomic writes via unique temp files + short retries to avoid sharing violations.
 - Resilience: honor `Retry-After` absolute dates without jitter (still clamped by retry budget).
 
-Release notes: https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.1.6
+Release notes: [v1.1.6](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.1.6)
 
 ## Choose your adventure
 
