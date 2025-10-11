@@ -20,7 +20,10 @@ Flow
 
 - Executor
   - For raw HttpClient usage, call `HttpClientExtensions.ExecuteWithResilienceAsync(request, policy)`.
-  - Features: 429 Retry‑After (date preferred), retry budget clamping, per-host|profile gates + aggregate host cap, safe request cloning, 307/308 redirect preserving method/body.
+  - Features: 429 Retry‑After (date preferred), retry budget clamping, per-host|profile gates + aggregate host cap, safe request cloning.
+  - Redirects:
+    - 307/308 preserve method/body and are auto‑followed.
+    - 301/302 are auto‑followed only when the method is safe (GET/HEAD). Unsafe methods (e.g., POST) return the 30x so callers can decide.
   - Observability: spans (`http.send`, `host.gate.wait`) and counters (retry.count).
 
 - Cache
