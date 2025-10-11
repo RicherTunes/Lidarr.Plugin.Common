@@ -52,7 +52,7 @@ jobs:
         with:
           args: >-
             --no-progress
-            --retry-wait-time 2s
+            --retry-wait-time 2
             --max-retries 2
             --exclude-mail
             docs/**/*.md README.md
