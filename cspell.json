@@ -51,7 +51,8 @@
     "nameof",
     "reqs",
     "behaviours",
-    "multidisc"
+    "multidisc",
+    "lifecycles"
   ],
   "ignorePaths": [
     "**/bin",

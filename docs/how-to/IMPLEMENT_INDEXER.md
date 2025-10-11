@@ -1,6 +1,6 @@
 # How-to: Implement an Indexer
 
-Use the shared library to minimise boilerplate when building a streaming indexer.
+Use the shared library to minimize boilerplate when building a streaming indexer.
 
 ## 1. Start from `IIndexer`
 Create a concrete class implementing `IIndexer` (from Abstractions). Inject required helpers via the constructor.
