@@ -9,11 +9,6 @@ on:
       - ".markdownlint.yaml"
       - ".vale.ini"
       - "cspell.json"
-  push:
-    paths:
-      - "docs/**"
-      - "README.md"
-      - ".github/workflows/docs.yml"
   workflow_dispatch:
 
 jobs:
