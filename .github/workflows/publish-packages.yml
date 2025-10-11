@@ -31,8 +31,12 @@ jobs:
           echo "version=$version" >> $env:GITHUB_OUTPUT
       - name: Restore
         run: dotnet restore src/Lidarr.Plugin.Common.csproj
+      - name: Build Abstractions
+        run: dotnet build src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release --nologo
       - name: Pack Abstractions
         run: dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -p:Version=${{ steps.ver.outputs.version }} -o artifacts
+      - name: Build Common
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release --nologo
       - name: Pack Common
         run: dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -p:Version=${{ steps.ver.outputs.version }} -o artifacts
       - name: Push to GitHub Packages
