@@ -1,8 +1,9 @@
+using System;
+using Microsoft.Extensions.DependencyInjection;
 using Lidarr.Plugin.Common.Services.Http;
 using Lidarr.Plugin.Common.Services.Caching;
 using Lidarr.Plugin.Common.Interfaces;
 using MyPlugin.Policies;
-using Microsoft.Extensions.DependencyInjection;
 
 namespace MyPlugin;
 

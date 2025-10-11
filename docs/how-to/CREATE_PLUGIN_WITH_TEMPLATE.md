@@ -33,5 +33,6 @@ dotnet test tests/MyPlugin.Tests/MyPlugin.Tests.csproj -c Release
 ## Next steps
 - Fill in API calls with `StreamingApiRequestBuilder` → Options → `ExecuteWithResilienceAsync`.
 - Configure caching: the template includes a minimal `ICachePolicyProvider` (see `Policies/PolicyProvider.cs`) with sensible defaults and ETag revalidation for details.
+- Configure `CachePolicyRegistry` in your host for sensible TTLs.
 - OAuth2: use `Auth/MyPluginOAuthSettings` to capture client credentials and redirect URI (for PKCE flows).
 - Use `Lidarr.Plugin.Common.TestKit` stubs/fixtures to simulate providers.
