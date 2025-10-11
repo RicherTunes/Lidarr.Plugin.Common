@@ -11,8 +11,8 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <Version>1.1.6</Version>
-    <PackageVersion>1.1.6</PackageVersion>
+    <Version>1.1.7-rc.1</Version>
+    <PackageVersion>1.1.7-rc.1</PackageVersion>
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
     <Authors>RicherTunes Community</Authors>
