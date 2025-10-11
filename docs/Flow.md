@@ -24,6 +24,7 @@ Flow
   - Redirects:
     - 307/308 preserve method/body and are auto‑followed.
   - 301/302 are auto‑followed only when the method is safe (GET/HEAD). Unsafe methods (e.g., POST) return the 30x so callers can decide.
+  - This mirrors common client behavior while preserving plugin control for non‑idempotent requests.
   - Observability: spans (`http.send`, `host.gate.wait`) and counters (retry.count).
 
 
