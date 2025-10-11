@@ -15,7 +15,7 @@ Summary only. The canonical reference lives in [Plugin isolation](../concepts/PL
 - Pass `perRequestTimeout` when a hard deadline is required; the helper raises `TimeoutException` while honouring caller cancellations.
 - Keep `ContentDecodingSnifferHandler` near the end of your pipeline to rescue mislabelled gzip payloads without buffering large bodies.
 - Compose handlers: authentication first (OAuth), then resilience, then content sniffing.
- - Centralize retry budgets so you do not fight host-level throttling.
+- Centralize retry budgets so you do not fight host-level throttling.
 
 ## Authentication
 
