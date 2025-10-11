@@ -29,6 +29,12 @@ jobs:
           dotnet restore
           dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1
 
+      - name: Public API drift (net8)
+        run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0
+
+      - name: Public API drift (net6)
+        run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net6.0
+
       - name: Test
         run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage"
 
