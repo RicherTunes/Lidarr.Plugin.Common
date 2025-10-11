@@ -28,6 +28,26 @@ Template to copy when drafting a release:
 [Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/vX.Y.(Z-1)...vX.Y.Z)
 ```
 
+## [1.1.7] - 2025-10-11
+**Upgrade note:** Policy-first HTTP path wired end-to-end; safer dedup/caching defaults; clearer redirect semantics.
+
+### Highlights
+- Builder → Options → Executor integration: stamp endpoint/profile/params/scope; executor consumes them for per-host|profile gates and stable keys.
+- GET singleflight dedup when cache misses; race-guarded recheck; avoids caching failures/cancels.
+- Query canonicalization for multivalue params (ordinal sort, lowercase percent-encoding).
+- Redirects: 307/308 auto-follow preserving method/body; 301/302 auto-follow only for safe methods (GET/HEAD).
+- Cache sliding TTL coalesced under concurrency; bounded by absolute expiration; short stale-grace for 304s.
+- Conditional GET: ETag/Last-Modified persisted and revalidation path tested.
+- Docs: OTel quickstart (feature flag `LPC_OTEL_ENABLE=1`) + sample Grafana dashboard.
+- Template: `dotnet new lidarr-plugin` with minimal settings/module/indexer and a passing test; includes cache policy defaults and OAuth2 settings stub.
+- Analyzers (dev dependency): LPC0001 avoid raw HttpClient usage; LPC0002 prefer policy-based overload.
+
+**Breaking changes:** None
+**Deprecations:** None (legacy overloads may be hidden in next minor)
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.6...v1.1.7)
+
 - Carved out `Lidarr.Plugin.Abstractions` as the host-owned ABI package with public API analyzers and AssemblyLoadContext guidance.
 - `NuGet.config` maps TagLibSharp packages to the public Lidarr Azure Artifacts feed so CI restores `TagLibSharp-Lidarr` 2.2.0.27.
 - `Directory.Build.props` pins `<AssemblyVersion>`/`<FileVersion>` to `10.0.0.35686` (Lidarr 2.14.2.4786 host) so every downstream plugin consumes matching binaries.
