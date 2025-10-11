@@ -107,7 +107,7 @@ jobs:
     if: always()
     permissions:
       contents: read
-      checks: read
+      checks: write
       pull-requests: write
     steps:
       - name: Download test artifacts
