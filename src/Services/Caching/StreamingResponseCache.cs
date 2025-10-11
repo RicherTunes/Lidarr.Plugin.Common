@@ -50,12 +50,12 @@ namespace Lidarr.Plugin.Common.Services.Caching
 
             if (_cache.TryGetValue(cacheKey, out var cacheItem))
             {
-                if (cacheItem.ExpiresAt > DateTime.UtcNow)
+                var now = DateTime.UtcNow;
+                if (cacheItem.ExpiresAt > now)
                 {
                     // Sliding expiration support
                     if (policy.SlidingExpiration.HasValue && policy.SlidingExpiration.Value > TimeSpan.Zero)
                     {
-                        var now = DateTime.UtcNow;
                         var proposed = now.Add(policy.SlidingExpiration.Value);
                         DateTime? absoluteCap = null;
                         if (policy.AbsoluteExpiration.HasValue && policy.AbsoluteExpiration.Value > TimeSpan.Zero)
@@ -81,6 +81,14 @@ namespace Lidarr.Plugin.Common.Services.Caching
                         }
                     }
 
+                    OnCacheHit(endpoint, cacheKey);
+                    return cacheItem.Value as T;
+                }
+                // Grace window: if the entry just expired, allow a short stale read to enable 304 revalidation flows.
+                // This prevents races where the item expires between preflight cache check and conditional request.
+                var staleGrace = TimeSpan.FromMilliseconds(200);
+                if (cacheItem.ExpiresAt > now - staleGrace)
+                {
                     OnCacheHit(endpoint, cacheKey);
                     return cacheItem.Value as T;
                 }
