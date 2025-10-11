@@ -459,9 +459,17 @@ namespace Lidarr.Plugin.Common.Utilities
                     }
 
                     var now = DateTime.UtcNow;
-                    // Prefer Retry-After date over delta; clamp to remaining budget
-                    var requested = GetRetryDelayPreferredDate(response) ?? TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt)));
-                    var delay = requested + GetJitter();
+                    // Prefer Retry-After absolute date over delta; do not add jitter when an absolute date is provided
+                    TimeSpan delay;
+                    var preferred = GetRetryDelayPreferredDate(response);
+                    if (preferred.HasValue)
+                    {
+                        delay = preferred.Value;
+                    }
+                    else
+                    {
+                        delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt))) + GetJitter();
+                    }
                     var remaining = deadline - now;
                     if (remaining <= TimeSpan.Zero)
                     {
