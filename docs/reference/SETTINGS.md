@@ -1,6 +1,6 @@
 # Settings Reference
 
-Centralise your plugin settings so users know which fields must be configured and which defaults are safe.
+Centralize your plugin settings so users know which fields must be configured and which defaults are safe.
 
 ## Abstractions
 The host interacts with settings via `ISettingsProvider` and `SettingDefinition`.
