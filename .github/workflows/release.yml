@@ -6,13 +6,15 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
+# Some org/repo policies require explicit top-level permissions.
+# Also ensures the job can push packages while defaulting contents to read-only.
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build_pack_publish:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      packages: write
 
     steps:
       - uses: actions/checkout@v4
