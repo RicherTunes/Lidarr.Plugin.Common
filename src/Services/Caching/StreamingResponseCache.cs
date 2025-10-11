@@ -53,31 +53,36 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 var now = DateTime.UtcNow;
                 if (cacheItem.ExpiresAt > now)
                 {
-                    // Sliding expiration support
+                    // Sliding expiration support (coalesced: at most once per throttle window, thread-safe per entry)
                     if (policy.SlidingExpiration.HasValue && policy.SlidingExpiration.Value > TimeSpan.Zero)
                     {
-                        var proposed = now.Add(policy.SlidingExpiration.Value);
-                        DateTime? absoluteCap = null;
-                        if (policy.AbsoluteExpiration.HasValue && policy.AbsoluteExpiration.Value > TimeSpan.Zero)
+                        lock (cacheItem)
                         {
-                            absoluteCap = cacheItem.CreatedAt.Add(policy.AbsoluteExpiration.Value);
-                        }
+                            // Re-evaluate time inside lock for correct windowing under concurrency
+                            var nowLocked = DateTime.UtcNow;
+                            var proposed = nowLocked.Add(policy.SlidingExpiration.Value);
+                            DateTime? absoluteCap = null;
+                            if (policy.AbsoluteExpiration.HasValue && policy.AbsoluteExpiration.Value > TimeSpan.Zero)
+                            {
+                                absoluteCap = cacheItem.CreatedAt.Add(policy.AbsoluteExpiration.Value);
+                            }
 
-                        var newExpiry = absoluteCap.HasValue ? (proposed < absoluteCap.Value ? proposed : absoluteCap.Value) : proposed;
-                        var throttle = policy.SlidingRefreshWindow;
-                        var canExtend = true;
-                        if (throttle.HasValue && throttle.Value > TimeSpan.Zero)
-                        {
-                            var sinceLast = now - cacheItem.LastExtendedAt;
-                            canExtend = sinceLast >= throttle.Value;
-                        }
+                            var newExpiry = absoluteCap.HasValue ? (proposed < absoluteCap.Value ? proposed : absoluteCap.Value) : proposed;
+                            var throttle = policy.SlidingRefreshWindow;
+                            var canExtend = true;
+                            if (throttle.HasValue && throttle.Value > TimeSpan.Zero)
+                            {
+                                var sinceLast = nowLocked - cacheItem.LastExtendedAt;
+                                canExtend = sinceLast >= throttle.Value;
+                            }
 
-                        if (canExtend && newExpiry > cacheItem.ExpiresAt)
-                        {
-                            var old = cacheItem.ExpiresAt;
-                            cacheItem.ExpiresAt = newExpiry;
-                            cacheItem.LastExtendedAt = now;
-                            OnSlidingExtended(endpoint, cacheKey, old, newExpiry);
+                            if (canExtend && newExpiry > cacheItem.ExpiresAt)
+                            {
+                                var old = cacheItem.ExpiresAt;
+                                cacheItem.ExpiresAt = newExpiry;
+                                cacheItem.LastExtendedAt = nowLocked;
+                                OnSlidingExtended(endpoint, cacheKey, old, newExpiry);
+                            }
                         }
                     }
 

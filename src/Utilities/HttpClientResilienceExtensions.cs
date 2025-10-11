@@ -27,13 +27,64 @@ namespace Lidarr.Plugin.Common.Utilities
             IConditionalRequestState? conditionalState = null,
             CancellationToken cancellationToken = default)
         {
-            if (deduplicator == null) throw new ArgumentNullException(nameof(deduplicator));
-            if (request?.Method == HttpMethod.Get)
+            if (httpClient is null) throw new ArgumentNullException(nameof(httpClient));
+            if (request is null) throw new ArgumentNullException(nameof(request));
+            if (resilience is null) throw new ArgumentNullException(nameof(resilience));
+            if (cache is null) throw new ArgumentNullException(nameof(cache));
+            if (deduplicator is null) throw new ArgumentNullException(nameof(deduplicator));
+
+            // Only apply singleflight to cacheable GET misses. Hits return immediately without entering the deduper.
+            if (request.Method == HttpMethod.Get)
             {
-                var key = HttpClientExtensions.BuildRequestDedupKey(request);
-                return await deduplicator.GetOrCreateAsync(key, () =>
-                    httpClient.ExecuteWithResilienceAndCachingAsync(request, resilience, cache, conditionalState, cancellationToken),
-                    cancellationToken).ConfigureAwait(false);
+                var (endpoint, parameters) = DeriveEndpointAndParams(request);
+
+                // Fast path: cached entry (or revalidation-driven grace) – skip dedup entirely
+                var cached = cache.Get<CachedHttpResponse>(endpoint, parameters);
+                if (cached != null)
+                {
+                    var passthrough = new HttpResponseMessage(cached.StatusCode)
+                    {
+                        Content = new ByteArrayContent(cached.Body ?? Array.Empty<byte>())
+                    };
+                    if (!string.IsNullOrEmpty(cached.ContentType))
+                    {
+                        passthrough.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(cached.ContentType);
+                    }
+                    if (cached.LastModified.HasValue)
+                    {
+                        passthrough.Content.Headers.LastModified = cached.LastModified;
+                    }
+                    try { Observability.Metrics.CacheHit.Add(1, new KeyValuePair<string, object?>("endpoint", endpoint)); } catch { }
+                    return passthrough;
+                }
+
+                // Miss path: singleflight by a stable dedup key derived from request intent
+                var dedupKey = HttpClientExtensions.BuildRequestDedupKey(request);
+                return await deduplicator.GetOrCreateAsync(dedupKey, async () =>
+                {
+                    // Double‑check cache inside the factory to avoid races between the initial miss and us acquiring the key
+                    var recheck = cache.Get<CachedHttpResponse>(endpoint, parameters);
+                    if (recheck != null)
+                    {
+                        var hit = new HttpResponseMessage(recheck.StatusCode)
+                        {
+                            Content = new ByteArrayContent(recheck.Body ?? Array.Empty<byte>())
+                        };
+                        if (!string.IsNullOrEmpty(recheck.ContentType))
+                        {
+                            hit.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(recheck.ContentType);
+                        }
+                        if (recheck.LastModified.HasValue)
+                        {
+                            hit.Content.Headers.LastModified = recheck.LastModified;
+                        }
+                        try { Observability.Metrics.CacheHit.Add(1, new KeyValuePair<string, object?>("endpoint", endpoint)); } catch { }
+                        return hit;
+                    }
+
+                    // Proceed with the normal cache-aware execution (which may attach validators and populate the cache)
+                    return await httpClient.ExecuteWithResilienceAndCachingAsync(request, resilience, cache, conditionalState, cancellationToken).ConfigureAwait(false);
+                }, cancellationToken).ConfigureAwait(false);
             }
 
             return await httpClient.ExecuteWithResilienceAndCachingAsync(request, resilience, cache, conditionalState, cancellationToken).ConfigureAwait(false);
