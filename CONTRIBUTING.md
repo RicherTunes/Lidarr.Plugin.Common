@@ -6,7 +6,7 @@ Thank you for your interest in contributing to the shared library for Lidarr str
 
 ### **🐛 Bug Reports**
 - **Found an issue?** Open an issue with clear steps to reproduce
-- **Security concerns?** Report privately via security@richertunes.com
+- **Security concerns?** Report privately via [security@richertunes.com](mailto:security@richertunes.com)
 - **Performance problems?** Include benchmarks and specific use cases
 
 ### **💡 Feature Requests**  
@@ -169,7 +169,7 @@ dotnet format --verify-no-changes
 ## 🎯 **Contribution Categories**
 
 ### **🛠️ Utilities & Helpers**
-**High Value, Low Risk**
+#### High Value, Low Risk
 - File system utilities (naming, path handling)
 - HTTP utilities (retry, error handling, security)
 - Validation helpers (input sanitization, format checking)
@@ -182,7 +182,7 @@ dotnet format --verify-no-changes
 - Cross-service error code normalization
 
 ### **📋 Models & Standards**
-**Medium Value, Medium Risk**
+#### Medium Value, Medium Risk
 - Universal data models for streaming content
 - Quality tier definitions and mapping utilities  
 - Standard interfaces for cross-service compatibility
@@ -195,7 +195,7 @@ dotnet format --verify-no-changes
 - Subscription and licensing models
 
 ### **⚙️ Service Frameworks**
-**High Value, High Risk**
+#### High Value, High Risk
 - Authentication service abstractions
 - Caching framework enhancements
 - Plugin registration and DI patterns
@@ -292,7 +292,7 @@ The shared library ecosystem transforms streaming plugin development from indivi
 - **Enable rapid expansion** to new streaming services
 - **Establish technology leadership** in media automation
 
-**Every contribution, no matter how small, helps build the future of streaming automation! 🚀✨**
+Every contribution, no matter how small, helps build the future of streaming automation ! 
 
 ### **Get Started Contributing**
 1. **Check existing issues** for good first issues
@@ -300,4 +300,5 @@ The shared library ecosystem transforms streaming plugin development from indivi
 3. **Study working examples** to understand patterns
 4. **Start with small improvements** and build up to larger contributions
 
-**Together, we're building something amazing! 🎵**
+Together, we're building something amazing ! 
+
