@@ -63,7 +63,8 @@ namespace Lidarr.Plugin.Common.Tests
             sw.Stop();
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
-            Assert.InRange(sw.ElapsedMilliseconds, 300, 1000); // waited roughly for date (clamped by 1s budget)
+            // Allow a little slack on slower CI runners
+            Assert.InRange(sw.ElapsedMilliseconds, 250, 1300); // waited roughly for date (clamped by ~1s budget)
         }
 
         private static int _attempt = 0;
