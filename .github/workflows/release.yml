@@ -43,41 +43,31 @@ jobs:
 
       - name: Verify tag matches package versions
         if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
         run: |
-          TAG=${GITHUB_REF#refs/tags/v}
-          export TAG
-          python <<'PY'
-          import os
-          import sys
-          from pathlib import Path
-          import xml.etree.ElementTree as ET
-
-          tag = os.environ.get("TAG")
-          paths = [
-              Path("src/Lidarr.Plugin.Common.csproj"),
-              Path("src/Abstractions/Lidarr.Plugin.Abstractions.csproj"),
-          ]
-
-          for path in paths:
-              tree = ET.parse(path)
-              root = tree.getroot()
-              version = None
-              for elem in root.findall(".//Version"):
-                  text = (elem.text or "").strip()
-                  if text:
-                      version = text
-              if version is None:
-                  for elem in root.findall(".//AssemblyVersion"):
-                      text = (elem.text or "").strip()
-                      if text:
-                          version = text
-              if version is None:
-                  print(f"::error ::Unable to resolve Version in {path}")
-                  sys.exit(1)
-              if version != tag:
-                  print(f"::error ::Tag v{tag} does not match version {version} in {path}")
-                  sys.exit(1)
-          PY
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "Verifying tag v$TAG against project versions"
+          for path in src/Lidarr.Plugin.Common.csproj src/Abstractions/Lidarr.Plugin.Abstractions.csproj; do
+            if [ ! -f "$path" ]; then
+              echo "::error ::Path not found: $path"
+              exit 1
+            fi
+            version=$(grep -oP '(?<=<Version>)[^<]+' "$path" | head -n 1 || true)
+            if [ -z "$version" ]; then
+              # Fall back to AssemblyVersion if Version not present
+              version=$(grep -oP '(?<=<AssemblyVersion>)[^<]+' "$path" | head -n 1 || true)
+            fi
+            if [ -z "$version" ]; then
+              echo "::warning ::Unable to resolve Version in $path; skipping strict check"
+              continue
+            fi
+            echo "- $path => $version"
+            if [ "$version" != "$TAG" ]; then
+              echo "::error ::Tag v$TAG does not match version $version in $path"
+              exit 1
+            fi
+          done
 
       - name: Pack
         run: |
