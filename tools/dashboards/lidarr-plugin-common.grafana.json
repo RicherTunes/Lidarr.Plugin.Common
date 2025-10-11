@@ -1,0 +1,48 @@
+{
+  "__inputs": [],
+  "__requires": [
+    { "type": "grafana", "id": "grafana", "name": "Grafana", "version": "9.5.0" },
+    { "type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "2.43.0" }
+  ],
+  "title": "Lidarr.Plugin.Common – OTel Metrics (Sample)",
+  "panels": [
+    {
+      "type": "timeseries",
+      "title": "Cache Hit/Miss/Revalidate",
+      "targets": [
+        { "expr": "sum(rate(cache_hit[5m]))", "legendFormat": "hit" },
+        { "expr": "sum(rate(cache_miss[5m]))", "legendFormat": "miss" },
+        { "expr": "sum(rate(cache_revalidate[5m]))", "legendFormat": "revalidate" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Retry Count",
+      "targets": [
+        { "expr": "sum(rate(retry_count[5m]))", "legendFormat": "retries" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 }
+    },
+    {
+      "type": "timeseries",
+      "title": "RateLimiter Inflight",
+      "targets": [
+        { "expr": "sum(ratelimiter_inflight)", "legendFormat": "inflight" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 }
+    },
+    {
+      "type": "timeseries",
+      "title": "Auth Refreshes",
+      "targets": [
+        { "expr": "sum(rate(auth_refreshes[5m]))", "legendFormat": "refreshes" }
+      ],
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 }
+    }
+  ],
+  "schemaVersion": 37,
+  "version": 1,
+  "refresh": "10s",
+  "time": { "from": "now-6h", "to": "now" }
+}

@@ -29,6 +29,12 @@ Usage
 - Traces: add an ActivityListener or use OpenTelemetry .NET SDK to subscribe to the ActivitySource.
 - Metrics: configure OpenTelemetry Metrics and add a MeterListener for the meter name above.
 
+Quick enable (feature‑flagged)
+
+- Set `LPC_OTEL_ENABLE=1` in your environment.
+- Wire OpenTelemetry (Metrics + Tracing) only when the flag is present. See `docs/observability/OTEL-QUICKSTART.md` for a copy‑paste setup.
+- A sample Grafana dashboard is provided at `tools/dashboards/lidarr-plugin-common.grafana.json`.
+
 Notes
 
 - No telemetry is emitted unless you wire a listener/exporter.
