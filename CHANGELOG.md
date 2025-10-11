@@ -55,6 +55,22 @@ Template to copy when drafting a release:
 ### Reminder
 - Maintainers must keep host assemblies in sync with Lidarr 2.14.2.4786 before shipping plugin updates; see `docs/UNIFIED_PLUGIN_PIPELINE.md` for the complete process.
 
+## [1.1.6] - 2025-10-11
+**Upgrade note:** No public API changes. Improves diagnostics and hardens concurrency + caching behavior under load.
+
+**Highlights**
+- New `PluginOperationResultJson` helper for consistent, structured diagnostics across plugins.
+- 304 revalidation path: add a brief stale grace to avoid races and preserve cached bodies when validators hit right at TTL.
+- Windows file concurrency: `FileTokenStore` now writes via unique temp files and retries atomic replace/move to avoid transient sharing violations.
+- Retry semantics: when honoring `Retry-After` absolute dates, do not add jitter; still clamped by the retry budget.
+- CI: grant permissions for PR test result annotations; coverage summary appears reliably on PRs.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.5...v1.1.6)
+
 ## [1.1.5] - 2025-10-01
 **Upgrade note:** No public API changes. CLI `config` commands now persist settings consistently and surface the latest metadata across hosts.
 
