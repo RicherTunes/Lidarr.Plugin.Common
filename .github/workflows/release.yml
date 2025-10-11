@@ -6,13 +6,15 @@ on:
       - 'v*.*.*'
   workflow_dispatch:
 
+# Some org/repo policies require explicit top-level permissions.
+# Also ensures the job can push packages while defaulting contents to read-only.
+permissions:
+  contents: read
+  packages: write
+
 jobs:
   build_pack_publish:
     runs-on: ubuntu-latest
-
-    permissions:
-      contents: read
-      packages: write
 
     steps:
       - uses: actions/checkout@v4
@@ -45,37 +47,37 @@ jobs:
           TAG=${GITHUB_REF#refs/tags/v}
           export TAG
           python <<'PY'
-import os
-import sys
-from pathlib import Path
-import xml.etree.ElementTree as ET
+          import os
+          import sys
+          from pathlib import Path
+          import xml.etree.ElementTree as ET
 
-tag = os.environ.get("TAG")
-paths = [
-    Path("src/Lidarr.Plugin.Common.csproj"),
-    Path("src/Abstractions/Lidarr.Plugin.Abstractions.csproj"),
-]
+          tag = os.environ.get("TAG")
+          paths = [
+              Path("src/Lidarr.Plugin.Common.csproj"),
+              Path("src/Abstractions/Lidarr.Plugin.Abstractions.csproj"),
+          ]
 
-for path in paths:
-    tree = ET.parse(path)
-    root = tree.getroot()
-    version = None
-    for elem in root.findall(".//Version"):
-        text = (elem.text or "").strip()
-        if text:
-            version = text
-    if version is None:
-        for elem in root.findall(".//AssemblyVersion"):
-            text = (elem.text or "").strip()
-            if text:
-                version = text
-    if version is None:
-        print(f"::error ::Unable to resolve Version in {path}")
-        sys.exit(1)
-    if version != tag:
-        print(f"::error ::Tag v{tag} does not match version {version} in {path}")
-        sys.exit(1)
-PY
+          for path in paths:
+              tree = ET.parse(path)
+              root = tree.getroot()
+              version = None
+              for elem in root.findall(".//Version"):
+                  text = (elem.text or "").strip()
+                  if text:
+                      version = text
+              if version is None:
+                  for elem in root.findall(".//AssemblyVersion"):
+                      text = (elem.text or "").strip()
+                      if text:
+                          version = text
+              if version is None:
+                  print(f"::error ::Unable to resolve Version in {path}")
+                  sys.exit(1)
+              if version != tag:
+                  print(f"::error ::Tag v{tag} does not match version {version} in {path}")
+                  sys.exit(1)
+          PY
 
       - name: Pack
         run: |
