@@ -1,0 +1,43 @@
+name: Publish Packages
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  pack-and-push:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            6.0.x
+            8.0.x
+      - name: Extract version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          $tag = "$env:GITHUB_REF_NAME"
+          if (-not $tag.StartsWith('v')) { Write-Error "Tag must start with v"; exit 1 }
+          $version = $tag.TrimStart('v')
+          echo "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Restore
+        run: dotnet restore src/Lidarr.Plugin.Common.csproj
+      - name: Pack Abstractions
+        run: dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -p:Version=${{ steps.ver.outputs.version }} -o artifacts
+      - name: Pack Common
+        run: dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -p:Version=${{ steps.ver.outputs.version }} -o artifacts
+      - name: Push to GitHub Packages
+        env:
+          NUGET_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dotnet nuget add source --username github --password $env:NUGET_AUTH_TOKEN --store-password-in-clear-text --name github "https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+          Get-ChildItem artifacts -Filter *.nupkg | ForEach-Object { dotnet nuget push $_.FullName --source github --skip-duplicate }
