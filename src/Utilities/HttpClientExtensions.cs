@@ -455,6 +455,60 @@ namespace Lidarr.Plugin.Common.Utilities
                             }
                             catch { /* fall through to return */ }
                         }
+                        // Handle 301/302 redirects only when safe (GET/HEAD). Do not auto-follow for unsafe methods (e.g., POST)
+                        else if ((status == 301 || status == 302) && response.Headers.Location != null &&
+                                 (HttpMethod.Get.Equals(attemptRequest.Method) || HttpMethod.Head.Equals(attemptRequest.Method)))
+                        {
+                            try
+                            {
+                                var loc = response.Headers.Location;
+                                var targetUri = loc.IsAbsoluteUri ? loc : new Uri(attemptRequest.RequestUri!, loc);
+
+                                // If the redirect crosses hosts, release current gates and reacquire for the new host
+                                var newHost = targetUri.Host;
+                                var crossingHosts = !string.Equals(newHost, host, StringComparison.OrdinalIgnoreCase);
+
+                                if (crossingHosts)
+                                {
+                                    try
+                                    {
+#if NET8_0_OR_GREATER
+                                        Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
+#endif
+                                    }
+                                    catch { }
+
+                                    try { gate.Release(); } catch { }
+                                    try { aggregateGate.Release(); } catch { }
+
+                                    host = newHost;
+                                    hostKey = host ?? "__unknown__";
+                                    if (!string.IsNullOrWhiteSpace(profileTag)) hostKey = hostKey + "|" + profileTag;
+
+                                    var newAggregate = HostGateRegistry.GetAggregate(host, aggregateEffective);
+                                    await newAggregate.WaitAsync(effectiveToken).ConfigureAwait(false);
+                                    var newGate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
+                                    await newGate.WaitAsync(effectiveToken).ConfigureAwait(false);
+
+                                    aggregateGate = newAggregate;
+                                    gate = newGate;
+
+                                    try
+                                    {
+#if NET8_0_OR_GREATER
+                                        Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
+#endif
+                                    }
+                                    catch { }
+                                }
+
+                                currentUri = targetUri;
+                                response.Dispose();
+                                // Continue without backoff; redirect handling should not consume retry budget
+                                continue;
+                            }
+                            catch { /* fall through to return */ }
+                        }
                         return response;
                     }
 

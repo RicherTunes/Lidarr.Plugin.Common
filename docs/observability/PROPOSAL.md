@@ -13,7 +13,7 @@
 ## Shape
 - EventId constants under Lidarr.Plugin.Common.Observability.EventIds
 - Logger extensions LogApiCallStarted/Completed
-- Optional Activity tags: service, ndpoint, status_code
+- Optional Activity tags: service, endpoint, status_code
 
 ## Next Steps
 - Agree on names and payloads
