@@ -1486,3 +1486,17 @@ M:Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateEmail(System.String
 M:Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateFilePath(System.String)~System.Boolean
 M:Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateFileSignature(System.String,System.String)~System.Boolean
 M:Lidarr.Plugin.Common.Utilities.ValidationUtilities.ValidateUrl(System.String)~System.Boolean
+Lidarr.Plugin.Common.Interfaces.IStreamingAuthenticationService<TSession, TCredentials>.GetValidSessionAsync() -> System.Threading.Tasks.Task<TSession?>!
+virtual Lidarr.Plugin.Common.Services.Authentication.BaseStreamingAuthenticationService<TSession, TCredentials>.GetValidSessionAsync() -> System.Threading.Tasks.Task<TSession?>!
+static Lidarr.Plugin.Common.Utilities.HttpClientExtensions.CloneForRetryAsync(System.Net.Http.HttpRequestMessage! request) -> System.Threading.Tasks.Task<System.Net.Http.HttpRequestMessage!>!
+P:Lidarr.Plugin.Common.Services.Caching.CachePolicy.SlidingRefreshWindow
+M:Lidarr.Plugin.Common.Services.Caching.CachePolicy.#ctor(System.String,System.Boolean,System.TimeSpan,System.Nullable{System.TimeSpan},System.Nullable{System.TimeSpan},System.Nullable{System.TimeSpan})
+M:Lidarr.Plugin.Common.Services.Caching.CachePolicy.#ctor(System.String,System.Boolean,System.TimeSpan,System.Nullable{System.TimeSpan},System.Nullable{System.TimeSpan},System.Boolean,System.Nullable{System.TimeSpan})
+M:Lidarr.Plugin.Common.Services.Caching.CachePolicy.With(System.String,System.Nullable{System.Boolean},System.Nullable{System.TimeSpan},System.Nullable{System.TimeSpan},System.Nullable{System.TimeSpan},System.Nullable{System.Boolean},System.Nullable{System.TimeSpan})~Lidarr.Plugin.Common.Services.Caching.CachePolicy
+M:Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache.OnSlidingExtended(System.String,System.String,System.DateTime,System.DateTime) -> void
+P:Lidarr.Plugin.Common.Utilities.ResiliencePolicy.MaxTotalConcurrencyPerHost
+M:Lidarr.Plugin.Common.Utilities.ResiliencePolicy.#ctor(System.String,System.Int32,System.TimeSpan,System.Int32,System.Nullable{System.TimeSpan},System.TimeSpan,System.TimeSpan,System.Nullable{System.TimeSpan},System.Nullable{System.TimeSpan},System.Nullable{System.Int32})
+P:Lidarr.Plugin.Common.Interfaces.ResilienceProfileSettings.MaxTotalConcurrencyPerHost
+P:Lidarr.Plugin.Common.Services.Caching.CachePolicy.EnableConditionalRevalidation
+M:Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.WithAuthScope(System.String)~Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder
+
