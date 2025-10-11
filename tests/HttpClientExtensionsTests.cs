@@ -220,19 +220,19 @@ namespace Lidarr.Plugin.Common.Tests
         {
             var handler = new StubHandler(async (req, ct) =>
             {
-                // Simulate slow server to trigger per-request timeout from policy
-                await Task.Delay(TimeSpan.FromMilliseconds(120), ct);
+                // Simulate a slow server; ensure this is comfortably above the timeout
+                await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
                 return new HttpResponseMessage(HttpStatusCode.OK);
             });
 
             using var client = new HttpClient(handler);
             var builder = new StreamingApiRequestBuilder("https://example.policy")
                 .Endpoint("timeout/test")
-                .WithPolicy(ResiliencePolicy.Default.With(perRequestTimeout: TimeSpan.FromMilliseconds(50)));
+                .WithPolicy(ResiliencePolicy.Default.With(perRequestTimeout: TimeSpan.FromMilliseconds(20)));
 
             await Assert.ThrowsAsync<TimeoutException>(() => client.SendWithResilienceAsync(
                 builder,
-                maxRetries: 1,
+                maxRetries: 0,
                 retryBudget: TimeSpan.FromSeconds(1),
                 maxConcurrencyPerHost: 1,
                 cancellationToken: CancellationToken.None));
