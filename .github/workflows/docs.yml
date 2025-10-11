@@ -11,6 +11,9 @@ on:
       - "cspell.json"
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   docs:
     runs-on: ubuntu-latest
