@@ -28,12 +28,20 @@ Flow
     - Keys derive from endpoint + canonical parameters (plus scope when policy.VaryByScope).
     - Persists DTOs including `ETag` and `Last-Modified`.
     - On 304, returns a synthetic 200 from cached body and refreshes TTL.
+    - A short stale grace prevents races when TTL expires near 304; callers still receive the cached body.
     - Sliding TTL extensions are coalesced (`SlidingRefreshWindow`) and capped by absolute expiration.
   - Observability: `cache.hit`, `cache.miss`, `cache.revalidate` counters.
+
+Conditional revalidation
+
+- If `IConditionalRequestState` is provided, validators are stored per cache key and attached on the next request.
+- Alternatively, if the policy enables `EnableConditionalRevalidation`, validators are read from cached entries.
+- Revalidation adds headers:
+  - `XArrCache: revalidated` (preferred)
+  - `X-Arr-Cache: revalidated` (legacy)
 
 Notes
 
 - Do not cache `HttpResponseMessage` instances; the cache stores DTOs only.
 - Prefer the builder → options → executor path for consistency and dedup/caching invariants.
 - For batch/non-HTTP workflows, use `NetworkResilienceService` for checkpoints & circuit-breaker, and call the HTTP executor for outbound HTTP.
-
