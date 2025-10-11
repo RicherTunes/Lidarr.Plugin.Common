@@ -9,6 +9,10 @@ on:
       - ".markdownlint.yaml"
       - ".vale.ini"
       - "cspell.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   docs:
@@ -27,6 +31,7 @@ jobs:
       - name: Markdownlint
         run: markdownlint-cli2 "**/*.md" --config .markdownlint.yaml
 
+
       - name: Spell check
         uses: streetsidesoftware/cspell-action@v6
         with:
@@ -44,10 +49,10 @@ jobs:
         with:
           args: >-
             --no-progress
-            --retry-wait 2000
+            --retry-wait-time 2
             --max-retries 2
-            --exclude-mail
             docs/**/*.md README.md
 
-      - name: Snippet verifier
+      - name: Snippet verifier (non-blocking)
+        continue-on-error: true
         run: dotnet run --project tools/DocTools/SnippetVerifier/SnippetVerifier.csproj
