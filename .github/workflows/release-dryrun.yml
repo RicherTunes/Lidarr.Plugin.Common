@@ -1,0 +1,62 @@
+name: Release Dry Run
+
+on:
+  workflow_dispatch:
+
+jobs:
+  dry_run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            6.0.x
+
+      - name: Restore & Build (no analyzers)
+        run: |
+          dotnet restore
+          dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1
+
+      - name: Public API drift (net8)
+        run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0
+
+      - name: Public API drift (net6)
+        run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net6.0
+
+      - name: Test
+        run: dotnet test -c Release --no-build --collect:"XPlat Code Coverage"
+
+      - name: Pack
+        run: |
+          dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
+          dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
+
+      - name: API compatibility (Abstractions vs previous)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          dotnet tool update --global microsoft.dotnet.apicompat.tool --version 9.0.305
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          PREV_TAG=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo "")
+          if [ -z "$PREV_TAG" ]; then
+            echo "No previous release detected; skipping API compatibility."
+            exit 0
+          fi
+          mkdir -p prev
+          if ! gh release download "$PREV_TAG" -p "Lidarr.Plugin.Abstractions.*.nupkg" -D prev; then
+            echo "Previous release found but no Abstractions package; skipping API compatibility."
+            exit 0
+          fi
+          CURRENT_PACKAGE=$(ls dist/Lidarr.Plugin.Abstractions.*.nupkg | head -n 1)
+          PREV_PACKAGE=$(ls prev/Lidarr.Plugin.Abstractions.*.nupkg | head -n 1)
+          if [ -z "$PREV_PACKAGE" ] || [ -z "$CURRENT_PACKAGE" ]; then
+            echo "Missing package for API compatibility; skipping."
+            exit 0
+          fi
+          apicompat package --package "$CURRENT_PACKAGE" --baseline-package "$PREV_PACKAGE"
+
