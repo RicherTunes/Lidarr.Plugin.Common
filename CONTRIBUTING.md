@@ -292,7 +292,7 @@ The shared library ecosystem transforms streaming plugin development from indivi
 - **Enable rapid expansion** to new streaming services
 - **Establish technology leadership** in media automation
 
-Every contribution, no matter how small, helps build the future of streaming automation ! 
+Every contribution, no matter how small, helps build the future of streaming automation!
 
 ### **Get Started Contributing**
 1. **Check existing issues** for good first issues
@@ -300,5 +300,5 @@ Every contribution, no matter how small, helps build the future of streaming aut
 3. **Study working examples** to understand patterns
 4. **Start with small improvements** and build up to larger contributions
 
-Together, we're building something amazing ! 
+Together, we're building something amazing!
 

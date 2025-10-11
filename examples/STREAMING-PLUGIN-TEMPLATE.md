@@ -318,7 +318,7 @@ var settings = MockFactories.CreateMockSettings<YourServiceSettings>();
 
 With `Lidarr.Plugin.Common`, streaming service plugin development has transformed from **months of complex work** to **weeks of focused service integration**.
 
-Your streaming service plugin can now achieve professional quality in record time ! 
+Your streaming service plugin can now achieve professional quality in record time!
 
 ---
 
