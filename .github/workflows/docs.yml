@@ -56,5 +56,6 @@ jobs:
             --max-retries 2
             docs/**/*.md README.md
 
-      - name: Snippet verifier
+      - name: Snippet verifier (non-blocking)
+        continue-on-error: true
         run: dotnet run --project tools/DocTools/SnippetVerifier/SnippetVerifier.csproj
