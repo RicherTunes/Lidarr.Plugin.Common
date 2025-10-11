@@ -122,7 +122,7 @@ public class YourServiceModule : StreamingPluginModule
 - [ ] **Day 3**: Documentation and user guides
 - [ ] **Day 4-5**: Final testing and release preparation
 
-**Total: 3 weeks vs 6-8 weeks traditional development**
+Total: 3 weeks vs 6-8 weeks traditional development
 
 ---
 
@@ -162,7 +162,7 @@ public class YourServiceIndexer : BaseStreamingIndexer<YourServiceSettings>
 }
 ```
 
-**Code reduction: 65-75% for new plugins**
+Code reduction: 65-75% for new plugins
 
 ---
 
@@ -318,7 +318,7 @@ var settings = MockFactories.CreateMockSettings<YourServiceSettings>();
 
 With `Lidarr.Plugin.Common`, streaming service plugin development has transformed from **months of complex work** to **weeks of focused service integration**.
 
-**Your streaming service plugin can now achieve professional quality in record time! 🚀🎵**
+Your streaming service plugin can now achieve professional quality in record time ! 
 
 ---
 
