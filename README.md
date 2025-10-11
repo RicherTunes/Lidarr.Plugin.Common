@@ -6,6 +6,17 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 [![Docs Status](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/docs.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/docs.yml)
 [![Release CI](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/release.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/release.yml)
 
+## What's New
+
+Latest: v1.1.6 — October 11, 2025
+
+- Diagnostics: `PluginOperationResultJson` helper for consistent structured output.
+- HTTP cache: 304 revalidation path hardened; short stale grace prevents TTL-edge races.
+- Windows token store: atomic writes via unique temp files + short retries to avoid sharing violations.
+- Resilience: honor `Retry-After` absolute dates without jitter (still clamped by retry budget).
+
+Release notes: https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.1.6
+
 ## Choose your adventure
 
 ### Plugin authors
