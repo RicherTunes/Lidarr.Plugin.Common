@@ -52,7 +52,9 @@
     "reqs",
     "behaviours",
     "multidisc",
-    "lifecycles"
+    "lifecycles",
+    "Zipkin",
+    "revalidations"
   ],
   "ignorePaths": [
     "**/bin",
