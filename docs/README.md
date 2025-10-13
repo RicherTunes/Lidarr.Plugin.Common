@@ -16,10 +16,12 @@ Pick the guide that matches what you need to do.
 ## How-to (do the thing)
 
 - [Create a plugin project](how-to/CREATE_PLUGIN.md)
-- [Test a plugin with the isolation loader](how-to/TEST_PLUGIN.md)\r\n- [Leverage the Common TestKit](how-to/TEST_WITH_TESTKIT.md)
+- [Test a plugin with the isolation loader](how-to/TEST_PLUGIN.md)
+- [Leverage the Common TestKit](how-to/TEST_WITH_TESTKIT.md)
 - [Implement an indexer](how-to/IMPLEMENT_INDEXER.md)
 - [Use the shared download orchestrator](how-to/USE_DOWNLOAD_ORCHESTRATOR.md)
 - [Authenticate with OAuth](how-to/AUTHENTICATE_OAUTH.md)
+- [Manage sessions/tokens with StreamingTokenManager](how-to/TOKEN_MANAGER.md)
 - [Add structured logging](how-to/ADD_LOGGING.md)
 - [Return structured diagnostics (PluginOperationResultJson)](how-to/DIAGNOSTICS_JSON.md)
 - [Cache GETs and enable 304 revalidation](how-to/HTTP_CACHING_AND_REVALIDATION.md)
@@ -30,6 +32,8 @@ Pick the guide that matches what you need to do.
 - [Manifest schema](PLUGIN_MANIFEST.md)
 - [Settings and configuration keys](reference/SETTINGS.md)
 - [Public API baselines](reference/PUBLIC_API_BASELINES.md)
+- [Key services and utilities](reference/KEY_SERVICES.md)
+- [Resilience policy reference](reference/RESILIENCE_POLICY.md)
 
 ## Migration
 
@@ -50,7 +54,6 @@ Pick the guide that matches what you need to do.
 - [Doc testing & snippet verification](dev-guide/TESTING_DOCS.md)
 
 Need something else? Open an issue or PR so the documentation evolves with the code.
-
 
 
 
