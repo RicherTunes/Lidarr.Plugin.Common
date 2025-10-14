@@ -48,7 +48,7 @@ var mgr = new StreamingTokenManager<MySession, MyCredentials>(
 ## Getting a valid session
 
 ```csharp
-var session = await mgr.GetValidSessionAsync(new MyCredentials(cid, secret, rtok));
+var session = await mgr.GetValidSessionAsync(new MyCredentials(clientId: cid, clientSecret: secret, refreshToken: refreshToken));
 // Use session.AccessToken in your delegating handler or client
 ```
 
@@ -60,18 +60,18 @@ If you already expose an `IStreamingTokenProvider`, adapt the manager behind it 
 public sealed class ManagerBackedTokenProvider : IStreamingTokenProvider
 {
     private readonly StreamingTokenManager<MySession, MyCredentials> _mgr;
-    private readonly MyCredentials _creds;
+    private readonly MyCredentials _credentials;
     public string ServiceName => "MyService";
     public bool SupportsRefresh => true;
 
-    public ManagerBackedTokenProvider(StreamingTokenManager<MySession, MyCredentials> mgr, MyCredentials creds)
-    { _mgr = mgr; _creds = creds; }
+    public ManagerBackedTokenProvider(StreamingTokenManager<MySession, MyCredentials> mgr, MyCredentials credentials)
+    { _mgr = mgr; _credentials = credentials; }
 
     public async Task<string> GetAccessTokenAsync()
-        => (await _mgr.GetValidSessionAsync(_creds)).AccessToken;
+        => (await _mgr.GetValidSessionAsync(_credentials)).AccessToken;
 
     public async Task<string> RefreshTokenAsync()
-    { await _mgr.RefreshSessionAsync(_creds); return (await _mgr.GetValidSessionAsync()).AccessToken; }
+    { await _mgr.RefreshSessionAsync(_credentials); return (await _mgr.GetValidSessionAsync()).AccessToken; }
 
     public Task<bool> ValidateTokenAsync(string token) => Task.FromResult(!string.IsNullOrEmpty(token));
     public DateTime? GetTokenExpiration(string token) => _mgr.GetSessionStatus().ExpiresAt;
@@ -79,7 +79,7 @@ public sealed class ManagerBackedTokenProvider : IStreamingTokenProvider
 }
 
 var http = HttpClientFactory.Create(
-    new OAuthDelegatingHandler(new ManagerBackedTokenProvider(mgr, creds), logger));
+    new OAuthDelegatingHandler(new ManagerBackedTokenProvider(mgr, credentials), logger));
 ```
 
 ## Events and status
@@ -98,4 +98,3 @@ var status = mgr.GetSessionStatus(); // IsValid, TimeUntilExpiry, etc.
 - Use `OAuthDelegatingHandler` for 401-triggered single-flight refresh on top of proactive refresh.
 
 See also: AUTHENTICATE_OAUTH.md, reference/KEY_SERVICES.md.
-

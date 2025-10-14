@@ -25,7 +25,7 @@ using var response = await httpClient.ExecuteWithResilienceAndCachingAsync(
     request,
     resilience: myResilienceProvider,
     cache: myCache,
-    deduplicator: myDeduper,
+    deduplicator: myDeduplicator,
     conditionalState: myValidators,
     cancellationToken: token);
 
@@ -78,7 +78,7 @@ public sealed class FileConditionalState : IConditionalRequestState { /* ... */ 
 
 ```csharp
 var key = HttpClientExtensions.BuildRequestDedupKey(request);
-var response = await deduper.GetOrCreateAsync(key, () => http.SendAsync(request, token), token);
+var response = await deduplicator.GetOrCreateAsync(key, () => http.SendAsync(request, token), token);
 ```
 
 ## Authentication
@@ -126,4 +126,3 @@ var orchestrator = new SimpleDownloadOrchestrator(
 - `SafeOperationExecutor` — defensive wrappers: timeouts, try-execute patterns, and IO retry for transient sharing violations.
 - `FileNameSanitizer`/`Sanitize` — filesystem-safe names and URL-safe components.
 - `RequestSigning`/`IRequestSigner` — MD5/HMAC helpers for signature schemes.
-
