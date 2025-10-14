@@ -48,5 +48,5 @@ var httpClient = HttpClientFactory.Create(new OAuthDelegatingHandler(tokenProvid
 ## Further reading
 
 - [Developer guide → Authentication](../dev-guide/DEVELOPER_GUIDE.md#authentication)
+- [Manage sessions/tokens with StreamingTokenManager](TOKEN_MANAGER.md)
 - [Release policy](../dev-guide/RELEASE_POLICY.md)
-

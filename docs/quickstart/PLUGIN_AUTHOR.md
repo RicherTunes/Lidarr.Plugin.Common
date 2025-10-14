@@ -17,13 +17,13 @@ dotnet new classlib -n MyPlugin -f net8.0
 
 ```
 
-Add references:
+Add references (replace x.y.z with the latest released versions from NuGet or the README "What’s New"):
 
 ```xml
 
 <ItemGroup>
-  <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.0.0" PrivateAssets="all" ExcludeAssets="runtime;native;contentfiles" />
-  <PackageReference Include="Lidarr.Plugin.Common" Version="1.1.4" />
+  <PackageReference Include="Lidarr.Plugin.Abstractions" Version="x.y.z" PrivateAssets="all" ExcludeAssets="runtime;native;contentfiles" />
+  <PackageReference Include="Lidarr.Plugin.Common" Version="x.y.z" />
 </ItemGroup>
 <PropertyGroup>
   <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
@@ -91,7 +91,7 @@ Run `dotnet publish -c Release` or copy the build output manually. Never rely on
   "name": "My Plugin",
   "version": "1.0.0",
   "apiVersion": "1.x",
-  "commonVersion": "1.1.4",
+  "commonVersion": "x.y.z",
   "minHostVersion": "2.12.0",
   "entryAssembly": "MyPlugin.dll"
 }
@@ -113,4 +113,3 @@ See the [Manifest reference](../reference/MANIFEST.md) for the full schema and v
 - Watch release notes for Abstractions updates ([Compatibility matrix](../concepts/COMPATIBILITY.md)).
 
 That’s it. You now have an isolated plugin that can live alongside other plugins without conflicts.
-

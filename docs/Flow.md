@@ -50,3 +50,4 @@ Notes
 - Do not cache `HttpResponseMessage` instances; the cache stores DTOs only.
 - Prefer the builder → options → executor path for consistency and dedup/caching invariants.
 - For batch/non-HTTP workflows, use `NetworkResilienceService` for checkpoints & circuit-breaker, and call the HTTP executor for outbound HTTP.
+- See also: [Key services and utilities](reference/KEY_SERVICES.md) and [Resilience policy reference](reference/RESILIENCE_POLICY.md).
