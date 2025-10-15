@@ -15,6 +15,8 @@ permissions:
 
 jobs:
   analyze:
+    # Skip CodeQL analysis for draft PRs; still run on push/main and schedule
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

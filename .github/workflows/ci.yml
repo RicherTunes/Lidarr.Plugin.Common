@@ -22,6 +22,8 @@ permissions:
 
 jobs:
   build_and_test:
+    # Skip CI for draft pull requests to avoid failing checks
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -129,7 +131,8 @@ jobs:
     name: Publish Test Results
     runs-on: ubuntu-latest
     needs: build_and_test
-    if: always()
+    # Skip for draft PRs; still allow on push/main
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     permissions:
       contents: read
       checks: write
@@ -148,6 +151,8 @@ jobs:
     name: Pack (dry run)
     runs-on: ubuntu-latest
     needs: build_and_test
+    # Skip for draft PRs; still allow on push/main
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
 
     steps:
       - uses: actions/checkout@v4

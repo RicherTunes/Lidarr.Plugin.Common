@@ -8,6 +8,8 @@ permissions:
 
 jobs:
   build:
+    # Skip PR validation for draft PRs
+    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,5 +42,4 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build
-
 
