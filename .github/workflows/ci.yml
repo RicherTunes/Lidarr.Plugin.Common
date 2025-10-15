@@ -22,8 +22,8 @@ permissions:
 
 jobs:
   build_and_test:
-    # Skip CI for draft pull requests to avoid failing checks
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    # Skip CI for draft PRs, and for PRs when runners are unavailable unless CI_RUNNERS_AVAILABLE=='true'
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
@@ -131,8 +131,8 @@ jobs:
     name: Publish Test Results
     runs-on: ubuntu-latest
     needs: build_and_test
-    # Skip for draft PRs; still allow on push/main
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    # Skip for drafts and when CI runners are unavailable
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
     permissions:
       contents: read
       checks: write
@@ -151,8 +151,8 @@ jobs:
     name: Pack (dry run)
     runs-on: ubuntu-latest
     needs: build_and_test
-    # Skip for draft PRs; still allow on push/main
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    # Skip for drafts and when CI runners are unavailable
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
 
     steps:
       - uses: actions/checkout@v4

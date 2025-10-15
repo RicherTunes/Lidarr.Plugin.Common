@@ -12,9 +12,8 @@ permissions:
 
 jobs:
   update_draft_release:
-    # Skip for draft PR events; still run on push to main
-    # Use explicit comparison for broader expression compatibility
-    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.draft != true }}
+    # Skip for draft PR events and when CI runners are unavailable, still run on push to main
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
     runs-on: ubuntu-latest
 
     permissions:

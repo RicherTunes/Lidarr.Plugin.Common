@@ -8,8 +8,8 @@ permissions:
 
 jobs:
   build:
-    # Skip PR validation for draft PRs
-    if: ${{ github.event_name != 'pull_request' || !github.event.pull_request.draft }}
+    # Skip validation for draft PRs, and for PRs when runners are unavailable unless CI_RUNNERS_AVAILABLE=='true'
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,4 +42,3 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build
-
