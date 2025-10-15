@@ -98,11 +98,16 @@ jobs:
           dotnet list src/Lidarr.Plugin.Common.csproj package --vulnerable --include-transitive || true
       - name: Generate SBOM (CycloneDX)
         if: always()
+        shell: bash
         run: |
-          dotnet tool install --global CycloneDX --version 2.7.1 || true
-          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          dotnet tool update --global CycloneDX --version 2.7.1 || dotnet tool install --global CycloneDX --version 2.7.1 || true
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
           mkdir -p artifacts
-          cyclonedx . --out ./artifacts/sbom.json || dotnet CycloneDX -o ./artifacts -j -s || true
+          if command -v cyclonedx >/dev/null 2>&1; then
+            cyclonedx . --out ./artifacts/sbom.json || true
+          else
+            dotnet CycloneDX -o ./artifacts -j -s || true
+          fi
       - name: Upload SBOM
         if: always()
         uses: actions/upload-artifact@v4
@@ -197,4 +202,3 @@ jobs:
         with:
           name: nupkg
           path: dist/*.nupkg
-
