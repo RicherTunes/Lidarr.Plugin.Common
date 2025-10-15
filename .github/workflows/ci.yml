@@ -92,6 +92,23 @@ jobs:
           targetdir: "coverage-report"
           reporttypes: "MarkdownSummary;HtmlInline_AzurePipelines"
           toolpath: "reportgenerator"
+      - name: Dependency vulnerability audit
+        continue-on-error: true
+        run: |
+          dotnet list src/Lidarr.Plugin.Common.csproj package --vulnerable --include-transitive || true
+      - name: Generate SBOM (CycloneDX)
+        if: always()
+        run: |
+          dotnet tool install --global CycloneDX --version 2.7.1 || true
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          mkdir -p artifacts
+          cyclonedx . --out ./artifacts/sbom.json || dotnet CycloneDX -o ./artifacts -j -s || true
+      - name: Upload SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: artifacts/sbom.json
       - name: Collect Abstractions binlog on failure
         if: failure()
         run: dotnet build src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -bl:abs.binlog
@@ -180,5 +197,4 @@ jobs:
         with:
           name: nupkg
           path: dist/*.nupkg
-
 

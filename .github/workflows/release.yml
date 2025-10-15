@@ -48,9 +48,22 @@ jobs:
           dotnet test -c Release --no-build --collect:"XPlat Code Coverage"
           --filter FullyQualifiedName!~RetrySemanticsTests.ExecuteWithResilienceAsync_PrefersRetryAfterDate_AndClampsToBudget
 
-      - name: Verify tag matches package versions (temporarily disabled)
-        if: ${{ false }}
-        run: echo "Skipped"
+      - name: Verify tag matches package versions
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG_REF="${GITHUB_REF##*/}"
+          TAG_NO_V="${TAG_REF#v}"
+          echo "Tag: $TAG_REF -> $TAG_NO_V"
+          common_ver=$(sed -n 's:.*<Version>\\(.*\\)</Version>.*:\\1:p' src/Lidarr.Plugin.Common.csproj | head -n1)
+          abstractions_ver=$(sed -n 's:.*<Version>\\(.*\\)</Version>.*:\\1:p' src/Abstractions/Lidarr.Plugin.Abstractions.csproj | head -n1)
+          echo "Common.csproj Version: $common_ver"
+          echo "Abstractions.csproj Version: $abstractions_ver"
+          test -n "$common_ver" && test -n "$abstractions_ver"
+          if [ "$common_ver" != "$TAG_NO_V" ] || [ "$abstractions_ver" != "$TAG_NO_V" ]; then
+            echo "Tag ($TAG_NO_V) does not match project versions (Common=$common_ver, Abstractions=$abstractions_ver)" >&2
+            exit 1
+          fi
 
       - name: Pack
         run: |
