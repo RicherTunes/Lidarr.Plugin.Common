@@ -13,9 +13,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install PowerShell (pwsh)
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y powershell
+        uses: PowerShell/setup-pwsh@v2
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
