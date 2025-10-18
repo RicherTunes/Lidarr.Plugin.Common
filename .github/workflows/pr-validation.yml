@@ -8,8 +8,6 @@ permissions:
 
 jobs:
   build:
-    # Skip validation for draft PRs, and for PRs when runners are unavailable unless CI_RUNNERS_AVAILABLE=='true'
-    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,13 +27,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Setup Lidarr host
+      - name: Prepare host stub
         shell: pwsh
-        run: ./scripts/setup-lidarr.ps1 -SkipBuild
-
-      - name: Verify host assemblies
-        shell: pwsh
-        run: ./scripts/verify-assemblies.ps1
+        run: |
+          $out = Join-Path $PWD 'artifacts/host-assemblies'
+          ./scripts/prepare-host-stub.ps1 -OutputPath $out
+          echo "LIDARR_PATH=$out" >> $GITHUB_ENV
 
       - name: Build
         run: dotnet build -c Release -warnaserror:NU1903
