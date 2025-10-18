@@ -389,7 +389,7 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
 
         public async Task<T> GetResultAsync<T>(CancellationToken cancellationToken)
         {
-            var result = await TaskCompletionSource.Task.ConfigureAwait(false);
+            var result = await TaskCompletionSource.Task.WaitAsync(cancellationToken).ConfigureAwait(false);
             return (T)result;
         }
     }
