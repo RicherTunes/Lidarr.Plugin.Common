@@ -32,7 +32,7 @@ jobs:
         run: |
           $out = Join-Path $PWD 'artifacts/host-assemblies'
           ./scripts/prepare-host-stub.ps1 -OutputPath $out
-          echo "LIDARR_PATH=$out" >> $GITHUB_ENV
+          "LIDARR_PATH=$out" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
 
       - name: Build
         run: dotnet build -c Release -warnaserror:NU1903
