@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -344,9 +345,18 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             {
                 try
                 {
-#if NET6_0_OR_GREATER
+#if NET7_0_OR_GREATER
                     // 600: read/write for owner only
                     File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+#else
+                    // Fallback for .NET 6: use chmod(2) when available
+                    if (RuntimeInformation.IsOSPlatform(OSPlatform.Linux) || RuntimeInformation.IsOSPlatform(OSPlatform.OSX))
+                    {
+                        // 0o600
+                        const uint S_IRUSR = 0x100; // 0400
+                        const uint S_IWUSR = 0x80;  // 0200
+                        _ = Chmod(path, S_IRUSR | S_IWUSR);
+                    }
 #endif
                 }
                 catch
@@ -355,5 +365,21 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 }
             }
         }
+
+#if !NET7_0_OR_GREATER
+        [DllImport("libc", SetLastError = true, CallingConvention = CallingConvention.Cdecl)]
+        private static extern int chmod(string pathname, uint mode);
+        private static int Chmod(string path, uint mode)
+        {
+            try
+            {
+                return chmod(path, mode);
+            }
+            catch
+            {
+                return -1;
+            }
+        }
+#endif
     }
 }

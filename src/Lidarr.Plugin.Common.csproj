@@ -133,8 +133,12 @@
     <PackageReference Include="Spectre.Console" Version="0.50.0" PrivateAssets="All" />
   </ItemGroup>
   <!-- Audio Processing Dependencies -->
-  <ItemGroup>
+  <!-- Default to public TagLibSharp for open PRs; allow opting into Lidarr-patched build with -p:UseLidarrTagLib=true -->
+  <ItemGroup Condition="'$(UseLidarrTagLib)' == 'true'">
     <PackageReference Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseLidarrTagLib)' != 'true'">
+    <PackageReference Include="TagLibSharp" Version="2.3.0" />
   </ItemGroup>
   <ItemGroup>
   </ItemGroup>
