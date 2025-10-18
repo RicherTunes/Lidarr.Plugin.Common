@@ -59,3 +59,11 @@ _nupkg_extract/
 # Local package output
 /dist/
 
+# Test artifacts
+[Tt]est[Rr]esults*/
+*.trx
+
+# Coverage
+coverage*/
+*.coverage
+*.cobertura.xml
