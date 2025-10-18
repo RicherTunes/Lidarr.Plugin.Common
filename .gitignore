@@ -67,3 +67,4 @@ _nupkg_extract/
 coverage*/
 *.coverage
 *.cobertura.xml
+dist/

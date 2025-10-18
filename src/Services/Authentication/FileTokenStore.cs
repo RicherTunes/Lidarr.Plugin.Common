@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -62,21 +63,48 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     return null;
                 }
 
-                await using var stream = new FileStream(_filePath, new FileStreamOptions
+                await using (var stream = new FileStream(_filePath, new FileStreamOptions
                 {
                     Access = FileAccess.Read,
                     Mode = FileMode.Open,
                     Share = FileShare.Read,
                     Options = FileOptions.SequentialScan
-                });
-
-                var persisted = await JsonSerializer.DeserializeAsync<PersistedEnvelope>(stream, _serializerOptions, cancellationToken).ConfigureAwait(false);
-                if (persisted == null)
+                }))
                 {
-                    return null;
-                }
+                    try
+                    {
+                        var persisted = await JsonSerializer.DeserializeAsync<PersistedEnvelope>(stream, _serializerOptions, cancellationToken).ConfigureAwait(false);
+                        if (persisted == null)
+                        {
+                            return null;
+                        }
 
-                return new TokenEnvelope<TSession>(persisted.Session!, persisted.ExpiresAt, persisted.Metadata);
+                        return new TokenEnvelope<TSession>(persisted.Session!, persisted.ExpiresAt, persisted.Metadata);
+                    }
+                    catch (JsonException) when (OperatingSystem.IsWindows())
+                    {
+                        // Fallback for DPAPI-protected payloads written on Windows
+                        stream.Position = 0;
+                        using var ms = new MemoryStream();
+                        await stream.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
+                        var protectedBytes = ms.ToArray();
+                        try
+                        {
+                            var plaintext = ProtectedData.Unprotect(protectedBytes, optionalEntropy: null, scope: DataProtectionScope.CurrentUser);
+                            var persisted = JsonSerializer.Deserialize<PersistedEnvelope>(plaintext, _serializerOptions);
+                            if (persisted == null)
+                            {
+                                return null;
+                            }
+                            return new TokenEnvelope<TSession>(persisted.Session!, persisted.ExpiresAt, persisted.Metadata);
+                        }
+                        catch (CryptographicException ex)
+                        {
+                            _logger?.LogWarning(ex, "Failed to decrypt token envelope with DPAPI from {FilePath}", _filePath);
+                            return null;
+                        }
+                    }
+                }
             }
             catch (Exception ex) when (ex is IOException or JsonException)
             {
@@ -114,8 +142,19 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     Options = FileOptions.Asynchronous
                 }))
                 {
-                    await JsonSerializer.SerializeAsync(stream, persisted, _serializerOptions, cancellationToken).ConfigureAwait(false);
-                    await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    if (OperatingSystem.IsWindows())
+                    {
+                        // Protect persisted JSON using DPAPI under CurrentUser scope
+                        var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(persisted, _serializerOptions);
+                        var protectedBytes = ProtectedData.Protect(jsonBytes, optionalEntropy: null, scope: DataProtectionScope.CurrentUser);
+                        await stream.WriteAsync(protectedBytes, cancellationToken).ConfigureAwait(false);
+                        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await JsonSerializer.SerializeAsync(stream, persisted, _serializerOptions, cancellationToken).ConfigureAwait(false);
+                        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+                    }
                 }
 
                 // Replace atomically when destination exists; otherwise a simple move is sufficient.
@@ -139,6 +178,8 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                         {
                             File.Move(tempPath, _filePath, overwrite: true);
                         }
+                        // Harden file permissions on Unix-like systems
+                        TryHardenFilePermissions(_filePath);
                         break; // success
                     }
                     catch (IOException) when (attempt < 10)
@@ -294,6 +335,24 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     ExpiresAt = envelope.ExpiresAt,
                     Metadata = envelope.Metadata != null ? new Dictionary<string, string>(envelope.Metadata) : null
                 };
+            }
+        }
+
+        private static void TryHardenFilePermissions(string path)
+        {
+            if (!OperatingSystem.IsWindows())
+            {
+                try
+                {
+#if NET6_0_OR_GREATER
+                    // 600: read/write for owner only
+                    File.SetUnixFileMode(path, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+#endif
+                }
+                catch
+                {
+                    // Best effort only; ignore if not supported
+                }
             }
         }
     }

@@ -8,4 +8,3 @@ Email security@richertunes.com with details and a proof of concept if possible. 
 
 ## Coordinated Disclosure
 Please do not open public issues for potential vulnerabilities. We’ll work with you on a coordinated disclosure and publish a fix + release notes.
-

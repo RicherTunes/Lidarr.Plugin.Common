@@ -25,7 +25,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.1.6: Diagnostics JSON helper; 304 revalidation deflake; Windows token store concurrency fix; CI test annotations.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.1.7: Align versioning; enable tag/version guard; add SECURITY.md; add CodeQL; ignore test artifacts; docs polish.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <!-- Build Configuration -->
@@ -193,4 +193,3 @@
     <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 </Project>
-
