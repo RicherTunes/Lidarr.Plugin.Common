@@ -27,10 +27,17 @@ jobs:
             8.0.x
             6.0.x
 
+      - name: Configure private TagLib feed (release only)
+        if: startsWith(github.ref, 'refs/tags/v') && env.ADO_TAGLIB_NUGET_URL != ''
+        env:
+          ADO_TAGLIB_NUGET_URL: ${{ secrets.ADO_TAGLIB_NUGET_URL }}
+        run: |
+          dotnet nuget add source --name lidarr-taglib "$ADO_TAGLIB_NUGET_URL"
+
       - name: Restore & Build (no analyzers)
         run: |
-          dotnet restore
-          dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1
+          dotnet restore -p:UseLidarrTagLib=true
+          dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1 -p:UseLidarrTagLib=true
 
       - name: Public API drift (net8)
         run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0
@@ -62,8 +69,8 @@ jobs:
 
       - name: Pack
         run: |
-          dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
-          dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
+          dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:UseLidarrTagLib=true
+          dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:UseLidarrTagLib=true
 
       - name: API compatibility (Abstractions vs previous)
         env:
