@@ -38,7 +38,10 @@ jobs:
           fetch-depth: 0
 
       - name: Install PowerShell (pwsh)
-        uses: PowerShell/setup-pwsh@v2
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y powershell
 
       - name: Setup .NET SDKs (8 & 6)
         uses: actions/setup-dotnet@v4
