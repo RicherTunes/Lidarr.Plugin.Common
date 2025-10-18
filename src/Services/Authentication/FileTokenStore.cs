@@ -2,12 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Security.Cryptography;
+using System.Reflection;
 using System.Runtime.InteropServices;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Interfaces;
 using Microsoft.Extensions.Logging;
+using Lidarr.Plugin.Common.Interop;
 
 namespace Lidarr.Plugin.Common.Services.Authentication
 {
@@ -89,21 +91,17 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                         using var ms = new MemoryStream();
                         await stream.CopyToAsync(ms, cancellationToken).ConfigureAwait(false);
                         var protectedBytes = ms.ToArray();
-                        try
+                        var plaintext = TryUnprotectWindows(protectedBytes);
+                        if (plaintext == null)
                         {
-                            var plaintext = ProtectedData.Unprotect(protectedBytes, optionalEntropy: null, scope: DataProtectionScope.CurrentUser);
-                            var persisted = JsonSerializer.Deserialize<PersistedEnvelope>(plaintext, _serializerOptions);
-                            if (persisted == null)
-                            {
-                                return null;
-                            }
-                            return new TokenEnvelope<TSession>(persisted.Session!, persisted.ExpiresAt, persisted.Metadata);
-                        }
-                        catch (CryptographicException ex)
-                        {
-                            _logger?.LogWarning(ex, "Failed to decrypt token envelope with DPAPI from {FilePath}", _filePath);
                             return null;
                         }
+                        var persisted = JsonSerializer.Deserialize<PersistedEnvelope>(plaintext, _serializerOptions);
+                        if (persisted == null)
+                        {
+                            return null;
+                        }
+                        return new TokenEnvelope<TSession>(persisted.Session!, persisted.ExpiresAt, persisted.Metadata);
                     }
                 }
             }
@@ -145,9 +143,9 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 {
                     if (OperatingSystem.IsWindows())
                     {
-                        // Protect persisted JSON using DPAPI under CurrentUser scope
+                        // Protect persisted JSON using DPAPI under CurrentUser scope when available
                         var jsonBytes = JsonSerializer.SerializeToUtf8Bytes(persisted, _serializerOptions);
-                        var protectedBytes = ProtectedData.Protect(jsonBytes, optionalEntropy: null, scope: DataProtectionScope.CurrentUser);
+                        var protectedBytes = TryProtectWindows(jsonBytes) ?? jsonBytes;
                         await stream.WriteAsync(protectedBytes, cancellationToken).ConfigureAwait(false);
                         await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                     }
@@ -355,7 +353,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                         // 0o600
                         const uint S_IRUSR = 0x100; // 0400
                         const uint S_IWUSR = 0x80;  // 0200
-                        _ = Chmod(path, S_IRUSR | S_IWUSR);
+                        _ = PosixInterop.Chmod(path, S_IRUSR | S_IWUSR);
                     }
 #endif
                 }
@@ -366,20 +364,64 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             }
         }
 
-#if !NET7_0_OR_GREATER
-        [DllImport("libc", SetLastError = true, CallingConvention = CallingConvention.Cdecl)]
-        private static extern int chmod(string pathname, uint mode);
-        private static int Chmod(string path, uint mode)
+        private byte[]? TryProtectWindows(byte[] plaintext)
         {
             try
             {
-                return chmod(path, mode);
+                var type = Type.GetType("System.Security.Cryptography.ProtectedData, System.Security.Cryptography.ProtectedData", throwOnError: false);
+                if (type == null)
+                {
+                    return null;
+                }
+                var scopeType = Type.GetType("System.Security.Cryptography.DataProtectionScope, System.Security.Cryptography.ProtectedData", throwOnError: false);
+                if (scopeType == null)
+                {
+                    return null;
+                }
+                var currentUser = Enum.ToObject(scopeType, 1);
+                var method = type.GetMethod("Protect", BindingFlags.Public | BindingFlags.Static, new Type[] { typeof(byte[]), typeof(byte[]), scopeType });
+                if (method == null)
+                {
+                    return null;
+                }
+                var result = method.Invoke(null, new object?[] { plaintext, null, currentUser }) as byte[];
+                return result;
             }
-            catch
+            catch (Exception ex)
             {
-                return -1;
+                _logger?.LogWarning(ex, "Failed to protect token envelope with DPAPI");
+                return null;
             }
         }
-#endif
+
+        private byte[]? TryUnprotectWindows(byte[] ciphertext)
+        {
+            try
+            {
+                var type = Type.GetType("System.Security.Cryptography.ProtectedData, System.Security.Cryptography.ProtectedData", throwOnError: false);
+                if (type == null)
+                {
+                    return null;
+                }
+                var scopeType = Type.GetType("System.Security.Cryptography.DataProtectionScope, System.Security.Cryptography.ProtectedData", throwOnError: false);
+                if (scopeType == null)
+                {
+                    return null;
+                }
+                var currentUser = Enum.ToObject(scopeType, 1);
+                var method = type.GetMethod("Unprotect", BindingFlags.Public | BindingFlags.Static, new Type[] { typeof(byte[]), typeof(byte[]), scopeType });
+                if (method == null)
+                {
+                    return null;
+                }
+                var result = method.Invoke(null, new object?[] { ciphertext, null, currentUser }) as byte[];
+                return result;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogWarning(ex, "Failed to unprotect token envelope with DPAPI");
+                return null;
+            }
+        }
     }
 }

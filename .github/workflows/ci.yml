@@ -37,6 +37,9 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install PowerShell (pwsh)
+        uses: PowerShell/setup-pwsh@v2
+
       - name: Setup .NET SDKs (8 & 6)
         uses: actions/setup-dotnet@v4
         with:
@@ -207,3 +210,4 @@ jobs:
         with:
           name: nupkg
           path: dist/*.nupkg
+ 
