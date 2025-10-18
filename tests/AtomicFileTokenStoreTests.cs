@@ -23,6 +23,7 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public async Task Concurrent_Saves_Do_Not_Corrupt_File()
         {
+            // Exercise concurrent saves across processes.
             var dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("n")));
             try
             {
