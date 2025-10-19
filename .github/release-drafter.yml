@@ -1,56 +1,31 @@
-name-template: 'v$NEXT_PATCH_VERSION'
-tag-template: 'v$NEXT_PATCH_VERSION'
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+change-template: '- $TITLE (#$NUMBER) @$AUTHOR'
+no-changes-template: 'No user-facing changes.'
+
+categories:
+  - title: 'Features'
+    labels: ['feat', 'feature']
+  - title: 'Fixes'
+    labels: ['fix', 'bugfix', 'bug']
+  - title: 'Documentation'
+    labels: ['docs']
+  - title: 'Chores'
+    labels: ['chore', 'refactor', 'ci']
+
 version-resolver:
   major:
-    labels:
-      - breaking-change
+    labels: ['semver:major', 'breaking-change']
   minor:
-    labels:
-      - feature
-      - enhancement
+    labels: ['semver:minor', 'feat', 'feature']
   patch:
-    labels:
-      - bug
-      - fix
-      - chore
-categories:
-  - title: 🚀 Features
-    labels:
-      - feature
-      - enhancement
-  - title: 🛠 Fixes
-    labels:
-      - bug
-      - fix
-  - title: 📚 Docs
-    labels:
-      - docs
-  - title: 🧱 Chore
-    labels:
-      - chore
-change-template: '- $TITLE (#$NUMBER)' 
-no-changes-template: '- No user-facing changes in this cycle.'
-exclude-labels:
-  - skip-changelog
-  - dependencies
-prerelease: false
-include-pre-releases: false
+    labels: ['semver:patch', 'fix', 'bugfix', 'bug', 'chore']
+  default: patch
 
 template: |
-  ## Summary
-  _Write the one-paragraph upgrade note here._
-
-  ## Highlights
+  ## Changes
   $CHANGES
-
-  ## Breaking changes
-  - _None_
-
-  ## Deprecations
-  - _None_
-
-  ## Dependency changes
-  - _None_
 
   ## Contributors
   $CONTRIBUTORS
+

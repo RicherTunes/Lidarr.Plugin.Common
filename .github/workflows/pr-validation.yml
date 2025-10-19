@@ -8,11 +8,26 @@ permissions:
 
 jobs:
   build:
-    # Skip validation for draft PRs, and for PRs when runners are unavailable unless CI_RUNNERS_AVAILABLE=='true'
-    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
     steps:
       - uses: actions/checkout@v4
+
+      - name: Install PowerShell (pwsh)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+          CODENAME=${VERSION_CODENAME:-"jammy"}
+          echo "Using Ubuntu codename: $CODENAME"
+          curl -fsSL "https://packages.microsoft.com/config/ubuntu/$CODENAME/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb \
+            || curl -fsSL "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb
+          sudo dpkg -i packages-microsoft-prod.deb
+          sudo apt-get update
+          sudo apt-get install -y powershell
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
@@ -29,13 +44,12 @@ jobs:
           restore-keys: |
             ${{ runner.os }}-nuget-
 
-      - name: Setup Lidarr host
+      - name: Prepare host stub
         shell: pwsh
-        run: ./scripts/setup-lidarr.ps1 -SkipBuild
-
-      - name: Verify host assemblies
-        shell: pwsh
-        run: ./scripts/verify-assemblies.ps1
+        run: |
+          $out = Join-Path $PWD 'artifacts/host-assemblies'
+          ./scripts/prepare-host-stub.ps1 -OutputPath $out
+          "LIDARR_PATH=$out" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
 
       - name: Build
         run: dotnet build -c Release -warnaserror:NU1903
