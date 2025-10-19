@@ -82,9 +82,9 @@ namespace Lidarr.Plugin.Common.Tests
             var p3 = new Dictionary<string, string> { { "id", "3" } };
 
             cache.Set("catalog/detail", p1, new CachePayload { Id = "one" });
-            Thread.Sleep(5);
+            Thread.Sleep(20);
             cache.Set("catalog/detail", p2, new CachePayload { Id = "two" });
-            Thread.Sleep(5);
+            Thread.Sleep(20);
             cache.Set("catalog/detail", p3, new CachePayload { Id = "three" });
 
             Assert.Null(cache.Get<CachePayload>("catalog/detail", p1));
