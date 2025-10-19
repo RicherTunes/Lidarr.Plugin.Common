@@ -8,14 +8,14 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.1.7 — October 11, 2025
+Latest: v1.2.2 — October 19, 2025
 
 - Versioning: SDK-generated assembly attributes from `<Version>`; package metadata aligned.
 - CI: Tag ↔ version verification re-enabled for release tags; CodeQL scanning added.
 - Hygiene: Ignore `.trx` and coverage artifacts; SECURITY.md added.
 - Docs: Minor polish and brand disclaimer.
 
-Release notes: [v1.1.7](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.1.7)
+Release notes: [v1.2.2](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.2.2)
 
 ## Choose your adventure
 
@@ -68,4 +68,3 @@ Release notes: [v1.1.7](https://github.com/RicherTunes/Lidarr.Plugin.Common/rele
 MIT – see [LICENSE](LICENSE).
 
 Note: All product and company names (e.g., Qobuz, TIDAL, Spotify) are trademarks of their respective owners; usage here is for descriptive purposes only and does not imply endorsement.
-
