@@ -12,7 +12,7 @@
     <NoWarn>SA1200;SA1633;CS1591;RS0016;RS0017</NoWarn>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
-    <Version>1.1.7</Version>
+    <Version>1.2.2</Version>
   </PropertyGroup>
   <!-- Make PublicAPI baselines visible to analyzer tools (e.g., dotnet format) without relying on build targets -->
   <ItemGroup>
@@ -91,6 +91,7 @@
     <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
   </ItemGroup>
 </Project>
+
 
 
 
