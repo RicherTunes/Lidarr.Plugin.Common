@@ -563,6 +563,224 @@ namespace Lidarr.Plugin.Common.Utilities
             }
         }
 
+// ---- TimeProvider-enabled variants (net8+) ----
+#if NET8_0_OR_GREATER
+        public static Task<HttpResponseMessage> ExecuteWithResilienceAsync(
+            this HttpClient httpClient,
+            HttpRequestMessage request,
+            int maxRetries,
+            TimeSpan? retryBudget,
+            int maxConcurrencyPerHost,
+            TimeSpan? perRequestTimeout,
+            TimeProvider timeProvider,
+            CancellationToken cancellationToken)
+        {
+            if (timeProvider == null) throw new ArgumentNullException(nameof(timeProvider));
+            return ExecuteWithResilienceAsyncCore(
+                httpClient,
+                request,
+                maxRetries,
+                retryBudget,
+                maxConcurrencyPerHost,
+                maxConcurrencyPerHost,
+                perRequestTimeout,
+                timeProvider,
+                cancellationToken);
+        }
+
+        private static async Task<HttpResponseMessage> ExecuteWithResilienceAsyncCore(
+            HttpClient httpClient,
+            HttpRequestMessage request,
+            int maxRetries,
+            TimeSpan? retryBudget,
+            int maxConcurrencyPerHost,
+            int maxTotalConcurrencyPerHost,
+            TimeSpan? perRequestTimeout,
+            TimeProvider timeProvider,
+            CancellationToken cancellationToken)
+        {
+            if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
+            if (request == null) throw new ArgumentNullException(nameof(request));
+            if (timeProvider == null) throw new ArgumentNullException(nameof(timeProvider));
+
+            retryBudget ??= TimeSpan.FromSeconds(60);
+            using var timeoutCts = perRequestTimeout.HasValue
+                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
+                : null;
+            if (perRequestTimeout.HasValue)
+            {
+                timeoutCts!.CancelAfter(perRequestTimeout.Value);
+            }
+
+            var effectiveToken = timeoutCts?.Token ?? cancellationToken;
+            var deadline = timeProvider.GetUtcNow().UtcDateTime + retryBudget.Value;
+            var attempt = 0;
+
+            Uri? currentUri = request.RequestUri;
+            if (currentUri != null && !currentUri.IsAbsoluteUri)
+            {
+                if (httpClient.BaseAddress == null)
+                {
+                    throw new InvalidOperationException("Relative RequestUri without HttpClient.BaseAddress.");
+                }
+                currentUri = new Uri(httpClient.BaseAddress, currentUri);
+            }
+
+            var host = currentUri?.Host;
+            string hostKey = host ?? "__unknown__";
+            string profileTag = "default";
+            try
+            {
+                if (request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ProfileKey, out string? profile) && !string.IsNullOrWhiteSpace(profile))
+                {
+                    hostKey = hostKey + "|" + profile;
+                    profileTag = profile;
+                }
+            }
+            catch { }
+
+            var gate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
+            var aggregateEffective = Math.Max(1, maxTotalConcurrencyPerHost);
+            var aggregateGate = HostGateRegistry.GetAggregate(host, aggregateEffective);
+
+            using (var waitActivity = Observability.Activity.StartActivity("host.gate.wait", ActivityKind.Internal))
+            {
+                waitActivity?.SetTag("net.host", host ?? "__unknown__");
+                waitActivity?.SetTag("profile", profileTag);
+                await aggregateGate.WaitAsync(effectiveToken).ConfigureAwait(false);
+                await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
+            }
+
+            try { Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch { }
+            try
+            {
+                while (true)
+                {
+                    attempt++;
+
+                    using var attemptRequest = await CloneForRetryAsync(request).ConfigureAwait(false);
+                    if (currentUri != null) { attemptRequest.RequestUri = currentUri; }
+
+                    HttpResponseMessage response;
+                    using var httpActivity = Observability.Activity.StartActivity("http.send", ActivityKind.Client);
+                    if (httpActivity != null)
+                    {
+                        try
+                        {
+                            httpActivity.SetTag("http.request.method", attemptRequest.Method.Method);
+                            if (attemptRequest.RequestUri != null)
+                            {
+                                httpActivity.SetTag("url.scheme", attemptRequest.RequestUri.Scheme);
+                                httpActivity.SetTag("net.peer.name", attemptRequest.RequestUri.Host);
+                                httpActivity.SetTag("url.path", attemptRequest.RequestUri.AbsolutePath);
+                            }
+                            httpActivity.SetTag("retry.attempt", attempt);
+                            httpActivity.SetTag("profile", profileTag);
+                        }
+                        catch { }
+                    }
+                    try
+                    {
+                        response = await httpClient.SendAsync(
+                                attemptRequest,
+                                HttpCompletionOption.ResponseHeadersRead,
+                                effectiveToken)
+                            .ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException ex) when (perRequestTimeout.HasValue &&
+                                                               timeoutCts!.IsCancellationRequested &&
+                                                               !cancellationToken.IsCancellationRequested)
+                    {
+                        throw new TimeoutException(
+                            $"Request exceeded the per-request timeout of {perRequestTimeout.Value}.",
+                            ex);
+                    }
+
+                    var status = (int)response.StatusCode;
+                    var retryable = status == (int)HttpStatusCode.RequestTimeout
+                                   || status == (int)HttpStatusCode.TooManyRequests
+                                   || (status >= 500 && status <= 599);
+
+                    if (!retryable || attempt >= maxRetries)
+                    {
+                        return response;
+                    }
+
+                    TimeSpan delay;
+                    var preferred = GetRetryDelayPreferredDate(response, timeProvider);
+                    if (preferred.HasValue)
+                    {
+                        delay = preferred.Value;
+                    }
+                    else
+                    {
+                        delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt))) + GetJitter();
+                    }
+
+                    var now = timeProvider.GetUtcNow().UtcDateTime;
+                    var remaining = deadline - now;
+                    if (remaining <= TimeSpan.Zero)
+                    {
+                        try { httpActivity?.SetTag("resilience.deadline.exhausted", true); } catch { }
+                        return response;
+                    }
+                    if (delay > remaining)
+                    {
+                        delay = remaining; // clamp to budget
+                    }
+
+                    try
+                    {
+                        Observability.Metrics.RetryCount.Add(1,
+                            new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"),
+                            new KeyValuePair<string, object?>("http.method", request.Method.Method));
+                        httpActivity?.AddEvent(new ActivityEvent("retry", tags: new ActivityTagsCollection
+                        {
+                            { "retry.delay.ms", (long)delay.TotalMilliseconds },
+                            { "retry.reason", status }
+                        }));
+                    }
+                    catch { }
+                    response.Dispose();
+                    await DelayAsync(delay, timeProvider, effectiveToken).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                try { gate.Release(); } catch { }
+                try { aggregateGate.Release(); } catch { }
+                try { Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch { }
+            }
+        }
+
+        private static TimeSpan? GetRetryDelayPreferredDate(HttpResponseMessage response, TimeProvider timeProvider)
+        {
+            try
+            {
+                var ra = response.Headers?.RetryAfter;
+                if (ra == null) return null;
+
+                if (ra.Date.HasValue)
+                {
+                    var delta = ra.Date.Value - timeProvider.GetUtcNow();
+                    if (delta > TimeSpan.Zero) return delta;
+                }
+                if (ra.Delta.HasValue) return ra.Delta.Value;
+            }
+            catch { }
+            return null;
+        }
+
+        private static async Task DelayAsync(TimeSpan delay, TimeProvider timeProvider, CancellationToken cancellationToken)
+        {
+            if (delay <= TimeSpan.Zero) return;
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var ctr = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
+            using var timer = timeProvider.CreateTimer(static s => ((TaskCompletionSource<object?>)s!).TrySetResult(null), tcs, delay, Timeout.InfiniteTimeSpan);
+            await tcs.Task.ConfigureAwait(false);
+        }
+#endif
+
         /// <summary>
         /// Executes an HTTP request and deserializes the JSON response.
         /// </summary>
