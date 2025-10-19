@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a bug to help us improve
+labels: [bug]
+body:
+  - type: checkboxes
+    attributes:
+      label: Pre-flight
+      options:
+        - label: I searched existing issues and discussions
+          required: true
+        - label: I can reproduce with the latest release (or main)
+          required: true
+  - type: textarea
+    attributes:
+      label: Describe the bug
+      description: What happened and what did you expect?
+    validations:
+      required: true
+  - type: textarea
+    attributes:
+      label: Reproduction steps
+      description: Minimal steps, code, or repo to reproduce
+      placeholder: |
+        1. Go to '...'
+        2. Run 'dotnet test -c Release'
+        3. See error
+  - type: input
+    attributes:
+      label: Affected version
+      placeholder: e.g., 1.1.7
+  - type: dropdown
+    attributes:
+      label: Runtime/OS
+      options:
+        - Windows
+        - Linux
+        - macOS
+  - type: textarea
+    attributes:
+      label: Logs / stacktrace
+      description: Attach relevant logs (redact secrets)
+

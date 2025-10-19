@@ -1,0 +1,24 @@
+# Normalize line endings and mark binary files
+* text=auto eol=lf
+
+# Solution and project files
+*.sln text eol=lf
+*.csproj text eol=lf
+*.props text eol=lf
+*.targets text eol=lf
+*.ps1 text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.md text eol=lf
+
+# Binaries
+*.dll -text
+*.exe -text
+*.nupkg -text
+*.snupkg -text
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.ico -text
+
