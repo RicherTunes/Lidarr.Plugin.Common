@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <PackageId>RicherTunes.Lidarr.Plugin.Templates</PackageId>
+    <Version>0.1.0</Version>
+    <Authors>RicherTunes</Authors>
+    <Description>Templates for building Lidarr streaming plugins.</Description>
+    <PackageType>Template</PackageType>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <NoBuild>true</NoBuild>
+  </PropertyGroup>
+  <ItemGroup>
+    <None Include="../lidarr-plugin/**" Pack="true" PackagePath="content/" />
+    <None Include="README.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>
+
