@@ -25,7 +25,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.1.6: Diagnostics JSON helper; 304 revalidation deflake; Windows token store concurrency fix; CI test annotations.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.2.1: Token-at-rest encryption (DPAPI/Keychain/Secret Service/Data Protection + AKV); TagLib default to public; CI security gates; docs updates. See CHANGELOG.md.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <!-- Build Configuration -->
@@ -207,4 +207,5 @@
     <PackageReference Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
   </ItemGroup>
 </Project>
+
 

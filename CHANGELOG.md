@@ -28,6 +28,20 @@ Template to copy when drafting a release:
 [Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/vX.Y.(Z-1)...vX.Y.Z)
 ```
 
+## [1.2.1] - 2025-10-11
+**Upgrade note:** Security + packaging polish. Encrypted token storage by default; safer feed configuration; improved CI supply-chain checks.
+
+**Highlights**
+- Token store: encrypt at rest with pluggable providers (DPAPI on Windows; Keychain on macOS; Secret Service or Data Protection on Linux). Auto-migrates legacy plaintext to v2 envelope.
+- Packaging: default to public TagLibSharp; CI-only override for TagLibSharp-Lidarr via UseLidarrTaglib.
+- CI security: CodeQL, SBOM generation + upload, dependency review gate, Gitleaks PR/push + full history workflows.
+- Docs: SECURITY.md, CODE_OF_CONDUCT.md, TOKEN_PROTECTION.md, TAGLIB_DEPENDENCY.md; README updated.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** Added Azure.* packages (net8) for optional AKV DP key wrapping.
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.7...v1.2.1)
 ## [1.1.7] - 2025-10-11
 **Upgrade note:** Policy-first HTTP path wired end-to-end; safer dedup/caching defaults; clearer redirect semantics.
 
@@ -218,3 +232,4 @@ Template to copy when drafting a release:
 - **Feature Requests**: Discuss in GitHub Discussions.
 - **Community**: Join the streaming plugin developer community.
 - **Documentation**: See `README.md` and the `docs/` folder.
+
