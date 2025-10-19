@@ -10,15 +10,19 @@ on:
 
 permissions:
   contents: read
+  actions: read
   security-events: write
 
 jobs:
   analyze:
+    # Skip CodeQL for draft PRs, and for PRs when runners are unavailable unless CI_RUNNERS_AVAILABLE=='true'
+    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: github/codeql-action/init@v3
         with:
           languages: csharp
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
       - uses: github/codeql-action/analyze@v3
-

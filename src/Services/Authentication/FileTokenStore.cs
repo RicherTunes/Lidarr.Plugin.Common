@@ -236,7 +236,9 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 bool acquired = false;
                 try
                 {
-                    acquired = _mutex.WaitOne(TimeSpan.FromSeconds(60));
+                    // Allow a more generous cross-process wait to reduce
+                    // rare false negatives on busy Windows CI runners.
+                    acquired = _mutex.WaitOne(TimeSpan.FromSeconds(120));
                 }
                 catch (AbandonedMutexException)
                 {

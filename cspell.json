@@ -55,7 +55,10 @@
     "lifecycles",
     "Zipkin",
     "revalidations",
-    "singleflight"
+    "singleflight",
+    "OpenTelemetry",
+    "Idempotent",
+    "Idempotency"
   ],
   "ignorePaths": [
     "**/bin",

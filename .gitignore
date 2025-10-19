@@ -59,7 +59,6 @@ _nupkg_extract/
 # Local package output
 /dist/
 
-
 # Test artifacts
 [Tt]est[Rr]esults*/
 *.trx
@@ -68,7 +67,6 @@ _nupkg_extract/
 coverage*/
 *.coverage
 *.cobertura.xml
-
 # Local security tools
 /tools/gitleaks*/
 /tools/gitleaks_*.zip

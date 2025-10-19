@@ -8,14 +8,14 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.1.6 - October 11, 2025
+Latest: v1.1.7 — October 15, 2025
 
 - Diagnostics: `PluginOperationResultJson` helper for consistent structured output.
 - HTTP cache: 304 revalidation path hardened; short stale grace prevents TTL-edge races.
 - Windows token store: atomic writes via unique temp files + short retries to avoid sharing violations.
 - Resilience: honor `Retry-After` absolute dates without jitter (still clamped by retry budget).
 
-Release notes: [v1.1.6](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.1.6)
+Release notes: [v1.1.7](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.1.7)
 
 ## Security & Conduct
 
@@ -33,6 +33,9 @@ All brand names and trademarks referenced (e.g., Qobuz, TIDAL, Spotify) are the 
 - [Use the streaming plugin bridge](docs/PLUGIN_BRIDGE.md)
 - [Test a streaming plugin end-to-end](docs/how-to/USE_STREAMING_PLUGIN.md)
 - [Map settings with the bridge](docs/SETTINGS_PROVIDER.md)
+- [Understand the HTTP flow (Builder → Options → Executor → Cache)](docs/Flow.md)
+- [Key services and utilities](docs/reference/KEY_SERVICES.md)
+- [Manage sessions/tokens](docs/how-to/TOKEN_MANAGER.md)
 - [Test with the shared TestKit](docs/TESTING_WITH_TESTKIT.md)
 - [Package with PluginPack.psm1](docs/PACKAGING.md)
 - [FAQ for plugin authors](docs/FAQ_FOR_PLUGIN_AUTHORS.md)
@@ -73,3 +76,4 @@ All brand names and trademarks referenced (e.g., Qobuz, TIDAL, Spotify) are the 
 
 ## License
 MIT – see [LICENSE](LICENSE).
+
