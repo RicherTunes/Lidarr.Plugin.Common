@@ -68,3 +68,4 @@ Release notes: [v1.1.7](https://github.com/RicherTunes/Lidarr.Plugin.Common/rele
 MIT – see [LICENSE](LICENSE).
 
 Note: All product and company names (e.g., Qobuz, TIDAL, Spotify) are trademarks of their respective owners; usage here is for descriptive purposes only and does not imply endorsement.
+
