@@ -73,3 +73,6 @@ coverage*/
 /tools/gitleaks*/
 /tools/gitleaks_*.zip
 protection.json
+
+# Temporary proposals
+tmp_*.md
