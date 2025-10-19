@@ -17,6 +17,15 @@ Latest: v1.1.7 — October 15, 2025
 
 Release notes: [v1.1.7](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.1.7)
 
+## Security & Conduct
+
+- Security policy: see SECURITY.md for supported versions and how to report vulnerabilities.
+- Code of Conduct: this project follows the Contributor Covenant 2.1.
+
+## Legal Notes
+
+All brand names and trademarks referenced (e.g., Qobuz, TIDAL, Spotify) are the property of their respective owners. This project is an independent community effort and is not affiliated with or endorsed by those companies.
+
 ## Choose your adventure
 
 ### Plugin authors
@@ -44,6 +53,7 @@ Release notes: [v1.1.7](https://github.com/RicherTunes/Lidarr.Plugin.Common/rele
 - [Docs & tooling guide](docs/dev-guide/TESTING_DOCS.md)
 - [Packaging playbook](docs/PACKAGING.md)
 - [Upgrade checklist for releases](docs/UPGRADING.md)
+- [TagLib dependency modes (public vs. private)](docs/dev-guide/TAGLIB_DEPENDENCY.md)
 
 ## Documentation workflow
 - Markdown lives under `docs/`; every page is the single source for its topic.
@@ -66,3 +76,4 @@ Release notes: [v1.1.7](https://github.com/RicherTunes/Lidarr.Plugin.Common/rele
 
 ## License
 MIT – see [LICENSE](LICENSE).
+

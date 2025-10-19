@@ -1,0 +1,45 @@
+name: DP-AKV-Check (optional)
+
+on:
+  workflow_dispatch:
+    inputs:
+      run:
+        description: Run AKV check
+        default: "false"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  akv:
+    if: ${{ github.event.inputs.run == 'true' && secrets.AKV_KEY_ID != '' }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+
+      # Authenticate to Azure (OIDC or client secret). Prefer OIDC; fall back to secret if provided.
+      - name: Azure login (OIDC)
+        if: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' && github.event.inputs.run == 'true' }}
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run DP + AKV wrap test
+        env:
+          LP_COMMON_PROTECTOR: dataprotection
+          LP_COMMON_AKV_KEY_ID: ${{ secrets.AKV_KEY_ID }}
+          LP_COMMON_REQUIRE_AKV: true
+        run: |
+          dotnet restore
+          dotnet test -c Release --no-build --filter FullyQualifiedName~AkvDataProtectionTests.Wraps_With_AKV_When_Configured
+
