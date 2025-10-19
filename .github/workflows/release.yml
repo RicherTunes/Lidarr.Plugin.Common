@@ -27,28 +27,17 @@ jobs:
             8.0.x
             6.0.x
 
-      - name: Verify tag matches project versions
-        if: startsWith(github.ref, 'refs/tags/v')
-        shell: bash
+      - name: Configure private TagLib feed (release only)
+        if: startsWith(github.ref, 'refs/tags/v') && env.ADO_TAGLIB_NUGET_URL != ''
+        env:
+          ADO_TAGLIB_NUGET_URL: ${{ secrets.ADO_TAGLIB_NUGET_URL }}
         run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF#refs/tags/v}"
-          echo "Tag: $TAG"
-          COMMON_V=$(grep -oPm1 '(?<=<Version>)[^<]+' src/Lidarr.Plugin.Common.csproj)
-          ABS_V=$(grep -oPm1 '(?<=<Version>)[^<]+' src/Abstractions/Lidarr.Plugin.Abstractions.csproj || true)
-          echo "Common=$COMMON_V Abstractions=$ABS_V"
-          if [ "$COMMON_V" != "$TAG" ]; then echo "Version mismatch: Common=$COMMON_V vs Tag=$TAG"; exit 1; fi
-          if [ -n "$ABS_V" ] && [ "$ABS_V" != "$TAG" ]; then echo "Version mismatch: Abstractions=$ABS_V vs Tag=$TAG"; exit 1; fi
+          dotnet nuget add source --name lidarr-taglib "$ADO_TAGLIB_NUGET_URL"
 
       - name: Restore & Build (no analyzers)
         run: |
-          dotnet restore
-          dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1
-
-      - name: Install CycloneDX tool
-        run: |
-          dotnet tool update --global CycloneDX --version 2.10.0
-          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+          dotnet restore -p:UseLidarrTagLib=true
+          dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1 -p:UseLidarrTagLib=true
 
       - name: Public API drift (net8)
         run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0
@@ -66,35 +55,22 @@ jobs:
           dotnet test -c Release --no-build --collect:"XPlat Code Coverage"
           --filter FullyQualifiedName!~RetrySemanticsTests.ExecuteWithResilienceAsync_PrefersRetryAfterDate_AndClampsToBudget
 
-<<<<<<< HEAD
-      # Tag congruence enforced above
-=======
       - name: Verify tag matches package versions
+        if: startsWith(github.ref, 'refs/tags/v')
         shell: bash
         run: |
           set -euo pipefail
-          TAG_REF="${GITHUB_REF##*/}"
-          TAG_NO_V="${TAG_REF#v}"
-          echo "Tag: $TAG_REF -> $TAG_NO_V"
-          common_ver=$(sed -n 's:.*<Version>\\(.*\\)</Version>.*:\\1:p' src/Lidarr.Plugin.Common.csproj | head -n1)
-          abstractions_ver=$(sed -n 's:.*<Version>\\(.*\\)</Version>.*:\\1:p' src/Abstractions/Lidarr.Plugin.Abstractions.csproj | head -n1)
-          echo "Common.csproj Version: $common_ver"
-          echo "Abstractions.csproj Version: $abstractions_ver"
-          test -n "$common_ver" && test -n "$abstractions_ver"
-          if [ "$common_ver" != "$TAG_NO_V" ] || [ "$abstractions_ver" != "$TAG_NO_V" ]; then
-            echo "Tag ($TAG_NO_V) does not match project versions (Common=$common_ver, Abstractions=$abstractions_ver)" >&2
-            exit 1
-          fi
->>>>>>> 75836444225978ce3b2513e3eed43e3a9105057c
+          TAG="${GITHUB_REF#refs/tags/}"
+          VER="${TAG#v}"
+          echo "Verifying tag '$TAG' matches <Version> '$VER' in csprojs..."
+          grep -q "<Version>${VER}</Version>" src/Lidarr.Plugin.Common.csproj
+          grep -q "<Version>${VER}</Version>" src/Abstractions/Lidarr.Plugin.Abstractions.csproj
+          echo "OK: Tag matches package versions."
 
       - name: Pack
         run: |
-          dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
-          dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
-
-      - name: Generate SBOM (CycloneDX JSON)
-        run: |
-          cyclonedx . --out ./dist/sbom.json --json
+          dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:UseLidarrTagLib=true
+          dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:UseLidarrTagLib=true
 
       - name: API compatibility (Abstractions vs previous)
         env:
@@ -123,11 +99,3 @@ jobs:
       - name: Publish to NuGet.org
         if: startsWith(github.ref, 'refs/tags/v')
         run: dotnet nuget push "dist/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
-
-      - name: Upload SBOM to release
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          TAG=${GITHUB_REF#refs/tags/}
-          gh release upload "$TAG" dist/sbom.json --clobber

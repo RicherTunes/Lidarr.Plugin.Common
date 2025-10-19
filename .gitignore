@@ -67,10 +67,4 @@ _nupkg_extract/
 coverage*/
 *.coverage
 *.cobertura.xml
-# Local security tools
-/tools/gitleaks*/
-/tools/gitleaks_*.zip
-protection.json
-
-# Temporary proposals
-tmp_*.md
+dist/

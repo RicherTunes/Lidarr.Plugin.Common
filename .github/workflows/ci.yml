@@ -22,10 +22,11 @@ permissions:
 
 jobs:
   build_and_test:
-    # Skip CI for draft PRs, and for PRs when runners are unavailable unless CI_RUNNERS_AVAILABLE=='true'
-    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      actions: write
     strategy:
       fail-fast: false
       matrix:
@@ -37,17 +38,26 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Install PowerShell (pwsh)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          . /etc/os-release
+          CODENAME=${VERSION_CODENAME:-"jammy"}
+          echo "Using Ubuntu codename: $CODENAME"
+          curl -fsSL "https://packages.microsoft.com/config/ubuntu/$CODENAME/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb \
+            || curl -fsSL "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb
+          sudo dpkg -i packages-microsoft-prod.deb
+          sudo apt-get update
+          sudo apt-get install -y powershell
+
       - name: Setup .NET SDKs (8 & 6)
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
             8.0.x
             6.0.x
-
-      - name: (Optional) Add TagLib feed for CI
-        if: ${{ secrets.LIDARR_TAGLIB_FEED_URL != '' }}
-        run: |
-          dotnet nuget add source --name lidarr-taglib-ci "${{ secrets.LIDARR_TAGLIB_FEED_URL }}" --store-password-in-clear-text || true
 
       - name: Show dotnet info
         run: dotnet --info
@@ -76,27 +86,42 @@ jobs:
       - name: Build (Release, warnings as errors)
         run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -m:1
 
+      - name: Ensure pwsh (Linux only)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v pwsh >/dev/null 2>&1; then
+            . /etc/os-release || true
+            CODENAME=${VERSION_CODENAME:-"jammy"}
+            curl -fsSL "https://packages.microsoft.com/config/ubuntu/$CODENAME/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb \
+              || curl -fsSL "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb
+            sudo dpkg -i packages-microsoft-prod.deb
+            sudo apt-get update
+            sudo apt-get install -y powershell
+          fi
+
       - name: Test (all TFMs) + coverage
         run: >
           dotnet test -c Release --no-build
           --collect:"XPlat Code Coverage"
           --logger "trx;LogFileName=test_results.trx"
 
-      - name: Vulnerability audit (transitive)
-        continue-on-error: true
+      - name: Install ReportGenerator
+        shell: bash
         run: |
-          dotnet list src/Lidarr.Plugin.Common.csproj package --vulnerable --include-transitive > vuln-report.txt || true
-          echo "Vulnerability report generated (non-blocking)."
-
-      - name: Install CycloneDX tool
-        run: |
-          dotnet tool update --global CycloneDX --version 2.10.0
+          dotnet tool update -g dotnet-reportgenerator-globaltool
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
-      - name: Generate SBOM (CycloneDX JSON)
+      - name: Generate coverage summary
+        shell: bash
         run: |
-          mkdir -p artifacts
-          cyclonedx . --out ./artifacts/sbom.json --json
+          reportgenerator \
+            -reports:"**/TestResults/*/coverage.cobertura.xml" \
+            -targetdir:"coverage-report" \
+            -reporttypes:"MarkdownSummary;HtmlInline_AzurePipelines"
+          echo "## Test Coverage Summary" >> $GITHUB_STEP_SUMMARY
+          cat coverage-report/Summary.md >> $GITHUB_STEP_SUMMARY || true
 
       - name: Upload test & coverage artifacts
         if: always()
@@ -106,127 +131,7 @@ jobs:
           path: |
             **/TestResults/*.trx
             **/TestResults/*/coverage.cobertura.xml
-            vuln-report.txt
-            artifacts/sbom.json
+            coverage-report/**
 
-      - name: Generate coverage summary
-        if: success()
-        uses: danielpalme/ReportGenerator-GitHub-Action@5.2.4
-        with:
-          reports: "**/TestResults/*/coverage.cobertura.xml"
-          targetdir: "coverage-report"
-          reporttypes: "MarkdownSummary;HtmlInline_AzurePipelines"
-          toolpath: "reportgenerator"
-      - name: Dependency vulnerability audit
-        continue-on-error: true
-        run: |
-          dotnet list src/Lidarr.Plugin.Common.csproj package --vulnerable --include-transitive || true
-      - name: Generate SBOM (CycloneDX)
-        if: always()
-        shell: bash
-        run: |
-          dotnet tool update --global CycloneDX --version 2.7.1 || dotnet tool install --global CycloneDX --version 2.7.1 || true
-          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
-          mkdir -p artifacts
-          if command -v cyclonedx >/dev/null 2>&1; then
-            cyclonedx . --out ./artifacts/sbom.json || true
-          else
-            dotnet CycloneDX -o ./artifacts -j -s || true
-          fi
-      - name: Upload SBOM
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: artifacts/sbom.json
-      - name: Collect Abstractions binlog on failure
-        if: failure()
-        run: dotnet build src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -bl:abs.binlog
-
-      - name: Upload Abstractions binlog
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: msbuild-binlog-${{ matrix.os }}
-          path: abs.binlog
-
-  report_tests:
-    name: Publish Test Results
-    runs-on: ubuntu-latest
-    needs: build_and_test
-    # Skip for drafts and when CI runners are unavailable
-    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
-    permissions:
-      contents: read
-      checks: write
-      pull-requests: write
-    steps:
-      - name: Download test artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: ./artifacts
-      - name: Annotate PR with test results
-        if: github.event_name == 'pull_request'
-        uses: EnricoMi/publish-unit-test-result-action@v2
-        with:
-          files: "artifacts/**/TestResults/*.trx"
-  pack_dry_run:
-    name: Pack (dry run)
-    runs-on: ubuntu-latest
-    needs: build_and_test
-    # Skip for drafts and when CI runners are unavailable
-    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
-
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: |
-            8.0.x
-            6.0.x
-      - name: Restore (including CLI framework)
-        run: dotnet restore -p:IncludeCLIFramework=true
-      - name: Build (Release, all TFMs)
-        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:IncludeCLIFramework=true -m:1
-      - name: Resolve Docker reference (optional)
-        shell: bash
-        run: |
-          # Prefer repository variables if set; otherwise leave empty
-          echo "DOCKER_TAG=${DOCKER_TAG:-${{ vars.DOCKER_TAG }}}" >> $GITHUB_ENV
-          echo "DOCKER_DIGEST=${DOCKER_DIGEST:-${{ vars.DOCKER_DIGEST }}}" >> $GITHUB_ENV
-          echo "Resolved DockerTag='$DOCKER_TAG'"
-          echo "Resolved DockerDigest='$DOCKER_DIGEST'"
-
-      - name: Pack nupkg
-        run: |
-          dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:DockerTag="$DOCKER_TAG" -p:DockerDigest="$DOCKER_DIGEST"
-          dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:DockerTag="$DOCKER_TAG" -p:DockerDigest="$DOCKER_DIGEST"
-          dotnet pack testkit/Lidarr.Plugin.Common.TestKit.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:DockerTag="$DOCKER_TAG" -p:DockerDigest="$DOCKER_DIGEST"
-      - name: API compatibility (Abstractions vs previous)
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          dotnet tool update --global microsoft.dotnet.apicompat.tool --version 9.0.305
-          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
-          PREV_TAG=$(gh release view --json tagName --jq .tagName 2>/dev/null || echo "")
-          if [ -z "$PREV_TAG" ]; then
-            echo "No previous release detected; skipping API compatibility."
-            exit 0
-          fi
-          mkdir -p prev
-          if ! gh release download "$PREV_TAG" -p "Lidarr.Plugin.Abstractions.*.nupkg" -D prev; then
-            echo "Previous release found but no Abstractions package; skipping API compatibility."
-            exit 0
-          fi
-          CURRENT_PACKAGE=$(ls dist/Lidarr.Plugin.Abstractions.*.nupkg | head -n 1)
-          PREV_PACKAGE=$(ls prev/Lidarr.Plugin.Abstractions.*.nupkg | head -n 1)
-          if [ -z "$PREV_PACKAGE" ] || [ -z "$CURRENT_PACKAGE" ]; then
-            echo "Missing package for API compatibility; skipping."
-            exit 0
-          fi
-          apicompat package --package "$CURRENT_PACKAGE" --baseline-package "$PREV_PACKAGE"
-      - name: Upload nupkg
-        uses: actions/upload-artifact@v4
-        with:
-          name: nupkg
-          path: dist/*.nupkg
+  # Remove separate test publishing to avoid third-party actions
+  # pack_dry_run job intentionally omitted for PR CI; release builds handle packing
