@@ -1,0 +1,13 @@
+# Default owners
+* @RicherTunes/core
+
+# Docs
+/docs @RicherTunes/docs
+
+# Library source
+/src @RicherTunes/core
+
+# Tests and testkit
+/tests @RicherTunes/core
+/testkit @RicherTunes/core
+

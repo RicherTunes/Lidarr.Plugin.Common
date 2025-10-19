@@ -42,6 +42,11 @@ jobs:
             8.0.x
             6.0.x
 
+      - name: (Optional) Add TagLib feed for CI
+        if: ${{ secrets.LIDARR_TAGLIB_FEED_URL != '' }}
+        run: |
+          dotnet nuget add source --name lidarr-taglib-ci "${{ secrets.LIDARR_TAGLIB_FEED_URL }}" --store-password-in-clear-text || true
+
       - name: Show dotnet info
         run: dotnet --info
 
@@ -75,6 +80,22 @@ jobs:
           --collect:"XPlat Code Coverage"
           --logger "trx;LogFileName=test_results.trx"
 
+      - name: Vulnerability audit (transitive)
+        continue-on-error: true
+        run: |
+          dotnet list src/Lidarr.Plugin.Common.csproj package --vulnerable --include-transitive > vuln-report.txt || true
+          echo "Vulnerability report generated (non-blocking)."
+
+      - name: Install CycloneDX tool
+        run: |
+          dotnet tool update --global CycloneDX --version 2.10.0
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
+
+      - name: Generate SBOM (CycloneDX JSON)
+        run: |
+          mkdir -p artifacts
+          cyclonedx . --out ./artifacts/sbom.json --json
+
       - name: Upload test & coverage artifacts
         if: always()
         uses: actions/upload-artifact@v4
@@ -83,6 +104,8 @@ jobs:
           path: |
             **/TestResults/*.trx
             **/TestResults/*/coverage.cobertura.xml
+            vuln-report.txt
+            artifacts/sbom.json
 
       - name: Generate coverage summary
         if: success()

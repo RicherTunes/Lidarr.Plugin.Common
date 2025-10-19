@@ -8,7 +8,7 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.1.6 — October 11, 2025
+Latest: v1.1.6 - October 11, 2025
 
 - Diagnostics: `PluginOperationResultJson` helper for consistent structured output.
 - HTTP cache: 304 revalidation path hardened; short stale grace prevents TTL-edge races.
@@ -16,6 +16,15 @@ Latest: v1.1.6 — October 11, 2025
 - Resilience: honor `Retry-After` absolute dates without jitter (still clamped by retry budget).
 
 Release notes: [v1.1.6](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.1.6)
+
+## Security & Conduct
+
+- Security policy: see SECURITY.md for supported versions and how to report vulnerabilities.
+- Code of Conduct: this project follows the Contributor Covenant 2.1.
+
+## Legal Notes
+
+All brand names and trademarks referenced (e.g., Qobuz, TIDAL, Spotify) are the property of their respective owners. This project is an independent community effort and is not affiliated with or endorsed by those companies.
 
 ## Choose your adventure
 
@@ -41,6 +50,7 @@ Release notes: [v1.1.6](https://github.com/RicherTunes/Lidarr.Plugin.Common/rele
 - [Docs & tooling guide](docs/dev-guide/TESTING_DOCS.md)
 - [Packaging playbook](docs/PACKAGING.md)
 - [Upgrade checklist for releases](docs/UPGRADING.md)
+- [TagLib dependency modes (public vs. private)](docs/dev-guide/TAGLIB_DEPENDENCY.md)
 
 ## Documentation workflow
 - Markdown lives under `docs/`; every page is the single source for its topic.

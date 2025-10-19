@@ -6,13 +6,14 @@
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
     <AssemblyName>Lidarr.Plugin.Common</AssemblyName>
     <RootNamespace>Lidarr.Plugin.Common</RootNamespace>
-    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <!-- Use SDK-generated assembly attributes -->
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
     <!-- Disable central package management for independent repository -->
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
     <Version>1.1.7</Version>
-    <PackageVersion>1.1.7-rc.1</PackageVersion>
+    <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
     <Authors>RicherTunes Community</Authors>
@@ -111,6 +112,9 @@
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="6.0.2" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="6.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="6.0.2" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="6.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="6.0.36" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="6.0.36" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)'=='net8.0'">
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
@@ -122,6 +126,9 @@
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.16" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.16" />
   </ItemGroup>
   <!-- CLI Framework Dependencies - Optional for development/testing only -->
   <!-- Production consumers: exclude pre-release dependencies by default -->
@@ -131,12 +138,8 @@
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" PrivateAssets="All" />
     <PackageReference Include="Spectre.Console" Version="0.50.0" PrivateAssets="All" />
   </ItemGroup>
-  <!-- Audio Processing Dependencies -->
-  <ItemGroup>
-    <PackageReference Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
-  </ItemGroup>
-  <ItemGroup>
-  </ItemGroup>
+  <!-- Audio Processing Dependency removed from core to avoid private feed.
+       Plugin authors who need TagLib should reference a public package (e.g., TagLibSharp from nuget.org) directly in their plugin. -->
 
   <ItemGroup>
     <None Remove="..\docs\**\*" />
@@ -146,6 +149,11 @@
   <ItemGroup>
     <None Include="..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\CHANGELOG.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
+  <!-- Azure Key Vault integration for Data Protection (optional, .NET 8+) -->
+  <ItemGroup Condition="'$(TargetFramework)'=='net8.0'">
+    <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" Version="1.6.1" />
+    <PackageReference Include="Azure.Identity" Version="1.12.0" />
   </ItemGroup>
 
   <Target Name="PreparePublicApiBaselines"
@@ -191,6 +199,11 @@
     <AdditionalFiles Remove="PublicAPI.Shipped.txt" />
     <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
   </ItemGroup>
+  <!-- Audio metadata dependency: prefer public TagLibSharp, optionally use Lidarr build on CI -->
+  <ItemGroup Condition="'$(UseLidarrTaglib)'!='true'">
+    <PackageReference Include="TagLibSharp" Version="2.3.0" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(UseLidarrTaglib)'=='true'">
+    <PackageReference Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
+  </ItemGroup>
 </Project>
-
-

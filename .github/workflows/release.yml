@@ -27,10 +27,28 @@ jobs:
             8.0.x
             6.0.x
 
+      - name: Verify tag matches project versions
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/v}"
+          echo "Tag: $TAG"
+          COMMON_V=$(grep -oPm1 '(?<=<Version>)[^<]+' src/Lidarr.Plugin.Common.csproj)
+          ABS_V=$(grep -oPm1 '(?<=<Version>)[^<]+' src/Abstractions/Lidarr.Plugin.Abstractions.csproj || true)
+          echo "Common=$COMMON_V Abstractions=$ABS_V"
+          if [ "$COMMON_V" != "$TAG" ]; then echo "Version mismatch: Common=$COMMON_V vs Tag=$TAG"; exit 1; fi
+          if [ -n "$ABS_V" ] && [ "$ABS_V" != "$TAG" ]; then echo "Version mismatch: Abstractions=$ABS_V vs Tag=$TAG"; exit 1; fi
+
       - name: Restore & Build (no analyzers)
         run: |
           dotnet restore
           dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1
+
+      - name: Install CycloneDX tool
+        run: |
+          dotnet tool update --global CycloneDX --version 2.10.0
+          echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
       - name: Public API drift (net8)
         run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0
@@ -48,14 +66,16 @@ jobs:
           dotnet test -c Release --no-build --collect:"XPlat Code Coverage"
           --filter FullyQualifiedName!~RetrySemanticsTests.ExecuteWithResilienceAsync_PrefersRetryAfterDate_AndClampsToBudget
 
-      - name: Verify tag matches package versions (temporarily disabled)
-        if: ${{ false }}
-        run: echo "Skipped"
+      # Tag congruence enforced above
 
       - name: Pack
         run: |
           dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
           dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
+
+      - name: Generate SBOM (CycloneDX JSON)
+        run: |
+          cyclonedx . --out ./dist/sbom.json --json
 
       - name: API compatibility (Abstractions vs previous)
         env:
@@ -84,3 +104,11 @@ jobs:
       - name: Publish to NuGet.org
         if: startsWith(github.ref, 'refs/tags/v')
         run: dotnet nuget push "dist/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key ${{ secrets.NUGET_API_KEY }} --skip-duplicate
+
+      - name: Upload SBOM to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG=${GITHUB_REF#refs/tags/}
+          gh release upload "$TAG" dist/sbom.json --clobber

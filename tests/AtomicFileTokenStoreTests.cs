@@ -72,5 +72,32 @@ namespace Lidarr.Plugin.Common.Tests
                 try { Directory.Delete(dir.FullName, true); } catch { }
             }
         }
+
+        [Fact]
+        public async Task Saves_In_Protected_Format()
+        {
+            var dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("n")));
+            try
+            {
+                var file = Path.Combine(dir.FullName, "tokens.json");
+                var store = CreateFileStore(file);
+                var env = new TokenEnvelope<SessionDto>(new SessionDto { AccessToken = "secret-token", RefreshToken = "secret-ref" }, DateTime.UtcNow.AddMinutes(3));
+                await store.SaveAsync(env);
+
+                var text = await File.ReadAllTextAsync(file);
+                Assert.Contains("\"v\": 2", text);
+                Assert.Contains("payload", text);
+                Assert.DoesNotContain("secret-token", text, StringComparison.Ordinal);
+                Assert.DoesNotContain("AccessToken", text, StringComparison.Ordinal);
+
+                var loaded = await store.LoadAsync();
+                Assert.NotNull(loaded);
+                Assert.Equal("secret-token", loaded!.Session.AccessToken);
+            }
+            finally
+            {
+                try { Directory.Delete(dir.FullName, true); } catch { }
+            }
+        }
     }
 }
