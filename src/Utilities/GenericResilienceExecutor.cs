@@ -32,8 +32,39 @@ namespace Lidarr.Plugin.Common.Utilities
                 getStatusCode,
                 getRetryAfterDelay,
                 policy,
+#if NET8_0_OR_GREATER
+                timeProvider: null,
+#endif
                 cancellationToken);
         }
+
+#if NET8_0_OR_GREATER
+        public static Task<TResponse> ExecuteWithResilienceAsync<TRequest, TResponse>(
+            TRequest request,
+            Func<TRequest, CancellationToken, Task<TResponse>> sendAsync,
+            Func<TRequest, Task<TRequest>> cloneRequestAsync,
+            Func<TRequest, string?> getHost,
+            Func<TResponse, int> getStatusCode,
+            Func<TResponse, TimeSpan?> getRetryAfterDelay,
+            ResiliencePolicy policy,
+            TimeProvider timeProvider,
+            CancellationToken cancellationToken = default)
+        {
+            if (policy == null) throw new ArgumentNullException(nameof(policy));
+            if (timeProvider == null) throw new ArgumentNullException(nameof(timeProvider));
+
+            return ExecuteWithResilienceAsyncCore(
+                request,
+                sendAsync,
+                cloneRequestAsync,
+                getHost,
+                getStatusCode,
+                getRetryAfterDelay,
+                policy,
+                timeProvider,
+                cancellationToken);
+        }
+#endif
 
         public static Task<TResponse> ExecuteWithResilienceAsync<TRequest, TResponse>(
             TRequest request,
@@ -64,6 +95,40 @@ namespace Lidarr.Plugin.Common.Utilities
                 policy,
                 cancellationToken);
         }
+
+#if NET8_0_OR_GREATER
+        public static Task<TResponse> ExecuteWithResilienceAsync<TRequest, TResponse>(
+            TRequest request,
+            Func<TRequest, CancellationToken, Task<TResponse>> sendAsync,
+            Func<TRequest, Task<TRequest>> cloneRequestAsync,
+            Func<TRequest, string?> getHost,
+            Func<TResponse, int> getStatusCode,
+            Func<TResponse, TimeSpan?> getRetryAfterDelay,
+            int maxRetries,
+            TimeSpan? retryBudget,
+            int maxConcurrencyPerHost,
+            TimeSpan? perRequestTimeout,
+            TimeProvider timeProvider,
+            CancellationToken cancellationToken)
+        {
+            var policy = ResiliencePolicy.Default.With(
+                maxRetries: maxRetries,
+                retryBudget: retryBudget ?? ResiliencePolicy.Default.RetryBudget,
+                maxConcurrencyPerHost: maxConcurrencyPerHost,
+                perRequestTimeout: perRequestTimeout ?? ResiliencePolicy.Default.PerRequestTimeout);
+
+            return ExecuteWithResilienceAsync(
+                request,
+                sendAsync,
+                cloneRequestAsync,
+                getHost,
+                getStatusCode,
+                getRetryAfterDelay,
+                policy,
+                timeProvider,
+                cancellationToken);
+        }
+#endif
         private static async Task<TResponse> ExecuteWithResilienceAsyncCore<TRequest, TResponse>(
             TRequest request,
             Func<TRequest, CancellationToken, Task<TResponse>> sendAsync,
@@ -72,6 +137,9 @@ namespace Lidarr.Plugin.Common.Utilities
             Func<TResponse, int> getStatusCode,
             Func<TResponse, TimeSpan?> getRetryAfterDelay,
             ResiliencePolicy policy,
+#if NET8_0_OR_GREATER
+            TimeProvider? timeProvider,
+#endif
             CancellationToken cancellationToken)
         {
             if (sendAsync == null) throw new ArgumentNullException(nameof(sendAsync));
@@ -90,7 +158,12 @@ namespace Lidarr.Plugin.Common.Utilities
             }
 
             var effectiveToken = timeoutCts?.Token ?? cancellationToken;
+#if NET8_0_OR_GREATER
+            var tp = timeProvider ?? TimeProvider.System;
+            var deadline = tp.GetUtcNow().UtcDateTime + policy.RetryBudget;
+#else
             var deadline = DateTime.UtcNow + policy.RetryBudget;
+#endif
             var attempt = 0;
 
             var host = getHost(request);
@@ -132,7 +205,11 @@ namespace Lidarr.Plugin.Common.Utilities
                     var retryAfter = getRetryAfterDelay(response);
                     var delay = retryAfter ?? policy.ComputeDelay(attempt) + policy.ComputeJitter();
 
+#if NET8_0_OR_GREATER
+                    var now = tp.GetUtcNow().UtcDateTime;
+#else
                     var now = DateTime.UtcNow;
+#endif
                     if (now + delay > deadline)
                     {
                         return response;
@@ -143,7 +220,11 @@ namespace Lidarr.Plugin.Common.Utilities
                         disposable.Dispose();
                     }
 
+#if NET8_0_OR_GREATER
+                    await DelayAsync(delay, tp, effectiveToken).ConfigureAwait(false);
+#else
                     await Task.Delay(delay, effectiveToken).ConfigureAwait(false);
+#endif
                 }
             }
             finally
@@ -151,5 +232,20 @@ namespace Lidarr.Plugin.Common.Utilities
                 gate.Release();
             }
         }
+
+#if NET8_0_OR_GREATER
+        private static async Task DelayAsync(TimeSpan delay, TimeProvider timeProvider, CancellationToken cancellationToken)
+        {
+            if (delay <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
+            using var ctr = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
+            using var timer = timeProvider.CreateTimer(static state => ((TaskCompletionSource<object?>)state!).TrySetResult(null), tcs, delay, Timeout.InfiniteTimeSpan);
+            await tcs.Task.ConfigureAwait(false);
+        }
+#endif
     }
 }
