@@ -22,8 +22,6 @@ permissions:
 
 jobs:
   build_and_test:
-    # Skip CI for draft PRs, and for PRs when runners are unavailable unless CI_RUNNERS_AVAILABLE=='true'
-    if: ${{ github.event_name != 'pull_request' || (github.event.pull_request.draft != true && vars.CI_RUNNERS_AVAILABLE == 'true') }}
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     permissions:
