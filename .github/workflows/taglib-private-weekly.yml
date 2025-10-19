@@ -1,0 +1,44 @@
+name: TagLib (Lidarr) Weekly Check
+
+on:
+  schedule:
+    - cron: '0 4 * * 1' # Mondays at 04:00 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lidarr-taglib-build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Precheck for secret
+        if: ${{ secrets.LIDARR_TAGLIB_FEED_URL == '' }}
+        run: |
+          echo "LIDARR_TAGLIB_FEED_URL not set; skipping Lidarr TagLib weekly build." && exit 0
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET SDKs
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            6.0.x
+
+      - name: Add Lidarr TagLib feed (CI only)
+        run: |
+          dotnet nuget add source --name lidarr-taglib-ci "${{ secrets.LIDARR_TAGLIB_FEED_URL }}" --store-password-in-clear-text || true
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build with Lidarr TagLib
+        run: dotnet build -c Release -p:UseLidarrTaglib=true -m:1
+
+      - name: Test
+        run: dotnet test -c Release --no-build -m:1
+
