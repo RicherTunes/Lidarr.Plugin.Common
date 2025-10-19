@@ -28,6 +28,15 @@ Template to copy when drafting a release:
 [Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/vX.Y.(Z-1)...vX.Y.Z)
 ```
 
+## [1.2.2] - 2025-10-19
+**Upgrade note:** Maintenance release aligning PR #39 merge; no breaking changes.
+
+**Highlights**
+- Merge “Prepare for public release” PR (#39) with conflict resolution on top of 1.2.1 baseline.
+- Documentation consistency (README Latest v1.2.2).
+- No functional changes beyond those in 1.2.1.
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.2.1...v1.2.2)
 ## [1.2.1] - 2025-10-11
 **Upgrade note:** Security + packaging polish. Encrypted token storage by default; safer feed configuration; improved CI supply-chain checks.
 
@@ -232,4 +241,5 @@ Template to copy when drafting a release:
 - **Feature Requests**: Discuss in GitHub Discussions.
 - **Community**: Join the streaming plugin developer community.
 - **Documentation**: See `README.md` and the `docs/` folder.
+
 
