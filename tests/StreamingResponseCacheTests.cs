@@ -11,7 +11,18 @@ namespace Lidarr.Plugin.Common.Tests
     {
         private sealed class TestCache : StreamingResponseCache
         {
+#if NET8_0_OR_GREATER
+            private readonly Microsoft.Extensions.Time.Testing.FakeTimeProvider _tp;
+            public TestCache(Microsoft.Extensions.Time.Testing.FakeTimeProvider? tp = null)
+                : base((tp ??= new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow)), new NullLogger<StreamingResponseCache>())
+            {
+                _tp = tp;
+            }
+
+            public void Advance(TimeSpan by) => _tp.Advance(by);
+#else
             public TestCache() : base(new NullLogger<StreamingResponseCache>()) { }
+#endif
 
             protected override string GetServiceName() => "TestService";
 
@@ -82,9 +93,17 @@ namespace Lidarr.Plugin.Common.Tests
             var p3 = new Dictionary<string, string> { { "id", "3" } };
 
             cache.Set("catalog/detail", p1, new CachePayload { Id = "one" });
+#if NET8_0_OR_GREATER
+            cache.Advance(TimeSpan.FromMilliseconds(50));
+#else
             Thread.Sleep(20);
+#endif
             cache.Set("catalog/detail", p2, new CachePayload { Id = "two" });
+#if NET8_0_OR_GREATER
+            cache.Advance(TimeSpan.FromMilliseconds(50));
+#else
             Thread.Sleep(20);
+#endif
             cache.Set("catalog/detail", p3, new CachePayload { Id = "three" });
 
             Assert.Null(cache.Get<CachePayload>("catalog/detail", p1));

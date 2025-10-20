@@ -5,6 +5,8 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 [![Build Status](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/ci.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions)
 [![Docs Status](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/docs.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/docs.yml)
 [![Release CI](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/release.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/release.yml)
+[![NuGet (Common)](https://img.shields.io/nuget/v/Lidarr.Plugin.Common?logo=nuget)](https://www.nuget.org/packages/Lidarr.Plugin.Common)
+[![NuGet (Abstractions)](https://img.shields.io/nuget/v/Lidarr.Plugin.Abstractions?logo=nuget)](https://www.nuget.org/packages/Lidarr.Plugin.Abstractions)
 
 ## What's New
 
