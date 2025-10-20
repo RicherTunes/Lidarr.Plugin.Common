@@ -70,15 +70,8 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public async Task Revalidation_304_Refreshes_TTL_And_Preserves_Body()
         {
-            if (OperatingSystem.IsWindows())
-            {
-                // Flaky on GitHub Windows runners due to timer/caching scheduling; covered on Linux.
-                return;
-            }
-            // Use a comfortably large TTL to deflake on slower Linux runners.
-            // Revalidation is driven by ETag presence, not TTL expiry, so we don't
-            // need to cut it too close to expiration for this assertion.
-            var cachePolicy = CachePolicy.Default.With(duration: TimeSpan.FromMilliseconds(500));
+            // Use a small TTL and advance virtual time deterministically to drive revalidation
+            var cachePolicy = CachePolicy.Default.With(duration: TimeSpan.FromMilliseconds(100), enableConditionalRevalidation: true);
             var policyProvider = new PolicyProvider(cachePolicy);
             var cache = new TestCache(new NullLogger<StreamingResponseCache>(), new TestPolicyProvider(cachePolicy));
             var conditional = new InMemoryConditionalState();
@@ -93,24 +86,40 @@ namespace Lidarr.Plugin.Common.Tests
             using var r1 = await client.ExecuteWithResilienceAndCachingAsync(req, policyProvider, cache, conditional, CancellationToken.None);
             Assert.Equal(HttpStatusCode.OK, r1.StatusCode);
 
-            // Small pause before the second request to ensure validators are stored
-            // and exercise the 304 revalidation path without racing TTL expiry.
-            await Task.Delay(50);
+            // Advance time past TTL to force revalidation on next call
+#if NET8_0_OR_GREATER
+            cache.Advance(TimeSpan.FromMilliseconds(150));
+#endif
 
             using var r2 = await client.ExecuteWithResilienceAndCachingAsync(req, policyProvider, cache, conditional, CancellationToken.None);
             Assert.Equal(HttpStatusCode.OK, r2.StatusCode); // synthetic 200 from cache
             var headerVals = r2.Headers.GetValues(Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.RevalidatedHeader);
             Assert.Contains(Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.RevalidatedValue, headerVals);
 
-            // Sleep short and ensure we can still get from cache (TTL refreshed)
-            await Task.Delay(60);
+            // Advance again (less than refreshed TTL) and ensure cache still holds value
+#if NET8_0_OR_GREATER
+            cache.Advance(TimeSpan.FromMilliseconds(50));
+#endif
             var cached = cache.Get<CachedHttpResponse>("/detail", new System.Collections.Generic.Dictionary<string, string> { { "id", "1" } });
             Assert.NotNull(cached);
         }
 
         private sealed class TestCache : StreamingResponseCache
         {
+#if NET8_0_OR_GREATER
+            private readonly Microsoft.Extensions.Time.Testing.FakeTimeProvider _tp;
+            public TestCache(Microsoft.Extensions.Logging.ILogger logger, ICachePolicyProvider provider)
+                : this(new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow), logger, provider) { }
+
+            private TestCache(Microsoft.Extensions.Time.Testing.FakeTimeProvider tp, Microsoft.Extensions.Logging.ILogger logger, ICachePolicyProvider provider)
+                : base(tp, logger, provider)
+            {
+                _tp = tp;
+            }
+            public void Advance(TimeSpan by) => _tp.Advance(by);
+#else
             public TestCache(Microsoft.Extensions.Logging.ILogger logger, ICachePolicyProvider provider) : base(logger, provider) { }
+#endif
             protected override string GetServiceName() => "E";
         }
 

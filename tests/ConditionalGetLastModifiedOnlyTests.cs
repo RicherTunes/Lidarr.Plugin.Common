@@ -54,19 +54,27 @@ namespace Lidarr.Plugin.Common.Tests
 
         private sealed class TestCache : StreamingResponseCache
         {
+#if NET8_0_OR_GREATER
+            private readonly Microsoft.Extensions.Time.Testing.FakeTimeProvider _tp;
+            public TestCache(Microsoft.Extensions.Logging.ILogger logger, ICachePolicyProvider provider)
+                : this(new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow), logger, provider) { }
+
+            private TestCache(Microsoft.Extensions.Time.Testing.FakeTimeProvider tp, Microsoft.Extensions.Logging.ILogger logger, ICachePolicyProvider provider)
+                : base(tp, logger, provider)
+            {
+                _tp = tp;
+            }
+            public void Advance(TimeSpan by) => _tp.Advance(by);
+#else
             public TestCache(Microsoft.Extensions.Logging.ILogger logger, ICachePolicyProvider provider) : base(logger, provider) { }
+#endif
             protected override string GetServiceName() => "LM";
         }
 
         [Fact]
         public async Task Auto_Revalidation_Uses_LastModified_When_Enabled()
         {
-            if (OperatingSystem.IsWindows())
-            {
-                // Flaky on GitHub Windows runners due to timer/caching scheduling; covered on Linux.
-                return;
-            }
-            var cachePolicy = CachePolicy.Default.With(duration: TimeSpan.FromMilliseconds(120), enableConditionalRevalidation: true);
+            var cachePolicy = CachePolicy.Default.With(duration: TimeSpan.FromMilliseconds(100), enableConditionalRevalidation: true);
             var policyProvider = new PolicyProvider(cachePolicy);
             var cache = new TestCache(new NullLogger<StreamingResponseCache>(), policyProvider);
 
@@ -80,8 +88,10 @@ namespace Lidarr.Plugin.Common.Tests
             using var r1 = await client.ExecuteWithResilienceAndCachingAsync(req, policyProvider, cache, conditionalState: null, cancellationToken: CancellationToken.None);
             Assert.Equal(HttpStatusCode.OK, r1.StatusCode);
 
-            // Revalidate (should attach If-Modified-Since from cached entry and get 304)
-            await Task.Delay(30);
+            // Revalidate: advance time past TTL so pipeline revalidates with If-Modified-Since
+#if NET8_0_OR_GREATER
+            cache.Advance(TimeSpan.FromMilliseconds(150));
+#endif
             using var r2 = await client.ExecuteWithResilienceAndCachingAsync(req, policyProvider, cache, conditionalState: null, cancellationToken: CancellationToken.None);
             Assert.Equal(HttpStatusCode.OK, r2.StatusCode); // synthetic 200 produced from cached body
             var headerVals = r2.Headers.GetValues(Lidarr.Plugin.Common.Services.Caching.ArrCachingHeaders.RevalidatedHeader);
