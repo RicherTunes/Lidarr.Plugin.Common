@@ -34,6 +34,22 @@ namespace Lidarr.Plugin.Common.Services.Caching
             _policyProvider = policyProvider;
         }
 
+#if NET8_0_OR_GREATER
+        protected StreamingResponseCache(TimeProvider timeProvider, Microsoft.Extensions.Logging.ILogger logger = null, ICachePolicyProvider? policyProvider = null)
+            : this(logger, policyProvider)
+        {
+            _timeProvider = timeProvider ?? TimeProvider.System;
+        }
+
+        private readonly TimeProvider _timeProvider = TimeProvider.System;
+#endif
+
+#if NET8_0_OR_GREATER
+        protected virtual DateTime UtcNow => _timeProvider.GetUtcNow().UtcDateTime;
+#else
+        protected virtual DateTime UtcNow => DateTime.UtcNow;
+#endif
+
         /// <inheritdoc/>
         public T? Get<T>(string endpoint, Dictionary<string, string> parameters) where T : class
         {
@@ -50,7 +66,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
 
             if (_cache.TryGetValue(cacheKey, out var cacheItem))
             {
-                var now = DateTime.UtcNow;
+                var now = UtcNow;
                 if (cacheItem.ExpiresAt > now)
                 {
                     // Sliding expiration support (coalesced: at most once per throttle window, thread-safe per entry)
@@ -59,7 +75,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
                         lock (cacheItem)
                         {
                             // Re-evaluate time inside lock for correct windowing under concurrency
-                            var nowLocked = DateTime.UtcNow;
+                            var nowLocked = UtcNow;
                             var proposed = nowLocked.Add(policy.SlidingExpiration.Value);
                             DateTime? absoluteCap = null;
                             if (policy.AbsoluteExpiration.HasValue && policy.AbsoluteExpiration.Value > TimeSpan.Zero)
@@ -168,7 +184,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
             var cacheKey = GenerateCacheKey(endpoint, parameters);
             var cacheSeed = BuildCacheKeySeed(endpoint, parameters);
             var normalizedEndpoint = NormalizeEndpointKey(endpoint);
-            var createdAt = DateTime.UtcNow;
+            var createdAt = UtcNow;
             var expiresAt = createdAt.Add(duration);
             if (policy.AbsoluteExpiration.HasValue)
             {
@@ -461,15 +477,15 @@ namespace Lidarr.Plugin.Common.Services.Caching
         private void CleanupExpiredItems()
         {
             // Only cleanup every configured interval to avoid performance impact
-            if (DateTime.UtcNow - _lastCleanup < CleanupInterval)
+            if (UtcNow - _lastCleanup < CleanupInterval)
                 return;
 
             lock (_cleanupLock)
             {
-                if (DateTime.UtcNow - _lastCleanup < CleanupInterval)
+                if (UtcNow - _lastCleanup < CleanupInterval)
                     return;
 
-                var now = DateTime.UtcNow;
+                var now = UtcNow;
                 var expiredEntries = _cache
                     .Where(kvp => kvp.Value.ExpiresAt <= now)
                     .Select(kvp => new { kvp.Key, kvp.Value })
