@@ -17,6 +17,7 @@
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
     <Authors>RicherTunes Community</Authors>
+    <!-- ci-touch: trigger Build & Test for PRs that only change docs/badges -->
     <Company>RicherTunes</Company>
     <Description>Shared library for building Lidarr streaming service plugins. Reduces development time by 60%+ through battle-tested utilities, models, and patterns.</Description>
     <Copyright>Copyright © 2025 RicherTunes Community</Copyright>
@@ -207,6 +208,5 @@
     <PackageReference Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
   </ItemGroup>
 </Project>
-
 
 
