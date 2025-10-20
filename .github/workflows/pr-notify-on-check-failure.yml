@@ -1,0 +1,56 @@
+name: PR Notify on Check Failure
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+      - PR Validation
+      - docs
+      - CodeQL
+      - Release
+      - Template Publish
+      - Dependency Review
+      - Gitleaks (PR/Push)
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
+
+jobs:
+  notify:
+    if: ${{ github.event.workflow_run.conclusion != 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Comment on associated PRs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const run = context.payload.workflow_run;
+            const sha = run.head_sha;
+            const workflowName = run.name;
+            const url = run.html_url;
+
+            const prs = await github.paginate(github.rest.repos.listPullRequestsAssociatedWithCommit, {
+              owner,
+              repo,
+              commit_sha: sha,
+            });
+
+            if (prs.length === 0) {
+              core.info(`No PRs found for ${sha}`);
+              return;
+            }
+
+            for (const pr of prs) {
+              const body = `@RicherTunes ${workflowName} checks failed (conclusion: ${run.conclusion}).\n\nDetails: ${url}`;
+              await github.rest.issues.createComment({ owner, repo, issue_number: pr.number, body });
+              try {
+                await github.rest.issues.addAssignees({ owner, repo, issue_number: pr.number, assignees: ['RicherTunes'] });
+              } catch (e) {
+                core.warning(`Could not assign PR #${pr.number}: ${e.message}`);
+              }
+            }
