@@ -24,6 +24,8 @@ jobs:
   build_and_test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    env:
+      DOTNET_ROLL_FORWARD: LatestMajor
     permissions:
       contents: read
       actions: write
@@ -132,6 +134,7 @@ jobs:
             **/TestResults/*.trx
             **/TestResults/*/coverage.cobertura.xml
             coverage-report/**
+          retention-days: 14
 
   # Remove separate test publishing to avoid third-party actions
   # pack_dry_run job intentionally omitted for PR CI; release builds handle packing
