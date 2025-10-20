@@ -17,6 +17,9 @@ permissions:
 jobs:
   docs:
     runs-on: ubuntu-latest
+    concurrency:
+      group: docs-${{ github.ref }}
+      cancel-in-progress: true
     steps:
       - uses: actions/checkout@v4
 
@@ -53,6 +56,5 @@ jobs:
             --max-retries 2
             docs/**/*.md README.md
 
-      - name: Snippet verifier (non-blocking)
-        continue-on-error: true
+      - name: Snippet verifier
         run: dotnet run --project tools/DocTools/SnippetVerifier/SnippetVerifier.csproj

@@ -1,0 +1,40 @@
+name: Template Publish
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  pack_and_publish_template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Pack template
+        run: |
+          dotnet pack templates/Lidarr.Plugin.Templates/Lidarr.Plugin.Templates.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true
+
+      - name: Publish template to NuGet.org (if API key present)
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ -z "${NUGET_API_KEY:-}" ]; then
+            echo "NUGET_API_KEY not set; skipping template publish."
+            exit 0
+          fi
+          dotnet nuget push "dist/*.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
