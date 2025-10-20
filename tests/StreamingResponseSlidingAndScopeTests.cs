@@ -19,9 +19,24 @@ namespace Lidarr.Plugin.Common.Tests
 
         private sealed class TestCache : StreamingResponseCache
         {
+#if NET8_0_OR_GREATER
+            private readonly Microsoft.Extensions.Time.Testing.FakeTimeProvider _tp;
+            public TestCache(ICachePolicyProvider provider)
+                : this(new Microsoft.Extensions.Time.Testing.FakeTimeProvider(DateTimeOffset.UtcNow), provider) { }
+
+            private TestCache(Microsoft.Extensions.Time.Testing.FakeTimeProvider tp, ICachePolicyProvider provider)
+                : base(tp, new NullLogger<StreamingResponseCache>(), provider)
+            {
+                _tp = tp;
+            }
+            protected override string GetServiceName() => "TestService";
+            public void SetMax(int size) => MaxCacheSize = size;
+            public void Advance(TimeSpan by) => _tp.Advance(by);
+#else
             public TestCache(ICachePolicyProvider provider) : base(new NullLogger<StreamingResponseCache>(), provider) { }
             protected override string GetServiceName() => "TestService";
             public void SetMax(int size) => MaxCacheSize = size;
+#endif
         }
 
         private sealed class Payload { public string Id { get; init; } = string.Empty; }
@@ -38,11 +53,19 @@ namespace Lidarr.Plugin.Common.Tests
             cache.Set("detail", parameters, new Payload { Id = "one" });
 
             // Wait within base duration, then hit to extend by sliding
+            #if NET8_0_OR_GREATER
+            cache.Advance(TimeSpan.FromMilliseconds(70));
+            #else
             Thread.Sleep(70);
+            #endif
             Assert.NotNull(cache.Get<Payload>("detail", parameters));
 
             // Original expiry would have been ~100ms; with sliding it should survive past that.
+            #if NET8_0_OR_GREATER
+            cache.Advance(TimeSpan.FromMilliseconds(60));
+            #else
             Thread.Sleep(60);
+            #endif
             Assert.NotNull(cache.Get<Payload>("detail", parameters));
         }
 
