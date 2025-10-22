@@ -14,17 +14,16 @@ The project file has conditional references:
 
 ## CI usage (optional)
 
-1) Add a private feed only in CI (do not commit it):
+1. Add a private feed only in CI (do not commit it):
 
 ```bash
 dotnet nuget add source --name lidarr-taglib-ci "${LIDARR_TAGLIB_FEED_URL}" --store-password-in-clear-text
 ```
 
-2) Build with the Lidarr package:
+1. Build with the Lidarr package:
 
 ```bash
 dotnet build -c Release -p:UseLidarrTaglib=true
 ```
 
 Our CI includes an optional step to add the feed when the secret `LIDARR_TAGLIB_FEED_URL` is present. Local developers remain on the public package unless they choose to add the feed and pass the property.
-

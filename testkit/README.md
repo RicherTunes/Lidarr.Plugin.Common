@@ -14,7 +14,7 @@ Shared testing helpers for Lidarr streaming plugins.
 
 ```xml
 <ItemGroup>
-  <PackageReference Include="Lidarr.Plugin.Common.TestKit" Version="1.1.4" />
+  <PackageReference Include="Lidarr.Plugin.Common.TestKit" Version="1.2.2" />
 </ItemGroup>
 ```
 

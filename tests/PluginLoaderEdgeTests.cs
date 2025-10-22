@@ -22,7 +22,7 @@ namespace Lidarr.Plugin.Common.Tests
         public async Task LoadAsync_throws_when_manifest_missing()
         {
             using var builder = new TestPluginBuilder();
-            var pluginDir = builder.BuildPlugin("MissingManifest", "1.1.4");
+            var pluginDir = builder.BuildPlugin("MissingManifest", "1.2.2");
             File.Delete(Path.Combine(pluginDir, "plugin.json"));
 
             var request = CreateRequest(pluginDir);
@@ -34,7 +34,7 @@ namespace Lidarr.Plugin.Common.Tests
         public async Task LoadAsync_throws_when_manifest_invalid_json()
         {
             using var builder = new TestPluginBuilder();
-            var pluginDir = builder.BuildPlugin("BadManifest", "1.1.4");
+            var pluginDir = builder.BuildPlugin("BadManifest", "1.2.2");
             File.WriteAllText(Path.Combine(pluginDir, "plugin.json"), "{ notValidJson }");
 
             var request = CreateRequest(pluginDir);
@@ -46,7 +46,7 @@ namespace Lidarr.Plugin.Common.Tests
         public async Task LoadAsync_rejects_when_host_version_too_low()
         {
             using var builder = new TestPluginBuilder();
-            var pluginDir = builder.BuildPlugin("HostTooLow", "1.1.4");
+            var pluginDir = builder.BuildPlugin("HostTooLow", "1.2.2");
 
             var manifestPath = Path.Combine(pluginDir, "plugin.json");
             var manifest = PluginManifest.Load(manifestPath);
@@ -74,7 +74,7 @@ namespace Lidarr.Plugin.Common.Tests
         public async Task LoadAsync_throws_when_entry_assembly_missing()
         {
             using var builder = new TestPluginBuilder();
-            var pluginDir = builder.BuildPlugin("MissingAssembly", "1.1.4");
+            var pluginDir = builder.BuildPlugin("MissingAssembly", "1.2.2");
             File.Delete(Path.Combine(pluginDir, "MissingAssembly.dll"));
 
             var request = CreateRequest(pluginDir);

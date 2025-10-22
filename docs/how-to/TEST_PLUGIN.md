@@ -46,7 +46,7 @@ public sealed class PluginFixture : IAsyncLifetime
     public async Task InitializeAsync()
     {
         _builder = new TestPluginBuilder();
-        var pluginDir = _builder.BuildPlugin("TidalarrSmoke", "1.1.4");
+        var pluginDir = _builder.BuildPlugin("TidalarrSmoke", "1.2.2");
 
         var request = new PluginLoadRequest
         {

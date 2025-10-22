@@ -8,7 +8,7 @@ Use this guide to move an existing Lidarr streaming plugin onto the new Abstract
 
   ```xml
 
-  <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.0.0" PrivateAssets="all" ExcludeAssets="runtime;native;contentfiles" />
+  <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.2.2" PrivateAssets="all" ExcludeAssets="runtime;native;contentfiles" />
 
   ```
 
@@ -25,7 +25,7 @@ Example:
   "name": "My Plugin",
   "version": "2.3.0",
   "apiVersion": "1.x",
-  "commonVersion": "1.1.4",
+  "commonVersion": "1.2.2",
   "minHostVersion": "2.12.0",
   "entryAssembly": "MyPlugin.dll"
 }
