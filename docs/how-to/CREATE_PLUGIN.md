@@ -26,8 +26,8 @@ Optional: add a solution file so you can include tests.
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.0.0" PrivateAssets="all" ExcludeAssets="runtime;native;contentfiles" />
-    <PackageReference Include="Lidarr.Plugin.Common" Version="1.1.4" />
+    <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.2.2" PrivateAssets="all" ExcludeAssets="runtime;native;contentfiles" />
+    <PackageReference Include="Lidarr.Plugin.Common" Version="1.2.2" />
   </ItemGroup>
 </Project>
 
@@ -48,7 +48,7 @@ Create `plugin.json` in the project root (mark as `Copy to Output Directory = Al
   "name": "My Plugin",
   "version": "1.0.0",
   "apiVersion": "1.x",
-  "commonVersion": "1.1.4",
+  "commonVersion": "1.2.2",
   "minHostVersion": "2.12.0",
   "entryAssembly": "MyPlugin.dll"
 }

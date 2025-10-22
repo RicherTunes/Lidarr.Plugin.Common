@@ -6,7 +6,7 @@ Keep `Lidarr.Plugin.Common`, `Lidarr.Plugin.Abstractions`, and the host aligned 
 
 | Host (Lidarr) | Abstractions | Common | TFMs | Status | Notes |
 | --- | --- | --- | --- | --- | --- |
-| 2.14.x | 1.x | 1.1.4 | net8.0, net6.0 | Active | Current release train. |
+| 2.14.x | 1.x | 1.2.2 | net8.0, net6.0 | Active | Current release train. |
 | 2.13.x | 1.x | 1.1.3 | net6.0 | Maintenance | Security fixes only; no new features. |
 | 2.12.x | 0.x | 1.0.x | net6.0 | Deprecated (EOL 2025-12-31) | Schedule upgrade to 1.x ABI. |
 

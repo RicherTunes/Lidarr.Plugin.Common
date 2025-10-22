@@ -21,7 +21,7 @@ namespace Lidarr.Plugin.Common.Tests
         public async Task PluginSandbox_loads_plugin_and_releases_locks()
         {
             using var builder = new TestPluginBuilder();
-            var pluginDir = builder.BuildPlugin("SandboxPlugin", "1.1.4");
+            var pluginDir = builder.BuildPlugin("SandboxPlugin", "1.2.2");
             var pluginPath = Path.Combine(pluginDir, "SandboxPlugin.dll");
 
             await using (var sandbox = await PluginSandbox.CreateAsync(pluginPath))

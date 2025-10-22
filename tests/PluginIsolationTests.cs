@@ -21,7 +21,7 @@ namespace Lidarr.Plugin.Common.Tests
             var loggerFactory = NullLoggerFactory.Instance;
             var context = new DefaultPluginContext(HostVersion, loggerFactory);
 
-            var pluginADir = builder.BuildPlugin("PluginA", "1.1.4");
+            var pluginADir = builder.BuildPlugin("PluginA", "1.2.2");
             var pluginBDir = builder.BuildPlugin("PluginB", "1.0.9");
 
             await using var handleA = await PluginLoader.LoadAsync(new PluginLoadRequest
@@ -40,7 +40,7 @@ namespace Lidarr.Plugin.Common.Tests
                 PluginContext = context
             });
 
-            Assert.Equal("1.1.4", handleA.Plugin.Manifest.CommonVersion);
+            Assert.Equal("1.2.2", handleA.Plugin.Manifest.CommonVersion);
             Assert.Equal("1.0.9", handleB.Plugin.Manifest.CommonVersion);
 
             await using var indexerA = await handleA.Plugin.CreateIndexerAsync();
@@ -51,7 +51,7 @@ namespace Lidarr.Plugin.Common.Tests
             var trackA = (await indexerA!.SearchTracksAsync("proof"))[0];
             var trackB = (await indexerB!.SearchTracksAsync("proof"))[0];
 
-            Assert.Equal("1.1.4", trackA.Album?.ExternalIds?["commonVersion"]);
+            Assert.Equal("1.2.2", trackA.Album?.ExternalIds?["commonVersion"]);
             Assert.Equal("1.0.9", trackB.Album?.ExternalIds?["commonVersion"]);
 
             var commonAssemblyA = handleA.LoadContext.Assemblies.First(a => a.GetName().Name == "Lidarr.Plugin.Common");
