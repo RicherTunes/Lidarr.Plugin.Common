@@ -13,7 +13,7 @@ This repository ships with a multi-stage GitHub Actions pipeline that keeps the 
 
 - `dotnet format --verify-no-changes`
 - `dotnet build -warnaserror`
-- `dotnet test` for all TFMs with XPlat coverage
+- `dotnet test --settings test.runsettings` for all TFMs with XPlat coverage and hang detection
 - `dotnet pack` (dry run) for both `Lidarr.Plugin.Common` and `Lidarr.Plugin.Common.TestKit`
 - Public API analyzer baselines (`RS0016`, `RS0026`)
 - Snippet extraction via `dotnet run --project tools/DocTools/SnippetVerifier`
@@ -54,7 +54,7 @@ jobs:
 ## Local verification
 
 1. `dotnet format --verify-no-changes`
-2. `dotnet test -c Release --collect:"XPlat Code Coverage"`
+2. `dotnet test -c Release --settings test.runsettings --collect:"XPlat Code Coverage"`
 3. `dotnet pack src/Lidarr.Plugin.Common.csproj -c Release /p:ContinuousIntegrationBuild=true`
 4. `dotnet pack testkit/Lidarr.Plugin.Common.TestKit.csproj -c Release /p:ContinuousIntegrationBuild=true`
 5. `dotnet run --project tools/DocTools/SnippetVerifier`

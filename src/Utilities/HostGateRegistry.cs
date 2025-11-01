@@ -51,7 +51,8 @@ namespace Lidarr.Plugin.Common.Utilities
         private static readonly ConcurrentDictionary<string, GateState> AggregateGates = new();
         private static readonly TimeSpan IdleTtl = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(5);
-        private static readonly Timer Sweeper;
+        private static Timer? Sweeper;
+        private static readonly object SweeperInitLock = new();
 
         static HostGateRegistry()
         {
@@ -61,6 +62,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
         public static SemaphoreSlim Get(string? host, int requestedLimit)
         {
+            EnsureSweeper();
             host ??= "__unknown__";
             var gate = Gates.AddOrUpdate(
                 host,
@@ -77,6 +79,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
         public static SemaphoreSlim GetAggregate(string? host, int requestedLimit)
         {
+            EnsureSweeper();
             host ??= "__unknown__";
             var gate = AggregateGates.AddOrUpdate(
                 host,
@@ -109,14 +112,11 @@ namespace Lidarr.Plugin.Common.Utilities
         {
             host ??= "__unknown__";
 
-            if (Gates.TryRemove(host, out var gate))
-            {
-                gate.Semaphore.Dispose();
-            }
-            if (AggregateGates.TryRemove(host, out var agg))
-            {
-                agg.Semaphore.Dispose();
-            }
+            // Do not Dispose() semaphores here; concurrent in-flight operations may still
+            // reference them and call Release(), which would throw ObjectDisposedException.
+            // Removing from the dictionaries is sufficient; GC will reclaim when unused.
+            Gates.TryRemove(host, out _);
+            AggregateGates.TryRemove(host, out _);
         }
 
         private static void Sweep()
@@ -129,10 +129,9 @@ namespace Lidarr.Plugin.Common.Utilities
                     var state = kv.Value;
                     if (state.Semaphore.CurrentCount == state.Limit && (now - state.LastUsedUtc) > IdleTtl)
                     {
-                        if (Gates.TryRemove(kv.Key, out var removed))
-                        {
-                            removed.Semaphore.Dispose();
-                        }
+                        // Remove idle entries; do not dispose semaphores to avoid races with
+                        // late Release() calls from in-flight operations.
+                        Gates.TryRemove(kv.Key, out _);
                     }
                 }
                 foreach (var kv in AggregateGates)
@@ -140,16 +139,41 @@ namespace Lidarr.Plugin.Common.Utilities
                     var state = kv.Value;
                     if (state.Semaphore.CurrentCount == state.Limit && (now - state.LastUsedUtc) > IdleTtl)
                     {
-                        if (AggregateGates.TryRemove(kv.Key, out var removed))
-                        {
-                            removed.Semaphore.Dispose();
-                        }
+                        AggregateGates.TryRemove(kv.Key, out _);
                     }
                 }
             }
             catch
             {
                 // best-effort cleanup; ignore sweep errors
+            }
+        }
+
+        /// <summary>
+        /// Disposes background timers and clears all gates within this AssemblyLoadContext.
+        /// Call from plugin unload paths to avoid collectible ALC retention via Timer roots.
+        /// </summary>
+        internal static void Shutdown()
+        {
+            try { Sweeper?.Dispose(); } catch { }
+            Sweeper = null;
+            try
+            {
+                foreach (var kv in Gates) { Gates.TryRemove(kv.Key, out _); }
+                foreach (var kv in AggregateGates) { AggregateGates.TryRemove(kv.Key, out _); }
+            }
+            catch { }
+        }
+
+        private static void EnsureSweeper()
+        {
+            if (Sweeper != null) return;
+            lock (SweeperInitLock)
+            {
+                if (Sweeper == null)
+                {
+                    try { Sweeper = new Timer(_ => Sweep(), null, SweepInterval, SweepInterval); } catch { }
+                }
             }
         }
     }
