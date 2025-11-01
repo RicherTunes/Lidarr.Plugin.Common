@@ -25,7 +25,7 @@ This repository ships two NuGet packages:
 
 1. **Author changes** in feature branches; keep CHANGELOG up to date (`CHANGELOG.md`).
 2. **Update docs** relevant to the change (migrations, manifest schema, isolation guide).
-3. **Run tests** (`dotnet test`). Isolation/manifest suites must pass.
+3. **Run tests** (`dotnet test --settings test.runsettings`) . Isolation/manifest suites must pass.
 4. **Tagging**:
    - Tag combined releases with `vX.Y.Z`. Reference the release template in [docs/UPGRADING.md](../UPGRADING.md).
 5. **Publishing**: use `.github/workflows/release.yml`, which packs Abstractions and Common and runs API compatibility against the previous tag before pushing to NuGet.
@@ -38,8 +38,9 @@ This repository ships two NuGet packages:
 - [ ] CHANGELOG entry complete.
 - [ ] Docs updated (`README`, playbooks, migration guides).
 - [ ] Public API baselines (`src/Abstractions/PublicAPI.*`) refreshed when Abstractions changes.
-- [ ] Tests green (`dotnet test`).
+- [ ] Tests green (`dotnet test --settings test.runsettings`) .
 - [ ] Sample loader (`examples/IsolationHostSample`) still compiles and loads generated plugins.
 - [ ] Packages pack locally (`dotnet pack`).
 
 This process keeps the ABI stable for the host while allowing plugins and shared implementation code to evolve independently without assembly conflicts.
+

@@ -19,7 +19,7 @@ namespace Lidarr.Plugin.Common.Services.Http
 
         public FileConditionalRequestState(string? folder = null)
         {
-            _folder = folder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ArrPlugins", "etag-validators");
+            _folder = folder ?? Lidarr.Plugin.Common.Utilities.PluginDataFolders.For("etag-validators");
             Directory.CreateDirectory(_folder);
         }
 

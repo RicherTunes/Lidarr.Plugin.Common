@@ -25,7 +25,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
 
         public FileStreamingResponseCache(string? folder = null, TimeSpan? defaultDuration = null)
         {
-            _root = folder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ArrPlugins", "resp-cache");
+            _root = folder ?? Lidarr.Plugin.Common.Utilities.PluginDataFolders.For("resp-cache");
             Directory.CreateDirectory(_root);
             _defaultDuration = defaultDuration ?? TimeSpan.FromHours(6);
             _maxEntries = ReadIntEnv("ARR_RESP_CACHE_MAX_ENTRIES", 20000);

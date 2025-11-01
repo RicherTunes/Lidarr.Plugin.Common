@@ -24,7 +24,7 @@ Each plugin repository must:
 1. Update/init the `plugins-platform` submodule.
 2. Execute `scripts/sync-host-assemblies.ps1 -Target ../Lidarr/_output/net6.0` (or equivalent path).
 3. Run `dotnet build -c Release`.
-4. Run `dotnet test -c Release --no-build`.
+4. Run `dotnet test -c Release --settings test.runsettings --no-build`.
 5. Fail fast if the resulting `Lidarr.Plugin.Common.dll` or host assemblies report anything other than the pinned host versions (e.g., `10.0.0.35686`).
 
 Use GitHub Actions, Azure DevOps, or similar. Example GitHub Actions steps:
@@ -43,7 +43,7 @@ Use GitHub Actions, Azure DevOps, or similar. Example GitHub Actions steps:
   run: dotnet build -c Release -warnaserror:NU1903
 
 - name: Test
-  run: dotnet test -c Release --no-build
+  run: dotnet test -c Release --no-build --settings test.runsettings
 
 ```
 

@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<RunSettings>
+  <RunConfiguration>
+    <ResultsDirectory>TestResults</ResultsDirectory>
+    <CollectSourceInformation>true</CollectSourceInformation>
+    <InIsolation>true</InIsolation>
+    <TreatNoTestsAsError>false</TreatNoTestsAsError>
+    <!-- Abort entire session after ~7 minutes to avoid CI hangs (milliseconds) -->
+    <TestSessionTimeout>420000</TestSessionTimeout>
+    <EnvironmentVariables>
+      <!-- Prevent accidental cloud calls during tests -->
+      <LP_COMMON_AKV_KEY_ID></LP_COMMON_AKV_KEY_ID>
+      <LP_COMMON_KMS_URI></LP_COMMON_KMS_URI>
+      <LP_COMMON_CERT_THUMBPRINT></LP_COMMON_CERT_THUMBPRINT>
+      <LP_COMMON_CERT_PATH></LP_COMMON_CERT_PATH>
+      <LP_COMMON_CERT_PASSWORD></LP_COMMON_CERT_PASSWORD>
+    </EnvironmentVariables>
+  </RunConfiguration>
+  <DataCollectionRunSettings>
+    <DataCollectors>
+      <DataCollector friendlyName="blame" enabled="true">
+        <Configuration>
+          <!-- Capture hang dumps after 2 minutes per stuck test -->
+          <HangDump Type="mini" CollectDumpOn="hang" TestTimeout="00:02:00" />
+        </Configuration>
+      </DataCollector>
+    </DataCollectors>
+  </DataCollectionRunSettings>
+</RunSettings>

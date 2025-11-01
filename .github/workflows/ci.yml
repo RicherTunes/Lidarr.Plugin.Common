@@ -103,9 +103,10 @@ jobs:
             sudo apt-get install -y powershell
           fi
 
-      - name: Test (all TFMs) + coverage
+      - name: Test (all TFMs) + coverage (with runsettings)
         run: >
           dotnet test -c Release --no-build
+          --settings test.runsettings
           --collect:"XPlat Code Coverage"
           --logger "trx;LogFileName=test_results.trx"
 

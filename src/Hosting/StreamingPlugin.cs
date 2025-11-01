@@ -7,6 +7,7 @@ using Lidarr.Plugin.Abstractions.Contracts;
 using Lidarr.Plugin.Abstractions.Manifest;
 using Lidarr.Plugin.Common.Hosting.Settings;
 using Lidarr.Plugin.Common.Services.Registration;
+using Lidarr.Plugin.Common.Utilities;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -184,6 +185,9 @@ public abstract class StreamingPlugin<TModule, TSettings> : IPlugin
         {
             (_serviceProvider as IDisposable)?.Dispose();
         }
+
+        // Release shared host gates and background timers created by this plugin's ALC.
+        HostGateRegistry.Shutdown();
 
         _module.Dispose();
     }

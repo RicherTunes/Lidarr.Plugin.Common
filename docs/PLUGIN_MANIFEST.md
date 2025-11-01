@@ -12,7 +12,7 @@ Each plugin ships a `plugin.json` that describes identity, compatibility expecta
 | `apiVersion` | pattern | ✅ | `1.x` | Must match the major version of `Lidarr.Plugin.Abstractions` (`^\d+\.x$`). |
 | `minHostVersion` | SemVer | ✅ | `2.14.0` | Host must be ≥ this version or the loader refuses the plugin. |
 | `targets` | array | ➖ | `["net8.0"]` | Optional diagnostics for supported TFMs. |
-| `commonVersion` | SemVer | ➖ | `1.1.4` | Informational only (per-plugin Common build). |
+| `commonVersion` | SemVer | ➖ | `1.2.2` | Informational only (per-plugin Common build). |
 
 `additionalProperties` are not permitted; keep the manifest concise and explicit.
 
@@ -43,7 +43,7 @@ Each plugin ships a `plugin.json` that describes identity, compatibility expecta
     "net8.0",
     "net6.0"
   ],
-  "commonVersion": "1.1.4"
+  "commonVersion": "1.2.2"
 }
 ```
 
