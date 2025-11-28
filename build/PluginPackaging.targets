@@ -1,4 +1,4 @@
-<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+﻿<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <!--
     Plugin Packaging with ILRepack Internalization
     
@@ -18,11 +18,7 @@
     <EnablePluginDeployment Condition="'$(EnablePluginDeployment)' == ''">false</EnablePluginDeployment>
     <PluginPackagingDisable Condition="'$(PluginPackagingDisable)' == ''">false</PluginPackagingDisable>
     <LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$(MSBuildProjectDirectory)/ext/Lidarr/_output/net6.0;$(MSBuildProjectDirectory)/ext/Lidarr/_output/net8.0</LidarrAssembliesPath>
-        <ILRepackLibraryPaths>$(OutputPath);$(LidarrAssembliesPath)</ILRepackLibraryPaths>
-    <!-- Disable ILRepack.Lib.MSBuild.Task built-in target by pointing ILRepackTargetsFile to this file.
-         The packages built-in target only runs when !Exists(ILRepackTargetsFile).
-         By setting this to our targets file path, we disable the built-in behavior. -->
-    <ILRepackTargetsFile>$(MSBuildThisFileFullPath)</ILRepackTargetsFile>
+    <ILRepackLibraryPaths>$(OutputPath);$(LidarrAssembliesPath)</ILRepackLibraryPaths>
   </PropertyGroup>
 
   <ItemGroup>
