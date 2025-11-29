@@ -70,7 +70,8 @@ jobs:
           find lidarr-app -name "*.dll" -exec cp {} lidarr-assemblies/ \; 2>/dev/null || true
 
           echo "Extracted assemblies:"
-          ls -la lidarr-assemblies/ | head -20
+          ls lidarr-assemblies/*.dll 2>/dev/null | wc -l | xargs -I {} echo "{} DLL files extracted"
+          ls lidarr-assemblies/ 2>/dev/null | head -20 || true
 
       - name: Checkout Brainarr
         if: contains(inputs.test_plugins, 'brainarr')
