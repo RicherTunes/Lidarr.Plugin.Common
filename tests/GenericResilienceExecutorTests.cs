@@ -97,7 +97,7 @@ namespace Lidarr.Plugin.Common.Tests
 
             Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> send = async (req, ct) =>
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(200), ct);
+                await Task.Delay(TimeSpan.FromMilliseconds(1000), ct);
                 return new HttpResponseMessage(HttpStatusCode.OK);
             };
 
@@ -113,7 +113,7 @@ namespace Lidarr.Plugin.Common.Tests
                 maxRetries: 1,
                 retryBudget: TimeSpan.FromSeconds(1),
                 maxConcurrencyPerHost: 1,
-                perRequestTimeout: TimeSpan.FromMilliseconds(50),
+                perRequestTimeout: TimeSpan.FromMilliseconds(100),
                 cancellationToken: CancellationToken.None));
         }
         // snippet-skip-compile
