@@ -103,6 +103,35 @@ jobs:
           submodules: recursive
           token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
 
+      - name: Copy Lidarr Assemblies to Plugin Locations
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Each plugin expects Lidarr assemblies in specific locations
+          # Copy extracted assemblies to where each plugin expects them
+
+          # Qobuzarr expects: ext/Lidarr/_output/net6.0/
+          if [ -d "plugins/qobuzarr" ]; then
+            mkdir -p plugins/qobuzarr/ext/Lidarr/_output/net6.0
+            cp lidarr-assemblies/*.dll plugins/qobuzarr/ext/Lidarr/_output/net6.0/ 2>/dev/null || true
+            echo "✓ Copied assemblies for Qobuzarr"
+          fi
+
+          # Tidalarr expects: ext/Lidarr/_output/net6.0/
+          if [ -d "plugins/tidalarr" ]; then
+            mkdir -p plugins/tidalarr/ext/Lidarr/_output/net6.0
+            cp lidarr-assemblies/*.dll plugins/tidalarr/ext/Lidarr/_output/net6.0/ 2>/dev/null || true
+            echo "✓ Copied assemblies for Tidalarr"
+          fi
+
+          # Brainarr uses -p:LidarrPath so no copy needed, but create ext/Lidarr-docker for fallback
+          if [ -d "plugins/brainarr" ]; then
+            mkdir -p plugins/brainarr/ext/Lidarr-docker/_output/net8.0
+            cp lidarr-assemblies/*.dll plugins/brainarr/ext/Lidarr-docker/_output/net8.0/ 2>/dev/null || true
+            echo "✓ Copied assemblies for Brainarr"
+          fi
+
       - name: Build Brainarr Plugin
         if: contains(inputs.test_plugins, 'brainarr')
         shell: bash
@@ -138,11 +167,13 @@ jobs:
               sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' ext/Lidarr.Plugin.Common/NuGet.config
           fi
 
+          # Qobuzarr uses hardcoded path ext/Lidarr/_output/net6.0
           dotnet restore Qobuzarr.csproj
           dotnet build Qobuzarr.csproj \
             --configuration Release \
             --no-restore \
-            -p:LidarrPath="${{ github.workspace }}/lidarr-assemblies" \
+            -p:RunAnalyzersDuringBuild=false \
+            -p:EnableNETAnalyzers=false \
             -m:1
 
           echo "Qobuzarr build complete"
@@ -160,11 +191,17 @@ jobs:
               sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' ext/Lidarr.Plugin.Common/NuGet.config
           fi
 
+          # Tidalarr uses hardcoded path in HostBridge: ext/Lidarr/_output/net6.0
+          # Build both the main plugin and the HostBridge
           dotnet restore src/Tidalarr/Tidalarr.csproj
+          dotnet restore src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj
           dotnet build src/Tidalarr/Tidalarr.csproj \
             --configuration Release \
             --no-restore \
-            -p:LidarrPath="${{ github.workspace }}/lidarr-assemblies" \
+            -m:1
+          dotnet build src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj \
+            --configuration Release \
+            --no-restore \
             -m:1
 
           echo "Tidalarr build complete"
