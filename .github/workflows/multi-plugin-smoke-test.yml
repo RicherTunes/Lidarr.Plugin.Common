@@ -265,15 +265,14 @@ jobs:
           echo "=== Staged Plugins ==="
           find staged-plugins -type f -name "*.dll" -o -name "*.json" | sort
 
-      - name: Start Lidarr with All Plugins
+      - name: Start Lidarr Container
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Starting Lidarr with all plugins mounted..."
+          echo "Starting Lidarr container..."
           docker run -d --name lidarr-smoke-test \
             -p 8686:8686 \
-            -v "${{ github.workspace }}/staged-plugins:/config/plugins:ro" \
             -e PUID=1000 -e PGID=1000 \
             ghcr.io/hotio/lidarr:${{ env.LIDARR_DOCKER_VERSION }}
 
@@ -291,6 +290,76 @@ jobs:
             fi
             if [ $i -eq 120 ]; then
               echo "Timeout waiting for Lidarr to start"
+              docker logs lidarr-smoke-test
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Copy Plugins into Container
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Copying plugins into Lidarr container ==="
+
+          # Check where Lidarr stores plugins
+          echo "Checking Lidarr AppData structure..."
+          docker exec lidarr-smoke-test ls -la /config/ 2>&1 || true
+          docker exec lidarr-smoke-test ls -la /config/plugins/ 2>&1 || echo "No /config/plugins directory yet"
+
+          # Create plugins directory structure with Owner/Name format
+          # (Lidarr uses this format for installed plugins)
+          echo "Creating plugin directories..."
+          docker exec lidarr-smoke-test mkdir -p /config/plugins/RicherTunes/Brainarr
+          docker exec lidarr-smoke-test mkdir -p /config/plugins/RicherTunes/Qobuzarr
+          docker exec lidarr-smoke-test mkdir -p /config/plugins/RicherTunes/Tidalarr
+
+          # Copy Brainarr
+          if [ -d "staged-plugins/Brainarr" ]; then
+            echo "Copying Brainarr plugin..."
+            docker cp staged-plugins/Brainarr/. lidarr-smoke-test:/config/plugins/RicherTunes/Brainarr/
+            docker exec lidarr-smoke-test ls -la /config/plugins/RicherTunes/Brainarr/
+          fi
+
+          # Copy Qobuzarr
+          if [ -d "staged-plugins/Qobuzarr" ]; then
+            echo "Copying Qobuzarr plugin..."
+            docker cp staged-plugins/Qobuzarr/. lidarr-smoke-test:/config/plugins/RicherTunes/Qobuzarr/
+            docker exec lidarr-smoke-test ls -la /config/plugins/RicherTunes/Qobuzarr/
+          fi
+
+          # Copy Tidalarr
+          if [ -d "staged-plugins/Tidalarr" ]; then
+            echo "Copying Tidalarr plugin..."
+            docker cp staged-plugins/Tidalarr/. lidarr-smoke-test:/config/plugins/RicherTunes/Tidalarr/
+            docker exec lidarr-smoke-test ls -la /config/plugins/RicherTunes/Tidalarr/
+          fi
+
+          echo ""
+          echo "=== Final plugin structure ==="
+          docker exec lidarr-smoke-test find /config/plugins -type f 2>&1 || true
+
+      - name: Restart Lidarr to Load Plugins
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Restarting Lidarr container to load plugins..."
+          docker restart lidarr-smoke-test
+
+          # Wait for restart
+          echo "Waiting for Lidarr to restart..."
+          sleep 15
+
+          for i in {1..120}; do
+            if curl -fsS http://localhost:8686 >/dev/null 2>&1; then
+              echo "Lidarr restarted and web interface is ready"
+              sleep 10
+              break
+            fi
+            if [ $i -eq 120 ]; then
+              echo "Timeout waiting for Lidarr to restart"
               docker logs lidarr-smoke-test
               exit 1
             fi
@@ -316,50 +385,6 @@ jobs:
           echo "Failed to retrieve API key after 60 attempts"
           docker logs lidarr-smoke-test --tail 50
           exit 1
-
-      - name: Install Plugins via API
-        shell: bash
-        env:
-          API_KEY: ${{ steps.apikey.outputs.api_key }}
-        run: |
-          set -e
-          echo "=== Exploring plugins API ==="
-
-          # Check swagger/API docs for plugin endpoints
-          echo "GET /api/v1/system/plugins:"
-          curl -sS -H "X-Api-Key: $API_KEY" http://localhost:8686/api/v1/system/plugins 2>&1 | head -5 || echo "Failed"
-
-          # Try installing plugins via API using GitHub URLs
-          echo ""
-          echo "Installing plugins via API..."
-
-          # Install Brainarr
-          echo "Installing Brainarr..."
-          curl -sS -X POST -H "X-Api-Key: $API_KEY" -H "Content-Type: application/json" \
-            -d '{"githubUrl":"https://github.com/RicherTunes/Brainarr"}' \
-            http://localhost:8686/api/v1/system/plugins 2>&1 || echo "Brainarr install request sent"
-
-          # Install Qobuzarr
-          echo "Installing Qobuzarr..."
-          curl -sS -X POST -H "X-Api-Key: $API_KEY" -H "Content-Type: application/json" \
-            -d '{"githubUrl":"https://github.com/RicherTunes/Qobuzarr"}' \
-            http://localhost:8686/api/v1/system/plugins 2>&1 || echo "Qobuzarr install request sent"
-
-          # Install Tidalarr
-          echo "Installing Tidalarr..."
-          curl -sS -X POST -H "X-Api-Key: $API_KEY" -H "Content-Type: application/json" \
-            -d '{"githubUrl":"https://github.com/RicherTunes/Tidalarr"}' \
-            http://localhost:8686/api/v1/system/plugins 2>&1 || echo "Tidalarr install request sent"
-
-          # Wait for installations to complete
-          echo ""
-          echo "Waiting for plugin installations..."
-          sleep 30
-
-          # Check swagger for API structure
-          echo ""
-          echo "=== Checking available API endpoints ==="
-          curl -sS http://localhost:8686/api/v1 2>&1 | head -20 || echo "API index not available"
 
       - name: Verify All Plugins Discovered
         shell: bash
