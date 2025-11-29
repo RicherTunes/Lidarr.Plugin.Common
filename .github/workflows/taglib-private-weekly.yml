@@ -11,6 +11,8 @@ permissions:
 jobs:
   lidarr-taglib-build:
     runs-on: ubuntu-latest
+    # Only run on schedule or manual dispatch (not on push events that GitHub creates for workflow file changes)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Precheck for secret
         if: ${{ secrets.LIDARR_TAGLIB_FEED_URL == '' }}
