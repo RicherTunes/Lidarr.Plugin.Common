@@ -7,14 +7,17 @@ on:
     - cron: '0 5 * * 1'
   workflow_dispatch:
 
-permissions:
-  contents: read
-  security-events: write
-  id-token: write
+# Workflow-level permissions must be read-only for Scorecard publish_results
+permissions: read-all
 
 jobs:
   analysis:
     runs-on: ubuntu-latest
+    # Job-level permissions for Scorecard with publish_results: true
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
         with:
