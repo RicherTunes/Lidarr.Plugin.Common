@@ -152,6 +152,7 @@ jobs:
             --no-restore \
             --framework net6.0 \
             -p:LidarrPath="${{ github.workspace }}/lidarr-assemblies" \
+            -p:PluginPackagingDisable=true \
             -m:1
 
           echo "Brainarr build complete"
@@ -180,6 +181,7 @@ jobs:
             -p:RunAnalyzersDuringBuild=false \
             -p:EnableNETAnalyzers=false \
             -p:DefineConstants=PLUGIN_PROTOCOL \
+            -p:PluginPackagingDisable=true \
             -m:1
 
           echo "Qobuzarr build complete"
@@ -207,11 +209,13 @@ jobs:
             --configuration Release \
             --no-restore \
             --framework net6.0 \
+            -p:PluginPackagingDisable=true \
             -m:1
           dotnet build src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj \
             --configuration Release \
             --no-restore \
             --framework net6.0 \
+            -p:PluginPackagingDisable=true \
             -m:1
 
           echo "Tidalarr build complete"
