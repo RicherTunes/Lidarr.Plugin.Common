@@ -138,8 +138,8 @@ jobs:
               sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' ext/Lidarr.Plugin.Common/NuGet.config
           fi
 
-          dotnet restore src/Qobuzarr/Lidarr.Plugin.Qobuzarr.csproj
-          dotnet build src/Qobuzarr/Lidarr.Plugin.Qobuzarr.csproj \
+          dotnet restore Qobuzarr.csproj
+          dotnet build Qobuzarr.csproj \
             --configuration Release \
             --no-restore \
             -p:LidarrPath="${{ github.workspace }}/lidarr-assemblies" \
