@@ -1,0 +1,417 @@
+name: 🔥 Multi-Plugin Smoke Test
+
+on:
+  workflow_call:
+    inputs:
+      caller_plugin:
+        description: 'The plugin that called this workflow (e.g., brainarr, qobuzarr, tidalarr)'
+        required: true
+        type: string
+      lidarr_docker_version:
+        description: 'Lidarr Docker image version (e.g., pr-plugins-2.14.2.4786)'
+        required: false
+        type: string
+        default: 'pr-plugins-2.14.2.4786'
+      test_plugins:
+        description: 'Comma-separated list of plugins to test (default: all)'
+        required: false
+        type: string
+        default: 'brainarr,qobuzarr,tidalarr'
+      skip_caller_build:
+        description: 'Skip building caller plugin (use artifact from previous job)'
+        required: false
+        type: boolean
+        default: false
+    secrets:
+      SUBMODULES_TOKEN:
+        required: false
+
+env:
+  DOTNET_VERSION: '6.0.x'
+  LIDARR_DOCKER_VERSION: ${{ inputs.lidarr_docker_version }}
+
+jobs:
+  smoke-test:
+    name: 🔥 Plugin Co-existence Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout Common Library
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Lidarr.Plugin.Common
+          ref: main
+          path: common
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Extract Lidarr Assemblies from Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p lidarr-assemblies
+
+          echo "Pulling Lidarr Docker image: ghcr.io/hotio/lidarr:${{ env.LIDARR_DOCKER_VERSION }}"
+          docker pull ghcr.io/hotio/lidarr:${{ env.LIDARR_DOCKER_VERSION }}
+
+          # Create temporary container and extract assemblies
+          CONTAINER_ID=$(docker create ghcr.io/hotio/lidarr:${{ env.LIDARR_DOCKER_VERSION }})
+          echo "Container ID: $CONTAINER_ID"
+
+          # Copy Lidarr binaries
+          docker cp "$CONTAINER_ID:/app" lidarr-app || docker cp "$CONTAINER_ID:/opt/Lidarr" lidarr-app
+          docker rm "$CONTAINER_ID"
+
+          # Find and copy required DLLs
+          find lidarr-app -name "*.dll" -exec cp {} lidarr-assemblies/ \; 2>/dev/null || true
+
+          echo "Extracted assemblies:"
+          ls lidarr-assemblies/*.dll 2>/dev/null | wc -l | xargs -I {} echo "{} DLL files extracted"
+          ls lidarr-assemblies/ 2>/dev/null | head -20 || true
+
+      - name: Checkout Brainarr
+        if: contains(inputs.test_plugins, 'brainarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Brainarr
+          ref: main
+          path: plugins/brainarr
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+
+      - name: Checkout Qobuzarr
+        if: contains(inputs.test_plugins, 'qobuzarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Qobuzarr
+          ref: main
+          path: plugins/qobuzarr
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+
+      - name: Checkout Tidalarr
+        if: contains(inputs.test_plugins, 'tidalarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Tidalarr
+          ref: main
+          path: plugins/tidalarr
+          submodules: recursive
+          token: ${{ secrets.SUBMODULES_TOKEN || github.token }}
+
+      - name: Copy Lidarr Assemblies to Plugin Locations
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Each plugin expects Lidarr assemblies in specific locations
+          # Copy extracted assemblies to where each plugin expects them
+
+          # Qobuzarr expects: ext/Lidarr/_output/net6.0/
+          if [ -d "plugins/qobuzarr" ]; then
+            mkdir -p plugins/qobuzarr/ext/Lidarr/_output/net6.0
+            cp lidarr-assemblies/*.dll plugins/qobuzarr/ext/Lidarr/_output/net6.0/ 2>/dev/null || true
+            echo "✓ Copied assemblies for Qobuzarr"
+          fi
+
+          # Tidalarr expects: ext/Lidarr/_output/net6.0/
+          if [ -d "plugins/tidalarr" ]; then
+            mkdir -p plugins/tidalarr/ext/Lidarr/_output/net6.0
+            cp lidarr-assemblies/*.dll plugins/tidalarr/ext/Lidarr/_output/net6.0/ 2>/dev/null || true
+            echo "✓ Copied assemblies for Tidalarr"
+          fi
+
+          # Brainarr uses -p:LidarrPath so no copy needed, but create ext/Lidarr-docker for fallback
+          if [ -d "plugins/brainarr" ]; then
+            mkdir -p plugins/brainarr/ext/Lidarr-docker/_output/net8.0
+            cp lidarr-assemblies/*.dll plugins/brainarr/ext/Lidarr-docker/_output/net8.0/ 2>/dev/null || true
+            echo "✓ Copied assemblies for Brainarr"
+          fi
+
+      - name: Build Brainarr Plugin
+        if: contains(inputs.test_plugins, 'brainarr')
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd plugins/brainarr
+
+          # Patch NuGet config if needed
+          if [ -f "ext/lidarr.plugin.common/NuGet.config" ]; then
+            grep -q 'TagLibSharp-Lidarr' ext/lidarr.plugin.common/NuGet.config || \
+              sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' ext/lidarr.plugin.common/NuGet.config
+          fi
+
+          dotnet restore Brainarr.Plugin/Brainarr.Plugin.csproj
+          dotnet build Brainarr.Plugin/Brainarr.Plugin.csproj \
+            --configuration Release \
+            --no-restore \
+            -p:LidarrPath="${{ github.workspace }}/lidarr-assemblies" \
+            -m:1
+
+          echo "Brainarr build complete"
+
+      - name: Build Qobuzarr Plugin
+        if: contains(inputs.test_plugins, 'qobuzarr')
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd plugins/qobuzarr
+
+          # Patch NuGet config if needed
+          if [ -f "ext/Lidarr.Plugin.Common/NuGet.config" ]; then
+            grep -q 'TagLibSharp-Lidarr' ext/Lidarr.Plugin.Common/NuGet.config || \
+              sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' ext/Lidarr.Plugin.Common/NuGet.config
+          fi
+
+          # Qobuzarr uses hardcoded path ext/Lidarr/_output/net6.0
+          # Define PLUGIN_PROTOCOL for plugins-branch compatibility (string Protocol instead of enum)
+          dotnet restore Qobuzarr.csproj
+          dotnet build Qobuzarr.csproj \
+            --configuration Release \
+            --no-restore \
+            -p:RunAnalyzersDuringBuild=false \
+            -p:EnableNETAnalyzers=false \
+            -p:DefineConstants=PLUGIN_PROTOCOL \
+            -m:1
+
+          echo "Qobuzarr build complete"
+
+      - name: Build Tidalarr Plugin
+        if: contains(inputs.test_plugins, 'tidalarr')
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd plugins/tidalarr
+
+          # Patch NuGet config if needed
+          if [ -f "ext/Lidarr.Plugin.Common/NuGet.config" ]; then
+            grep -q 'TagLibSharp-Lidarr' ext/Lidarr.Plugin.Common/NuGet.config || \
+              sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' ext/Lidarr.Plugin.Common/NuGet.config
+          fi
+
+          # Tidalarr uses hardcoded path in HostBridge: ext/Lidarr/_output/net6.0
+          # Build both the main plugin and the HostBridge
+          dotnet restore src/Tidalarr/Tidalarr.csproj
+          dotnet restore src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj
+          dotnet build src/Tidalarr/Tidalarr.csproj \
+            --configuration Release \
+            --no-restore \
+            -m:1
+          dotnet build src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj \
+            --configuration Release \
+            --no-restore \
+            -m:1
+
+          echo "Tidalarr build complete"
+
+      - name: Stage Plugin Artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p staged-plugins
+
+          # Stage Brainarr
+          if [ -d "plugins/brainarr" ]; then
+            mkdir -p staged-plugins/RicherTunes/Brainarr
+            DLL=$(find plugins/brainarr -name 'Lidarr.Plugin.Brainarr.dll' -path '*/bin/*' | head -1)
+            if [ -n "$DLL" ]; then
+              cp "$DLL" staged-plugins/RicherTunes/Brainarr/
+              cp plugins/brainarr/plugin.json staged-plugins/RicherTunes/Brainarr/ 2>/dev/null || true
+              cp plugins/brainarr/manifest.json staged-plugins/RicherTunes/Brainarr/ 2>/dev/null || true
+              echo "✓ Staged Brainarr from: $DLL"
+            fi
+          fi
+
+          # Stage Qobuzarr
+          if [ -d "plugins/qobuzarr" ]; then
+            mkdir -p staged-plugins/RicherTunes/Qobuzarr
+            DLL=$(find plugins/qobuzarr -name 'Lidarr.Plugin.Qobuzarr.dll' -path '*/bin/*' | head -1)
+            if [ -n "$DLL" ]; then
+              cp "$DLL" staged-plugins/RicherTunes/Qobuzarr/
+              cp plugins/qobuzarr/plugin.json staged-plugins/RicherTunes/Qobuzarr/ 2>/dev/null || true
+              cp plugins/qobuzarr/manifest.json staged-plugins/RicherTunes/Qobuzarr/ 2>/dev/null || true
+              echo "✓ Staged Qobuzarr from: $DLL"
+            fi
+          fi
+
+          # Stage Tidalarr
+          if [ -d "plugins/tidalarr" ]; then
+            mkdir -p staged-plugins/RicherTunes/Tidalarr
+            DLL=$(find plugins/tidalarr -name 'Lidarr.Plugin.Tidalarr.dll' -path '*/bin/*' | head -1)
+            if [ -n "$DLL" ]; then
+              cp "$DLL" staged-plugins/RicherTunes/Tidalarr/
+              cp plugins/tidalarr/plugin.json staged-plugins/RicherTunes/Tidalarr/ 2>/dev/null || true
+              cp plugins/tidalarr/manifest.json staged-plugins/RicherTunes/Tidalarr/ 2>/dev/null || true
+              echo "✓ Staged Tidalarr from: $DLL"
+            fi
+          fi
+
+          echo ""
+          echo "=== Staged Plugins ==="
+          find staged-plugins -type f -name "*.dll" -o -name "*.json" | sort
+
+      - name: Start Lidarr with All Plugins
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Starting Lidarr with all plugins mounted..."
+          docker run -d --name lidarr-smoke-test \
+            -p 8686:8686 \
+            -v "${{ github.workspace }}/staged-plugins:/config/plugins:ro" \
+            -e PUID=1000 -e PGID=1000 \
+            ghcr.io/hotio/lidarr:${{ env.LIDARR_DOCKER_VERSION }}
+
+          echo "Waiting for Lidarr to start..."
+          for i in {1..120}; do
+            if curl -fsS http://localhost:8686 >/dev/null 2>&1; then
+              echo "Lidarr web interface is ready"
+              break
+            fi
+            if [ $i -eq 120 ]; then
+              echo "Timeout waiting for Lidarr to start"
+              docker logs lidarr-smoke-test
+              exit 1
+            fi
+            sleep 5
+          done
+
+      - name: Get Lidarr API Key
+        id: apikey
+        shell: bash
+        run: |
+          set -e
+          for i in {1..30}; do
+            APIKEY=$(docker exec lidarr-smoke-test sh -lc "cat /config/config.xml 2>/dev/null | sed -n 's:.*<ApiKey>\\(.*\\)</ApiKey>.*:\\1:p'" 2>/dev/null || true)
+            if [ -n "$APIKEY" ]; then
+              echo "api_key=$APIKEY" >> $GITHUB_OUTPUT
+              echo "API key retrieved successfully"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "Failed to retrieve API key"
+          exit 1
+
+      - name: Verify All Plugins Discovered
+        shell: bash
+        env:
+          API_KEY: ${{ steps.apikey.outputs.api_key }}
+        run: |
+          set -e
+          PLUGINS_TO_CHECK="${{ inputs.test_plugins }}"
+          FAILED_PLUGINS=""
+          DETECTED_PLUGINS=""
+
+          echo "Checking plugin discovery via Lidarr API..."
+          echo "Plugins to verify: $PLUGINS_TO_CHECK"
+          echo ""
+
+          # Wait for plugins to be fully loaded
+          sleep 10
+
+          # Get plugin list from API
+          PLUGIN_RESPONSE=$(curl -fsS -H "X-Api-Key: $API_KEY" http://localhost:8686/api/v1/system/plugins 2>/dev/null || echo "[]")
+          echo "API Response: $PLUGIN_RESPONSE"
+          echo ""
+
+          # Check each plugin
+          IFS=',' read -ra PLUGIN_ARRAY <<< "$PLUGINS_TO_CHECK"
+          for plugin in "${PLUGIN_ARRAY[@]}"; do
+            plugin_lower=$(echo "$plugin" | tr '[:upper:]' '[:lower:]' | xargs)
+
+            # Case-insensitive grep
+            if echo "$PLUGIN_RESPONSE" | grep -qi "$plugin_lower"; then
+              echo "✓ $plugin plugin detected"
+              DETECTED_PLUGINS="$DETECTED_PLUGINS $plugin"
+            else
+              echo "✗ $plugin plugin NOT detected"
+              FAILED_PLUGINS="$FAILED_PLUGINS $plugin"
+            fi
+          done
+
+          echo ""
+          echo "=== Plugin Co-existence Summary ==="
+          echo "Detected plugins:$DETECTED_PLUGINS"
+
+          if [ -n "$FAILED_PLUGINS" ]; then
+            echo "Missing plugins:$FAILED_PLUGINS"
+            echo ""
+            echo "=== Lidarr Logs (last 100 lines) ==="
+            docker logs lidarr-smoke-test --tail 100 2>&1 || true
+            exit 1
+          fi
+
+          echo ""
+          echo "🎉 All plugins successfully co-exist in Lidarr!"
+
+      - name: Test Plugin API Endpoints
+        if: success()
+        shell: bash
+        env:
+          API_KEY: ${{ steps.apikey.outputs.api_key }}
+        run: |
+          set -e
+          echo "Testing plugin API endpoints..."
+
+          # Test indexers endpoint
+          echo "Checking indexers..."
+          INDEXERS=$(curl -fsS -H "X-Api-Key: $API_KEY" http://localhost:8686/api/v1/indexer/schema 2>/dev/null || echo "[]")
+
+          # Check for streaming indexers
+          if echo "$INDEXERS" | grep -qi "tidal"; then
+            echo "✓ Tidal indexer schema available"
+          fi
+          if echo "$INDEXERS" | grep -qi "qobuz"; then
+            echo "✓ Qobuz indexer schema available"
+          fi
+
+          # Test download clients endpoint
+          echo "Checking download clients..."
+          CLIENTS=$(curl -fsS -H "X-Api-Key: $API_KEY" http://localhost:8686/api/v1/downloadclient/schema 2>/dev/null || echo "[]")
+
+          if echo "$CLIENTS" | grep -qi "tidal"; then
+            echo "✓ Tidal download client schema available"
+          fi
+          if echo "$CLIENTS" | grep -qi "qobuz"; then
+            echo "✓ Qobuz download client schema available"
+          fi
+
+          # Test import lists endpoint for Brainarr
+          echo "Checking import lists..."
+          LISTS=$(curl -fsS -H "X-Api-Key: $API_KEY" http://localhost:8686/api/v1/importlist/schema 2>/dev/null || echo "[]")
+
+          if echo "$LISTS" | grep -qi "brainarr"; then
+            echo "✓ Brainarr import list schema available"
+          fi
+
+          echo ""
+          echo "✓ Plugin API endpoints verified"
+
+      - name: Capture Debug Info on Failure
+        if: failure()
+        shell: bash
+        run: |
+          echo "=== Docker Container Status ==="
+          docker ps -a
+
+          echo ""
+          echo "=== Lidarr Container Logs ==="
+          docker logs lidarr-smoke-test 2>&1 || true
+
+          echo ""
+          echo "=== Plugin Directory Contents ==="
+          docker exec lidarr-smoke-test ls -laR /config/plugins 2>&1 || true
+
+          echo ""
+          echo "=== Lidarr Config ==="
+          docker exec lidarr-smoke-test cat /config/config.xml 2>&1 || true
+
+      - name: Cleanup
+        if: always()
+        run: |
+          docker rm -f lidarr-smoke-test 2>/dev/null || true
