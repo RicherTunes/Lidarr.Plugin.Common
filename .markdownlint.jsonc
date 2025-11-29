@@ -1,10 +1,37 @@
 {
   "default": true,
-  "MD012": false,
+  // Line length - disabled for readability
   "MD013": false,
+  // Blank lines - disabled
+  "MD012": false,
+  // Headings blank lines - disabled
   "MD022": false,
+  // Fenced code blocks - disabled
   "MD031": false,
+  // Lists blank lines - disabled
   "MD032": false,
+  // Fenced code language - disabled
   "MD040": false,
-  "MD058": false
+  // Tables - disabled
+  "MD058": false,
+  // HTML in markdown - allowed
+  "MD033": false,
+  // Bare URLs - allowed for simplicity
+  "MD034": false,
+  // First line heading - disabled for templates
+  "MD041": false,
+  // Table column style - disabled
+  "MD060": false,
+  // Heading style - allow mixed styles
+  "MD003": false,
+  // Trailing spaces - disabled
+  "MD009": false,
+  // Multiple top-level headings - allowed
+  "MD025": false,
+  // Trailing punctuation in headings - allowed
+  "MD026": false,
+  // Ordered list prefix - disabled
+  "MD029": false,
+  // Emphasis as heading - allowed
+  "MD036": false
 }
