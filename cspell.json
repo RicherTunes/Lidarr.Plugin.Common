@@ -64,7 +64,8 @@
     "Ollama",
     "pluginname",
     "mystreamingplugin",
-    "xcopy"
+    "xcopy",
+    "Taglib"
   ],
   "ignorePaths": [
     "**/bin",
