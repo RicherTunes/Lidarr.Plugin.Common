@@ -274,10 +274,16 @@ jobs:
             -e PUID=1000 -e PGID=1000 \
             ghcr.io/hotio/lidarr:${{ env.LIDARR_DOCKER_VERSION }}
 
+          # Give container time to initialize
+          echo "Waiting for container initialization..."
+          sleep 15
+
           echo "Waiting for Lidarr to start..."
           for i in {1..120}; do
             if curl -fsS http://localhost:8686 >/dev/null 2>&1; then
               echo "Lidarr web interface is ready"
+              # Additional delay for full initialization
+              sleep 10
               break
             fi
             if [ $i -eq 120 ]; then
@@ -293,16 +299,19 @@ jobs:
         shell: bash
         run: |
           set -e
-          for i in {1..30}; do
+          echo "Retrieving API key from Lidarr config..."
+          for i in {1..60}; do
             APIKEY=$(docker exec lidarr-smoke-test sh -lc "cat /config/config.xml 2>/dev/null | sed -n 's:.*<ApiKey>\\(.*\\)</ApiKey>.*:\\1:p'" 2>/dev/null || true)
             if [ -n "$APIKEY" ]; then
               echo "api_key=$APIKEY" >> $GITHUB_OUTPUT
-              echo "API key retrieved successfully"
+              echo "API key retrieved successfully after $i attempts"
               exit 0
             fi
-            sleep 2
+            echo "Attempt $i: API key not ready yet..."
+            sleep 3
           done
-          echo "Failed to retrieve API key"
+          echo "Failed to retrieve API key after 60 attempts"
+          docker logs lidarr-smoke-test --tail 50
           exit 1
 
       - name: Verify All Plugins Discovered
