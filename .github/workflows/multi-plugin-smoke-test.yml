@@ -222,38 +222,41 @@ jobs:
           set -euo pipefail
           mkdir -p staged-plugins
 
+          # Lidarr plugins branch expects flat structure: PluginName/plugin-files
+          # NOT nested: Owner/PluginName/plugin-files
+
           # Stage Brainarr
           if [ -d "plugins/brainarr" ]; then
-            mkdir -p staged-plugins/RicherTunes/Brainarr
+            mkdir -p staged-plugins/Brainarr
             DLL=$(find plugins/brainarr -name 'Lidarr.Plugin.Brainarr.dll' -path '*/bin/*' | head -1)
             if [ -n "$DLL" ]; then
-              cp "$DLL" staged-plugins/RicherTunes/Brainarr/
-              cp plugins/brainarr/plugin.json staged-plugins/RicherTunes/Brainarr/ 2>/dev/null || true
-              cp plugins/brainarr/manifest.json staged-plugins/RicherTunes/Brainarr/ 2>/dev/null || true
+              cp "$DLL" staged-plugins/Brainarr/
+              cp plugins/brainarr/plugin.json staged-plugins/Brainarr/ 2>/dev/null || true
+              cp plugins/brainarr/manifest.json staged-plugins/Brainarr/ 2>/dev/null || true
               echo "✓ Staged Brainarr from: $DLL"
             fi
           fi
 
           # Stage Qobuzarr
           if [ -d "plugins/qobuzarr" ]; then
-            mkdir -p staged-plugins/RicherTunes/Qobuzarr
+            mkdir -p staged-plugins/Qobuzarr
             DLL=$(find plugins/qobuzarr -name 'Lidarr.Plugin.Qobuzarr.dll' -path '*/bin/*' | head -1)
             if [ -n "$DLL" ]; then
-              cp "$DLL" staged-plugins/RicherTunes/Qobuzarr/
-              cp plugins/qobuzarr/plugin.json staged-plugins/RicherTunes/Qobuzarr/ 2>/dev/null || true
-              cp plugins/qobuzarr/manifest.json staged-plugins/RicherTunes/Qobuzarr/ 2>/dev/null || true
+              cp "$DLL" staged-plugins/Qobuzarr/
+              cp plugins/qobuzarr/plugin.json staged-plugins/Qobuzarr/ 2>/dev/null || true
+              cp plugins/qobuzarr/manifest.json staged-plugins/Qobuzarr/ 2>/dev/null || true
               echo "✓ Staged Qobuzarr from: $DLL"
             fi
           fi
 
           # Stage Tidalarr
           if [ -d "plugins/tidalarr" ]; then
-            mkdir -p staged-plugins/RicherTunes/Tidalarr
+            mkdir -p staged-plugins/Tidalarr
             DLL=$(find plugins/tidalarr -name 'Lidarr.Plugin.Tidalarr.dll' -path '*/bin/*' | head -1)
             if [ -n "$DLL" ]; then
-              cp "$DLL" staged-plugins/RicherTunes/Tidalarr/
-              cp plugins/tidalarr/plugin.json staged-plugins/RicherTunes/Tidalarr/ 2>/dev/null || true
-              cp plugins/tidalarr/manifest.json staged-plugins/RicherTunes/Tidalarr/ 2>/dev/null || true
+              cp "$DLL" staged-plugins/Tidalarr/
+              cp plugins/tidalarr/plugin.json staged-plugins/Tidalarr/ 2>/dev/null || true
+              cp plugins/tidalarr/manifest.json staged-plugins/Tidalarr/ 2>/dev/null || true
               echo "✓ Staged Tidalarr from: $DLL"
             fi
           fi
