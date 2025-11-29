@@ -58,7 +58,13 @@
     "singleflight",
     "OpenTelemetry",
     "Idempotent",
-    "Idempotency"
+    "Idempotency",
+    "kbps",
+    "ALAC",
+    "Ollama",
+    "pluginname",
+    "mystreamingplugin",
+    "xcopy"
   ],
   "ignorePaths": [
     "**/bin",
