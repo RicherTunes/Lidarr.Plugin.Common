@@ -51,6 +51,7 @@ jobs:
             --no-progress
             --retry-wait-time 2
             --max-retries 2
+            --config .lychee.toml
             docs/**/*.md README.md
 
       - name: Snippet verifier (non-blocking)

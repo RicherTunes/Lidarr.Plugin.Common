@@ -1,0 +1,262 @@
+// Centralized Playwright screenshotter for Lidarr streaming plugins
+// Usage: node snap.mjs --plugin=Tidalarr --type=indexer,download-client
+// Requires: `npx playwright install --with-deps chromium`
+
+import { chromium } from 'playwright';
+import { parseArgs } from 'node:util';
+import { mkdirSync, existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+// Parse command line arguments
+const { values: args } = parseArgs({
+  options: {
+    plugin: { type: 'string', default: process.env.PLUGIN_NAME || 'Plugin' },
+    type: { type: 'string', default: 'indexer,download-client,import-list' },
+    output: { type: 'string', default: process.env.OUTPUT_DIR || 'docs/assets/screenshots' },
+    url: { type: 'string', default: process.env.LIDARR_BASE_URL || 'http://localhost:8686' },
+    help: { type: 'boolean', short: 'h', default: false }
+  }
+});
+
+if (args.help) {
+  console.log(`
+Lidarr Plugin Screenshot Utility
+
+Usage: node snap.mjs [options]
+
+Options:
+  --plugin=NAME       Plugin name to search for (default: $PLUGIN_NAME or 'Plugin')
+  --type=TYPES        Comma-separated plugin types: indexer,download-client,import-list
+  --output=DIR        Output directory for screenshots (default: docs/assets/screenshots)
+  --url=URL           Lidarr base URL (default: $LIDARR_BASE_URL or http://localhost:8686)
+  -h, --help          Show this help message
+
+Examples:
+  node snap.mjs --plugin=Tidalarr --type=indexer,download-client
+  node snap.mjs --plugin=Brainarr --type=import-list
+  PLUGIN_NAME=Qobuzarr node snap.mjs
+`);
+  process.exit(0);
+}
+
+const PLUGIN_NAME = args.plugin;
+const PLUGIN_TYPES = args.type.split(',').map(t => t.trim().toLowerCase());
+const OUTDIR = args.output;
+const BASE = args.url;
+
+console.log(`Screenshot config:
+  Plugin: ${PLUGIN_NAME}
+  Types: ${PLUGIN_TYPES.join(', ')}
+  Output: ${OUTDIR}
+  URL: ${BASE}
+`);
+
+// Ensure output directory exists
+if (!existsSync(OUTDIR)) {
+  mkdirSync(OUTDIR, { recursive: true });
+}
+
+async function screenshotOrSkip(page, name, fn) {
+  try {
+    await fn();
+    const path = `${OUTDIR}/${name}.png`;
+    await page.screenshot({ path, fullPage: true });
+    console.log(`saved: ${path}`);
+  } catch (err) {
+    console.warn(`skip ${name}: ${err?.message || err}`);
+  }
+}
+
+async function captureIndexerScreenshots(page) {
+  // Navigate to Indexers section
+  await screenshotOrSkip(page, 'indexers-list', async () => {
+    const indexersLink = page.getByRole('link', { name: /indexers/i }).first();
+    if (await indexersLink.count()) {
+      await indexersLink.click({ timeout: 3000 }).catch(() => {});
+      await page.waitForLoadState('networkidle').catch(() => {});
+    } else {
+      await page.goto(`${BASE}/settings/indexers`, { waitUntil: 'domcontentloaded' });
+    }
+    await page.waitForTimeout(500);
+  });
+
+  // Add Indexer modal
+  await screenshotOrSkip(page, 'indexer-add-modal', async () => {
+    const addBtn = page.getByRole('button', { name: /add/i }).first();
+    if (await addBtn.count()) {
+      await addBtn.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+    const search = page.getByPlaceholder(/search/i).first();
+    if (await search.count()) {
+      await search.fill(PLUGIN_NAME).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  });
+
+  // Plugin configuration
+  await screenshotOrSkip(page, 'indexer-config', async () => {
+    const pluginOption = page.getByText(new RegExp(PLUGIN_NAME, 'i')).first();
+    if (await pluginOption.count()) {
+      await pluginOption.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  });
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+}
+
+async function captureDownloadClientScreenshots(page) {
+  // Navigate to Download Clients section
+  await screenshotOrSkip(page, 'download-clients-list', async () => {
+    const downloadLink = page.getByRole('link', { name: /download client/i }).first();
+    if (await downloadLink.count()) {
+      await downloadLink.click({ timeout: 3000 }).catch(() => {});
+      await page.waitForLoadState('networkidle').catch(() => {});
+    } else {
+      await page.goto(`${BASE}/settings/downloadclients`, { waitUntil: 'domcontentloaded' });
+    }
+    await page.waitForTimeout(500);
+  });
+
+  // Add Download Client modal
+  await screenshotOrSkip(page, 'download-client-add-modal', async () => {
+    const addBtn = page.getByRole('button', { name: /add/i }).first();
+    if (await addBtn.count()) {
+      await addBtn.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+    const search = page.getByPlaceholder(/search/i).first();
+    if (await search.count()) {
+      await search.fill(PLUGIN_NAME).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  });
+
+  // Plugin configuration
+  await screenshotOrSkip(page, 'download-client-config', async () => {
+    const pluginOption = page.getByText(new RegExp(PLUGIN_NAME, 'i')).first();
+    if (await pluginOption.count()) {
+      await pluginOption.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  });
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+}
+
+async function captureImportListScreenshots(page) {
+  // Navigate to Import Lists section
+  await screenshotOrSkip(page, 'import-lists', async () => {
+    const importLists = page.getByText(/import lists/i).first();
+    if (await importLists.count()) {
+      await importLists.click({ timeout: 2000 }).catch(() => {});
+    } else {
+      await page.goto(`${BASE}/settings/importlists`, { waitUntil: 'domcontentloaded' });
+    }
+    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForTimeout(500);
+  });
+
+  // Add Import List modal
+  await screenshotOrSkip(page, 'import-list-add-modal', async () => {
+    const addBtn = page.getByRole('button', { name: /add/i }).first();
+    if (await addBtn.count()) {
+      await addBtn.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+    const search = page.getByPlaceholder(/search/i).first();
+    if (await search.count()) {
+      await search.fill(PLUGIN_NAME).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  });
+
+  // Plugin configuration
+  await screenshotOrSkip(page, 'import-list-config', async () => {
+    const pluginOption = page.getByText(new RegExp(PLUGIN_NAME, 'i')).first();
+    if (await pluginOption.count()) {
+      await pluginOption.click({ timeout: 2000 }).catch(() => {});
+      await page.waitForTimeout(500);
+    }
+  });
+
+  await page.keyboard.press('Escape');
+  await page.waitForTimeout(300);
+}
+
+async function run() {
+  const browser = await chromium.launch({ headless: true });
+  const context = await browser.newContext({
+    viewport: { width: 1440, height: 900 },
+    userAgent: `${PLUGIN_NAME.toLowerCase()}-ci-screenshot`,
+    colorScheme: 'dark'
+  });
+  const page = await context.newPage();
+
+  // Basic navigation + wizard-friendly waits
+  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+  await page.waitForLoadState('networkidle', { timeout: 60_000 }).catch(() => {});
+
+  // Try to breeze through wizard if present
+  const tryClick = async (text) => {
+    const el = page.getByRole('button', { name: text });
+    if (await el.count().catch(() => 0)) {
+      await el.first().click({ timeout: 2000 }).catch(() => {});
+    }
+  };
+  await tryClick('Next');
+  await tryClick('Continue');
+  await tryClick('Skip');
+  await tryClick('Finish');
+
+  // Landing page
+  await screenshotOrSkip(page, 'landing', async () => {
+    await page.waitForTimeout(800);
+  });
+
+  // Navigate to Settings
+  const goSettings = async () => {
+    const settings = page.getByRole('link', { name: /settings/i });
+    if (await settings.count()) {
+      await settings.first().click();
+      await page.waitForLoadState('networkidle');
+    } else {
+      await page.goto(`${BASE}/settings`, { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle').catch(() => {});
+    }
+  };
+
+  await goSettings();
+
+  // Settings overview
+  await screenshotOrSkip(page, 'settings', async () => {
+    await page.waitForTimeout(500);
+  });
+
+  // Capture type-specific screenshots
+  if (PLUGIN_TYPES.includes('indexer')) {
+    await captureIndexerScreenshots(page);
+    await goSettings();
+  }
+
+  if (PLUGIN_TYPES.includes('download-client')) {
+    await captureDownloadClientScreenshots(page);
+    await goSettings();
+  }
+
+  if (PLUGIN_TYPES.includes('import-list')) {
+    await captureImportListScreenshots(page);
+  }
+
+  await browser.close();
+  console.log('\nScreenshot capture complete!');
+}
+
+run().catch((e) => {
+  console.error(e);
+  process.exitCode = 1;
+});

@@ -1,4 +1,4 @@
-Lidarr Plugin Templates
+# Lidarr Plugin Templates
 
 This package provides a `dotnet new` template to bootstrap a Lidarr streaming plugin.
 
@@ -10,4 +10,3 @@ Usage (once published):
 Local install (from repo):
 
   dotnet new install templates/lidarr-plugin
-

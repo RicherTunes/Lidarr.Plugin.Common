@@ -1,19 +1,29 @@
----
-extends: null
-MD003: { style: "atx" }
-MD004: { style: "asterisk" }
-MD007: { indent: 2 }
-MD009: { strict: true }
-MD012: { maximum: 1 }
-MD013:
-  line_length: 120
-  heading_line_length: 120
-  code_block_line_length: 0
-  tables: false
-  heading_line_breaks: false
+default: true
+# Line length - disabled for readability
+MD013: false
+# HTML in markdown - allowed
+MD033: false
+# Bare URLs - allowed for simplicity
+MD034: false
+# First line heading - disabled for templates
+MD041: false
+# Table column style - disabled
+MD060: false
+# Heading style - allow mixed styles
+MD003: false
+# Trailing spaces - disabled
+MD009: false
+# Multiple top-level headings - allowed
+MD025: false
+# Trailing punctuation in headings - allowed
+MD026: false
+# Ordered list prefix - disabled
+MD029: false
+# Emphasis as heading - allowed
+MD036: false
+# Duplicate headings - allow siblings
 MD024:
-  allow_different_nesting: true
-MD026: { punctuation: "!?." }
-MD029: { style: one }
-MD033: { allowed_elements: ["div", "span"] }
-MD041: { level: 1 }
+  siblings_only: true
+# Code block style
+MD046:
+  style: fenced

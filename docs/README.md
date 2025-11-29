@@ -7,6 +7,10 @@ Pick the guide that matches what you need to do.
 - [Build your first plugin](quickstart/PLUGIN_AUTHOR.md)
 - [Load plugins safely in the host](quickstart/HOST_MAINTAINER.md)
 
+## Tutorials
+
+- [Build your first plugin from scratch](tutorials/BUILD_YOUR_FIRST_PLUGIN.md) - Complete 30-minute tutorial
+
 ## Concepts (know how it works)
 
 - [Architecture](concepts/ARCHITECTURE.md)
@@ -25,6 +29,7 @@ Pick the guide that matches what you need to do.
 - [Add structured logging](how-to/ADD_LOGGING.md)
 - [Return structured diagnostics (PluginOperationResultJson)](how-to/DIAGNOSTICS_JSON.md)
 - [Cache GETs and enable 304 revalidation](how-to/HTTP_CACHING_AND_REVALIDATION.md)
+- [Troubleshoot common issues](how-to/TROUBLESHOOTING_COMMON.md)
 
 ## Reference (facts)
 
@@ -34,6 +39,7 @@ Pick the guide that matches what you need to do.
 - [Public API baselines](reference/PUBLIC_API_BASELINES.md)
 - [Key services and utilities](reference/KEY_SERVICES.md)
 - [Resilience policy reference](reference/RESILIENCE_POLICY.md)
+- [Streaming plugins glossary](GLOSSARY.md) - Common terminology
 
 ## Migration
 
@@ -52,6 +58,16 @@ Pick the guide that matches what you need to do.
 - [Unified plugin pipeline](dev-guide/UNIFIED_PLUGIN_PIPELINE.md)
 - [Documentation style guide](dev-guide/STYLE_GUIDE.md)
 - [Doc testing & snippet verification](dev-guide/TESTING_DOCS.md)
+
+## Plugins using this library
+
+These production plugins are built on Lidarr.Plugin.Common:
+
+| Plugin | Description | Repository |
+|--------|-------------|------------|
+| **Brainarr** | AI-powered music recommendations | [RicherTunes/brainarr](https://github.com/RicherTunes/brainarr) |
+| **Tidalarr** | Tidal streaming integration | [RicherTunes/tidalarr](https://github.com/RicherTunes/tidalarr) |
+| **Qobuzarr** | Qobuz high-res audio integration | [RicherTunes/qobuzarr](https://github.com/RicherTunes/qobuzarr) |
 
 Need something else? Open an issue or PR so the documentation evolves with the code.
 

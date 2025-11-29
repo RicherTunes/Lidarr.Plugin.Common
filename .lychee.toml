@@ -1,0 +1,30 @@
+# Lychee link checker configuration
+# See: https://lychee.cli.rs/configuration/
+
+# Exclude private repos and unpublished packages (pre-public state)
+exclude = [
+    # Private repos (will be public soon)
+    "https://github.com/RicherTunes/qobuzarr.*",
+    "https://github.com/RicherTunes/tidalarr.*",
+    # Unpublished NuGet packages
+    "https://www.nuget.org/packages/Lidarr.Plugin.*",
+    # Future releases
+    "https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/.*",
+    # TODO docs (planned but not yet written)
+    ".*IMPLEMENT_DOWNLOAD_CLIENT.*",
+]
+
+# Accept these status codes as valid
+accept = [
+    "100..=103",
+    "200..=299",
+    "403",  # GitHub rate limiting
+]
+
+# Skip these file patterns
+exclude_path = [
+    "node_modules",
+    ".git",
+    "bin",
+    "obj",
+]
