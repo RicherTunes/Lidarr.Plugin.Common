@@ -168,12 +168,14 @@ jobs:
           fi
 
           # Qobuzarr uses hardcoded path ext/Lidarr/_output/net6.0
+          # Define PLUGIN_PROTOCOL for plugins-branch compatibility (string Protocol instead of enum)
           dotnet restore Qobuzarr.csproj
           dotnet build Qobuzarr.csproj \
             --configuration Release \
             --no-restore \
             -p:RunAnalyzersDuringBuild=false \
             -p:EnableNETAnalyzers=false \
+            -p:DefineConstants=PLUGIN_PROTOCOL \
             -m:1
 
           echo "Qobuzarr build complete"
