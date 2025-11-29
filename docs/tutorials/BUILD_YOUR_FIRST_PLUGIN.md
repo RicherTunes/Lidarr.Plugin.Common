@@ -798,7 +798,7 @@ Now that you have a working plugin, extend it with:
 See [How to: Authenticate with OAuth](../how-to/AUTHENTICATE_OAUTH.md)
 
 ### Add a download client
-See [How to: Implement a Download Client](../how-to/IMPLEMENT_DOWNLOAD_CLIENT.md)
+See [How to: Use Download Orchestrator](../how-to/USE_DOWNLOAD_ORCHESTRATOR.md)
 
 ### Add caching
 See [How to: HTTP Caching and Revalidation](../how-to/HTTP_CACHING_AND_REVALIDATION.md)
