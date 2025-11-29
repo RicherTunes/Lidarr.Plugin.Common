@@ -60,17 +60,17 @@ public abstract class PluginComplianceTestBase : IDisposable
     {
         var errors = new List<string>();
 
+        if (string.IsNullOrWhiteSpace(PluginManifest.Id))
+            errors.Add("Manifest must have a non-empty Id");
+
         if (string.IsNullOrWhiteSpace(PluginManifest.Name))
             errors.Add("Manifest must have a non-empty Name");
 
-        if (string.IsNullOrWhiteSpace(PluginManifest.Owner))
-            errors.Add("Manifest must have a non-empty Owner");
-
-        if (PluginManifest.Version == null)
+        if (string.IsNullOrWhiteSpace(PluginManifest.Version))
             errors.Add("Manifest must have a Version");
 
-        if (string.IsNullOrWhiteSpace(PluginManifest.MainAssembly))
-            errors.Add("Manifest must specify MainAssembly");
+        if (string.IsNullOrWhiteSpace(PluginManifest.ApiVersion))
+            errors.Add("Manifest must specify ApiVersion");
 
         return new ComplianceResult(errors.Count == 0, errors);
     }
@@ -83,13 +83,16 @@ public abstract class PluginComplianceTestBase : IDisposable
         var errors = new List<string>();
         var assemblyVersion = PluginAssembly.GetName().Version;
 
-        if (PluginManifest.Version != null && assemblyVersion != null)
+        if (!string.IsNullOrWhiteSpace(PluginManifest.Version) && assemblyVersion != null)
         {
-            // Allow minor version differences but major should match
-            if (PluginManifest.Version.Major != assemblyVersion.Major)
+            // Try to parse the manifest version and compare major versions
+            if (Version.TryParse(PluginManifest.Version, out var manifestVersion))
             {
-                errors.Add($"Manifest version major ({PluginManifest.Version.Major}) " +
-                          $"should match assembly version major ({assemblyVersion.Major})");
+                if (manifestVersion.Major != assemblyVersion.Major)
+                {
+                    errors.Add($"Manifest version major ({manifestVersion.Major}) " +
+                              $"should match assembly version major ({assemblyVersion.Major})");
+                }
             }
         }
 

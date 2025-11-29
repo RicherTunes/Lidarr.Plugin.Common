@@ -99,7 +99,8 @@ public abstract class StreamingServiceComplianceTestBase : PluginComplianceTestB
         var tokenStorageTypes = allTypes.Where(t =>
             t.Name.Contains("TokenStore", StringComparison.OrdinalIgnoreCase) ||
             t.Name.Contains("TokenStorage", StringComparison.OrdinalIgnoreCase) ||
-            typeof(ITokenStore).IsAssignableFrom(t)).ToList();
+            t.GetInterfaces().Any(i => i.IsGenericType &&
+                i.GetGenericTypeDefinition().Name.StartsWith("ITokenStore", StringComparison.Ordinal))).ToList();
 
         if (!tokenStorageTypes.Any())
         {
