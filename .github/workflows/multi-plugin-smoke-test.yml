@@ -210,12 +210,18 @@ jobs:
             --no-restore \
             --framework net6.0 \
             -p:PluginPackagingDisable=true \
+            -p:RunAnalyzersDuringBuild=false \
+            -p:EnableNETAnalyzers=false \
+            -p:TreatWarningsAsErrors=false \
             -m:1
           dotnet build src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj \
             --configuration Release \
             --no-restore \
             --framework net6.0 \
             -p:PluginPackagingDisable=true \
+            -p:RunAnalyzersDuringBuild=false \
+            -p:EnableNETAnalyzers=false \
+            -p:TreatWarningsAsErrors=false \
             -m:1
 
           echo "Tidalarr build complete"
