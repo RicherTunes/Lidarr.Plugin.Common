@@ -1,0 +1,62 @@
+# Lidarr.Plugin.Common - Dependency Review Workflow Template
+# Copy this to your plugin's .github/workflows/dependency-review.yml
+
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '**/*.csproj'
+      - '**/Directory.Packages.props'
+      - '**/packages.lock.json'
+      - 'NuGet.config'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  dependency-review:
+    name: License & Vulnerability Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        submodules: recursive
+
+    - name: Dependency Review
+      uses: actions/dependency-review-action@v4
+      with:
+        fail-on-severity: high
+        deny-licenses: GPL-3.0, GPL-3.0-only, GPL-3.0+, AGPL-3.0, AGPL-3.0-only, AGPL-3.0+, SSPL-1.0
+        allow-licenses: MIT, Apache-2.0, BSD-2-Clause, BSD-3-Clause, ISC, Unlicense, CC0-1.0, MS-PL, Zlib, BSL-1.0, LGPL-2.1, LGPL-3.0, MPL-2.0
+        comment-summary-in-pr: always
+        allow-dependencies-licenses: unresolved
+
+    - name: License Summary Comment
+      if: failure()
+      uses: actions/github-script@v7
+      with:
+        script: |
+          github.rest.issues.createComment({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+            body: `## License or Vulnerability Issue
+
+          This PR introduces dependencies with licenses or vulnerabilities that require review.
+
+          ### Denied Licenses
+          - **GPL-3.0**: Strong copyleft license
+          - **AGPL-3.0**: Network copyleft license
+          - **SSPL-1.0**: Server Side Public License
+
+          ### Resolution
+          1. Check the dependency-review action output for specific packages
+          2. Find alternative packages with permissive licenses
+          3. Or document why the license is acceptable`
+          })

@@ -1,0 +1,29 @@
+# Lidarr.Plugin.Common - Gitleaks Configuration
+# Copy this to your plugin root directory
+# https://github.com/gitleaks/gitleaks
+
+title = "Lidarr Plugin Gitleaks Config"
+
+[extend]
+useDefault = true
+
+# Allowlist for false positives
+[allowlist]
+description = "Allowlist for Lidarr plugins"
+paths = [
+  '''(^|/)\.git/''',
+  '''(^|/)bin/''',
+  '''(^|/)obj/''',
+  '''(^|/)TestResults/''',
+  '''\.min\.js$''',
+  '''package-lock\.json$''',
+  '''\.lock$'''
+]
+
+# Example placeholder tokens (for documentation)
+regexTarget = "line"
+regexes = [
+  '''your[_-]?api[_-]?key[_-]?here''',
+  '''REPLACE[_-]?WITH[_-]?YOUR''',
+  '''example\.com'''
+]

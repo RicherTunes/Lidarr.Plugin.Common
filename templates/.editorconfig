@@ -1,0 +1,71 @@
+# Lidarr.Plugin.Common - Unified EditorConfig
+# Copy this to your plugin root directory
+# https://editorconfig.org
+
+root = true
+
+# All files
+[*]
+charset = utf-8
+indent_style = space
+indent_size = 4
+insert_final_newline = true
+end_of_line = lf
+trim_trailing_whitespace = true
+
+# C# files
+[*.cs]
+# Prefer var when type is obvious
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+csharp_style_var_when_type_is_apparent = true:suggestion
+csharp_style_var_elsewhere = false:suggestion
+
+# Expression-level preferences
+dotnet_style_object_initializer = true:suggestion
+dotnet_style_collection_initializer = true:suggestion
+dotnet_style_prefer_auto_properties = true:suggestion
+dotnet_style_prefer_simplified_boolean_expressions = true:suggestion
+dotnet_style_prefer_conditional_expression_over_assignment = true:suggestion
+dotnet_style_prefer_conditional_expression_over_return = true:suggestion
+
+# Nullability warnings - keep as warnings for awareness
+dotnet_diagnostic.CS8600.severity = warning
+dotnet_diagnostic.CS8601.severity = warning
+dotnet_diagnostic.CS8602.severity = warning
+dotnet_diagnostic.CS8603.severity = warning
+dotnet_diagnostic.CS8604.severity = warning
+dotnet_diagnostic.CS8618.severity = warning
+
+# StyleCop rules (when package is included)
+dotnet_diagnostic.SA0001.severity = suggestion
+dotnet_diagnostic.SA1101.severity = suggestion
+dotnet_diagnostic.SA1122.severity = suggestion
+dotnet_diagnostic.SA1310.severity = suggestion
+dotnet_diagnostic.SA1633.severity = none
+
+# XML and config files
+[*.{xml,csproj,props,targets,config}]
+indent_size = 2
+
+# JSON files
+[*.json]
+indent_size = 2
+
+# YAML files
+[*.{yml,yaml}]
+indent_size = 2
+
+# Markdown files
+[*.md]
+trim_trailing_whitespace = false
+
+# Shell scripts
+[*.sh]
+end_of_line = lf
+
+# PowerShell scripts
+[*.{ps1,psm1,psd1}]
+end_of_line = crlf

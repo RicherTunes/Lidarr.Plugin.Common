@@ -1,0 +1,67 @@
+# Lidarr.Plugin.Common - CodeQL Workflow Template
+# Copy this to your plugin's .github/workflows/codeql.yml
+# Customize PLUGIN_SOLUTION and COMMON_SUBMODULE_PATH as needed
+
+name: CodeQL
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  schedule:
+    - cron: '0 3 * * 0'
+
+env:
+  PLUGIN_SOLUTION: 'YourPlugin.sln'        # <-- UPDATE THIS
+  COMMON_SUBMODULE_PATH: 'ext/Lidarr.Plugin.Common'  # <-- UPDATE IF DIFFERENT
+
+jobs:
+  analyze:
+    name: Analyze (CodeQL)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    concurrency:
+      group: ${{ github.workflow }}-${{ github.ref }}
+      cancel-in-progress: true
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [ 'csharp' ]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: false
+
+      - name: Init Common submodule
+        shell: bash
+        run: |
+          git config --local url.https://github.com/.insteadOf git@github.com:
+          git submodule sync -- ${{ env.COMMON_SUBMODULE_PATH }}
+          git submodule update --init --recursive --depth=1 -- ${{ env.COMMON_SUBMODULE_PATH }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Initialize CodeQL (manual build)
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          build-mode: manual
+
+      - name: Build for CodeQL analysis
+        run: |
+          dotnet restore ${{ env.PLUGIN_SOLUTION }}
+          dotnet build ${{ env.PLUGIN_SOLUTION }} -c Release --no-restore -m:1
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
