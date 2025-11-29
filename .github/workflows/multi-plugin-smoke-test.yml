@@ -145,7 +145,8 @@ jobs:
               sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' ext/lidarr.plugin.common/NuGet.config
           fi
 
-          dotnet restore Brainarr.Plugin/Brainarr.Plugin.csproj
+          dotnet restore Brainarr.Plugin/Brainarr.Plugin.csproj \
+            /p:TargetFramework=net6.0
           dotnet build Brainarr.Plugin/Brainarr.Plugin.csproj \
             --configuration Release \
             --no-restore \
@@ -170,7 +171,8 @@ jobs:
 
           # Qobuzarr uses hardcoded path ext/Lidarr/_output/net6.0
           # Define PLUGIN_PROTOCOL for plugins-branch compatibility (string Protocol instead of enum)
-          dotnet restore Qobuzarr.csproj
+          dotnet restore Qobuzarr.csproj \
+            /p:TargetFramework=net6.0
           dotnet build Qobuzarr.csproj \
             --configuration Release \
             --no-restore \
@@ -197,8 +199,10 @@ jobs:
 
           # Tidalarr uses hardcoded path in HostBridge: ext/Lidarr/_output/net6.0
           # Build both the main plugin and the HostBridge
-          dotnet restore src/Tidalarr/Tidalarr.csproj
-          dotnet restore src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj
+          dotnet restore src/Tidalarr/Tidalarr.csproj \
+            /p:TargetFramework=net6.0
+          dotnet restore src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj \
+            /p:TargetFramework=net6.0
           dotnet build src/Tidalarr/Tidalarr.csproj \
             --configuration Release \
             --no-restore \
