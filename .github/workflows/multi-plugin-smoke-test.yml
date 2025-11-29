@@ -317,6 +317,50 @@ jobs:
           docker logs lidarr-smoke-test --tail 50
           exit 1
 
+      - name: Install Plugins via API
+        shell: bash
+        env:
+          API_KEY: ${{ steps.apikey.outputs.api_key }}
+        run: |
+          set -e
+          echo "=== Exploring plugins API ==="
+
+          # Check swagger/API docs for plugin endpoints
+          echo "GET /api/v1/system/plugins:"
+          curl -sS -H "X-Api-Key: $API_KEY" http://localhost:8686/api/v1/system/plugins 2>&1 | head -5 || echo "Failed"
+
+          # Try installing plugins via API using GitHub URLs
+          echo ""
+          echo "Installing plugins via API..."
+
+          # Install Brainarr
+          echo "Installing Brainarr..."
+          curl -sS -X POST -H "X-Api-Key: $API_KEY" -H "Content-Type: application/json" \
+            -d '{"githubUrl":"https://github.com/RicherTunes/Brainarr"}' \
+            http://localhost:8686/api/v1/system/plugins 2>&1 || echo "Brainarr install request sent"
+
+          # Install Qobuzarr
+          echo "Installing Qobuzarr..."
+          curl -sS -X POST -H "X-Api-Key: $API_KEY" -H "Content-Type: application/json" \
+            -d '{"githubUrl":"https://github.com/RicherTunes/Qobuzarr"}' \
+            http://localhost:8686/api/v1/system/plugins 2>&1 || echo "Qobuzarr install request sent"
+
+          # Install Tidalarr
+          echo "Installing Tidalarr..."
+          curl -sS -X POST -H "X-Api-Key: $API_KEY" -H "Content-Type: application/json" \
+            -d '{"githubUrl":"https://github.com/RicherTunes/Tidalarr"}' \
+            http://localhost:8686/api/v1/system/plugins 2>&1 || echo "Tidalarr install request sent"
+
+          # Wait for installations to complete
+          echo ""
+          echo "Waiting for plugin installations..."
+          sleep 30
+
+          # Check swagger for API structure
+          echo ""
+          echo "=== Checking available API endpoints ==="
+          curl -sS http://localhost:8686/api/v1 2>&1 | head -20 || echo "API index not available"
+
       - name: Verify All Plugins Discovered
         shell: bash
         env:
