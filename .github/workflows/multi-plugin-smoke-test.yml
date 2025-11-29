@@ -321,22 +321,40 @@ jobs:
         run: |
           set -e
           PLUGINS_TO_CHECK="${{ inputs.test_plugins }}"
-          FAILED_PLUGINS=""
-          DETECTED_PLUGINS=""
 
           echo "Checking plugin discovery via Lidarr API..."
           echo "Plugins to verify: $PLUGINS_TO_CHECK"
           echo ""
 
-          # Wait for plugins to be fully loaded
-          sleep 10
+          # Wait for Lidarr to finish initializing and load plugins (with retry)
+          echo "Waiting for plugins to be loaded..."
+          for attempt in {1..60}; do
+            PLUGIN_RESPONSE=$(curl -fsS -H "X-Api-Key: $API_KEY" http://localhost:8686/api/v1/system/plugins 2>/dev/null || echo "[]")
 
-          # Get plugin list from API
-          PLUGIN_RESPONSE=$(curl -fsS -H "X-Api-Key: $API_KEY" http://localhost:8686/api/v1/system/plugins 2>/dev/null || echo "[]")
+            # Check if response contains any plugin data (not empty array)
+            if [ "$PLUGIN_RESPONSE" != "[]" ] && [ -n "$PLUGIN_RESPONSE" ]; then
+              echo "Plugins API responded after $attempt attempts"
+              break
+            fi
+
+            if [ $attempt -eq 60 ]; then
+              echo "Timeout: Plugins API still returning empty after 60 attempts"
+              echo "API Response: $PLUGIN_RESPONSE"
+              docker logs lidarr-smoke-test --tail 100 2>&1 || true
+              exit 1
+            fi
+
+            echo "Attempt $attempt: Plugins not loaded yet, waiting..."
+            sleep 5
+          done
+
+          echo ""
           echo "API Response: $PLUGIN_RESPONSE"
           echo ""
 
           # Check each plugin
+          FAILED_PLUGINS=""
+          DETECTED_PLUGINS=""
           IFS=',' read -ra PLUGIN_ARRAY <<< "$PLUGINS_TO_CHECK"
           for plugin in "${PLUGIN_ARRAY[@]}"; do
             plugin_lower=$(echo "$plugin" | tr '[:upper:]' '[:lower:]' | xargs)
