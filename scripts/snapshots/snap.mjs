@@ -188,6 +188,25 @@ async function captureImportListScreenshots(page) {
   await page.waitForTimeout(300);
 }
 
+// Helper to enable "Show Advanced" settings toggle
+async function enableShowAdvanced(page) {
+  try {
+    // Look for the "Show Advanced" button in the toolbar
+    const showAdvancedBtn = page.locator('button').filter({ hasText: /show\s*advanced/i }).first();
+    if (await showAdvancedBtn.count()) {
+      // Check if it's already enabled (button text might change or have different state)
+      const btnText = await showAdvancedBtn.textContent().catch(() => '');
+      if (btnText && !btnText.toLowerCase().includes('hide')) {
+        await showAdvancedBtn.click({ timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(300);
+        console.log('Enabled "Show Advanced" settings');
+      }
+    }
+  } catch (err) {
+    console.warn(`Could not enable Show Advanced: ${err?.message || err}`);
+  }
+}
+
 async function run() {
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({
@@ -228,6 +247,8 @@ async function run() {
       await page.goto(`${BASE}/settings`, { waitUntil: 'domcontentloaded' });
       await page.waitForLoadState('networkidle').catch(() => {});
     }
+    // Enable Show Advanced after navigating to settings
+    await enableShowAdvanced(page);
   };
 
   await goSettings();
