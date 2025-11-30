@@ -2,9 +2,9 @@
 
 Track ABI-breaking updates here so plugin authors can plan migrations. Each entry should link to the relevant release notes and documentation updates.
 
-| Version | Component | Description | Migration steps | Docs |
-|---------|-----------|-------------|-----------------|------|
-| TBD | Abstractions | N/A | N/A | N/A |
+| Version | Component    | Description | Migration steps | Docs |
+|---------|--------------|-------------|-----------------|------|
+| TBD     | Abstractions | N/A         | N/A             | N/A  |
 
 Guidelines:
 

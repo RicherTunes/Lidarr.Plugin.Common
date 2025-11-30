@@ -90,14 +90,14 @@ The bridge:
 
 ## Recommended keys
 
-| Key | Type | Required | Notes |
-|-----|------|----------|-------|
-| `ClientId` | string | yes | OAuth identifier. |
-| `ClientSecret` | string | yes | Mark as sensitive. |
-| `BaseUrl` | string | yes | Required for self-hosted services. |
-| `CountryCode` | string | no | Default `US`; use for locale-specific APIs. |
-| `Locale` | string | no | Default `en-US`. |
-| `PreferredQuality` | enum | no | Use `StreamingQualityTier`. |
+| Key                | Type   | Required | Notes                               |
+|--------------------|--------|----------|-------------------------------------|
+| `ClientId`         | string | yes      | OAuth identifier.                   |
+| `ClientSecret`     | string | yes      | Mark as sensitive.                  |
+| `BaseUrl`          | string | yes      | Required for self-hosted services.  |
+| `CountryCode`      | string | no       | Default `US`; use for locale-specific APIs. |
+| `Locale`           | string | no       | Default `en-US`.                    |
+| `PreferredQuality` | enum   | no       | Use `StreamingQualityTier`.         |
 
 ## Best practices
 
