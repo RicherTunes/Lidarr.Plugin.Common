@@ -1,0 +1,120 @@
+<Project>
+  <!--
+    Lidarr Plugin Directory.Packages.props Template
+    Copy this to your plugin repository root and customize as needed.
+
+    This template provides centralized package version management for:
+    - Core framework dependencies
+    - Audio processing libraries
+    - CLI application dependencies
+    - Test framework dependencies
+    - Security updates for transitive dependencies
+  -->
+
+  <!-- Enable Centralized Package Management -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!-- Disable for Lidarr source projects (if using submodule) -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('ext\Lidarr-source')) OR $(MSBuildProjectDirectory.Contains('ext/Lidarr-source'))">
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       PRODUCTION DEPENDENCIES
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <ItemGroup Label="Core Framework">
+    <PackageVersion Include="Newtonsoft.Json" Version="13.0.3" />
+    <PackageVersion Include="NLog" Version="6.0.3" />
+    <PackageVersion Include="NLog.Extensions.Logging" Version="5.3.14" />
+    <PackageVersion Include="FluentValidation" Version="11.11.0" />
+    <PackageVersion Include="System.Resources.Extensions" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Audio Processing">
+    <PackageVersion Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
+  </ItemGroup>
+
+  <ItemGroup Label="Plugin Packaging">
+    <PackageVersion Include="ILRepack.Lib.MSBuild.Task" Version="2.0.34.2" />
+  </ItemGroup>
+
+  <ItemGroup Label="Shared Plugin Ecosystem">
+    <!-- Pin to latest verified release of the shared library -->
+    <PackageVersion Include="Lidarr.Plugin.Abstractions" Version="1.2.2" />
+    <PackageVersion Include="Lidarr.Plugin.Common" Version="1.2.2" />
+  </ItemGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       SECURITY UPDATES (Transitive Dependencies)
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <ItemGroup Label="Security Updates">
+    <PackageVersion Include="System.Text.Json" Version="9.0.0" />
+    <PackageVersion Include="System.Net.Http" Version="4.3.4" />
+    <PackageVersion Include="System.Text.RegularExpressions" Version="4.3.1" />
+  </ItemGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       CLI APPLICATION DEPENDENCIES (Optional)
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <ItemGroup Label="CLI Framework">
+    <PackageVersion Include="System.CommandLine" Version="2.0.0-beta4.22272.1" />
+    <PackageVersion Include="Spectre.Console" Version="0.50.0" />
+    <PackageVersion Include="Spectre.Console.Cli" Version="0.50.0" />
+    <PackageVersion Include="Newtonsoft.Json.Schema" Version="3.0.15" />
+    <PackageVersion Include="DotNetEnv" Version="3.1.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="Microsoft Extensions">
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="8.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="8.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Console" Version="8.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="8.0.0" />
+  </ItemGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       TEST DEPENDENCIES
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <ItemGroup Label="Test Framework">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageVersion Include="xunit" Version="2.9.2" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageVersion Include="coverlet.collector" Version="6.0.2" />
+  </ItemGroup>
+
+  <ItemGroup Label="Assertions and Mocking">
+    <PackageVersion Include="FluentAssertions" Version="6.12.2" />
+    <PackageVersion Include="Moq" Version="4.20.72" />
+    <PackageVersion Include="NSubstitute" Version="5.3.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Test Utilities">
+    <!-- For Lidarr assembly compatibility in tests -->
+    <PackageVersion Include="System.IO.Abstractions" Version="21.1.3" />
+    <PackageVersion Include="System.IO.Abstractions.TestingHelpers" Version="21.1.3" />
+    <PackageVersion Include="Equ" Version="2.3.0" />
+    <PackageVersion Include="FsCheck" Version="2.16.6" />
+    <PackageVersion Include="FsCheck.Xunit" Version="2.16.6" />
+  </ItemGroup>
+
+  <ItemGroup Label="Integration Testing">
+    <PackageVersion Include="Docker.DotNet" Version="3.125.15" />
+  </ItemGroup>
+
+  <ItemGroup Label="Performance Testing">
+    <PackageVersion Include="BenchmarkDotNet" Version="0.14.0" />
+  </ItemGroup>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════════
+       BUILD AND ANALYSIS TOOLS
+       ═══════════════════════════════════════════════════════════════════════════ -->
+  <ItemGroup Label="Build Tools">
+    <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="8.0.0" />
+  </ItemGroup>
+
+</Project>
