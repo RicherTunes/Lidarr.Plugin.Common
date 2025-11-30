@@ -27,9 +27,7 @@ jobs:
 
       - uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: |
-            8.0.x
-            6.0.x
+          dotnet-version: 8.0.x
 
       - name: Configure private TagLib feed (release only)
         if: startsWith(github.ref, 'refs/tags/v') && env.ADO_TAGLIB_NUGET_URL != ''
@@ -43,11 +41,8 @@ jobs:
           dotnet restore -p:UseLidarrTagLib=true
           dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1 -p:UseLidarrTagLib=true
 
-      - name: Public API drift (net8)
+      - name: Public API drift
         run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0
-
-      - name: Public API drift (net6)
-        run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net6.0
 
       - name: Test (PR/branch)
         if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
