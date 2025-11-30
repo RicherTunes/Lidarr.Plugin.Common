@@ -24,12 +24,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Setup .NET SDKs
+      - name: Setup .NET SDK
         uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: |
-            8.0.x
-            6.0.x
+          dotnet-version: 8.0.x
 
       - name: Add Lidarr TagLib feed (CI only)
         run: |
