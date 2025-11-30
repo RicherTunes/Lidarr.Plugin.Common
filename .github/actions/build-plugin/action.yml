@@ -1,0 +1,111 @@
+name: 'Build Lidarr Plugin'
+description: 'Composite action for building Lidarr plugins with common configuration'
+author: 'RicherTunes'
+
+inputs:
+  project-path:
+    description: 'Path to the main plugin csproj file'
+    required: true
+  configuration:
+    description: 'Build configuration (Debug or Release)'
+    required: false
+    default: 'Release'
+  target-framework:
+    description: 'Target framework (net6.0 or net8.0)'
+    required: false
+    default: 'net6.0'
+  lidarr-docker-version:
+    description: 'Lidarr Docker image tag for assembly extraction'
+    required: false
+    default: 'pr-plugins-2.14.2.4786'
+  lidarr-assemblies-path:
+    description: 'Path where Lidarr assemblies should be extracted'
+    required: false
+    default: 'ext/Lidarr/_output/net6.0'
+  disable-packaging:
+    description: 'Disable ILRepack plugin packaging'
+    required: false
+    default: 'true'
+  run-tests:
+    description: 'Run tests after build'
+    required: false
+    default: 'false'
+  test-project:
+    description: 'Path to test project(s) - glob pattern supported'
+    required: false
+    default: ''
+
+outputs:
+  dll-path:
+    description: 'Path to the built plugin DLL'
+    value: ${{ steps.find-dll.outputs.path }}
+  version:
+    description: 'Plugin version'
+    value: ${{ steps.version.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Extract Lidarr Assemblies from Docker
+      shell: bash
+      run: |
+        echo "Extracting Lidarr assemblies from Docker..."
+        docker pull ghcr.io/hotio/lidarr:${{ inputs.lidarr-docker-version }}
+        docker create --name lidarr-extract ghcr.io/hotio/lidarr:${{ inputs.lidarr-docker-version }}
+        mkdir -p "${{ inputs.lidarr-assemblies-path }}"
+        docker cp lidarr-extract:/app/bin/. "${{ inputs.lidarr-assemblies-path }}/"
+        docker rm lidarr-extract
+        echo "Extracted assemblies to: ${{ inputs.lidarr-assemblies-path }}"
+        ls -la "${{ inputs.lidarr-assemblies-path }}/" | head -10
+
+    - name: Read Version
+      id: version
+      shell: bash
+      run: |
+        if [ -f "VERSION" ]; then
+          VERSION=$(cat VERSION | tr -d '[:space:]')
+        else
+          VERSION="0.1.0-dev"
+        fi
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Plugin version: $VERSION"
+
+    - name: Restore Dependencies
+      shell: bash
+      run: |
+        dotnet restore "${{ inputs.project-path }}" \
+          -p:TargetFramework=${{ inputs.target-framework }}
+
+    - name: Build Plugin
+      shell: bash
+      run: |
+        dotnet build "${{ inputs.project-path }}" \
+          --configuration ${{ inputs.configuration }} \
+          --no-restore \
+          -p:TargetFramework=${{ inputs.target-framework }} \
+          -p:PluginPackagingDisable=${{ inputs.disable-packaging }} \
+          -p:RunAnalyzersDuringBuild=false \
+          -p:EnableNETAnalyzers=false \
+          -p:TreatWarningsAsErrors=false
+
+    - name: Find Built DLL
+      id: find-dll
+      shell: bash
+      run: |
+        DLL_PATH=$(find . -name '*.dll' -path '*/bin/*' -name 'Lidarr.Plugin.*.dll' ! -path './ext/*' | head -1)
+        if [ -z "$DLL_PATH" ]; then
+          echo "::warning::Could not find built plugin DLL"
+          DLL_PATH=""
+        else
+          echo "Found DLL: $DLL_PATH"
+        fi
+        echo "path=$DLL_PATH" >> $GITHUB_OUTPUT
+
+    - name: Run Tests
+      if: inputs.run-tests == 'true' && inputs.test-project != ''
+      shell: bash
+      run: |
+        dotnet test "${{ inputs.test-project }}" \
+          --configuration ${{ inputs.configuration }} \
+          --no-build \
+          --verbosity normal
