@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
+    <!-- .NET 6.0 reached EOL in Nov 2024; Lidarr plugins branch targets net8.0 -->
+    <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>Lidarr.Plugin.Abstractions</AssemblyName>
@@ -12,12 +13,10 @@
     <NoWarn>SA1200;SA1633;CS1591;RS0016;RS0017</NoWarn>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
-    <Version>1.2.2</Version>
+    <Version>1.3.0</Version>
   </PropertyGroup>
   <!-- Make PublicAPI baselines visible to analyzer tools (e.g., dotnet format) without relying on build targets -->
   <ItemGroup>
-    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/net6.0/PublicAPI.Shipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/net6.0/PublicAPI.Unshipped.txt')" />
     <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/net8.0/PublicAPI.Shipped.txt')" />
     <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/net8.0/PublicAPI.Unshipped.txt')" />
   </ItemGroup>
@@ -35,14 +34,6 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
-    <PackageReference Include="System.Text.Json" Version="6.0.11" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
   </ItemGroup>
