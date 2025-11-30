@@ -4,25 +4,11 @@ This project includes third‑party software components. Each component is licen
 
 If you are a rights holder and believe any attribution is missing or incorrect, please open an issue or contact <security@richertunes.com>.
 
-## Direct NuGet Dependencies (by target framework)
+## Direct NuGet Dependencies
 
 Note: Versions reflect the current repository state and may change over time. Some dependencies are marked as PrivateAssets and are only used at build time.
 
-- net6.0
-  - System.Text.Json 6.0.11
-  - Microsoft.Extensions.DependencyInjection 6.0.2
-  - Microsoft.Extensions.Http 6.0.1
-  - Microsoft.Extensions.Caching.Memory 6.0.3
-  - Microsoft.Extensions.Logging 6.0.1
-  - Microsoft.Extensions.Logging.Console 6.0.1
-  - Microsoft.Extensions.Configuration 6.0.2
-  - Microsoft.Extensions.Configuration.Json 6.0.1
-  - Microsoft.Extensions.Configuration.EnvironmentVariables 6.0.2
-  - System.Security.Cryptography.ProtectedData 6.0.0
-  - Microsoft.AspNetCore.DataProtection 6.0.36
-  - Microsoft.AspNetCore.DataProtection.Extensions 6.0.36
-
-- net8.0
+- Runtime Dependencies (net8.0)
   - System.Text.Json 8.0.6
   - Microsoft.Extensions.DependencyInjection 8.0.1
   - Microsoft.Extensions.Http 8.0.1
