@@ -25,7 +25,8 @@ jobs:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     env:
-      DOTNET_ROLL_FORWARD: LatestMajor
+      # Don't roll forward to preview SDKs - stay on specified version
+      DOTNET_ROLL_FORWARD: Minor
     permissions:
       contents: read
       actions: write
@@ -73,7 +74,7 @@ jobs:
       - name: Restore (including CLI framework)
         run: dotnet restore -p:IncludeCLIFramework=true
       - name: Build (Release, all TFMs)
-        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -m:1
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -p:GeneratePackageOnBuild=false -m:1
 
       - name: Dotnet format (verify - style only)
         run: dotnet format style --verify-no-changes
