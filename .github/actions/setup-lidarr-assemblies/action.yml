@@ -1,0 +1,260 @@
+name: 'Setup Lidarr Assemblies'
+description: 'Extract Lidarr assemblies from Docker image with tarball fallback for plugin builds'
+
+inputs:
+  docker-version:
+    description: 'Lidarr Docker image version tag (e.g., pr-plugins-2.14.2.4786)'
+    required: false
+    default: 'pr-plugins-2.14.2.4786'
+  docker-digest:
+    description: 'Optional Docker image digest for reproducible builds'
+    required: false
+    default: ''
+  output-dir:
+    description: 'Directory to extract assemblies to'
+    required: false
+    default: 'ext/Lidarr/_output/net8.0'
+  mode:
+    description: 'Extraction mode: minimal (core assemblies only) or full (all assemblies)'
+    required: false
+    default: 'minimal'
+  validate-plugins-branch:
+    description: 'Validate that assemblies are from plugins branch (checks for IDownloadProtocol)'
+    required: false
+    default: 'true'
+  tarball-fallback:
+    description: 'Enable tarball fallback when Docker extraction fails'
+    required: false
+    default: 'true'
+  tarball-version:
+    description: 'Lidarr version for tarball fallback (e.g., 2.13.3.4711)'
+    required: false
+    default: '2.13.3.4711'
+
+outputs:
+  assemblies-path:
+    description: 'Path to extracted assemblies'
+    value: ${{ steps.extract.outputs.assemblies-path }}
+  extraction-method:
+    description: 'Method used for extraction (docker or tarball)'
+    value: ${{ steps.extract.outputs.extraction-method }}
+  manifest-path:
+    description: 'Path to provenance manifest file'
+    value: ${{ steps.extract.outputs.manifest-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Extract Lidarr Assemblies
+      id: extract
+      shell: bash
+      env:
+        LIDARR_DOCKER_VERSION: ${{ inputs.docker-version }}
+        LIDARR_DOCKER_DIGEST: ${{ inputs.docker-digest }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        MODE: ${{ inputs.mode }}
+        VALIDATE_PLUGINS: ${{ inputs.validate-plugins-branch }}
+        TARBALL_FALLBACK: ${{ inputs.tarball-fallback }}
+        TARBALL_VERSION: ${{ inputs.tarball-version }}
+      run: |
+        set -euo pipefail
+
+        # Create output directory
+        mkdir -p "$OUTPUT_DIR"
+
+        # Required and optional assemblies
+        REQ=(
+          Lidarr.dll
+          Lidarr.Common.dll
+          Lidarr.Core.dll
+          Lidarr.Http.dll
+          Lidarr.Api.V1.dll
+          Lidarr.Host.dll
+          NLog.dll
+          FluentValidation.dll
+        )
+
+        OPT=(
+          Microsoft.Extensions.Caching.Memory.dll
+          Microsoft.Extensions.Caching.Abstractions.dll
+          Microsoft.Extensions.DependencyInjection.Abstractions.dll
+          Microsoft.Extensions.Logging.Abstractions.dll
+          Microsoft.Extensions.Options.dll
+          Microsoft.Extensions.Primitives.dll
+          Equ.dll
+        )
+
+        TAG_IMAGE="ghcr.io/hotio/lidarr:${LIDARR_DOCKER_VERSION}"
+        IMAGE="$TAG_IMAGE"
+        EXTRACTION_METHOD="none"
+        CONTAINER_CREATED=false
+
+        # Retry helper for flaky docker pulls
+        docker_pull_retry() {
+          local image="$1"
+          local attempts=${2:-3}
+          local delay=${3:-5}
+          local n=1
+          until [ $n -gt $attempts ]; do
+            echo "Attempting docker pull $image (attempt $n/$attempts)..."
+            if docker pull "$image" >/dev/null 2>&1; then
+              return 0
+            fi
+            echo "Pull failed, retrying in ${delay}s..."
+            sleep "$delay"
+            n=$((n+1))
+          done
+          return 1
+        }
+
+        # Try Docker-based extraction
+        echo "::group::Docker-based extraction"
+        DOCKER_OK=false
+
+        if [[ -n "$LIDARR_DOCKER_DIGEST" ]]; then
+          DIGEST_IMAGE="ghcr.io/hotio/lidarr@${LIDARR_DOCKER_DIGEST}"
+          echo "Attempting Docker image (digest): ${DIGEST_IMAGE}"
+          if docker_pull_retry "$DIGEST_IMAGE"; then
+            IMAGE="$DIGEST_IMAGE"
+            DOCKER_OK=true
+          elif docker_pull_retry "$TAG_IMAGE"; then
+            DOCKER_OK=true
+          fi
+        else
+          echo "Using Docker image (tag): ${TAG_IMAGE}"
+          if docker_pull_retry "$TAG_IMAGE"; then
+            DOCKER_OK=true
+          fi
+        fi
+
+        if [[ "$DOCKER_OK" == true ]]; then
+          # Create container
+          if docker create --name temp-lidarr-extract "$IMAGE" >/dev/null 2>&1; then
+            CONTAINER_CREATED=true
+
+            copy_from_container() {
+              docker cp "temp-lidarr-extract:/app/bin/$1" "$OUTPUT_DIR/" 2>/dev/null || \
+              docker cp "temp-lidarr-extract:/opt/lidarr/bin/$1" "$OUTPUT_DIR/" 2>/dev/null || return 1
+            }
+
+            if [[ "$MODE" == "full" ]]; then
+              echo "Mode=full: copying entire /app/bin"
+              docker cp temp-lidarr-extract:/app/bin/. "$OUTPUT_DIR/" 2>/dev/null || \
+              docker cp temp-lidarr-extract:/opt/lidarr/bin/. "$OUTPUT_DIR/" 2>/dev/null || true
+            else
+              echo "Mode=minimal: copying required assemblies"
+              for f in "${REQ[@]}"; do
+                copy_from_container "$f" || echo "Missing required: $f"
+              done
+              for f in "${OPT[@]}"; do
+                copy_from_container "$f" || true
+              done
+            fi
+
+            docker rm -f temp-lidarr-extract >/dev/null 2>&1 || true
+            EXTRACTION_METHOD="docker"
+          fi
+        fi
+        echo "::endgroup::"
+
+        # Tarball fallback if Docker extraction failed
+        if [[ ! -f "$OUTPUT_DIR/Lidarr.Core.dll" && "$TARBALL_FALLBACK" == "true" ]]; then
+          echo "::group::Tarball fallback"
+          echo "Docker extraction failed, attempting tarball fallback..."
+
+          VERSIONS=("$TARBALL_VERSION" "2.13.3.4711")
+          for VER in "${VERSIONS[@]}"; do
+            echo "Trying Lidarr tarball version: $VER"
+            URL="https://github.com/Lidarr/Lidarr/releases/download/v${VER}/Lidarr.master.${VER}.linux-core-x64.tar.gz"
+            if curl -fsSL --retry 3 "$URL" -o lidarr.tar.gz; then
+              if tar -xzf lidarr.tar.gz; then
+                LDIR=""
+                [[ -d Lidarr ]] && LDIR="Lidarr"
+                [[ -d lidarr ]] && LDIR="lidarr"
+
+                if [[ -n "$LDIR" ]]; then
+                  if [[ "$MODE" == "full" ]]; then
+                    cp -r "$LDIR/." "$OUTPUT_DIR/"
+                  else
+                    for f in "${REQ[@]}"; do
+                      [[ -f "$LDIR/$f" ]] && cp "$LDIR/$f" "$OUTPUT_DIR/" || echo "Missing: $f"
+                    done
+                  fi
+                  rm -f lidarr.tar.gz
+                  rm -rf "$LDIR"
+                  EXTRACTION_METHOD="tarball"
+                  break
+                fi
+              fi
+            fi
+          done
+          echo "::endgroup::"
+        fi
+
+        # Validate extraction
+        if [[ ! -f "$OUTPUT_DIR/Lidarr.Core.dll" ]]; then
+          echo "::error::Missing Lidarr.Core.dll after extraction"
+          ls -la "$OUTPUT_DIR" || true
+          exit 1
+        fi
+
+        # Validate plugins branch if requested
+        if [[ "$VALIDATE_PLUGINS" == "true" ]]; then
+          echo "::group::Validating plugins branch assemblies"
+          if command -v strings >/dev/null 2>&1; then
+            if ! strings "$OUTPUT_DIR/Lidarr.Core.dll" | grep -q "IDownloadProtocol"; then
+              echo "::warning::Assemblies may not be from plugins branch (IDownloadProtocol not found)"
+            else
+              echo "Plugins branch validation passed"
+            fi
+          else
+            echo "::warning::strings command not available, skipping plugins branch validation"
+          fi
+          echo "::endgroup::"
+        fi
+
+        # Generate manifest
+        MANIFEST_PATH="$OUTPUT_DIR/MANIFEST.txt"
+        {
+          echo "Lidarr Plugin Common - Assemblies Manifest"
+          echo "==========================================="
+          echo "Date: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          echo "Mode: $MODE"
+          echo "OutputDir: $OUTPUT_DIR"
+          echo "DockerTag: $TAG_IMAGE"
+          echo "DockerDigest: ${LIDARR_DOCKER_DIGEST:-none}"
+          echo "ExtractionMethod: $EXTRACTION_METHOD"
+          echo ""
+          echo "Files:"
+          ls -1 "$OUTPUT_DIR" | sed 's/^/  - /'
+        } > "$MANIFEST_PATH"
+
+        echo "::notice::Extraction complete via $EXTRACTION_METHOD"
+        ls -la "$OUTPUT_DIR"
+
+        # Set outputs
+        echo "assemblies-path=$OUTPUT_DIR" >> $GITHUB_OUTPUT
+        echo "extraction-method=$EXTRACTION_METHOD" >> $GITHUB_OUTPUT
+        echo "manifest-path=$MANIFEST_PATH" >> $GITHUB_OUTPUT
+
+    - name: Validate Required Assemblies
+      shell: bash
+      run: |
+        OUTPUT_DIR="${{ inputs.output-dir }}"
+
+        echo "Validating required assemblies..."
+        required=(Lidarr.Core.dll Lidarr.Common.dll Lidarr.Http.dll)
+        missing=()
+
+        for dll in "${required[@]}"; do
+          if [[ ! -f "$OUTPUT_DIR/$dll" ]]; then
+            missing+=("$dll")
+          fi
+        done
+
+        if [[ ${#missing[@]} -gt 0 ]]; then
+          echo "::error::Missing required assemblies: ${missing[*]}"
+          exit 1
+        fi
+
+        echo "All required assemblies present"
