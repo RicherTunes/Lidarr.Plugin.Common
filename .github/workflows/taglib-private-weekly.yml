@@ -4,14 +4,23 @@ on:
   schedule:
     - cron: '0 4 * * 1' # Mondays at 04:00 UTC
   workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/taglib-private-weekly.yml'
 
 permissions:
   contents: read
 
 jobs:
+  # Skip job that always succeeds - prevents "no jobs" failure on push
+  skip:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Workflow file updated - skipping weekly TagLib check"
+
   lidarr-taglib-build:
     runs-on: ubuntu-latest
-    # Only run on schedule or manual dispatch (not on push events that GitHub creates for workflow file changes)
     if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Precheck for secret
