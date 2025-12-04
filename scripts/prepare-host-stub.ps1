@@ -8,7 +8,7 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path $scriptRoot -Parent
 
 if (-not $OutputPath -or [string]::IsNullOrWhiteSpace($OutputPath)) {
-    $OutputPath = [System.IO.Path]::Combine($repoRoot, '..', 'Lidarr', '_output', 'net6.0')
+    $OutputPath = [System.IO.Path]::Combine($repoRoot, '..', 'Lidarr', '_output', 'net8.0')
 }
 
 $resolvedOutput = [System.IO.Path]::GetFullPath($OutputPath)
@@ -24,7 +24,7 @@ $projectFile = Join-Path $workingDir 'HostStub.csproj'
 $projectContent = @"
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>disable</ImplicitUsings>
     <Nullable>disable</Nullable>
     <AssemblyVersion>$AssemblyVersion</AssemblyVersion>
@@ -52,7 +52,7 @@ if ($LASTEXITCODE -ne 0) {
     exit $LASTEXITCODE
 }
 
-$builtAssembly = Join-Path $workingDir 'bin/Release/net6.0/HostStub.dll'
+$builtAssembly = Join-Path $workingDir 'bin/Release/net8.0/HostStub.dll'
 if (-not (Test-Path $builtAssembly)) {
     Write-Error "Expected stub assembly at $builtAssembly was not produced."
     exit 1
