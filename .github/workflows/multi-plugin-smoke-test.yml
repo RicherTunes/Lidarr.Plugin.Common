@@ -37,7 +37,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - name: Checkout Common Library
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: RicherTunes/Lidarr.Plugin.Common
           ref: main
@@ -75,7 +75,7 @@ jobs:
 
       - name: Checkout Brainarr
         if: contains(inputs.test_plugins, 'brainarr')
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: RicherTunes/Brainarr
           ref: main
@@ -85,7 +85,7 @@ jobs:
 
       - name: Checkout Qobuzarr
         if: contains(inputs.test_plugins, 'qobuzarr')
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: RicherTunes/Qobuzarr
           ref: main
@@ -95,7 +95,7 @@ jobs:
 
       - name: Checkout Tidalarr
         if: contains(inputs.test_plugins, 'tidalarr')
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: RicherTunes/Tidalarr
           ref: main

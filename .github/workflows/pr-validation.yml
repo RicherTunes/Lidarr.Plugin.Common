@@ -15,7 +15,7 @@ jobs:
     env:
       DOTNET_ROLL_FORWARD: LatestMajor
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install PowerShell (pwsh)
         if: runner.os == 'Linux'
