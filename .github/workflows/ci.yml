@@ -84,7 +84,7 @@ jobs:
         run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0
 
       - name: Build (Release, warnings as errors)
-        run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false
+        run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -p:GeneratePackageOnBuild=false
 
       - name: Ensure pwsh (Linux only)
         if: runner.os == 'Linux'
