@@ -27,7 +27,7 @@ on:
         required: false
 
 env:
-  DOTNET_VERSION: '6.0.x'
+  DOTNET_VERSION: '8.0.x'
   LIDARR_DOCKER_VERSION: ${{ inputs.lidarr_docker_version }}
 
 jobs:
@@ -111,17 +111,17 @@ jobs:
           # Each plugin expects Lidarr assemblies in specific locations
           # Copy extracted assemblies to where each plugin expects them
 
-          # Qobuzarr expects: ext/Lidarr/_output/net6.0/
+          # Qobuzarr expects: ext/Lidarr/_output/net8.0/
           if [ -d "plugins/qobuzarr" ]; then
-            mkdir -p plugins/qobuzarr/ext/Lidarr/_output/net6.0
-            cp lidarr-assemblies/*.dll plugins/qobuzarr/ext/Lidarr/_output/net6.0/ 2>/dev/null || true
+            mkdir -p plugins/qobuzarr/ext/Lidarr/_output/net8.0
+            cp lidarr-assemblies/*.dll plugins/qobuzarr/ext/Lidarr/_output/net8.0/ 2>/dev/null || true
             echo "✓ Copied assemblies for Qobuzarr"
           fi
 
-          # Tidalarr expects: ext/Lidarr/_output/net6.0/
+          # Tidalarr expects: ext/Lidarr/_output/net8.0/
           if [ -d "plugins/tidalarr" ]; then
-            mkdir -p plugins/tidalarr/ext/Lidarr/_output/net6.0
-            cp lidarr-assemblies/*.dll plugins/tidalarr/ext/Lidarr/_output/net6.0/ 2>/dev/null || true
+            mkdir -p plugins/tidalarr/ext/Lidarr/_output/net8.0
+            cp lidarr-assemblies/*.dll plugins/tidalarr/ext/Lidarr/_output/net8.0/ 2>/dev/null || true
             echo "✓ Copied assemblies for Tidalarr"
           fi
 
@@ -146,11 +146,11 @@ jobs:
           fi
 
           dotnet restore Brainarr.Plugin/Brainarr.Plugin.csproj \
-            /p:TargetFramework=net6.0
+            /p:TargetFramework=net8.0
           dotnet build Brainarr.Plugin/Brainarr.Plugin.csproj \
             --configuration Release \
             --no-restore \
-            --framework net6.0 \
+            --framework net8.0 \
             -p:LidarrPath="${{ github.workspace }}/lidarr-assemblies" \
             -p:PluginPackagingDisable=true \
             -m:1
@@ -170,14 +170,14 @@ jobs:
               sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' ext/Lidarr.Plugin.Common/NuGet.config
           fi
 
-          # Qobuzarr uses hardcoded path ext/Lidarr/_output/net6.0
+          # Qobuzarr uses hardcoded path ext/Lidarr/_output/net8.0
           # Define PLUGIN_PROTOCOL for plugins-branch compatibility (string Protocol instead of enum)
           dotnet restore Qobuzarr.csproj \
-            /p:TargetFramework=net6.0
+            /p:TargetFramework=net8.0
           dotnet build Qobuzarr.csproj \
             --configuration Release \
             --no-restore \
-            --framework net6.0 \
+            --framework net8.0 \
             -p:RunAnalyzersDuringBuild=false \
             -p:EnableNETAnalyzers=false \
             -p:DefineConstants=PLUGIN_PROTOCOL \
@@ -199,16 +199,16 @@ jobs:
               sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' ext/Lidarr.Plugin.Common/NuGet.config
           fi
 
-          # Tidalarr uses hardcoded path in HostBridge: ext/Lidarr/_output/net6.0
+          # Tidalarr uses hardcoded path in HostBridge: ext/Lidarr/_output/net8.0
           # Build both the main plugin and the HostBridge
           dotnet restore src/Tidalarr/Tidalarr.csproj \
-            /p:TargetFramework=net6.0
+            /p:TargetFramework=net8.0
           dotnet restore src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj \
-            /p:TargetFramework=net6.0
+            /p:TargetFramework=net8.0
           dotnet build src/Tidalarr/Tidalarr.csproj \
             --configuration Release \
             --no-restore \
-            --framework net6.0 \
+            --framework net8.0 \
             -p:PluginPackagingDisable=true \
             -p:RunAnalyzersDuringBuild=false \
             -p:EnableNETAnalyzers=false \
@@ -217,7 +217,7 @@ jobs:
           dotnet build src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj \
             --configuration Release \
             --no-restore \
-            --framework net6.0 \
+            --framework net8.0 \
             -p:PluginPackagingDisable=true \
             -p:RunAnalyzersDuringBuild=false \
             -p:EnableNETAnalyzers=false \
@@ -451,7 +451,7 @@ jobs:
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup>
               <OutputType>Exe</OutputType>
-              <TargetFramework>net6.0</TargetFramework>
+              <TargetFramework>net8.0</TargetFramework>
               <ImplicitUsings>disable</ImplicitUsings>
               <Nullable>disable</Nullable>
             </PropertyGroup>
