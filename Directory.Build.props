@@ -1,6 +1,14 @@
 <Project>
+  <!--
+    Lidarr.Plugin.Common - Shared Build Configuration
+    ================================================
+
+    This file provides standardized build settings for all Lidarr plugin projects.
+    Consuming projects can import this via their submodule reference.
+  -->
+
   <PropertyGroup Condition="'$(UseHostVersioning)' == 'true'">
-    <!-- // Matches Lidarr 2.14.2.4786 host binaries -->
+    <!-- Matches Lidarr 2.14.2.4786 host binaries -->
     <AssemblyVersion>10.0.0.35686</AssemblyVersion>
     <FileVersion>10.0.0.35686</FileVersion>
   </PropertyGroup>
@@ -13,6 +21,36 @@
     <Deterministic>true</Deterministic>
     <!-- Map project directories to a stable root to avoid leaking developer paths in PDBs -->
     <PathMap>$(MSBuildProjectDirectory)=/src</PathMap>
+  </PropertyGroup>
+
+  <!-- Standardized Analyzer Configuration -->
+  <PropertyGroup Label="Analyzer Settings">
+    <!-- Enable .NET analyzers for code quality (can override with -p:EnableNETAnalyzers=false) -->
+    <EnableNETAnalyzers Condition="'$(EnableNETAnalyzers)' == ''">true</EnableNETAnalyzers>
+
+    <!-- Run analyzers during build (disable for CI with -p:RunAnalyzersDuringBuild=false) -->
+    <RunAnalyzersDuringBuild Condition="'$(RunAnalyzersDuringBuild)' == ''">true</RunAnalyzersDuringBuild>
+
+    <!-- Nullable reference types enabled by default -->
+    <Nullable Condition="'$(Nullable)' == ''">enable</Nullable>
+
+    <!-- Nullable warnings are errors to prevent null reference exceptions -->
+    <WarningsAsErrors Condition="'$(WarningsAsErrors)' == ''">nullable</WarningsAsErrors>
+
+    <!-- Don't treat all warnings as errors (too strict for incremental adoption) -->
+    <TreatWarningsAsErrors Condition="'$(TreatWarningsAsErrors)' == ''">false</TreatWarningsAsErrors>
+
+    <!-- Recommended analysis mode for balanced strictness -->
+    <AnalysisMode Condition="'$(AnalysisMode)' == ''">Recommended</AnalysisMode>
+
+    <!-- Latest C# language features -->
+    <LangVersion Condition="'$(LangVersion)' == ''">latest</LangVersion>
+  </PropertyGroup>
+
+  <!-- Common Warning Suppressions -->
+  <PropertyGroup Label="Warning Suppressions">
+    <!-- NU1701/1702: Package targets older framework (expected for Lidarr assemblies) -->
+    <NoWarn>$(NoWarn);NU1701;NU1702</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
