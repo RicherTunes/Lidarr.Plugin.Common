@@ -20,7 +20,7 @@ jobs:
           echo "LIDARR_TAGLIB_FEED_URL not set; skipping Lidarr TagLib weekly build." && exit 0
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
