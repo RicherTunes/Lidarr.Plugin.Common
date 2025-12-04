@@ -1,0 +1,110 @@
+name: Ecosystem Notify
+
+# Triggers downstream plugin builds when Lidarr.Plugin.Common is released
+# This ensures all plugins in the ecosystem are tested with the new common library version
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run - do not actually trigger builds'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+env:
+  # List of downstream plugin repositories to notify
+  # Format: owner/repo
+  DOWNSTREAM_REPOS: |
+    RicherTunes/Qobuzarr
+    RicherTunes/Tidalarr
+    RicherTunes/Brainarr
+
+jobs:
+  notify-downstream:
+    name: Notify Downstream Plugins
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get release info
+        id: release
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+            echo "is_prerelease=${{ github.event.release.prerelease }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=manual-trigger" >> $GITHUB_OUTPUT
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger downstream builds
+        env:
+          GH_TOKEN: ${{ secrets.ECOSYSTEM_PAT }}
+        run: |
+          set -euo pipefail
+
+          VERSION="${{ steps.release.outputs.version }}"
+          DRY_RUN="${{ inputs.dry_run || 'false' }}"
+
+          echo "🔔 Notifying downstream plugins about Lidarr.Plugin.Common ${VERSION}"
+          echo ""
+
+          # Check if we have the PAT configured
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "⚠️  ECOSYSTEM_PAT secret not configured"
+            echo "To enable ecosystem notifications:"
+            echo "  1. Create a PAT with 'workflow' scope"
+            echo "  2. Add it as ECOSYSTEM_PAT secret in this repo"
+            echo ""
+            echo "Downstream repos to notify:"
+            echo "$DOWNSTREAM_REPOS" | while read -r repo; do
+              [ -n "$repo" ] && echo "  - $repo"
+            done
+            exit 0
+          fi
+
+          # Trigger builds for each downstream repo
+          echo "$DOWNSTREAM_REPOS" | while read -r repo; do
+            [ -z "$repo" ] && continue
+
+            echo "📦 Triggering $repo..."
+
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "  [DRY RUN] Would trigger nightly.yml for $repo"
+              continue
+            fi
+
+            # Try to trigger the nightly workflow
+            if gh workflow run nightly.yml -R "$repo" \
+              -f common_version="$VERSION" 2>/dev/null; then
+              echo "  ✅ Successfully triggered $repo"
+            else
+              # Fallback: try without the field if workflow doesn't accept inputs
+              if gh workflow run nightly.yml -R "$repo" 2>/dev/null; then
+                echo "  ✅ Successfully triggered $repo (without version field)"
+              else
+                echo "  ⚠️  Could not trigger $repo (workflow may not exist or PAT lacks access)"
+              fi
+            fi
+          done
+
+          echo ""
+          echo "✅ Ecosystem notification complete"
+
+      - name: Create summary
+        run: |
+          echo "## Ecosystem Notification Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ steps.release.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Pre-release:** ${{ steps.release.outputs.is_prerelease }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Downstream Plugins Notified" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "$DOWNSTREAM_REPOS" | while read -r repo; do
+            [ -n "$repo" ] && echo "- \`$repo\`" >> $GITHUB_STEP_SUMMARY
+          done

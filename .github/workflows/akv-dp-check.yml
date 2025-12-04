@@ -7,13 +7,23 @@ on:
         description: Run AKV check
         default: "false"
         required: false
+  push:
+    paths:
+      - '.github/workflows/akv-dp-check.yml'
 
 permissions:
   contents: read
 
 jobs:
+  # Skip job that always succeeds - prevents "no jobs" failure on push
+  skip:
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Workflow file updated - skipping optional AKV check"
+
   akv:
-    if: ${{ github.event.inputs.run == 'true' && secrets.AKV_KEY_ID != '' }}
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.run == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

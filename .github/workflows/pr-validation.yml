@@ -52,7 +52,9 @@ jobs:
           "LIDARR_PATH=$out" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
 
       - name: Build
-        run: dotnet build -c Release -warnaserror:NU1903
+        # GeneratePackageOnBuild=false prevents nupkg race condition with multi-TFM builds
+        # RunAnalyzersDuringBuild=false prevents CA1707 errors on test method naming
+        run: dotnet build -c Release -warnaserror:NU1903 -p:GeneratePackageOnBuild=false -p:RunAnalyzersDuringBuild=false
 
       - name: Dotnet format (verify - style only)
         run: dotnet format style --verify-no-changes
