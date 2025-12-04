@@ -1,0 +1,165 @@
+name: Nightly Tests
+
+on:
+  schedule:
+    # Run every day at 5 AM UTC (before downstream plugins at 6 AM)
+    - cron: '0 5 * * *'
+  workflow_dispatch:
+    inputs:
+      dotnet_version:
+        description: '.NET version to test'
+        required: false
+        default: '8.0.x'
+        type: choice
+        options:
+          - '8.0.x'
+          - '9.0.x'
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  nightly-tests:
+    name: Nightly Tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        dotnet-version: ['8.0.x']
+        include:
+          # Also test on .NET 9 preview (Ubuntu only)
+          - os: ubuntu-latest
+            dotnet-version: '9.0.x'
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup .NET ${{ matrix.dotnet-version }}
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version || matrix.dotnet-version }}
+          cache: true
+          cache-dependency-path: |
+            **/*.csproj
+            **/Directory.Packages.props
+            **/NuGet.config
+            global.json
+
+      - name: Restore dependencies
+        run: dotnet restore lidarr.plugin.common.sln
+
+      - name: Build
+        run: dotnet build lidarr.plugin.common.sln --configuration Release --no-restore
+
+      - name: Run tests
+        run: |
+          dotnet test lidarr.plugin.common.sln \
+            --configuration Release \
+            --no-build \
+            --verbosity normal \
+            --collect:"XPlat Code Coverage" \
+            --results-directory TestResults/ \
+            --logger "trx;LogFileName=test-results.trx"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}-${{ matrix.dotnet-version }}
+          path: TestResults/
+          retention-days: 7
+
+      - name: Generate coverage report
+        if: matrix.os == 'ubuntu-latest' && matrix.dotnet-version == '8.0.x'
+        run: |
+          dotnet tool install --global dotnet-reportgenerator-globaltool || true
+          reportgenerator \
+            -reports:TestResults/**/coverage.cobertura.xml \
+            -targetdir:TestResults/CoverageReport \
+            -reporttypes:MarkdownSummaryGithub
+
+      - name: Add coverage to summary
+        if: matrix.os == 'ubuntu-latest' && matrix.dotnet-version == '8.0.x'
+        run: |
+          if [ -f TestResults/CoverageReport/SummaryGithub.md ]; then
+            echo "## Code Coverage" >> $GITHUB_STEP_SUMMARY
+            cat TestResults/CoverageReport/SummaryGithub.md >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # Check for outdated packages
+  dependency-check:
+    name: Dependency Health Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Install dotnet-outdated
+        run: dotnet tool install --global dotnet-outdated-tool
+
+      - name: Check for outdated packages
+        id: outdated
+        run: |
+          echo "## Dependency Health Check" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+
+          # Run outdated check and capture output
+          dotnet outdated --output outdated.md --output-format markdown || true
+
+          if [ -f outdated.md ] && [ -s outdated.md ]; then
+            cat outdated.md >> $GITHUB_STEP_SUMMARY
+            echo "has_outdated=true" >> $GITHUB_OUTPUT
+          else
+            echo "✅ All packages are up to date!" >> $GITHUB_STEP_SUMMARY
+            echo "has_outdated=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Upload outdated report
+        if: steps.outdated.outputs.has_outdated == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: outdated-packages-report
+          path: outdated.md
+          retention-days: 7
+
+  # Summary job
+  nightly-summary:
+    name: Nightly Summary
+    runs-on: ubuntu-latest
+    needs: [nightly-tests, dependency-check]
+    if: always()
+
+    steps:
+      - name: Check results
+        run: |
+          echo "## Nightly Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Tests | ${{ needs.nightly-tests.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency Check | ${{ needs.dependency-check.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Run:** [${{ github.run_id }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})" >> $GITHUB_STEP_SUMMARY
+
+      - name: Fail if any job failed
+        if: needs.nightly-tests.result == 'failure'
+        run: exit 1
