@@ -3,7 +3,7 @@ param()
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path $scriptRoot -Parent
 
-$sourcePath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($repoRoot, '..', 'Lidarr', '_output', 'net6.0'))
+$sourcePath = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($repoRoot, '..', 'Lidarr', '_output', 'net8.0'))
 if (-not (Test-Path $sourcePath)) {
     Write-Error "Host assemblies not found at $sourcePath. Run build/publish on Lidarr first."
     exit 1

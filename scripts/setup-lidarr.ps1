@@ -69,8 +69,8 @@ try {
     }
 
     $lidarrOutputs = @(
-        Join-Path $destPath '_output/net6.0'
-        Join-Path $destPath 'src/Lidarr/bin/Release/net6.0'
+        Join-Path $destPath '_output/net8.0'
+        Join-Path $destPath 'src/Lidarr/bin/Release/net8.0'
     )
 
     $lidarrPath = $null
@@ -82,7 +82,7 @@ try {
     }
 
     if (-not $lidarrPath) {
-        $stubPath = [System.IO.Path]::Combine($destPath, '_output/net6.0')
+        $stubPath = [System.IO.Path]::Combine($destPath, '_output/net8.0')
         if (-not $SkipStub) {
             Write-Host "No Lidarr build output detected; generating host stub" -ForegroundColor Yellow
             & (Join-Path $repoRoot 'scripts/prepare-host-stub.ps1') -OutputPath $stubPath | Out-Null

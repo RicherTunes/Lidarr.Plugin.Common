@@ -173,7 +173,7 @@ get_version_prefix() {
 
 # Check if Lidarr assemblies exist
 check_lidarr_assemblies() {
-    local path="${1:-ext/Lidarr/_output/net6.0}"
+    local path="${1:-ext/Lidarr/_output/net8.0}"
 
     if [[ -d "$path" ]] && [[ -f "$path/Lidarr.Core.dll" ]]; then
         log_success "Lidarr assemblies found at: $path"
@@ -186,7 +186,7 @@ check_lidarr_assemblies() {
 
 # Extract Lidarr assemblies from Docker
 extract_lidarr_from_docker() {
-    local output_dir="${1:-ext/Lidarr/_output/net6.0}"
+    local output_dir="${1:-ext/Lidarr/_output/net8.0}"
     local docker_version="${2:-pr-plugins-2.14.2.4786}"
 
     log_step "Extracting Lidarr assemblies from Docker..."
