@@ -1,9 +1,12 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <!--
-    Plugin Packaging with ILRepack Internalization
+    Plugin Packaging with ILRepack Assembly Merging
 
-    Merges plugin dependencies into a single DLL with internal visibility,
-    preventing version conflicts when multiple RicherTunes plugins are installed.
+    Merges plugin dependencies into a single DLL for self-contained deployment.
+
+    NOTE: Internalization (Internalize="true") is disabled because Lidarr's DI
+    container (DryIoc) needs to see types from merged assemblies. With internalization
+    enabled, DryIoc fails to resolve types during container initialization.
 
     USAGE:
     1. Add ILRepack.Lib.MSBuild.Task package with ExcludeAssets="build" and GeneratePathProperty="true"
@@ -49,11 +52,13 @@
     </ItemGroup>
 
     <Message Text="[ILRepack] Found dependencies to merge: @(_PluginDeps->'%(Filename)')" Importance="high" />
-    <Message Text="[ILRepack] Merging plugin assemblies with internalization..." Importance="high" />
+    <Message Text="[ILRepack] Merging plugin assemblies..." Importance="high" />
 
+    <!-- NOTE: Internalize="false" is required because Lidarr's DI container needs to
+         see types from merged assemblies. Internalization causes DryIoc resolution failures. -->
     <ILRepack
       Parallel="true"
-      Internalize="true"
+      Internalize="false"
       DebugInfo="true"
       TargetKind="Dll"
       InputAssemblies="@(_AssembliesToMerge)"
