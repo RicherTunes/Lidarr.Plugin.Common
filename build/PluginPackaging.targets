@@ -28,22 +28,27 @@
     <ILRepackEnabled>false</ILRepackEnabled>
   </PropertyGroup>
 
-  <ItemGroup>
-    <PluginMergeDependency Include="$(OutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Common.dll')" />
-    <PluginMergeDependency Include="$(OutputPath)Lidarr.Plugin.Abstractions.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Abstractions.dll')" />
-    <PluginMergeDependency Include="$(OutputPath)Polly.dll" Condition="Exists('$(OutputPath)Polly.dll')" />
-    <PluginMergeDependency Include="$(OutputPath)Polly.Core.dll" Condition="Exists('$(OutputPath)Polly.Core.dll')" />
-    <PluginMergeDependency Include="$(OutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(OutputPath)Polly.Extensions.Http.dll')" />
-    <PluginMergeDependency Include="$(OutputPath)TagLibSharp*.dll" />
-    <PluginMergeDependency Include="@(PluginPackagingAdditionalMerge)" />
-  </ItemGroup>
+  <!-- NOTE: PluginMergeDependency is defined INSIDE RepackPlugin target so Exists() checks
+       happen AFTER the build copies dependencies to OutputPath, not at project load time -->
 
   <Target Name="RepackPlugin" AfterTargets="Build" Condition="'$(PluginPackagingDisable)' != 'true'">
+    <!-- Detect dependencies at runtime (after build), not at project load time -->
     <ItemGroup>
-      <_AssembliesToMerge Include="$(OutputPath)$(AssemblyName).dll" />
-      <_AssembliesToMerge Include="@(PluginMergeDependency)" />
+      <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Common.dll')" />
+      <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Abstractions.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Abstractions.dll')" />
+      <_PluginDeps Include="$(OutputPath)Polly.dll" Condition="Exists('$(OutputPath)Polly.dll')" />
+      <_PluginDeps Include="$(OutputPath)Polly.Core.dll" Condition="Exists('$(OutputPath)Polly.Core.dll')" />
+      <_PluginDeps Include="$(OutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(OutputPath)Polly.Extensions.Http.dll')" />
+      <_PluginDeps Include="$(OutputPath)TagLibSharp*.dll" />
+      <_PluginDeps Include="@(PluginPackagingAdditionalMerge)" />
     </ItemGroup>
 
+    <ItemGroup>
+      <_AssembliesToMerge Include="$(OutputPath)$(AssemblyName).dll" />
+      <_AssembliesToMerge Include="@(_PluginDeps)" />
+    </ItemGroup>
+
+    <Message Text="[ILRepack] Found dependencies to merge: @(_PluginDeps->'%(Filename)')" Importance="high" />
     <Message Text="[ILRepack] Merging plugin assemblies with internalization..." Importance="high" />
 
     <ILRepack
