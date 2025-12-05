@@ -70,14 +70,41 @@ async function screenshotOrSkip(page, name, fn) {
 
 
 // Helper to open add modal and find plugin card
-async function openAddModalAndFindPlugin(page, pluginName, addBtnSelector = 'button') {
+async function openAddModalAndFindPlugin(page, pluginName) {
   await page.waitForTimeout(500);
 
-  // Click the add button (usually "+" card or "Add" button)
-  const addBtn = page.locator(addBtnSelector).filter({ hasText: /add|^\+$/i }).first();
-  if (await addBtn.count().catch(() => 0)) {
-    await addBtn.click({ timeout: 3000 }).catch(() => {});
-    await page.waitForTimeout(800);
+  // Try multiple selectors for the add card/button (Lidarr uses various patterns)
+  const addSelectors = [
+    // Card-style add buttons (div/a with + icon)
+    'div[class*="AddNew"]',
+    'a[class*="AddNew"]',
+    'div[class*="addNew"]',
+    '[class*="Card"]:has-text("+")',
+    '[class*="card"]:has-text("+")',
+    // Button-style add
+    'button:has-text("Add")',
+    'button:has-text("+")',
+  ];
+
+  let clicked = false;
+  for (const selector of addSelectors) {
+    const addBtn = page.locator(selector).first();
+    const count = await addBtn.count().catch(() => 0);
+    if (count > 0) {
+      console.log(`Found add element with selector: ${selector}`);
+      try {
+        await addBtn.click({ timeout: 3000 });
+        await page.waitForTimeout(800);
+        clicked = true;
+        break;
+      } catch (e) {
+        console.log(`Click failed for ${selector}: ${e?.message || e}`);
+      }
+    }
+  }
+
+  if (!clicked) {
+    console.log('Could not find add button/card with any selector');
   }
 
   // Wait for modal to appear
