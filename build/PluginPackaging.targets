@@ -4,9 +4,9 @@
 
     Merges plugin dependencies into a single DLL for self-contained deployment.
 
-    NOTE: Internalization (Internalize="true") is disabled because Lidarr's DI
-    container (DryIoc) needs to see types from merged assemblies. With internalization
-    enabled, DryIoc fails to resolve types during container initialization.
+    NOTE: Internalize="true" is REQUIRED to prevent DryIoc conflicts. When types
+    from merged assemblies (Polly, TagLibSharp, etc.) remain public, they can
+    conflict with Lidarr's own types during DI container resolution.
 
     USAGE:
     1. Add ILRepack.Lib.MSBuild.Task package with ExcludeAssets="build" and GeneratePathProperty="true"
@@ -54,11 +54,10 @@
     <Message Text="[ILRepack] Found dependencies to merge: @(_PluginDeps->'%(Filename)')" Importance="high" />
     <Message Text="[ILRepack] Merging plugin assemblies..." Importance="high" />
 
-    <!-- NOTE: Internalize="false" is required because Lidarr's DI container needs to
-         see types from merged assemblies. Internalization causes DryIoc resolution failures. -->
+    <!-- NOTE: Internalize="true" prevents merged assembly types from conflicting with Lidarr types -->
     <ILRepack
       Parallel="true"
-      Internalize="false"
+      Internalize="true"
       DebugInfo="true"
       TargetKind="Dll"
       InputAssemblies="@(_AssembliesToMerge)"
