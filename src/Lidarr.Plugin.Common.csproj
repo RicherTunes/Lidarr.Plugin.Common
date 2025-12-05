@@ -149,7 +149,7 @@
   <!-- Azure Key Vault integration for Data Protection (.NET 6.0) -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
     <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" Version="1.2.3" />
-    <PackageReference Include="Azure.Identity" Version="1.10.4" />
+    <PackageReference Include="Azure.Identity" Version="1.11.4" />
   </ItemGroup>
 
   <!-- Azure Key Vault integration for Data Protection (.NET 8.0) -->
