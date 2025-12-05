@@ -38,7 +38,8 @@
     <!-- Detect dependencies at runtime (after build), not at project load time -->
     <ItemGroup>
       <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Common.dll')" />
-      <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Abstractions.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Abstractions.dll')" />
+      <!-- NOTE: Lidarr.Plugin.Abstractions is NOT merged - it contains interfaces (IImportList, etc.)
+           that must match Lidarr runtime's types exactly. Merging causes DryIoc resolution failures. -->
       <_PluginDeps Include="$(OutputPath)Polly.dll" Condition="Exists('$(OutputPath)Polly.dll')" />
       <_PluginDeps Include="$(OutputPath)Polly.Core.dll" Condition="Exists('$(OutputPath)Polly.Core.dll')" />
       <_PluginDeps Include="$(OutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(OutputPath)Polly.Extensions.Http.dll')" />
