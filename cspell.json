@@ -65,7 +65,11 @@
     "pluginname",
     "mystreamingplugin",
     "xcopy",
-    "Taglib"
+    "Taglib",
+    "Tubifarry",
+    "hotio",
+    "TrevTV",
+    "APIKEY"
   ],
   "ignorePaths": [
     "**/bin",
