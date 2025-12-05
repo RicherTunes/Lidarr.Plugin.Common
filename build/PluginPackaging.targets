@@ -1,15 +1,20 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <!--
     Plugin Packaging with ILRepack Internalization
-    
+
     Merges plugin dependencies into a single DLL with internal visibility,
     preventing version conflicts when multiple RicherTunes plugins are installed.
 
     USAGE:
-    1. Add ILRepack.Lib.MSBuild.Task package
+    1. Add ILRepack.Lib.MSBuild.Task package with ExcludeAssets="build" and GeneratePathProperty="true"
     2. Import this targets file
     3. Optionally set LidarrAssembliesPath
   -->
+
+  <!-- Import ILRepack task from NuGet package - supports both netfx and netcore -->
+  <UsingTask TaskName="ILRepack"
+             AssemblyFile="$(PkgILRepack_Lib_MSBuild_Task)/build/ILRepack.Lib.MSBuild.Task.dll"
+             Condition="'$(PkgILRepack_Lib_MSBuild_Task)' != '' and Exists('$(PkgILRepack_Lib_MSBuild_Task)/build/ILRepack.Lib.MSBuild.Task.dll')" />
 
   <PropertyGroup>
     <PluginAssemblyFileName Condition="'$(PluginAssemblyFileName)' == ''">$(AssemblyName).dll</PluginAssemblyFileName>
