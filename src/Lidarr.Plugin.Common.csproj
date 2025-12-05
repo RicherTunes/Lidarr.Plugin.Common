@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <!-- .NET 6.0 reached EOL in Nov 2024; Lidarr plugins branch targets net8.0 -->
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- Multi-target: net6.0 for Lidarr plugins branch (v2.x), net8.0 for mainline (v3.x) -->
+    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
@@ -13,7 +13,7 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <Version>1.3.0</Version>
+    <Version>1.4.0</Version>
     <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
@@ -26,7 +26,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.3.0: Drop .NET 6.0 (EOL); target .NET 8.0 only. See CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.4.0: Re-add net6.0 multi-targeting for plugins branch compatibility. See CHANGELOG.md.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <!-- Build Configuration -->
@@ -48,8 +48,8 @@
   </PropertyGroup>
   <!-- Make PublicAPI baselines visible to analyzer tools (e.g., dotnet format) without relying on build targets -->
   <ItemGroup>
-    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/net8.0/PublicAPI.Shipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/net8.0/PublicAPI.Unshipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt')" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -87,12 +87,32 @@
     <ProjectReference Include="Abstractions/Lidarr.Plugin.Abstractions.csproj" />
   </ItemGroup>
 
-  <!-- Core Dependencies (.NET 8.0) -->
+  <!-- Core Dependencies (framework-independent) -->
   <ItemGroup>
     <PackageReference Include="FluentValidation" Version="9.5.4" />
     <PackageReference Include="Microsoft.DotNet.PackageValidation" Version="1.0.0-preview.7.21379.12" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- .NET 6.0 compatible package versions -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
+    <PackageReference Include="System.Text.Json" Version="6.0.10" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="6.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Http" Version="6.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="6.0.2" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="6.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration" Version="6.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="6.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="6.0.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="6.0.0" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="6.0.35" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="6.0.35" />
+  </ItemGroup>
+
+  <!-- .NET 8.0 package versions -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
@@ -126,8 +146,14 @@
     <None Include="..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\CHANGELOG.md" Pack="true" PackagePath="\" />
   </ItemGroup>
-  <!-- Azure Key Vault integration for Data Protection -->
-  <ItemGroup>
+  <!-- Azure Key Vault integration for Data Protection (.NET 6.0) -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
+    <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" Version="1.2.3" />
+    <PackageReference Include="Azure.Identity" Version="1.11.4" />
+  </ItemGroup>
+
+  <!-- Azure Key Vault integration for Data Protection (.NET 8.0) -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
     <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" Version="1.6.1" />
     <PackageReference Include="Azure.Identity" Version="1.12.0" />
   </ItemGroup>
