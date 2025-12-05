@@ -232,41 +232,41 @@ jobs:
           set -euo pipefail
           mkdir -p staged-plugins
 
-          # Lidarr plugins branch expects flat structure: PluginName/plugin-files
-          # NOT nested: Owner/PluginName/plugin-files
+          # CRITICAL: Lidarr plugins branch expects NESTED structure: Owner/PluginName/plugin-files
+          # See PathExtensions.cs:323-335 - scans plugins/{owner}/{pluginname}/Lidarr.Plugin.*.dll
 
           # Stage Brainarr
           if [ -d "plugins/brainarr" ]; then
-            mkdir -p staged-plugins/Brainarr
+            mkdir -p staged-plugins/RicherTunes/Brainarr
             DLL=$(find plugins/brainarr -name 'Lidarr.Plugin.Brainarr.dll' -path '*/bin/*' | head -1)
             if [ -n "$DLL" ]; then
-              cp "$DLL" staged-plugins/Brainarr/
-              cp plugins/brainarr/plugin.json staged-plugins/Brainarr/ 2>/dev/null || true
-              cp plugins/brainarr/manifest.json staged-plugins/Brainarr/ 2>/dev/null || true
+              cp "$DLL" staged-plugins/RicherTunes/Brainarr/
+              cp plugins/brainarr/plugin.json staged-plugins/RicherTunes/Brainarr/ 2>/dev/null || true
+              cp plugins/brainarr/manifest.json staged-plugins/RicherTunes/Brainarr/ 2>/dev/null || true
               echo "✓ Staged Brainarr from: $DLL"
             fi
           fi
 
           # Stage Qobuzarr
           if [ -d "plugins/qobuzarr" ]; then
-            mkdir -p staged-plugins/Qobuzarr
+            mkdir -p staged-plugins/RicherTunes/Qobuzarr
             DLL=$(find plugins/qobuzarr -name 'Lidarr.Plugin.Qobuzarr.dll' -path '*/bin/*' | head -1)
             if [ -n "$DLL" ]; then
-              cp "$DLL" staged-plugins/Qobuzarr/
-              cp plugins/qobuzarr/plugin.json staged-plugins/Qobuzarr/ 2>/dev/null || true
-              cp plugins/qobuzarr/manifest.json staged-plugins/Qobuzarr/ 2>/dev/null || true
+              cp "$DLL" staged-plugins/RicherTunes/Qobuzarr/
+              cp plugins/qobuzarr/plugin.json staged-plugins/RicherTunes/Qobuzarr/ 2>/dev/null || true
+              cp plugins/qobuzarr/manifest.json staged-plugins/RicherTunes/Qobuzarr/ 2>/dev/null || true
               echo "✓ Staged Qobuzarr from: $DLL"
             fi
           fi
 
           # Stage Tidalarr
           if [ -d "plugins/tidalarr" ]; then
-            mkdir -p staged-plugins/Tidalarr
+            mkdir -p staged-plugins/RicherTunes/Tidalarr
             DLL=$(find plugins/tidalarr -name 'Lidarr.Plugin.Tidalarr.dll' -path '*/bin/*' | head -1)
             if [ -n "$DLL" ]; then
-              cp "$DLL" staged-plugins/Tidalarr/
-              cp plugins/tidalarr/plugin.json staged-plugins/Tidalarr/ 2>/dev/null || true
-              cp plugins/tidalarr/manifest.json staged-plugins/Tidalarr/ 2>/dev/null || true
+              cp "$DLL" staged-plugins/RicherTunes/Tidalarr/
+              cp plugins/tidalarr/plugin.json staged-plugins/RicherTunes/Tidalarr/ 2>/dev/null || true
+              cp plugins/tidalarr/manifest.json staged-plugins/RicherTunes/Tidalarr/ 2>/dev/null || true
               echo "✓ Staged Tidalarr from: $DLL"
             fi
           fi
@@ -477,7 +477,7 @@ jobs:
           echo "=== Verifying Plugin Build Artifacts ==="
           echo ""
 
-          # Check each plugin has required files
+          # Check each plugin has required files (now in nested Owner/PluginName structure)
           PLUGINS_TO_CHECK="${{ inputs.test_plugins }}"
           IFS=',' read -ra PLUGIN_ARRAY <<< "$PLUGINS_TO_CHECK"
 
@@ -485,7 +485,8 @@ jobs:
           for plugin in "${PLUGIN_ARRAY[@]}"; do
             plugin_name=$(echo "$plugin" | xargs)
             plugin_cap=$(echo "$plugin_name" | sed 's/.*/\u&/')
-            plugin_dir="staged-plugins/${plugin_cap}"
+            # Use nested structure: Owner/PluginName
+            plugin_dir="staged-plugins/RicherTunes/${plugin_cap}"
 
             echo "Checking $plugin_cap..."
 
@@ -527,6 +528,108 @@ jobs:
             echo "🎉 All plugin artifacts verified successfully!"
           else
             echo "✗ Some plugins missing required files"
+            exit 1
+          fi
+
+      - name: Verify Plugins Load at Runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=== Runtime Plugin Loading Verification ==="
+          echo ""
+          echo "Starting Lidarr with staged plugins to verify actual runtime loading..."
+          echo ""
+
+          # Start Lidarr with staged plugins mounted
+          docker run -d --name lidarr-verify \
+            -p 8686:8686 \
+            -v "${{ github.workspace }}/staged-plugins:/config/plugins:ro" \
+            -e PUID=1000 -e PGID=1000 \
+            ghcr.io/hotio/lidarr:${{ env.LIDARR_DOCKER_VERSION }}
+
+          # Wait for Lidarr to initialize and create config
+          echo "Waiting for Lidarr to initialize..."
+          CONFIG_FOUND=false
+          for i in {1..60}; do
+            if docker exec lidarr-verify test -f /config/config.xml 2>/dev/null; then
+              echo "Config file exists!"
+              CONFIG_FOUND=true
+              break
+            fi
+            sleep 2
+          done
+
+          if [ "$CONFIG_FOUND" != "true" ]; then
+            echo "ERROR: config.xml was not created after 120 seconds"
+            echo "=== Container logs ==="
+            docker logs lidarr-verify 2>&1 | tail -100 || true
+            docker rm -f lidarr-verify || true
+            exit 1
+          fi
+
+          # Wait for web interface to be ready
+          echo "Waiting for Lidarr web interface..."
+          for i in {1..60}; do
+            if curl -fsS http://localhost:8686 >/dev/null 2>&1; then
+              echo "Lidarr is ready!"
+              break
+            fi
+            sleep 2
+          done
+
+          # Get API key
+          APIKEY=$(docker exec lidarr-verify sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /config/config.xml)
+          echo "Using API key: ${APIKEY:0:4}..."
+
+          # Query plugins API
+          echo ""
+          echo "Querying Lidarr plugins API..."
+          PLUGINS_RESPONSE=$(curl -fsS -H "X-Api-Key: $APIKEY" http://localhost:8686/api/v1/system/plugins 2>&1 || echo "API_ERROR")
+
+          if [ "$PLUGINS_RESPONSE" = "API_ERROR" ]; then
+            echo "ERROR: Failed to query plugins API"
+            echo "=== Container logs ==="
+            docker logs lidarr-verify 2>&1 | tail -100 || true
+            docker rm -f lidarr-verify || true
+            exit 1
+          fi
+
+          echo "Plugins API response:"
+          echo "$PLUGINS_RESPONSE" | head -20
+
+          # Check for each expected plugin
+          PLUGINS_TO_CHECK="${{ inputs.test_plugins }}"
+          IFS=',' read -ra PLUGIN_ARRAY <<< "$PLUGINS_TO_CHECK"
+          FAILED=0
+
+          echo ""
+          echo "=== Plugin Detection Results ==="
+          for plugin in "${PLUGIN_ARRAY[@]}"; do
+            plugin_name=$(echo "$plugin" | xargs)
+            plugin_cap=$(echo "$plugin_name" | sed 's/.*/\u&/')
+
+            if echo "$PLUGINS_RESPONSE" | grep -qi "$plugin_cap"; then
+              echo "  ✓ $plugin_cap detected in Lidarr"
+            else
+              echo "  ✗ $plugin_cap NOT detected in Lidarr"
+              FAILED=1
+            fi
+          done
+
+          # Show container logs for debugging
+          echo ""
+          echo "=== Lidarr container logs (plugin loading) ==="
+          docker logs lidarr-verify 2>&1 | grep -i "plugin\|load\|error" | tail -30 || true
+
+          # Cleanup
+          docker rm -f lidarr-verify || true
+
+          echo ""
+          if [ $FAILED -eq 0 ]; then
+            echo "🎉 All plugins loaded successfully at runtime!"
+          else
+            echo "✗ Some plugins failed to load"
             exit 1
           fi
 
