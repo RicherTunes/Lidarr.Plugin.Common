@@ -166,6 +166,32 @@ async function clickPluginCard(page, pluginName, modal = null) {
 
   console.log('Modal detected, searching for plugin card...');
 
+  // Debug: Dump all visible provider cards in modal
+  const allCards = await modal.locator('div[class*="card" i], div[class*="Card"], a[class*="card" i], a[class*="Card"]').evaluateAll(els =>
+    els.slice(0, 30).map(el => ({
+      tag: el.tagName,
+      className: el.className?.substring(0, 80),
+      text: el.textContent?.trim().substring(0, 50)
+    }))
+  ).catch(() => []);
+  console.log('Modal cards found:', JSON.stringify(allCards, null, 2));
+
+  // Debug: Dump all section headers in modal
+  const sectionHeaders = await modal.locator('h2, h3, h4, [class*="header" i], [class*="section" i]').evaluateAll(els =>
+    els.slice(0, 15).map(el => el.textContent?.trim().substring(0, 50))
+  ).catch(() => []);
+  console.log('Modal section headers:', sectionHeaders);
+
+  // Scroll through modal to load all content (some providers may be below the fold)
+  const scrollableArea = modal.locator('[class*="ModalBody"], [class*="modalBody"], [class*="scroller"]').first();
+  if (await scrollableArea.count().catch(() => 0)) {
+    console.log('Scrolling through modal content...');
+    await scrollableArea.evaluate(el => el.scrollTo(0, el.scrollHeight)).catch(() => {});
+    await page.waitForTimeout(500);
+    await scrollableArea.evaluate(el => el.scrollTo(0, 0)).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+
   // Selectors scoped to modal content only
   const selectors = [
     // Standard Lidarr plugin card selectors
