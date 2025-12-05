@@ -256,72 +256,75 @@ async function enableShowAdvanced(page) {
 
 async function run() {
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext({
-    viewport: { width: 1440, height: 900 },
-    userAgent: `${PLUGIN_NAME.toLowerCase()}-ci-screenshot`,
-    colorScheme: 'dark'
-  });
-  const page = await context.newPage();
+  try {
+    const context = await browser.newContext({
+      viewport: { width: 1440, height: 900 },
+      userAgent: `${PLUGIN_NAME.toLowerCase()}-ci-screenshot`,
+      colorScheme: 'dark'
+    });
+    const page = await context.newPage();
 
-  // Basic navigation + wizard-friendly waits
-  await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 60_000 });
-  await page.waitForLoadState('networkidle', { timeout: 60_000 }).catch(() => {});
+    // Basic navigation + wizard-friendly waits
+    await page.goto(BASE, { waitUntil: 'domcontentloaded', timeout: 60_000 });
+    await page.waitForLoadState('networkidle', { timeout: 60_000 }).catch(() => {});
 
-  // Try to breeze through wizard if present
-  const tryClick = async (text) => {
-    const el = page.getByRole('button', { name: text });
-    if (await el.count().catch(() => 0)) {
-      await el.first().click({ timeout: 2000 }).catch(() => {});
-    }
-  };
-  await tryClick('Next');
-  await tryClick('Continue');
-  await tryClick('Skip');
-  await tryClick('Finish');
+    // Try to breeze through wizard if present
+    const tryClick = async (text) => {
+      const el = page.getByRole('button', { name: text });
+      if (await el.count().catch(() => 0)) {
+        await el.first().click({ timeout: 2000 }).catch(() => {});
+      }
+    };
+    await tryClick('Next');
+    await tryClick('Continue');
+    await tryClick('Skip');
+    await tryClick('Finish');
 
-  // Landing page
-  await screenshotOrSkip(page, 'landing', async () => {
-    await page.waitForTimeout(800);
-  });
+    // Landing page
+    await screenshotOrSkip(page, 'landing', async () => {
+      await page.waitForTimeout(800);
+    });
 
-  // Navigate to Settings
-  const goSettings = async () => {
-    const settings = page.getByRole('link', { name: /settings/i });
-    if (await settings.count()) {
-      await settings.first().click();
-      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-    } else {
-      await page.goto(`${BASE}/settings`, { waitUntil: 'domcontentloaded' });
-      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
-    }
-    // Enable Show Advanced after navigating to settings
-    await enableShowAdvanced(page);
-  };
+    // Navigate to Settings
+    const goSettings = async () => {
+      const settings = page.getByRole('link', { name: /settings/i });
+      if (await settings.count()) {
+        await settings.first().click();
+        await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+      } else {
+        await page.goto(`${BASE}/settings`, { waitUntil: 'domcontentloaded' });
+        await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+      }
+      // Enable Show Advanced after navigating to settings
+      await enableShowAdvanced(page);
+    };
 
-  await goSettings();
-
-  // Settings overview
-  await screenshotOrSkip(page, 'settings', async () => {
-    await page.waitForTimeout(500);
-  });
-
-  // Capture type-specific screenshots
-  if (PLUGIN_TYPES.includes('indexer')) {
-    await captureIndexerScreenshots(page);
     await goSettings();
-  }
 
-  if (PLUGIN_TYPES.includes('download-client')) {
-    await captureDownloadClientScreenshots(page);
-    await goSettings();
-  }
+    // Settings overview
+    await screenshotOrSkip(page, 'settings', async () => {
+      await page.waitForTimeout(500);
+    });
 
-  if (PLUGIN_TYPES.includes('import-list')) {
-    await captureImportListScreenshots(page);
-  }
+    // Capture type-specific screenshots
+    if (PLUGIN_TYPES.includes('indexer')) {
+      await captureIndexerScreenshots(page);
+      await goSettings();
+    }
 
-  await browser.close();
-  console.log('\nScreenshot capture complete!');
+    if (PLUGIN_TYPES.includes('download-client')) {
+      await captureDownloadClientScreenshots(page);
+      await goSettings();
+    }
+
+    if (PLUGIN_TYPES.includes('import-list')) {
+      await captureImportListScreenshots(page);
+    }
+
+    console.log('\nScreenshot capture complete!');
+  } finally {
+    await browser.close();
+  }
 }
 
 run().catch((e) => {
