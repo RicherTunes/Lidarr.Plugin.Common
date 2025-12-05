@@ -126,11 +126,48 @@ async function openAddModalAndFindPlugin(page, pluginName) {
     console.log('Could not find add button/card with any selector');
   }
 
-  // Wait for modal to appear
-  const modal = page.locator('[class*="ModalContent"], [class*="modalContent"], [class*="Modal-content"]').first();
-  const modalVisible = await modal.isVisible({ timeout: 5000 }).catch(() => false);
+  // Wait for modal to appear - try multiple selector patterns
+  const modalSelectors = [
+    '[class*="ModalContent"]',
+    '[class*="modalContent"]',
+    '[class*="Modal-content"]',
+    '[class*="modal-content"]',
+    '[class*="ModalBody"]',
+    '[class*="modalBody"]',
+    'div[role="dialog"]',
+    '[class*="Modal"]:has(h2, h3)',  // Modal with header
+    '[class*="modal"]:has(h2, h3)',
+    '.modal-open [class*="Modal"]',
+    // Lidarr specific - look for modal with "Add" in title
+    'div:has(> [class*="ModalHeader"]:has-text("Add"))',
+  ];
 
-  if (!modalVisible) {
+  let modal = null;
+  for (const selector of modalSelectors) {
+    const candidate = page.locator(selector).first();
+    try {
+      await candidate.waitFor({ state: 'visible', timeout: 2000 });
+      modal = candidate;
+      console.log(`Modal found with selector: ${selector}`);
+      break;
+    } catch {
+      // Try next selector
+    }
+  }
+
+  if (!modal) {
+    // Debug: dump what elements appeared after click
+    const pageStructure = await page.evaluate(() => {
+      const modals = document.querySelectorAll('[class*="modal" i], [class*="Modal"], [role="dialog"]');
+      return Array.from(modals).slice(0, 5).map(el => ({
+        tag: el.tagName,
+        className: el.className?.substring?.(0, 100) || '',
+        visible: el.offsetParent !== null,
+        text: el.textContent?.substring(0, 100)
+      }));
+    }).catch(() => []);
+    console.log('Elements with modal-like classes after click:', JSON.stringify(pageStructure, null, 2));
+
     console.log('No modal appeared after clicking add button');
     return { modal: null, found: false };
   }
@@ -152,14 +189,31 @@ async function openAddModalAndFindPlugin(page, pluginName) {
 async function clickPluginCard(page, pluginName, modal = null) {
   await page.waitForTimeout(500);
 
-  // If no modal provided, try to find one
+  // If no modal provided, try to find one using multiple selectors
   if (!modal) {
-    modal = page.locator('[class*="ModalContent"], [class*="modalContent"], [class*="Modal-content"]').first();
+    const modalSelectors = [
+      '[class*="ModalContent"]',
+      '[class*="modalContent"]',
+      '[class*="Modal-content"]',
+      '[class*="modal-content"]',
+      '[class*="ModalBody"]',
+      '[class*="modalBody"]',
+      'div[role="dialog"]',
+      '[class*="Modal"]:has(h2, h3)',
+      '[class*="modal"]:has(h2, h3)',
+    ];
+
+    for (const selector of modalSelectors) {
+      const candidate = page.locator(selector).first();
+      if (await candidate.isVisible().catch(() => false)) {
+        modal = candidate;
+        console.log(`Found existing modal with selector: ${selector}`);
+        break;
+      }
+    }
   }
 
-  const modalVisible = await modal.isVisible().catch(() => false);
-
-  if (!modalVisible) {
+  if (!modal || !(await modal.isVisible().catch(() => false))) {
     console.log('No modal detected, cannot click plugin card');
     return false;
   }
