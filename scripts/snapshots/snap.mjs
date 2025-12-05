@@ -68,6 +68,39 @@ async function screenshotOrSkip(page, name, fn) {
   }
 }
 
+
+// Helper to click plugin card in add modal and wait for config dialog
+async function clickPluginCard(page, pluginName) {
+  await page.waitForTimeout(500);
+  const selectors = [
+    `div[class*="AddNewItem"]:has-text("${pluginName}")`,
+    `div[class*="selectableCard"]:has-text("${pluginName}")`,
+    `div[class*="modalContent"] div:has-text("${pluginName}"):not(input)`,
+    `li:has-text("${pluginName}")`,
+  ];
+  for (const selector of selectors) {
+    const card = page.locator(selector).first();
+    if (await card.count().catch(() => 0)) {
+      try {
+        await card.click({ timeout: 3000 });
+        await page.waitForTimeout(1000);
+        const hasForm = await page.locator('input[name], select, textarea').count().catch(() => 0);
+        if (hasForm > 0) {
+          console.log(`Clicked plugin card using: ${selector}`);
+          return true;
+        }
+      } catch (e) {}
+    }
+  }
+  const exactMatch = page.locator('div, span, a').filter({ hasText: new RegExp('^' + pluginName + '$', 'i') }).first();
+  if (await exactMatch.count().catch(() => 0)) {
+    await exactMatch.click({ timeout: 3000 }).catch(() => {});
+    await page.waitForTimeout(1000);
+    return true;
+  }
+  return false;
+}
+
 async function captureIndexerScreenshots(page) {
   // Navigate to Indexers section
   await screenshotOrSkip(page, 'indexers-list', async () => {
@@ -95,13 +128,9 @@ async function captureIndexerScreenshots(page) {
     }
   });
 
-  // Plugin configuration
+  // Plugin configuration - click the plugin card to open config modal
   await screenshotOrSkip(page, 'indexer-config', async () => {
-    const pluginOption = page.getByText(new RegExp(PLUGIN_NAME, 'i')).first();
-    if (await pluginOption.count()) {
-      await pluginOption.click({ timeout: 2000 }).catch(() => {});
-      await page.waitForTimeout(500);
-    }
+    await clickPluginCard(page, PLUGIN_NAME);
   });
 
   await page.keyboard.press('Escape');
@@ -135,13 +164,9 @@ async function captureDownloadClientScreenshots(page) {
     }
   });
 
-  // Plugin configuration
+  // Plugin configuration - click the plugin card to open config modal
   await screenshotOrSkip(page, 'download-client-config', async () => {
-    const pluginOption = page.getByText(new RegExp(PLUGIN_NAME, 'i')).first();
-    if (await pluginOption.count()) {
-      await pluginOption.click({ timeout: 2000 }).catch(() => {});
-      await page.waitForTimeout(500);
-    }
+    await clickPluginCard(page, PLUGIN_NAME);
   });
 
   await page.keyboard.press('Escape');
@@ -175,13 +200,9 @@ async function captureImportListScreenshots(page) {
     }
   });
 
-  // Plugin configuration
+  // Plugin configuration - click the plugin card to open config modal
   await screenshotOrSkip(page, 'import-list-config', async () => {
-    const pluginOption = page.getByText(new RegExp(PLUGIN_NAME, 'i')).first();
-    if (await pluginOption.count()) {
-      await pluginOption.click({ timeout: 2000 }).catch(() => {});
-      await page.waitForTimeout(500);
-    }
+    await clickPluginCard(page, PLUGIN_NAME);
   });
 
   await page.keyboard.press('Escape');
