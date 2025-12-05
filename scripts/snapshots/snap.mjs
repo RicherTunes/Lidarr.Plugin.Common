@@ -133,7 +133,7 @@ async function captureIndexerScreenshots(page) {
     const indexersLink = page.getByRole('link', { name: /indexers/i }).first();
     if (await indexersLink.count()) {
       await indexersLink.click({ timeout: 3000 }).catch(() => {});
-      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
     } else {
       await page.goto(`${BASE}/settings/indexers`, { waitUntil: 'domcontentloaded' });
     }
@@ -169,7 +169,7 @@ async function captureDownloadClientScreenshots(page) {
     const downloadLink = page.getByRole('link', { name: /download client/i }).first();
     if (await downloadLink.count()) {
       await downloadLink.click({ timeout: 3000 }).catch(() => {});
-      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
     } else {
       await page.goto(`${BASE}/settings/downloadclients`, { waitUntil: 'domcontentloaded' });
     }
@@ -208,7 +208,7 @@ async function captureImportListScreenshots(page) {
     } else {
       await page.goto(`${BASE}/settings/importlists`, { waitUntil: 'domcontentloaded' });
     }
-    await page.waitForLoadState('networkidle').catch(() => {});
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
     await page.waitForTimeout(500);
   });
 
@@ -289,10 +289,10 @@ async function run() {
     const settings = page.getByRole('link', { name: /settings/i });
     if (await settings.count()) {
       await settings.first().click();
-      await page.waitForLoadState('networkidle');
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
     } else {
       await page.goto(`${BASE}/settings`, { waitUntil: 'domcontentloaded' });
-      await page.waitForLoadState('networkidle').catch(() => {});
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
     }
     // Enable Show Advanced after navigating to settings
     await enableShowAdvanced(page);
