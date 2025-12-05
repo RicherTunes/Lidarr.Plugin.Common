@@ -71,35 +71,24 @@ async function screenshotOrSkip(page, name, fn) {
 
 // Helper to click plugin card in add modal and wait for config dialog
 async function clickPluginCard(page, pluginName) {
-  // Wait a bit longer for modal to fully render
-  await page.waitForTimeout(800);
+  // Wait for modal to fully render (modal is already open from previous step)
+  await page.waitForTimeout(1000);
 
-  // Check if a modal is present by counting elements (more reliable than isVisible)
-  const modalCount = await page.locator('[class*="ModalContent"], [class*="modalContent"], [class*="Modal-content"], div[class*="Modal"]').count().catch(() => 0);
-  
-  console.log(`Modal elements found: ${modalCount}`);
+  console.log(`Looking for plugin card: ${pluginName}`);
 
-  if (modalCount === 0) {
-    console.log('No modal detected, cannot click plugin card');
-    return false;
-  }
-
-  console.log('Modal detected, searching for plugin card...');
-
-  // Selectors scoped to modal content only - NO li selector to avoid global search autocomplete
-  // Try multiple approaches to find the plugin card
+  // Try multiple selector patterns to find the plugin card
   const selectors = [
     `div[class*="AddNewItem"]:has-text("${pluginName}")`,
     `div[class*="selectableCard"]:has-text("${pluginName}")`,
     `div[class*="ProviderType"]:has-text("${pluginName}")`,
-    `div[class*="AddNew"]:has-text("${pluginName}")`,
     `div[class*="card"]:has-text("${pluginName}")`,
+    `div[class*="Card"]:has-text("${pluginName}")`,
   ];
 
   for (const selector of selectors) {
     const card = page.locator(selector).first();
     const count = await card.count().catch(() => 0);
-    console.log(`Checking selector: ${selector} - found: ${count}`);
+    console.log(`Checking: ${selector} - found: ${count}`);
     if (count > 0) {
       try {
         await card.click({ timeout: 3000 });
@@ -107,44 +96,38 @@ async function clickPluginCard(page, pluginName) {
         // Check if config dialog opened (should have form inputs)
         const hasForm = await page.locator('input[name], select, textarea').count().catch(() => 0);
         if (hasForm > 0) {
-          console.log(`Clicked plugin card using: ${selector}, form fields found: ${hasForm}`);
+          console.log(`SUCCESS: Clicked using ${selector}, form fields: ${hasForm}`);
           return true;
         }
       } catch (e) {
-        console.log(`Click failed for ${selector}: ${e?.message || e}`);
+        console.log(`Click failed: ${e?.message || e}`);
       }
     }
   }
 
-  // Fallback: look for any clickable element with plugin name text
-  const fallbackSelector = `div:has-text("${pluginName}"):not(:has(input))`;
-  const fallback = page.locator(fallbackSelector);
-  const fallbackCount = await fallback.count().catch(() => 0);
-  console.log(`Fallback selector found: ${fallbackCount} elements`);
+  // Fallback: find by text content
+  console.log('Trying text-based fallback...');
+  const textLocator = page.getByText(pluginName, { exact: true });
+  const textCount = await textLocator.count().catch(() => 0);
+  console.log(`Text locator found: ${textCount}`);
   
-  if (fallbackCount > 0) {
-    // Click the first visible one that's likely a card
-    for (let i = 0; i < Math.min(fallbackCount, 5); i++) {
-      const el = fallback.nth(i);
+  if (textCount > 0) {
+    for (let i = 0; i < Math.min(textCount, 3); i++) {
       try {
-        const box = await el.boundingBox().catch(() => null);
-        if (box && box.width > 50 && box.height > 30) {
-          console.log(`Clicking fallback element ${i} (${box.width}x${box.height})`);
-          await el.click({ timeout: 2000 });
-          await page.waitForTimeout(1500);
-          const hasForm = await page.locator('input[name], select, textarea').count().catch(() => 0);
-          if (hasForm > 0) {
-            console.log(`Fallback click successful, form fields found: ${hasForm}`);
-            return true;
-          }
+        await textLocator.nth(i).click({ timeout: 2000 });
+        await page.waitForTimeout(1500);
+        const hasForm = await page.locator('input[name], select, textarea').count().catch(() => 0);
+        if (hasForm > 0) {
+          console.log(`SUCCESS: Text click ${i} worked, form fields: ${hasForm}`);
+          return true;
         }
       } catch (e) {
-        // continue to next
+        // continue
       }
     }
   }
 
-  console.log('No plugin card found in modal');
+  console.log('No plugin card could be clicked');
   return false;
 }
 
