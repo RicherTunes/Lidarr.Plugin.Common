@@ -75,16 +75,35 @@ async function openAddModalAndFindPlugin(page, pluginName) {
 
   // Try multiple selectors for the add card/button (Lidarr uses various patterns)
   const addSelectors = [
-    // Card-style add buttons (div/a with + icon)
-    'div[class*="AddNew"]',
-    'a[class*="AddNew"]',
-    'div[class*="addNew"]',
+    // Lidarr import list specific patterns
+    '[class*="ImportList"] [class*="add" i]',
+    '[class*="importList"] [class*="add" i]',
+    // Card-style add buttons (div/a with + icon) - case insensitive
+    '[class*="AddNew" i]',
+    '[class*="addListItem" i]',
+    '[class*="ListItemAdd" i]',
+    // Generic card with + icon
     '[class*="Card"]:has-text("+")',
     '[class*="card"]:has-text("+")',
+    '[class*="Poster"]:has-text("+")',
+    // The + icon itself or its container
+    'div:has(> [class*="icon" i]:has-text("+"))',
     // Button-style add
     'button:has-text("Add")',
     'button:has-text("+")',
   ];
+
+  console.log('Searching for add button/card...');
+
+  // Debug: Log elements with "+" text
+  const plusElements = await page.locator('*:has-text("+")').evaluateAll(els =>
+    els.slice(0, 10).map(el => ({
+      tag: el.tagName,
+      className: el.className,
+      text: el.textContent?.substring(0, 50)
+    }))
+  ).catch(() => []);
+  console.log('Elements with "+":', JSON.stringify(plusElements, null, 2));
 
   let clicked = false;
   for (const selector of addSelectors) {
