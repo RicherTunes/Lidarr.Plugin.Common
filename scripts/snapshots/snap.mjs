@@ -72,32 +72,58 @@ async function screenshotOrSkip(page, name, fn) {
 // Helper to click plugin card in add modal and wait for config dialog
 async function clickPluginCard(page, pluginName) {
   await page.waitForTimeout(500);
+
+  // First, ensure we are in a modal by waiting for modal content
+  const modal = page.locator('[class*="ModalContent"], [class*="modalContent"], div[class*="Modal"]').first();
+  const modalVisible = await modal.isVisible().catch(() => false);
+
+  if (!modalVisible) {
+    console.log('No modal detected, cannot click plugin card');
+    return false;
+  }
+
+  console.log('Modal detected, searching for plugin card...');
+
+  // Selectors scoped to modal content only - NO li selector to avoid global search autocomplete
   const selectors = [
-    `div[class*="AddNewItem"]:has-text("${pluginName}")`,
-    `div[class*="selectableCard"]:has-text("${pluginName}")`,
-    `div[class*="modalContent"] div:has-text("${pluginName}"):not(input)`,
-    `li:has-text("${pluginName}")`,
+    `[class*="ModalContent"] div[class*="AddNewItem"]:has-text("${pluginName}")`,
+    `[class*="modalContent"] div[class*="AddNewItem"]:has-text("${pluginName}")`,
+    `[class*="ModalContent"] div[class*="selectableCard"]:has-text("${pluginName}")`,
+    `[class*="modalContent"] div[class*="selectableCard"]:has-text("${pluginName}")`,
+    `[class*="Modal"] div[class*="AddNewItem"]:has-text("${pluginName}")`,
+    `[class*="Modal"] div[class*="card"]:has-text("${pluginName}")`,
   ];
+
   for (const selector of selectors) {
     const card = page.locator(selector).first();
-    if (await card.count().catch(() => 0)) {
+    const count = await card.count().catch(() => 0);
+    console.log(`Checking selector: ${selector} - found: ${count}`);
+    if (count > 0) {
       try {
         await card.click({ timeout: 3000 });
-        await page.waitForTimeout(1000);
-        const hasForm = await page.locator('input[name], select, textarea').count().catch(() => 0);
+        await page.waitForTimeout(1500);
+        // Check if config dialog opened (should have form inputs)
+        const hasForm = await page.locator('[class*="Modal"] input[name], [class*="Modal"] select, [class*="Modal"] textarea').count().catch(() => 0);
         if (hasForm > 0) {
-          console.log(`Clicked plugin card using: ${selector}`);
+          console.log(`Clicked plugin card using: ${selector}, form fields found: ${hasForm}`);
           return true;
         }
-      } catch (e) {}
+      } catch (e) {
+        console.log(`Click failed for ${selector}: ${e?.message || e}`);
+      }
     }
   }
-  const exactMatch = page.locator('div, span, a').filter({ hasText: new RegExp('^' + pluginName + '$', 'i') }).first();
+
+  // Fallback: look for exact text match within modal only
+  const exactMatch = modal.locator('div, span').filter({ hasText: new RegExp(`^${pluginName}$`, 'i') }).first();
   if (await exactMatch.count().catch(() => 0)) {
+    console.log('Found exact match within modal, clicking...');
     await exactMatch.click({ timeout: 3000 }).catch(() => {});
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(1500);
     return true;
   }
+
+  console.log('No plugin card found in modal');
   return false;
 }
 
