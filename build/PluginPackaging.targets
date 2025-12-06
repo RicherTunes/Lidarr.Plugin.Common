@@ -25,15 +25,6 @@
     <PluginManifestFileName Condition="'$(PluginManifestFileName)' == ''">plugin.json</PluginManifestFileName>
     <EnablePluginDeployment Condition="'$(EnablePluginDeployment)' == ''">false</EnablePluginDeployment>
     <PluginPackagingDisable Condition="'$(PluginPackagingDisable)' == ''">false</PluginPackagingDisable>
-    <!-- Use MSBuildThisFileDirectory (targets file location) for paths relative to Common submodule -->
-    <!-- This file is at ext/Lidarr.Plugin.Common/build/, so ../ goes to ext/Lidarr.Plugin.Common/ -->
-    <CommonLibraryPath Condition="'$(CommonLibraryPath)' == ''">$(MSBuildThisFileDirectory)../src/bin/$(Configuration)/$(TargetFramework)</CommonLibraryPath>
-    <AbstractionsPath Condition="'$(AbstractionsPath)' == ''">$(MSBuildThisFileDirectory)../src/Abstractions/bin/$(Configuration)/$(TargetFramework)</AbstractionsPath>
-    <!-- Use MSBuildProjectDirectory (plugin project location) for ext/Lidarr paths - go up to repo root -->
-    <!-- Plugin projects are typically at src/PluginName/, so ../../ goes to repo root -->
-    <LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net6.0;$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net8.0</LidarrAssembliesPath>
-    <!-- ILRepackLibraryPaths: Use TargetDir (absolute path) instead of OutputPath (relative) -->
-    <ILRepackLibraryPaths>$(TargetDir);$(LidarrAssembliesPath);$(CommonLibraryPath);$(AbstractionsPath)</ILRepackLibraryPaths>
     <!-- Disable ILRepack.Lib.MSBuild.Task built-in target - we use our own RepackPlugin target -->
     <ILRepackEnabled>false</ILRepackEnabled>
   </PropertyGroup>
@@ -42,6 +33,20 @@
        happen AFTER the build copies dependencies to OutputPath, not at project load time -->
 
   <Target Name="RepackPlugin" AfterTargets="Build" Condition="'$(PluginPackagingDisable)' != 'true'">
+    <!-- Compute library paths at runtime (after build) when OutputPath is fully resolved -->
+    <PropertyGroup>
+      <!-- Absolute path to plugin output directory (where all runtime deps are copied) -->
+      <_PluginOutputDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(OutputPath)'))</_PluginOutputDir>
+      <!-- Paths relative to this targets file (inside Common submodule) -->
+      <_CommonLibraryPath>$(MSBuildThisFileDirectory)../src/bin/$(Configuration)/$(TargetFramework)</_CommonLibraryPath>
+      <_AbstractionsPath>$(MSBuildThisFileDirectory)../src/Abstractions/bin/$(Configuration)/$(TargetFramework)</_AbstractionsPath>
+      <!-- Paths to Lidarr assemblies (for reference resolution, typically at repo root/ext/Lidarr) -->
+      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net6.0;$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net8.0</_LidarrAssembliesPath>
+      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' != ''">$(LidarrAssembliesPath)</_LidarrAssembliesPath>
+      <!-- Combined library paths for ILRepack - plugin output first (has all NuGet deps) -->
+      <_ILRepackLibraryPaths>$(_PluginOutputDir);$(_LidarrAssembliesPath);$(_CommonLibraryPath);$(_AbstractionsPath)</_ILRepackLibraryPaths>
+    </PropertyGroup>
+
     <!-- Detect dependencies at runtime (after build), not at project load time -->
     <ItemGroup>
       <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Common.dll')" />
@@ -60,8 +65,7 @@
     </ItemGroup>
 
     <Message Text="[ILRepack] Found dependencies to merge: @(_PluginDeps->'%(Filename)')" Importance="high" />
-    <Message Text="[ILRepack] Library paths: $(ILRepackLibraryPaths)" Importance="high" />
-    <Message Text="[ILRepack] OutputPath: $(OutputPath)" Importance="high" />
+    <Message Text="[ILRepack] Library paths: $(_ILRepackLibraryPaths)" Importance="high" />
     <Message Text="[ILRepack] Merging plugin assemblies..." Importance="high" />
 
     <!-- NOTE: Internalize="true" prevents merged assembly types from conflicting with Lidarr types -->
@@ -72,7 +76,7 @@
       TargetKind="Dll"
       InputAssemblies="@(_AssembliesToMerge)"
       OutputFile="$(IntermediateOutputPath)$(AssemblyName).merged.dll"
-      LibraryPath="$(ILRepackLibraryPaths)" />
+      LibraryPath="$(_ILRepackLibraryPaths)" />
 
     <Copy SourceFiles="$(IntermediateOutputPath)$(AssemblyName).merged.dll"
           DestinationFiles="$(OutputPath)$(PluginAssemblyFileName)"
