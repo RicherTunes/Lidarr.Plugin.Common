@@ -56,6 +56,8 @@
     </ItemGroup>
 
     <Message Text="[ILRepack] Found dependencies to merge: @(_PluginDeps->'%(Filename)')" Importance="high" />
+    <Message Text="[ILRepack] Library paths: $(ILRepackLibraryPaths)" Importance="high" />
+    <Message Text="[ILRepack] OutputPath: $(OutputPath)" Importance="high" />
     <Message Text="[ILRepack] Merging plugin assemblies..." Importance="high" />
 
     <!-- NOTE: Internalize="true" prevents merged assembly types from conflicting with Lidarr types -->
