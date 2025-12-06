@@ -461,6 +461,174 @@ async function enableShowAdvanced(page) {
   }
 }
 
+// Helper to enable plugin protocol in Delay Profiles
+// This is required for streaming plugins (Tidalarr, Qobuzarr, etc.) to appear in Indexer/Download Client settings
+async function enablePluginProtocol(page, pluginName, baseUrl) {
+  console.log(`Enabling protocol for ${pluginName} in Delay Profiles...`);
+
+  try {
+    // Navigate to Profiles page
+    await page.goto(`${baseUrl}/settings/profiles`, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(500);
+
+    // Look for Delay Profiles section
+    const delayProfilesHeader = page.locator('h3, h4, div[class*="header"]').filter({ hasText: /delay\s*profiles/i }).first();
+    if (await delayProfilesHeader.count()) {
+      console.log('Found Delay Profiles section');
+      await delayProfilesHeader.scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(300);
+    }
+
+    // Find the wrench/edit icon button for the default delay profile
+    // Lidarr uses various icon patterns - try multiple selectors
+    const editSelectors = [
+      // Wrench icon button within delay profile card/row
+      '[class*="DelayProfile"] button[class*="edit" i]',
+      '[class*="DelayProfile"] [class*="icon-wrench"]',
+      '[class*="DelayProfile"] [class*="iconButton"]',
+      '[class*="delayProfile" i] button:has([class*="icon"])',
+      // Generic edit button near delay profiles
+      'div:has(> [class*="DelayProfile"]) button[title*="edit" i]',
+      'div:has(> [class*="DelayProfile"]) button[title*="settings" i]',
+      // Row-based edit buttons
+      '[class*="row" i]:has-text("Delay Profile") button[class*="icon"]',
+      // Table row edit button
+      'tr:has-text("Delay") button',
+      // Any clickable element with wrench/settings icon
+      '[class*="DelayProfile"] [class*="fa-wrench"]',
+      '[class*="DelayProfile"] svg[class*="wrench"]',
+      // Fallback: first edit-like button in delay profiles area
+      '[class*="delay" i] button:first-of-type',
+    ];
+
+    let editClicked = false;
+    for (const selector of editSelectors) {
+      const editBtn = page.locator(selector).first();
+      const count = await editBtn.count().catch(() => 0);
+      if (count > 0) {
+        console.log(`Found edit button with selector: ${selector}`);
+        try {
+          await editBtn.click({ timeout: 3000 });
+          await page.waitForTimeout(800);
+          editClicked = true;
+          break;
+        } catch (e) {
+          console.log(`Click failed for ${selector}: ${e?.message || e}`);
+        }
+      }
+    }
+
+    if (!editClicked) {
+      // Try clicking any card/row in the delay profiles section to open edit modal
+      const delayCard = page.locator('[class*="DelayProfile"], [class*="delayProfile"]').first();
+      if (await delayCard.count()) {
+        console.log('Clicking delay profile card directly...');
+        await delayCard.click({ timeout: 3000 }).catch(() => {});
+        await page.waitForTimeout(800);
+        editClicked = true;
+      }
+    }
+
+    if (!editClicked) {
+      console.log('Could not find delay profile edit button, trying alternative approach...');
+      // Debug: dump page structure around delay profiles
+      const profilesArea = await page.evaluate(() => {
+        const els = document.querySelectorAll('[class*="delay" i], [class*="Delay"]');
+        return Array.from(els).slice(0, 10).map(el => ({
+          tag: el.tagName,
+          className: el.className?.substring(0, 80),
+          buttons: Array.from(el.querySelectorAll('button')).map(b => b.className?.substring(0, 40))
+        }));
+      }).catch(() => []);
+      console.log('Delay profiles area elements:', JSON.stringify(profilesArea, null, 2));
+      return false;
+    }
+
+    // Wait for modal to appear
+    await page.waitForTimeout(500);
+
+    // Look for protocol checkboxes in the modal
+    // The protocol name is usually based on the plugin name (e.g., "TidalarrDownloadProtocol", "QobuzarrDownloadProtocol")
+    const protocolPatterns = [
+      pluginName,
+      `${pluginName}DownloadProtocol`,
+      `${pluginName.toLowerCase()}`,
+      pluginName.replace(/arr$/i, ''),  // "Tidal" from "Tidalarr"
+    ];
+
+    console.log('Looking for protocol checkboxes with patterns:', protocolPatterns);
+
+    // Debug: dump all checkboxes/labels in the modal
+    const modalCheckboxes = await page.evaluate(() => {
+      const modal = document.querySelector('[class*="Modal"], [role="dialog"]');
+      if (!modal) return [];
+      const labels = modal.querySelectorAll('label, [class*="checkbox" i], [class*="toggle" i]');
+      return Array.from(labels).map(el => ({
+        text: el.textContent?.trim().substring(0, 50),
+        className: el.className?.substring(0, 50)
+      }));
+    }).catch(() => []);
+    console.log('Modal checkboxes/labels:', JSON.stringify(modalCheckboxes, null, 2));
+
+    // Try to find and click the protocol checkbox
+    let protocolEnabled = false;
+    for (const pattern of protocolPatterns) {
+      // Try various checkbox/toggle selectors
+      const checkboxSelectors = [
+        `label:has-text("${pattern}")`,
+        `[class*="checkbox" i]:has-text("${pattern}")`,
+        `[class*="toggle" i]:has-text("${pattern}")`,
+        `input[type="checkbox"][name*="${pattern}" i]`,
+        `div:has-text("${pattern}") input[type="checkbox"]`,
+      ];
+
+      for (const selector of checkboxSelectors) {
+        const checkbox = page.locator(selector).first();
+        if (await checkbox.count().catch(() => 0)) {
+          console.log(`Found protocol checkbox with selector: ${selector}`);
+          try {
+            // Check if already enabled
+            const isChecked = await checkbox.isChecked().catch(() => false);
+            if (!isChecked) {
+              await checkbox.click({ timeout: 2000 });
+              console.log(`Enabled protocol: ${pattern}`);
+            } else {
+              console.log(`Protocol already enabled: ${pattern}`);
+            }
+            protocolEnabled = true;
+            break;
+          } catch (e) {
+            console.log(`Checkbox interaction failed: ${e?.message || e}`);
+          }
+        }
+      }
+      if (protocolEnabled) break;
+    }
+
+    if (!protocolEnabled) {
+      console.log('Could not find protocol checkbox, may already be enabled or different UI pattern');
+    }
+
+    // Save changes - look for save button
+    const saveBtn = page.locator('button').filter({ hasText: /save/i }).first();
+    if (await saveBtn.count()) {
+      await saveBtn.click({ timeout: 3000 }).catch(() => {});
+      console.log('Saved delay profile changes');
+      await page.waitForTimeout(500);
+    }
+
+    // Close modal if still open
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(300);
+
+    return protocolEnabled;
+  } catch (err) {
+    console.warn(`Could not enable protocol: ${err?.message || err}`);
+    return false;
+  }
+}
+
 async function run() {
   const browser = await chromium.launch({ headless: true });
   try {
@@ -512,6 +680,14 @@ async function run() {
     await screenshotOrSkip(page, 'settings', async () => {
       await page.waitForTimeout(500);
     });
+
+    // Enable plugin protocol in Delay Profiles (required for streaming plugins like Tidalarr/Qobuzarr)
+    // This must be done BEFORE capturing indexer/download-client screenshots
+    if (PLUGIN_TYPES.includes('indexer') || PLUGIN_TYPES.includes('download-client')) {
+      console.log('\n=== Enabling plugin protocol for indexer/download-client visibility ===');
+      await enablePluginProtocol(page, PLUGIN_NAME, BASE);
+      await goSettings();
+    }
 
     // Capture type-specific screenshots
     if (PLUGIN_TYPES.includes('indexer')) {
