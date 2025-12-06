@@ -26,7 +26,10 @@
     <EnablePluginDeployment Condition="'$(EnablePluginDeployment)' == ''">false</EnablePluginDeployment>
     <PluginPackagingDisable Condition="'$(PluginPackagingDisable)' == ''">false</PluginPackagingDisable>
     <LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$(MSBuildProjectDirectory)/ext/Lidarr/_output/net6.0;$(MSBuildProjectDirectory)/ext/Lidarr/_output/net8.0</LidarrAssembliesPath>
-        <ILRepackLibraryPaths>$(OutputPath);$(LidarrAssembliesPath)</ILRepackLibraryPaths>
+    <!-- Include paths for Abstractions and Common DLLs which may be in separate output directories -->
+    <CommonLibraryPath Condition="'$(CommonLibraryPath)' == ''">$(MSBuildProjectDirectory)/ext/Lidarr.Plugin.Common/src/bin/$(Configuration)/$(TargetFramework)</CommonLibraryPath>
+    <AbstractionsPath Condition="'$(AbstractionsPath)' == ''">$(MSBuildProjectDirectory)/ext/Lidarr.Plugin.Common/src/Abstractions/bin/$(Configuration)/$(TargetFramework)</AbstractionsPath>
+    <ILRepackLibraryPaths>$(OutputPath);$(LidarrAssembliesPath);$(CommonLibraryPath);$(AbstractionsPath)</ILRepackLibraryPaths>
     <!-- Disable ILRepack.Lib.MSBuild.Task built-in target - we use our own RepackPlugin target -->
     <ILRepackEnabled>false</ILRepackEnabled>
   </PropertyGroup>
