@@ -25,11 +25,15 @@
     <PluginManifestFileName Condition="'$(PluginManifestFileName)' == ''">plugin.json</PluginManifestFileName>
     <EnablePluginDeployment Condition="'$(EnablePluginDeployment)' == ''">false</EnablePluginDeployment>
     <PluginPackagingDisable Condition="'$(PluginPackagingDisable)' == ''">false</PluginPackagingDisable>
-    <LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$(MSBuildProjectDirectory)/ext/Lidarr/_output/net6.0;$(MSBuildProjectDirectory)/ext/Lidarr/_output/net8.0</LidarrAssembliesPath>
-    <!-- Include paths for Abstractions and Common DLLs which may be in separate output directories -->
-    <CommonLibraryPath Condition="'$(CommonLibraryPath)' == ''">$(MSBuildProjectDirectory)/ext/Lidarr.Plugin.Common/src/bin/$(Configuration)/$(TargetFramework)</CommonLibraryPath>
-    <AbstractionsPath Condition="'$(AbstractionsPath)' == ''">$(MSBuildProjectDirectory)/ext/Lidarr.Plugin.Common/src/Abstractions/bin/$(Configuration)/$(TargetFramework)</AbstractionsPath>
-    <ILRepackLibraryPaths>$(OutputPath);$(LidarrAssembliesPath);$(CommonLibraryPath);$(AbstractionsPath)</ILRepackLibraryPaths>
+    <!-- Use MSBuildThisFileDirectory (targets file location) for paths relative to Common submodule -->
+    <!-- This file is at ext/Lidarr.Plugin.Common/build/, so ../ goes to ext/Lidarr.Plugin.Common/ -->
+    <CommonLibraryPath Condition="'$(CommonLibraryPath)' == ''">$(MSBuildThisFileDirectory)../src/bin/$(Configuration)/$(TargetFramework)</CommonLibraryPath>
+    <AbstractionsPath Condition="'$(AbstractionsPath)' == ''">$(MSBuildThisFileDirectory)../src/Abstractions/bin/$(Configuration)/$(TargetFramework)</AbstractionsPath>
+    <!-- Use MSBuildProjectDirectory (plugin project location) for ext/Lidarr paths - go up to repo root -->
+    <!-- Plugin projects are typically at src/PluginName/, so ../../ goes to repo root -->
+    <LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net6.0;$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net8.0</LidarrAssembliesPath>
+    <!-- ILRepackLibraryPaths: Use TargetDir (absolute path) instead of OutputPath (relative) -->
+    <ILRepackLibraryPaths>$(TargetDir);$(LidarrAssembliesPath);$(CommonLibraryPath);$(AbstractionsPath)</ILRepackLibraryPaths>
     <!-- Disable ILRepack.Lib.MSBuild.Task built-in target - we use our own RepackPlugin target -->
     <ILRepackEnabled>false</ILRepackEnabled>
   </PropertyGroup>
