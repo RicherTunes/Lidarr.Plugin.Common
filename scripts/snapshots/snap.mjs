@@ -69,37 +69,205 @@ async function screenshotOrSkip(page, name, fn) {
 }
 
 
-// Helper to click plugin card in add modal and wait for config dialog
-async function clickPluginCard(page, pluginName) {
+// Helper to open add modal and find plugin card
+async function openAddModalAndFindPlugin(page, pluginName) {
   await page.waitForTimeout(500);
 
-  // First, ensure we are in a modal by waiting for modal content
-  const modal = page.locator('[class*="ModalContent"], [class*="modalContent"], div[class*="Modal"]').first();
-  const modalVisible = await modal.isVisible().catch(() => false);
+  // Try multiple selectors for the add card/button (Lidarr uses various patterns)
+  const addSelectors = [
+    // Lidarr import list specific patterns
+    '[class*="ImportList"] [class*="add" i]',
+    '[class*="importList"] [class*="add" i]',
+    // Card-style add buttons (div/a with + icon) - case insensitive
+    '[class*="AddNew" i]',
+    '[class*="addListItem" i]',
+    '[class*="ListItemAdd" i]',
+    // Generic card with + icon
+    '[class*="Card"]:has-text("+")',
+    '[class*="card"]:has-text("+")',
+    '[class*="Poster"]:has-text("+")',
+    // The + icon itself or its container
+    'div:has(> [class*="icon" i]:has-text("+"))',
+    // Button-style add
+    'button:has-text("Add")',
+    'button:has-text("+")',
+  ];
 
-  if (!modalVisible) {
+  console.log('Searching for add button/card...');
+
+  // Debug: Log elements with "+" text
+  const plusElements = await page.locator('*:has-text("+")').evaluateAll(els =>
+    els.slice(0, 10).map(el => ({
+      tag: el.tagName,
+      className: el.className,
+      text: el.textContent?.substring(0, 50)
+    }))
+  ).catch(() => []);
+  console.log('Elements with "+":', JSON.stringify(plusElements, null, 2));
+
+  let clicked = false;
+  for (const selector of addSelectors) {
+    const addBtn = page.locator(selector).first();
+    const count = await addBtn.count().catch(() => 0);
+    if (count > 0) {
+      console.log(`Found add element with selector: ${selector}`);
+      try {
+        await addBtn.click({ timeout: 3000 });
+        await page.waitForTimeout(800);
+        clicked = true;
+        break;
+      } catch (e) {
+        console.log(`Click failed for ${selector}: ${e?.message || e}`);
+      }
+    }
+  }
+
+  if (!clicked) {
+    console.log('Could not find add button/card with any selector');
+  }
+
+  // Wait for modal to appear - try multiple selector patterns
+  const modalSelectors = [
+    '[class*="ModalContent"]',
+    '[class*="modalContent"]',
+    '[class*="Modal-content"]',
+    '[class*="modal-content"]',
+    '[class*="ModalBody"]',
+    '[class*="modalBody"]',
+    'div[role="dialog"]',
+    '[class*="Modal"]:has(h2, h3)',  // Modal with header
+    '[class*="modal"]:has(h2, h3)',
+    '.modal-open [class*="Modal"]',
+    // Lidarr specific - look for modal with "Add" in title
+    'div:has(> [class*="ModalHeader"]:has-text("Add"))',
+  ];
+
+  let modal = null;
+  for (const selector of modalSelectors) {
+    const candidate = page.locator(selector).first();
+    try {
+      await candidate.waitFor({ state: 'visible', timeout: 2000 });
+      modal = candidate;
+      console.log(`Modal found with selector: ${selector}`);
+      break;
+    } catch {
+      // Try next selector
+    }
+  }
+
+  if (!modal) {
+    // Debug: dump what elements appeared after click
+    const pageStructure = await page.evaluate(() => {
+      const modals = document.querySelectorAll('[class*="modal" i], [class*="Modal"], [role="dialog"]');
+      return Array.from(modals).slice(0, 5).map(el => ({
+        tag: el.tagName,
+        className: el.className?.substring?.(0, 100) || '',
+        visible: el.offsetParent !== null,
+        text: el.textContent?.substring(0, 100)
+      }));
+    }).catch(() => []);
+    console.log('Elements with modal-like classes after click:', JSON.stringify(pageStructure, null, 2));
+
+    console.log('No modal appeared after clicking add button');
+    return { modal: null, found: false };
+  }
+
+  console.log('Modal opened, looking for plugin card...');
+
+  // Try to use modal-specific filter/search if available (NOT global search bar)
+  const modalSearch = modal.locator('input[type="text"], input[placeholder*="filter" i], input[placeholder*="search" i]').first();
+  if (await modalSearch.count().catch(() => 0)) {
+    console.log('Found modal-specific search/filter, using it...');
+    await modalSearch.fill(pluginName).catch(() => {});
+    await page.waitForTimeout(500);
+  }
+
+  return { modal, found: true };
+}
+
+// Helper to click plugin card in add modal and wait for config dialog
+async function clickPluginCard(page, pluginName, modal = null) {
+  await page.waitForTimeout(500);
+
+  // If no modal provided, try to find one using multiple selectors
+  if (!modal) {
+    const modalSelectors = [
+      '[class*="ModalContent"]',
+      '[class*="modalContent"]',
+      '[class*="Modal-content"]',
+      '[class*="modal-content"]',
+      '[class*="ModalBody"]',
+      '[class*="modalBody"]',
+      'div[role="dialog"]',
+      '[class*="Modal"]:has(h2, h3)',
+      '[class*="modal"]:has(h2, h3)',
+    ];
+
+    for (const selector of modalSelectors) {
+      const candidate = page.locator(selector).first();
+      if (await candidate.isVisible().catch(() => false)) {
+        modal = candidate;
+        console.log(`Found existing modal with selector: ${selector}`);
+        break;
+      }
+    }
+  }
+
+  if (!modal || !(await modal.isVisible().catch(() => false))) {
     console.log('No modal detected, cannot click plugin card');
     return false;
   }
 
   console.log('Modal detected, searching for plugin card...');
 
-  // Selectors scoped to modal content only - NO li selector to avoid global search autocomplete
+  // Debug: Dump all visible provider cards in modal
+  const allCards = await modal.locator('div[class*="card" i], div[class*="Card"], a[class*="card" i], a[class*="Card"]').evaluateAll(els =>
+    els.slice(0, 30).map(el => ({
+      tag: el.tagName,
+      className: el.className?.substring(0, 80),
+      text: el.textContent?.trim().substring(0, 50)
+    }))
+  ).catch(() => []);
+  console.log('Modal cards found:', JSON.stringify(allCards, null, 2));
+
+  // Debug: Dump all section headers in modal
+  const sectionHeaders = await modal.locator('h2, h3, h4, [class*="header" i], [class*="section" i]').evaluateAll(els =>
+    els.slice(0, 15).map(el => el.textContent?.trim().substring(0, 50))
+  ).catch(() => []);
+  console.log('Modal section headers:', sectionHeaders);
+
+  // Scroll through modal to load all content (some providers may be below the fold)
+  const scrollableArea = modal.locator('[class*="ModalBody"], [class*="modalBody"], [class*="scroller"]').first();
+  if (await scrollableArea.count().catch(() => 0)) {
+    console.log('Scrolling through modal content...');
+    await scrollableArea.evaluate(el => el.scrollTo(0, el.scrollHeight)).catch(() => {});
+    await page.waitForTimeout(500);
+    await scrollableArea.evaluate(el => el.scrollTo(0, 0)).catch(() => {});
+    await page.waitForTimeout(300);
+  }
+
+  // Selectors scoped to modal content only
   const selectors = [
-    `[class*="ModalContent"] div[class*="AddNewItem"]:has-text("${pluginName}")`,
-    `[class*="modalContent"] div[class*="AddNewItem"]:has-text("${pluginName}")`,
-    `[class*="ModalContent"] div[class*="selectableCard"]:has-text("${pluginName}")`,
-    `[class*="modalContent"] div[class*="selectableCard"]:has-text("${pluginName}")`,
-    `[class*="Modal"] div[class*="AddNewItem"]:has-text("${pluginName}")`,
-    `[class*="Modal"] div[class*="card"]:has-text("${pluginName}")`,
+    // Standard Lidarr plugin card selectors
+    `div[class*="AddNewItem"]:has-text("${pluginName}")`,
+    `div[class*="selectableCard"]:has-text("${pluginName}")`,
+    `div[class*="card"]:has-text("${pluginName}")`,
+    `div[class*="Card"]:has-text("${pluginName}")`,
+    // Link-style cards
+    `a[class*="card"]:has-text("${pluginName}")`,
+    `a[class*="Card"]:has-text("${pluginName}")`,
   ];
 
   for (const selector of selectors) {
-    const card = page.locator(selector).first();
+    // Scope to modal only
+    const card = modal.locator(selector).first();
     const count = await card.count().catch(() => 0);
-    console.log(`Checking selector: ${selector} - found: ${count}`);
+    console.log(`Checking modal selector: ${selector} - found: ${count}`);
     if (count > 0) {
       try {
+        // Scroll card into view first
+        await card.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(300);
         await card.click({ timeout: 3000 });
         await page.waitForTimeout(1500);
         // Check if config dialog opened (should have form inputs)
@@ -114,11 +282,19 @@ async function clickPluginCard(page, pluginName) {
     }
   }
 
-  // Fallback: look for exact text match within modal only
-  const exactMatch = modal.locator('div, span').filter({ hasText: new RegExp(`^${pluginName}$`, 'i') }).first();
+  // Fallback: look for exact text match within modal and scroll to it
+  const exactMatch = modal.locator('div, span, h3, h4').filter({ hasText: new RegExp(`^${pluginName}$`, 'i') }).first();
   if (await exactMatch.count().catch(() => 0)) {
-    console.log('Found exact match within modal, clicking...');
-    await exactMatch.click({ timeout: 3000 }).catch(() => {});
+    console.log('Found exact text match within modal, scrolling and clicking...');
+    await exactMatch.scrollIntoViewIfNeeded({ timeout: 2000 }).catch(() => {});
+    await page.waitForTimeout(300);
+    // Click the parent card element, not just the text
+    const parentCard = exactMatch.locator('xpath=ancestor::div[contains(@class, "card") or contains(@class, "Card") or contains(@class, "AddNewItem")]').first();
+    if (await parentCard.count().catch(() => 0)) {
+      await parentCard.click({ timeout: 3000 }).catch(() => {});
+    } else {
+      await exactMatch.click({ timeout: 3000 }).catch(() => {});
+    }
     await page.waitForTimeout(1500);
     return true;
   }
@@ -140,23 +316,36 @@ async function captureIndexerScreenshots(page) {
     await page.waitForTimeout(500);
   });
 
-  // Add Indexer modal
+  // Open Add Indexer modal and find plugin card (for add-modal screenshot)
+  let modalRef = null;
   await screenshotOrSkip(page, 'indexer-add-modal', async () => {
-    const addBtn = page.getByRole('button', { name: /add/i }).first();
-    if (await addBtn.count()) {
-      await addBtn.click({ timeout: 2000 }).catch(() => {});
-      await page.waitForTimeout(500);
-    }
-    const search = page.getByPlaceholder(/search/i).first();
-    if (await search.count()) {
-      await search.fill(PLUGIN_NAME).catch(() => {});
-      await page.waitForTimeout(500);
+    const result = await openAddModalAndFindPlugin(page, PLUGIN_NAME);
+    modalRef = result.modal;
+    // Screenshot shows the modal with plugin card visible (scrolled into view if needed)
+    if (modalRef) {
+      await clickPluginCard(page, PLUGIN_NAME, modalRef).catch(() => {});
+      // After clicking, we're now in config - go back for add-modal screenshot
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      // Re-open modal for screenshot
+      const addBtn = page.locator('button').filter({ hasText: /add/i }).first();
+      if (await addBtn.count().catch(() => 0)) {
+        await addBtn.click({ timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(500);
+      }
     }
   });
 
   // Plugin configuration - click the plugin card to open config modal
   await screenshotOrSkip(page, 'indexer-config', async () => {
-    await clickPluginCard(page, PLUGIN_NAME);
+    const clicked = await clickPluginCard(page, PLUGIN_NAME);
+    if (!clicked) {
+      // Try opening modal fresh
+      const result = await openAddModalAndFindPlugin(page, PLUGIN_NAME);
+      if (result.modal) {
+        await clickPluginCard(page, PLUGIN_NAME, result.modal);
+      }
+    }
   });
 
   await page.keyboard.press('Escape');
@@ -176,23 +365,32 @@ async function captureDownloadClientScreenshots(page) {
     await page.waitForTimeout(500);
   });
 
-  // Add Download Client modal
+  // Open Add Download Client modal and find plugin card
+  let modalRef = null;
   await screenshotOrSkip(page, 'download-client-add-modal', async () => {
-    const addBtn = page.getByRole('button', { name: /add/i }).first();
-    if (await addBtn.count()) {
-      await addBtn.click({ timeout: 2000 }).catch(() => {});
-      await page.waitForTimeout(500);
-    }
-    const search = page.getByPlaceholder(/search/i).first();
-    if (await search.count()) {
-      await search.fill(PLUGIN_NAME).catch(() => {});
-      await page.waitForTimeout(500);
+    const result = await openAddModalAndFindPlugin(page, PLUGIN_NAME);
+    modalRef = result.modal;
+    if (modalRef) {
+      await clickPluginCard(page, PLUGIN_NAME, modalRef).catch(() => {});
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      const addBtn = page.locator('button').filter({ hasText: /add/i }).first();
+      if (await addBtn.count().catch(() => 0)) {
+        await addBtn.click({ timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(500);
+      }
     }
   });
 
   // Plugin configuration - click the plugin card to open config modal
   await screenshotOrSkip(page, 'download-client-config', async () => {
-    await clickPluginCard(page, PLUGIN_NAME);
+    const clicked = await clickPluginCard(page, PLUGIN_NAME);
+    if (!clicked) {
+      const result = await openAddModalAndFindPlugin(page, PLUGIN_NAME);
+      if (result.modal) {
+        await clickPluginCard(page, PLUGIN_NAME, result.modal);
+      }
+    }
   });
 
   await page.keyboard.press('Escape');
@@ -212,23 +410,32 @@ async function captureImportListScreenshots(page) {
     await page.waitForTimeout(500);
   });
 
-  // Add Import List modal
+  // Open Add Import List modal and find plugin card
+  let modalRef = null;
   await screenshotOrSkip(page, 'import-list-add-modal', async () => {
-    const addBtn = page.getByRole('button', { name: /add/i }).first();
-    if (await addBtn.count()) {
-      await addBtn.click({ timeout: 2000 }).catch(() => {});
-      await page.waitForTimeout(500);
-    }
-    const search = page.getByPlaceholder(/search/i).first();
-    if (await search.count()) {
-      await search.fill(PLUGIN_NAME).catch(() => {});
-      await page.waitForTimeout(500);
+    const result = await openAddModalAndFindPlugin(page, PLUGIN_NAME);
+    modalRef = result.modal;
+    if (modalRef) {
+      await clickPluginCard(page, PLUGIN_NAME, modalRef).catch(() => {});
+      await page.keyboard.press('Escape');
+      await page.waitForTimeout(300);
+      const addBtn = page.locator('button').filter({ hasText: /add/i }).first();
+      if (await addBtn.count().catch(() => 0)) {
+        await addBtn.click({ timeout: 2000 }).catch(() => {});
+        await page.waitForTimeout(500);
+      }
     }
   });
 
   // Plugin configuration - click the plugin card to open config modal
   await screenshotOrSkip(page, 'import-list-config', async () => {
-    await clickPluginCard(page, PLUGIN_NAME);
+    const clicked = await clickPluginCard(page, PLUGIN_NAME);
+    if (!clicked) {
+      const result = await openAddModalAndFindPlugin(page, PLUGIN_NAME);
+      if (result.modal) {
+        await clickPluginCard(page, PLUGIN_NAME, result.modal);
+      }
+    }
   });
 
   await page.keyboard.press('Escape');
@@ -251,6 +458,174 @@ async function enableShowAdvanced(page) {
     }
   } catch (err) {
     console.warn(`Could not enable Show Advanced: ${err?.message || err}`);
+  }
+}
+
+// Helper to enable plugin protocol in Delay Profiles
+// This is required for streaming plugins (Tidalarr, Qobuzarr, etc.) to appear in Indexer/Download Client settings
+async function enablePluginProtocol(page, pluginName, baseUrl) {
+  console.log(`Enabling protocol for ${pluginName} in Delay Profiles...`);
+
+  try {
+    // Navigate to Profiles page
+    await page.goto(`${baseUrl}/settings/profiles`, { waitUntil: 'domcontentloaded' });
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(500);
+
+    // Look for Delay Profiles section
+    const delayProfilesHeader = page.locator('h3, h4, div[class*="header"]').filter({ hasText: /delay\s*profiles/i }).first();
+    if (await delayProfilesHeader.count()) {
+      console.log('Found Delay Profiles section');
+      await delayProfilesHeader.scrollIntoViewIfNeeded().catch(() => {});
+      await page.waitForTimeout(300);
+    }
+
+    // Find the wrench/edit icon button for the default delay profile
+    // Lidarr uses various icon patterns - try multiple selectors
+    const editSelectors = [
+      // Wrench icon button within delay profile card/row
+      '[class*="DelayProfile"] button[class*="edit" i]',
+      '[class*="DelayProfile"] [class*="icon-wrench"]',
+      '[class*="DelayProfile"] [class*="iconButton"]',
+      '[class*="delayProfile" i] button:has([class*="icon"])',
+      // Generic edit button near delay profiles
+      'div:has(> [class*="DelayProfile"]) button[title*="edit" i]',
+      'div:has(> [class*="DelayProfile"]) button[title*="settings" i]',
+      // Row-based edit buttons
+      '[class*="row" i]:has-text("Delay Profile") button[class*="icon"]',
+      // Table row edit button
+      'tr:has-text("Delay") button',
+      // Any clickable element with wrench/settings icon
+      '[class*="DelayProfile"] [class*="fa-wrench"]',
+      '[class*="DelayProfile"] svg[class*="wrench"]',
+      // Fallback: first edit-like button in delay profiles area
+      '[class*="delay" i] button:first-of-type',
+    ];
+
+    let editClicked = false;
+    for (const selector of editSelectors) {
+      const editBtn = page.locator(selector).first();
+      const count = await editBtn.count().catch(() => 0);
+      if (count > 0) {
+        console.log(`Found edit button with selector: ${selector}`);
+        try {
+          await editBtn.click({ timeout: 3000 });
+          await page.waitForTimeout(800);
+          editClicked = true;
+          break;
+        } catch (e) {
+          console.log(`Click failed for ${selector}: ${e?.message || e}`);
+        }
+      }
+    }
+
+    if (!editClicked) {
+      // Try clicking any card/row in the delay profiles section to open edit modal
+      const delayCard = page.locator('[class*="DelayProfile"], [class*="delayProfile"]').first();
+      if (await delayCard.count()) {
+        console.log('Clicking delay profile card directly...');
+        await delayCard.click({ timeout: 3000 }).catch(() => {});
+        await page.waitForTimeout(800);
+        editClicked = true;
+      }
+    }
+
+    if (!editClicked) {
+      console.log('Could not find delay profile edit button, trying alternative approach...');
+      // Debug: dump page structure around delay profiles
+      const profilesArea = await page.evaluate(() => {
+        const els = document.querySelectorAll('[class*="delay" i], [class*="Delay"]');
+        return Array.from(els).slice(0, 10).map(el => ({
+          tag: el.tagName,
+          className: el.className?.substring(0, 80),
+          buttons: Array.from(el.querySelectorAll('button')).map(b => b.className?.substring(0, 40))
+        }));
+      }).catch(() => []);
+      console.log('Delay profiles area elements:', JSON.stringify(profilesArea, null, 2));
+      return false;
+    }
+
+    // Wait for modal to appear
+    await page.waitForTimeout(500);
+
+    // Look for protocol checkboxes in the modal
+    // The protocol name is usually based on the plugin name (e.g., "TidalarrDownloadProtocol", "QobuzarrDownloadProtocol")
+    const protocolPatterns = [
+      pluginName,
+      `${pluginName}DownloadProtocol`,
+      `${pluginName.toLowerCase()}`,
+      pluginName.replace(/arr$/i, ''),  // "Tidal" from "Tidalarr"
+    ];
+
+    console.log('Looking for protocol checkboxes with patterns:', protocolPatterns);
+
+    // Debug: dump all checkboxes/labels in the modal
+    const modalCheckboxes = await page.evaluate(() => {
+      const modal = document.querySelector('[class*="Modal"], [role="dialog"]');
+      if (!modal) return [];
+      const labels = modal.querySelectorAll('label, [class*="checkbox" i], [class*="toggle" i]');
+      return Array.from(labels).map(el => ({
+        text: el.textContent?.trim().substring(0, 50),
+        className: el.className?.substring(0, 50)
+      }));
+    }).catch(() => []);
+    console.log('Modal checkboxes/labels:', JSON.stringify(modalCheckboxes, null, 2));
+
+    // Try to find and click the protocol checkbox
+    let protocolEnabled = false;
+    for (const pattern of protocolPatterns) {
+      // Try various checkbox/toggle selectors
+      const checkboxSelectors = [
+        `label:has-text("${pattern}")`,
+        `[class*="checkbox" i]:has-text("${pattern}")`,
+        `[class*="toggle" i]:has-text("${pattern}")`,
+        `input[type="checkbox"][name*="${pattern}" i]`,
+        `div:has-text("${pattern}") input[type="checkbox"]`,
+      ];
+
+      for (const selector of checkboxSelectors) {
+        const checkbox = page.locator(selector).first();
+        if (await checkbox.count().catch(() => 0)) {
+          console.log(`Found protocol checkbox with selector: ${selector}`);
+          try {
+            // Check if already enabled
+            const isChecked = await checkbox.isChecked().catch(() => false);
+            if (!isChecked) {
+              await checkbox.click({ timeout: 2000 });
+              console.log(`Enabled protocol: ${pattern}`);
+            } else {
+              console.log(`Protocol already enabled: ${pattern}`);
+            }
+            protocolEnabled = true;
+            break;
+          } catch (e) {
+            console.log(`Checkbox interaction failed: ${e?.message || e}`);
+          }
+        }
+      }
+      if (protocolEnabled) break;
+    }
+
+    if (!protocolEnabled) {
+      console.log('Could not find protocol checkbox, may already be enabled or different UI pattern');
+    }
+
+    // Save changes - look for save button
+    const saveBtn = page.locator('button').filter({ hasText: /save/i }).first();
+    if (await saveBtn.count()) {
+      await saveBtn.click({ timeout: 3000 }).catch(() => {});
+      console.log('Saved delay profile changes');
+      await page.waitForTimeout(500);
+    }
+
+    // Close modal if still open
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(300);
+
+    return protocolEnabled;
+  } catch (err) {
+    console.warn(`Could not enable protocol: ${err?.message || err}`);
+    return false;
   }
 }
 
@@ -305,6 +680,14 @@ async function run() {
     await screenshotOrSkip(page, 'settings', async () => {
       await page.waitForTimeout(500);
     });
+
+    // Enable plugin protocol in Delay Profiles (required for streaming plugins like Tidalarr/Qobuzarr)
+    // This must be done BEFORE capturing indexer/download-client screenshots
+    if (PLUGIN_TYPES.includes('indexer') || PLUGIN_TYPES.includes('download-client')) {
+      console.log('\n=== Enabling plugin protocol for indexer/download-client visibility ===');
+      await enablePluginProtocol(page, PLUGIN_NAME, BASE);
+      await goSettings();
+    }
 
     // Capture type-specific screenshots
     if (PLUGIN_TYPES.includes('indexer')) {
