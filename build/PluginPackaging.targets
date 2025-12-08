@@ -105,11 +105,17 @@
     <Delete Files="$(IntermediateOutputPath)$(AssemblyName).merged.pdb"
             Condition="Exists('$(IntermediateOutputPath)$(AssemblyName).merged.pdb')" />
 
+
+    <!-- Assemblies to keep (NOT merged but required at runtime).
+         FluentValidation can't be merged (breaks Test() signature) but is still needed. -->
     <ItemGroup>
-      <_ExtraAssemblies Include="$(OutputPath)*.dll" Exclude="$(OutputPath)$(PluginAssemblyFileName)" />
+      <_PluginRuntimeDeps Include="$(OutputPath)FluentValidation.dll" Condition="Exists('$(OutputPath)FluentValidation.dll')" />
+      <_PluginRuntimeDeps Include="@(PluginPackagingAdditionalKeep)" />
+      <_ExtraAssemblies Include="$(OutputPath)*.dll" Exclude="$(OutputPath)$(PluginAssemblyFileName);@(_PluginRuntimeDeps)" />
       <_ExtraSymbols Include="$(OutputPath)*.pdb" Exclude="$(OutputPath)$(PluginSymbolFileName)" />
     </ItemGroup>
 
+    <Message Text="[ILRepack] Keeping runtime dependencies: @(_PluginRuntimeDeps->'%(Filename)')" Importance="high" Condition="'@(_PluginRuntimeDeps)' != ''" />
     <Delete Files="@(_ExtraAssemblies)" />
     <Delete Files="@(_ExtraSymbols)" />
     <Delete Files="$(OutputPath)$(AssemblyName).deps.json" Condition="Exists('$(OutputPath)$(AssemblyName).deps.json')" />
