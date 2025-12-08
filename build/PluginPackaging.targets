@@ -66,6 +66,8 @@
       <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Options.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Options.dll')" />
       <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Primitives.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Primitives.dll')" />
       <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll')" />
+      <!-- FluentValidation - merge to avoid version conflicts with Lidarr host (plugins may use 11.x, Lidarr has 9.x) -->
+      <_PluginDeps Include="$(OutputPath)FluentValidation.dll" Condition="Exists('$(OutputPath)FluentValidation.dll')" />
       <_PluginDeps Include="@(PluginPackagingAdditionalMerge)" />
     </ItemGroup>
 
