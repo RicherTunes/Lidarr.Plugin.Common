@@ -57,6 +57,15 @@
       <_PluginDeps Include="$(OutputPath)Polly.Core.dll" Condition="Exists('$(OutputPath)Polly.Core.dll')" />
       <_PluginDeps Include="$(OutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(OutputPath)Polly.Extensions.Http.dll')" />
       <_PluginDeps Include="$(OutputPath)TagLibSharp*.dll" />
+      <!-- Microsoft.Extensions packages - merge to avoid version conflicts with Lidarr older versions.
+           Lidarr plugins branch uses older M.E.DI.Abstractions but plugins may need newer features. -->
+      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll')" />
+      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.DependencyInjection.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.DependencyInjection.dll')" />
+      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Caching.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Caching.Abstractions.dll')" />
+      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Caching.Memory.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Caching.Memory.dll')" />
+      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Options.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Options.dll')" />
+      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Primitives.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Primitives.dll')" />
+      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll')" />
       <_PluginDeps Include="@(PluginPackagingAdditionalMerge)" />
     </ItemGroup>
 
