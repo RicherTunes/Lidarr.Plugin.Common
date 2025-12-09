@@ -58,6 +58,16 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         Task<T> ExecuteAsync<T>(Func<Task<T>> operation);
 
         /// <summary>
+        /// Executes an operation through the circuit breaker with an operation name for logging.
+        /// </summary>
+        /// <typeparam name="T">The return type of the operation.</typeparam>
+        /// <param name="operation">The operation to execute.</param>
+        /// <param name="operationName">Human-readable name for logging and diagnostics.</param>
+        /// <returns>The result of the operation.</returns>
+        /// <exception cref="CircuitBreakerOpenException">Thrown when the circuit is open.</exception>
+        Task<T> ExecuteAsync<T>(Func<Task<T>> operation, string operationName);
+
+        /// <summary>
         /// Executes an operation through the circuit breaker with cancellation support.
         /// </summary>
         /// <typeparam name="T">The return type of the operation.</typeparam>
@@ -68,11 +78,30 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken);
 
         /// <summary>
+        /// Executes an operation through the circuit breaker with cancellation support and operation name.
+        /// </summary>
+        /// <typeparam name="T">The return type of the operation.</typeparam>
+        /// <param name="operation">The operation to execute.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <param name="operationName">Human-readable name for logging and diagnostics.</param>
+        /// <returns>The result of the operation.</returns>
+        /// <exception cref="CircuitBreakerOpenException">Thrown when the circuit is open.</exception>
+        Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken, string operationName);
+
+        /// <summary>
         /// Executes a void operation through the circuit breaker.
         /// </summary>
         /// <param name="operation">The operation to execute.</param>
         /// <exception cref="CircuitBreakerOpenException">Thrown when the circuit is open.</exception>
         Task ExecuteAsync(Func<Task> operation);
+
+        /// <summary>
+        /// Executes a void operation through the circuit breaker with an operation name for logging.
+        /// </summary>
+        /// <param name="operation">The operation to execute.</param>
+        /// <param name="operationName">Human-readable name for logging and diagnostics.</param>
+        /// <exception cref="CircuitBreakerOpenException">Thrown when the circuit is open.</exception>
+        Task ExecuteAsync(Func<Task> operation, string operationName);
 
         /// <summary>
         /// Executes a void operation through the circuit breaker with cancellation support.
@@ -81,6 +110,15 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         /// <param name="cancellationToken">Cancellation token.</param>
         /// <exception cref="CircuitBreakerOpenException">Thrown when the circuit is open.</exception>
         Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken);
+
+        /// <summary>
+        /// Executes a void operation through the circuit breaker with cancellation support and operation name.
+        /// </summary>
+        /// <param name="operation">The operation to execute.</param>
+        /// <param name="cancellationToken">Cancellation token.</param>
+        /// <param name="operationName">Human-readable name for logging and diagnostics.</param>
+        /// <exception cref="CircuitBreakerOpenException">Thrown when the circuit is open.</exception>
+        Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken, string operationName);
 
         /// <summary>
         /// Manually records a successful operation.
