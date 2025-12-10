@@ -8,10 +8,10 @@ on:
         required: true
         type: string
       lidarr_docker_version:
-        description: 'Lidarr Docker image version (e.g., pr-plugins-2.14.2.4786)'
+        description: 'Lidarr Docker image version (e.g., pr-plugins-3.1.1.4884)'
         required: false
         type: string
-        default: 'pr-plugins-2.14.2.4786'
+        default: 'pr-plugins-3.1.1.4884'
       test_plugins:
         description: 'Comma-separated list of plugins to test (default: all)'
         required: false
@@ -199,22 +199,13 @@ jobs:
               sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' ext/Lidarr.Plugin.Common/NuGet.config
           fi
 
-          # Tidalarr uses hardcoded path in HostBridge: ext/Lidarr/_output/net8.0
-          # Build both the main plugin and the HostBridge
+          # Build only the main plugin - HostBridge requires internal NzbDrone.Core types
+          # (FieldDefinitionAttribute, FieldType, IDownloadProtocol, etc.) not present in
+          # Docker-extracted assemblies. Tidalarr's own CI excludes HostBridge with
+          # ExcludeHostBridge=true for the same reason.
           dotnet restore src/Tidalarr/Tidalarr.csproj \
             /p:TargetFramework=net8.0
-          dotnet restore src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj \
-            /p:TargetFramework=net8.0
           dotnet build src/Tidalarr/Tidalarr.csproj \
-            --configuration Release \
-            --no-restore \
-            --framework net8.0 \
-            -p:PluginPackagingDisable=true \
-            -p:RunAnalyzersDuringBuild=false \
-            -p:EnableNETAnalyzers=false \
-            -p:TreatWarningsAsErrors=false \
-            -m:1
-          dotnet build src/Tidalarr.HostBridge/Tidalarr.HostBridge.csproj \
             --configuration Release \
             --no-restore \
             --framework net8.0 \

@@ -206,26 +206,38 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         /// <inheritdoc />
         public async Task<T> ExecuteAsync<T>(Func<Task<T>> operation)
         {
-            return await ExecuteAsync(_ => operation(), CancellationToken.None).ConfigureAwait(false);
+            return await ExecuteAsync(_ => operation(), CancellationToken.None, null).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc />
+        public async Task<T> ExecuteAsync<T>(Func<Task<T>> operation, string operationName)
+        {
+            return await ExecuteAsync(_ => operation(), CancellationToken.None, operationName).ConfigureAwait(false);
         }
 
         /// <inheritdoc />
         public async Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken)
         {
+            return await ExecuteAsync(operation, cancellationToken, null).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc />
+        public async Task<T> ExecuteAsync<T>(Func<CancellationToken, Task<T>> operation, CancellationToken cancellationToken, string operationName)
+        {
             if (operation == null)
                 throw new ArgumentNullException(nameof(operation));
 
-            EnsureCircuitAllowsRequest();
+            EnsureCircuitAllowsRequest(operationName);
 
             try
             {
                 var result = await operation(cancellationToken).ConfigureAwait(false);
-                RecordSuccess();
+                RecordSuccess(operationName);
                 return result;
             }
             catch (Exception ex) when (ShouldHandleException(ex))
             {
-                RecordFailure();
+                RecordFailure(operationName, ex);
                 throw;
             }
         }
@@ -233,31 +245,51 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         /// <inheritdoc />
         public async Task ExecuteAsync(Func<Task> operation)
         {
-            await ExecuteAsync(_ => operation(), CancellationToken.None).ConfigureAwait(false);
+            await ExecuteAsync(_ => operation(), CancellationToken.None, null).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc />
+        public async Task ExecuteAsync(Func<Task> operation, string operationName)
+        {
+            await ExecuteAsync(_ => operation(), CancellationToken.None, operationName).ConfigureAwait(false);
         }
 
         /// <inheritdoc />
         public async Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken)
         {
+            await ExecuteAsync(operation, cancellationToken, null).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc />
+        public async Task ExecuteAsync(Func<CancellationToken, Task> operation, CancellationToken cancellationToken, string operationName)
+        {
             if (operation == null)
                 throw new ArgumentNullException(nameof(operation));
 
-            EnsureCircuitAllowsRequest();
+            EnsureCircuitAllowsRequest(operationName);
 
             try
             {
                 await operation(cancellationToken).ConfigureAwait(false);
-                RecordSuccess();
+                RecordSuccess(operationName);
             }
             catch (Exception ex) when (ShouldHandleException(ex))
             {
-                RecordFailure();
+                RecordFailure(operationName, ex);
                 throw;
             }
         }
 
         /// <inheritdoc />
         public void RecordSuccess()
+        {
+            RecordSuccess(null);
+        }
+
+        /// <summary>
+        /// Records a successful operation with an optional operation name for logging.
+        /// </summary>
+        private void RecordSuccess(string operationName)
         {
             lock (_stateLock)
             {
@@ -266,8 +298,16 @@ namespace Lidarr.Plugin.Common.Services.Resilience
                 if (_state == CircuitState.HalfOpen)
                 {
                     _halfOpenSuccesses++;
-                    _logger?.LogDebug("Circuit '{Name}' half-open success {Count}/{Threshold}",
-                        Name, _halfOpenSuccesses, _options.SuccessThresholdInHalfOpen);
+                    if (!string.IsNullOrEmpty(operationName))
+                    {
+                        _logger?.LogDebug("Circuit '{Name}' half-open success for '{Operation}' {Count}/{Threshold}",
+                            Name, operationName, _halfOpenSuccesses, _options.SuccessThresholdInHalfOpen);
+                    }
+                    else
+                    {
+                        _logger?.LogDebug("Circuit '{Name}' half-open success {Count}/{Threshold}",
+                            Name, _halfOpenSuccesses, _options.SuccessThresholdInHalfOpen);
+                    }
 
                     if (_halfOpenSuccesses >= _options.SuccessThresholdInHalfOpen)
                     {
@@ -280,6 +320,14 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         /// <inheritdoc />
         public void RecordFailure()
         {
+            RecordFailure(null, null);
+        }
+
+        /// <summary>
+        /// Records a failed operation with optional operation name and exception for logging.
+        /// </summary>
+        private void RecordFailure(string operationName, Exception exception)
+        {
             lock (_stateLock)
             {
                 _statistics.TotalFailures++;
@@ -287,10 +335,20 @@ namespace Lidarr.Plugin.Common.Services.Resilience
                 _failureTimestamps.Add(DateTime.UtcNow);
                 _statistics.FailuresInWindow = _failureTimestamps.Count;
 
+                // Log the failure with operation context if provided
+                if (!string.IsNullOrEmpty(operationName))
+                {
+                    _logger?.LogWarning("Circuit '{Name}' recorded failure for '{Operation}': {Message}",
+                        Name, operationName, exception?.Message ?? "Unknown error");
+                }
+
                 if (_state == CircuitState.HalfOpen)
                 {
                     // Any failure in half-open immediately opens the circuit
-                    TransitionTo(CircuitState.Open, "Failure during half-open test");
+                    var reason = !string.IsNullOrEmpty(operationName)
+                        ? $"Failure during half-open test for '{operationName}'"
+                        : "Failure during half-open test";
+                    TransitionTo(CircuitState.Open, reason);
                 }
                 else if (_state == CircuitState.Closed)
                 {
@@ -322,7 +380,7 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             }
         }
 
-        private void EnsureCircuitAllowsRequest()
+        private void EnsureCircuitAllowsRequest(string operationName)
         {
             var currentState = State; // May trigger state transition
             if (currentState == CircuitState.Open)
@@ -330,7 +388,12 @@ namespace Lidarr.Plugin.Common.Services.Resilience
                 var retryAfter = _options.OpenDuration - (DateTime.UtcNow - _openedAt);
                 if (retryAfter < TimeSpan.Zero) retryAfter = TimeSpan.Zero;
 
-                throw new CircuitBreakerOpenException(Name, retryAfter);
+                var message = !string.IsNullOrEmpty(operationName)
+                    ? $"Circuit breaker '{Name}' is open for operation '{operationName}'. Service is currently unavailable."
+                    : $"Circuit breaker '{Name}' is open. Service is currently unavailable.";
+
+                _logger?.LogWarning(message);
+                throw new CircuitBreakerOpenException(Name, message, retryAfter);
             }
         }
 
