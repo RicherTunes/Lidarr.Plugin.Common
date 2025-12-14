@@ -66,6 +66,7 @@ jobs:
         run: dotnet build lidarr.plugin.common.sln --configuration Release --no-restore
 
       - name: Run tests
+        shell: bash
         run: |
           dotnet test lidarr.plugin.common.sln \
             --configuration Release \
