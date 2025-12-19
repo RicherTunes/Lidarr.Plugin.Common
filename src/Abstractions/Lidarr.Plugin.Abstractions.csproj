@@ -10,7 +10,7 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <NoWarn>SA1200;SA1633;CS1591;RS0016;RS0017</NoWarn>
+    <NoWarn>SA1200;SA1633;CS1591;RS0016;RS0017;RS0025</NoWarn>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
     <Version>1.5.0</Version>
