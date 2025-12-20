@@ -50,22 +50,23 @@
     <!-- Detect dependencies at runtime (after build), not at project load time -->
     <ItemGroup>
       <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Common.dll')" />
-      <!-- Lidarr.Plugin.Abstractions IS merged - it contains OUR interfaces (IPlugin, StreamingModels, etc.)
-           NOT Lidarr interfaces (IImportList lives in NzbDrone.Core). Merging with Internalize=true prevents AssemblyLoadContext conflicts. -->
-      <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Abstractions.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Abstractions.dll')" />
+      <!-- NOTE: Lidarr.Plugin.Abstractions must NOT be merged - it contains IPlugin and other interfaces
+           that must have identical type identity with the host. Merging breaks plugin loading. -->
+      <!-- <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Abstractions.dll" /> DO NOT ENABLE - breaks IPlugin type identity -->
       <_PluginDeps Include="$(OutputPath)Polly.dll" Condition="Exists('$(OutputPath)Polly.dll')" />
       <_PluginDeps Include="$(OutputPath)Polly.Core.dll" Condition="Exists('$(OutputPath)Polly.Core.dll')" />
       <_PluginDeps Include="$(OutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(OutputPath)Polly.Extensions.Http.dll')" />
       <_PluginDeps Include="$(OutputPath)TagLibSharp*.dll" />
-      <!-- Microsoft.Extensions packages - merge to avoid version conflicts with Lidarr older versions.
-           Lidarr plugins branch uses older M.E.DI.Abstractions but plugins may need newer features. -->
-      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll')" />
+      <!-- Microsoft.Extensions packages - merge implementation assemblies but NOT abstractions.
+           Abstractions must maintain type identity with host for DI to work correctly. -->
+      <!-- DO NOT MERGE: Microsoft.Extensions.DependencyInjection.Abstractions - breaks IServiceProvider contracts -->
+      <!-- DO NOT MERGE: Microsoft.Extensions.Logging.Abstractions - breaks ILogger contracts -->
       <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.DependencyInjection.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.DependencyInjection.dll')" />
       <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Caching.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Caching.Abstractions.dll')" />
       <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Caching.Memory.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Caching.Memory.dll')" />
       <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Options.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Options.dll')" />
       <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Primitives.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Primitives.dll')" />
-      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll')" />
+      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Http.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Http.dll')" />
       <!-- NOTE: FluentValidation must NOT be merged - it breaks DownloadClient.Test(List<ValidationFailure>) -->
       <!-- <_PluginDeps Include="$(OutputPath)FluentValidation.dll" /> DO NOT ENABLE - breaks Test() signature -->
       <!-- System.Text.Json - merge to avoid version conflicts (plugins may use 9.x, Lidarr has 8.x or older) -->
@@ -82,6 +83,14 @@
     <Message Text="[ILRepack] Library paths: $(_ILRepackLibraryPaths)" Importance="high" />
     <Message Text="[ILRepack] Merging plugin assemblies..." Importance="high" />
 
+    <!-- Create temp directory for ILRepack output to preserve correct assembly identity.
+         IMPORTANT: OutputFile filename determines the internal assembly name, not just the file name.
+         Using $(AssemblyName).dll (not *.merged.dll) ensures the merged assembly has the correct identity. -->
+    <PropertyGroup>
+      <_ILRepackTempDir>$(IntermediateOutputPath)ilrepack-temp\</_ILRepackTempDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_ILRepackTempDir)" />
+
     <!-- NOTE: Internalize="true" prevents merged assembly types from conflicting with Lidarr types -->
     <ILRepack
       Parallel="true"
@@ -89,26 +98,30 @@
       DebugInfo="true"
       TargetKind="Dll"
       InputAssemblies="@(_AssembliesToMerge)"
-      OutputFile="$(IntermediateOutputPath)$(AssemblyName).merged.dll"
+      OutputFile="$(_ILRepackTempDir)$(AssemblyName).dll"
       LibraryPath="$(_ILRepackLibraryPaths)" />
 
-    <Copy SourceFiles="$(IntermediateOutputPath)$(AssemblyName).merged.dll"
+    <Copy SourceFiles="$(_ILRepackTempDir)$(AssemblyName).dll"
           DestinationFiles="$(OutputPath)$(PluginAssemblyFileName)"
           OverwriteReadOnlyFiles="true" />
 
-    <Copy SourceFiles="$(IntermediateOutputPath)$(AssemblyName).merged.pdb"
+    <Copy SourceFiles="$(_ILRepackTempDir)$(AssemblyName).pdb"
           DestinationFiles="$(OutputPath)$(PluginSymbolFileName)"
           OverwriteReadOnlyFiles="true"
-          Condition="Exists('$(IntermediateOutputPath)$(AssemblyName).merged.pdb')" />
+          Condition="Exists('$(_ILRepackTempDir)$(AssemblyName).pdb')" />
 
-    <Delete Files="$(IntermediateOutputPath)$(AssemblyName).merged.dll" />
-    <Delete Files="$(IntermediateOutputPath)$(AssemblyName).merged.pdb"
-            Condition="Exists('$(IntermediateOutputPath)$(AssemblyName).merged.pdb')" />
+    <RemoveDir Directories="$(_ILRepackTempDir)" />
 
 
     <!-- Assemblies to keep (NOT merged but required at runtime).
-         FluentValidation can't be merged (breaks Test() signature) but is still needed. -->
+         These assemblies contain types that must have identical identity with the host. -->
     <ItemGroup>
+      <!-- Plugin contract interfaces - MUST match host type identity -->
+      <_PluginRuntimeDeps Include="$(OutputPath)Lidarr.Plugin.Abstractions.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Abstractions.dll')" />
+      <!-- DI/Logging abstractions - MUST match host type identity for IServiceProvider, ILogger, etc. -->
+      <_PluginRuntimeDeps Include="$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll')" />
+      <_PluginRuntimeDeps Include="$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll')" />
+      <!-- FluentValidation - breaks DownloadClient.Test() signature if merged -->
       <_PluginRuntimeDeps Include="$(OutputPath)FluentValidation.dll" Condition="Exists('$(OutputPath)FluentValidation.dll')" />
       <_PluginRuntimeDeps Include="@(PluginPackagingAdditionalKeep)" />
       <_ExtraAssemblies Include="$(OutputPath)*.dll" Exclude="$(OutputPath)$(PluginAssemblyFileName);@(_PluginRuntimeDeps)" />
