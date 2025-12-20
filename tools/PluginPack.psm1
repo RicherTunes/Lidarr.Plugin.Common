@@ -71,22 +71,54 @@ function New-PluginPackage {
 
     Test-PluginManifest -Csproj $csprojPath -Manifest $manifestPath
 
-    # Exclude Abstractions runtime bits from the package to avoid confusing host/shared resolution
-    Get-ChildItem -LiteralPath $publishPath -Filter 'Lidarr.Plugin.Abstractions*.dll' | Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -LiteralPath $publishPath -Filter 'Lidarr.Plugin.Abstractions*.pdb' | Remove-Item -Force -ErrorAction SilentlyContinue
-    Get-ChildItem -LiteralPath $publishPath -Filter 'Lidarr.Plugin.Abstractions*.xml' | Remove-Item -Force -ErrorAction SilentlyContinue
-
+    # Parse project metadata FIRST (before any cleanup/merge operations)
     $projectXml = [xml](Get-Content -LiteralPath $csprojPath)
     $assemblyName = $projectXml.Project.PropertyGroup.AssemblyName | Select-Object -Last 1
     if (-not $assemblyName) { $assemblyName = [IO.Path]::GetFileNameWithoutExtension($csprojPath) }
+    
+    # Resolve Version: try XML parsing first, then MSBuild evaluation as fallback
+    # MSBuild evaluation handles Directory.Build.props, VERSION files, and conditional properties
+    $version = $null
     $versionNode = $projectXml.Project.PropertyGroup.Version | Select-Object -Last 1
     if (-not $versionNode) { $versionNode = $projectXml.Project.PropertyGroup.AssemblyVersion | Select-Object -Last 1 }
-    $version = $versionNode
-    if (-not $version) { $version = '0.0.0' }
+    if ($versionNode) {
+        $rawVersion = "$versionNode".Trim()
+        # Check if the value contains unresolved MSBuild expressions like $(Version), $(VersionPrefix), etc.
+        if ($rawVersion -and $rawVersion -notmatch '\$\(') {
+            $version = $rawVersion
+        }
+    }
+    
+    # Fallback: Use MSBuild to evaluate the Version property (handles Directory.Build.props, VERSION files, expressions, etc.)
+    if (-not $version) {
+        try {
+            $msbuildOutput = & dotnet msbuild $csprojPath -getProperty:Version -nologo 2>&1
+            if ($LASTEXITCODE -eq 0 -and $msbuildOutput) {
+                $rawVersion = ($msbuildOutput | Out-String).Trim()
+                # Extract semver pattern (X.Y.Z or X.Y.Z-suffix) from potentially noisy output
+                if ($rawVersion -match '(\d+\.\d+\.\d+(?:-[\w\.\+]+)?)') {
+                    $version = $matches[1]
+                }
+            }
+        } catch {
+            # MSBuild evaluation failed, continue to fallback
+        }
+    }
+    
+    # Final validation: ensure version is a valid semver-like string
+    if (-not $version -or $version -notmatch '^\d+\.\d+\.\d+') { 
+        $version = '0.0.0' 
+        Write-Host "Warning: Could not determine valid version, using $version" -ForegroundColor Yellow
+    }
 
+    # Step 1: Merge assemblies (if requested) - BEFORE cleanup so deps exist
     if ($MergeAssemblies.IsPresent) {
         Invoke-PluginMerge -PublishPath $publishPath -AssemblyName $assemblyName -IlRepackRsp $IlRepackRsp -InternalizeExclude $InternalizeExclude
     }
+
+    # Step 2: Clean up publish output AFTER merge - removes extra deps, keeps runtime deps
+    # This matches PluginPackaging.targets behavior
+    Invoke-PluginCleanup -PublishPath $publishPath -AssemblyName $assemblyName
 
     $manifestJson = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     $pluginId = if ($manifestJson.id) { $manifestJson.id } else { $assemblyName }
@@ -133,7 +165,92 @@ function New-PluginPackage {
     return $zipPath
 }
 
+function Invoke-PluginCleanup {
+    <#
+    .SYNOPSIS
+    Cleans up the publish output to match PluginPackaging.targets behavior.
+    
+    .DESCRIPTION
+    Removes assemblies that should not be in the final package:
+    - Host assemblies (Lidarr.Core, Lidarr.Common, etc.)
+    - Extra dependencies that were merged into the plugin DLL
+    - System.* and other runtime assemblies provided by the host
+    
+    Keeps (type-identity assemblies that must match host):
+    - Plugin assembly (merged)
+    - Lidarr.Plugin.Abstractions.dll
+    - Microsoft.Extensions.DependencyInjection.Abstractions.dll
+    - Microsoft.Extensions.Logging.Abstractions.dll
+    - FluentValidation.dll (breaks Test() signature if merged)
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PublishPath,
+        [Parameter(Mandatory = $true)]
+        [string]$AssemblyName
+    )
+
+    # Assemblies to KEEP in the package (must match PluginPackaging.targets _PluginRuntimeDeps)
+    $keepAssemblies = @(
+        "$AssemblyName.dll",                                    # Plugin itself
+        'Lidarr.Plugin.Abstractions.dll',                       # Type identity with host
+        'Lidarr.Plugin.Common.dll',                             # Shared library (if used)
+        'FluentValidation.dll',                                 # Type identity - breaks Test() if merged
+        'Microsoft.Extensions.DependencyInjection.Abstractions.dll',  # Type identity with host
+        'Microsoft.Extensions.Logging.Abstractions.dll'               # Type identity with host
+    )
+
+    # Remove everything except kept assemblies
+    $allDlls = Get-ChildItem -LiteralPath $PublishPath -Filter '*.dll'
+    foreach ($dll in $allDlls) {
+        if ($keepAssemblies -notcontains $dll.Name) {
+            Write-Host "  Removing: $($dll.Name)" -ForegroundColor DarkGray
+            Remove-Item -LiteralPath $dll.FullName -Force -ErrorAction SilentlyContinue
+            
+            # Also remove matching .pdb and .xml
+            $pdb = [IO.Path]::ChangeExtension($dll.FullName, '.pdb')
+            $xml = [IO.Path]::ChangeExtension($dll.FullName, '.xml')
+            if (Test-Path -LiteralPath $pdb) { Remove-Item -LiteralPath $pdb -Force -ErrorAction SilentlyContinue }
+            if (Test-Path -LiteralPath $xml) { Remove-Item -LiteralPath $xml -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    # Remove deps.json (not needed for plugin)
+    Get-ChildItem -LiteralPath $PublishPath -Filter '*.deps.json' | Remove-Item -Force -ErrorAction SilentlyContinue
+
+    # Remove runtimes folder (native dependencies should be handled by host)
+    $runtimesPath = Join-Path $PublishPath 'runtimes'
+    if (Test-Path -LiteralPath $runtimesPath) {
+        Remove-Item -LiteralPath $runtimesPath -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host "Cleanup complete. Kept assemblies:" -ForegroundColor Cyan
+    Get-ChildItem -LiteralPath $PublishPath -Filter '*.dll' | ForEach-Object { Write-Host "  $($_.Name)" -ForegroundColor Green }
+}
+
 function Invoke-PluginMerge {
+    <#
+    .SYNOPSIS
+    Merges plugin dependencies using ILRepack, matching PluginPackaging.targets behavior.
+    
+    .DESCRIPTION
+    Merges assemblies that should be internalized into the plugin:
+    - Lidarr.Plugin.Common.dll
+    - Polly*.dll
+    - TagLibSharp*.dll
+    - Microsoft.Extensions.DependencyInjection.dll (implementation, not abstractions)
+    - Microsoft.Extensions.Caching.*.dll
+    - Microsoft.Extensions.Options.dll
+    - Microsoft.Extensions.Primitives.dll
+    - Microsoft.Extensions.Http.dll
+    
+    Does NOT merge (type identity with host):
+    - Lidarr.Plugin.Abstractions.dll
+    - FluentValidation.dll
+    - Microsoft.Extensions.DependencyInjection.Abstractions.dll
+    - Microsoft.Extensions.Logging.Abstractions.dll
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -151,19 +268,38 @@ function Invoke-PluginMerge {
         throw "Plugin assembly '$AssemblyName.dll' not found under $PublishPath."
     }
 
-    $mergeCandidates = Get-ChildItem -LiteralPath $PublishPath -Filter *.dll |
-        Where-Object {
-            $_.FullName -ne $pluginAssembly -and
-            $_.Name -notmatch '^System\.' -and
-            $_.Name -notmatch '^Microsoft\.' -and
-            $_.Name -notmatch '^Lidarr\.Plugin\.Abstractions'
-        } |
-        Sort-Object Name
+    # Assemblies to merge (matching PluginPackaging.targets _PluginDeps)
+    # These get internalized into the plugin assembly
+    # NOTE: Do NOT merge System.Text.Json - its types may cross the host/plugin boundary
+    #       and cause TypeLoadException or weird serialization issues
+    $mergePatterns = @(
+        'Lidarr.Plugin.Common.dll',
+        'Polly.dll',
+        'Polly.Core.dll', 
+        'Polly.Extensions.Http.dll',
+        'TagLibSharp*.dll',
+        'Microsoft.Extensions.DependencyInjection.dll',  # Implementation, not abstractions
+        'Microsoft.Extensions.Caching.Abstractions.dll',
+        'Microsoft.Extensions.Caching.Memory.dll',
+        'Microsoft.Extensions.Options.dll',
+        'Microsoft.Extensions.Primitives.dll',
+        'Microsoft.Extensions.Http.dll'
+        # System.Text.Json.dll - EXCLUDED: types cross host/plugin boundary
+    )
+
+    $mergeCandidates = @()
+    foreach ($pattern in $mergePatterns) {
+        $matches = Get-ChildItem -LiteralPath $PublishPath -Filter $pattern -ErrorAction SilentlyContinue
+        $mergeCandidates += $matches
+    }
 
     if ($mergeCandidates.Count -eq 0) {
         Write-Host 'No candidate assemblies found for ILRepack. Skipping merge.' -ForegroundColor Yellow
         return
     }
+
+    Write-Host "Merging assemblies:" -ForegroundColor Cyan
+    $mergeCandidates | ForEach-Object { Write-Host "  $($_.Name)" -ForegroundColor DarkGray }
 
     $mergeOut = Join-Path $PublishPath "$AssemblyName.merged.dll"
     $resolvedRsp = Resolve-Path -LiteralPath $IlRepackRsp
@@ -203,5 +339,5 @@ function Invoke-PluginMerge {
     }
 }
 
-Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage
+Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage, Invoke-PluginCleanup
 # end-snippet

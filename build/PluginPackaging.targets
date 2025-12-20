@@ -69,8 +69,9 @@
       <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Http.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Http.dll')" />
       <!-- NOTE: FluentValidation must NOT be merged - it breaks DownloadClient.Test(List<ValidationFailure>) -->
       <!-- <_PluginDeps Include="$(OutputPath)FluentValidation.dll" /> DO NOT ENABLE - breaks Test() signature -->
-      <!-- System.Text.Json - merge to avoid version conflicts (plugins may use 9.x, Lidarr has 8.x or older) -->
-      <_PluginDeps Include="$(OutputPath)System.Text.Json.dll" Condition="Exists('$(OutputPath)System.Text.Json.dll')" />
+      <!-- NOTE: System.Text.Json must NOT be merged - its types cross the host/plugin boundary -->
+      <!-- and can cause TypeLoadException or serialization issues -->
+      <!-- <_PluginDeps Include="$(OutputPath)System.Text.Json.dll" /> DO NOT ENABLE - cross-boundary type issues -->
       <_PluginDeps Include="@(PluginPackagingAdditionalMerge)" />
     </ItemGroup>
 
