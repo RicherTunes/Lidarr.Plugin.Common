@@ -82,7 +82,13 @@ function New-PluginPackage {
     $versionNode = $projectXml.Project.PropertyGroup.Version | Select-Object -Last 1
     if (-not $versionNode) { $versionNode = $projectXml.Project.PropertyGroup.AssemblyVersion | Select-Object -Last 1 }
     if ($versionNode) {
-        $rawVersion = "$versionNode".Trim()
+        $rawVersion = $null
+        if ($versionNode -is [System.Xml.XmlNode]) {
+            $rawVersion = $versionNode.InnerText
+        } else {
+            $rawVersion = "$versionNode"
+        }
+        $rawVersion = $rawVersion.Trim()
         # Check if the value contains unresolved MSBuild expressions like $(Version), $(VersionPrefix), etc.
         if ($rawVersion -and $rawVersion -notmatch '\$\(') {
             $version = $rawVersion
@@ -148,7 +154,7 @@ function New-PluginPackage {
         packageId = $pluginId
         version = $version
         framework = $Framework
-        build = @{ commit = ($commit ?? 'unknown'); date = (Get-Date).ToString('s') }
+        build = @{ commit = $(if ($commit) { $commit } else { 'unknown' }); date = (Get-Date).ToString('s') }
         assemblies = $assemblyInfos
     }
     $metadataPath = Join-Path $publishPath 'package-metadata.json'
