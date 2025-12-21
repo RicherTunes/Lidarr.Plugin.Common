@@ -29,15 +29,52 @@ if (-not (Test-Path -LiteralPath $ManifestPath)) {
 $nsmgr = New-Object System.Xml.XmlNamespaceManager($project.NameTable)
 $nsmgr.AddNamespace('msb', 'http://schemas.microsoft.com/developer/msbuild/2003')
 
-# Resolve Version with namespace-aware query then fallback to no-namespace projects
+# Resolve Version: try XML parsing first, then MSBuild evaluation as fallback
+# MSBuild evaluation handles Directory.Build.props, VERSION files, and conditional properties
 $versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:Version', $nsmgr)
 if (-not $versionNode) { $versionNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:AssemblyVersion', $nsmgr) }
 if (-not $versionNode) { $versionNode = $project.SelectSingleNode('//Project/PropertyGroup/Version') }
 if (-not $versionNode) { $versionNode = $project.SelectSingleNode('//Project/PropertyGroup/AssemblyVersion') }
-if (-not $versionNode) {
-    throw "Unable to resolve Version from '$ProjectPath'."
+
+$projectVersion = $null
+if ($versionNode) {
+    $rawVersion = $versionNode.InnerText.Trim()
+    # Check if the value contains unresolved MSBuild expressions like $(Version), $(VersionPrefix), etc.
+    if ($rawVersion -and $rawVersion -notmatch '\$\(') {
+        $projectVersion = $rawVersion
+    }
 }
-$projectVersion = $versionNode.InnerText.Trim()
+
+# Fallback: Use MSBuild to evaluate the Version property (handles Directory.Build.props, VERSION files, expressions, etc.)
+if (-not $projectVersion) {
+    try {
+        $msbuildOutput = & dotnet msbuild $ProjectPath -getProperty:Version -nologo 2>&1
+        if ($LASTEXITCODE -eq 0 -and $msbuildOutput) {
+            $projectVersion = ($msbuildOutput | Out-String).Trim()
+        }
+    } catch {
+        # MSBuild evaluation failed, continue to error
+    }
+}
+
+# Last resort: Check for VERSION file in repository root (legacy fallback)
+if (-not $projectVersion) {
+    $searchDir = Split-Path -Parent (Resolve-Path -LiteralPath $ProjectPath)
+    for ($i = 0; $i -lt 5; $i++) {
+        $versionFilePath = Join-Path $searchDir 'VERSION'
+        if (Test-Path -LiteralPath $versionFilePath) {
+            $projectVersion = (Get-Content -LiteralPath $versionFilePath -Raw).Trim()
+            break
+        }
+        $parentDir = Split-Path -Parent $searchDir
+        if (-not $parentDir -or $parentDir -eq $searchDir) { break }
+        $searchDir = $parentDir
+    }
+}
+
+if (-not $projectVersion) {
+    throw "Unable to resolve Version from '$ProjectPath'. Tried: XML parsing, MSBuild evaluation, VERSION file. Ensure the project has a Version property."
+}
 
 $manifest = Get-Content -LiteralPath $ManifestPath -Raw | ConvertFrom-Json
 
@@ -45,25 +82,55 @@ if (-not $manifest.version) {
     throw "Manifest at '$ManifestPath' is missing 'version'."
 }
 
-$packageReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:PackageReference[@Include='$AbstractionsPackage']", $nsmgr)
-if (-not $packageReference) { $packageReference = $project.SelectSingleNode("//Project/ItemGroup/PackageReference[@Include='$AbstractionsPackage']") }
+# Check for ProjectReference first (preferred for development with submodules)
 $projectReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:ProjectReference[contains(@Include, 'Lidarr.Plugin.Abstractions.csproj') or contains(@Include, 'Abstractions')]", $nsmgr)
 if (-not $projectReference) { $projectReference = $project.SelectSingleNode("//Project/ItemGroup/ProjectReference[contains(@Include, 'Lidarr.Plugin.Abstractions.csproj') or contains(@Include, 'Abstractions')]") }
+
+# Check for PackageReference (used in package-based consumption)
+$packageReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:PackageReference[@Include='$AbstractionsPackage']", $nsmgr)
+if (-not $packageReference) { $packageReference = $project.SelectSingleNode("//Project/ItemGroup/PackageReference[@Include='$AbstractionsPackage']") }
 
 $packageMajor = $null
 $packageVersion = $null
 $usingProjectRef = $false
 
-if ($packageReference) {
-    $packageVersion = $packageReference.Version
-    if (-not $packageVersion) {
-        throw "PackageReference to $AbstractionsPackage must specify Version."
-    }
-    $packageMajor = ($packageVersion -split '\.')[0]
-}
-elseif ($projectReference) {
-    # Fall back to manifest.commonVersion for in-repo abstractions; emit MAN001 warning (or error in Strict)
+if ($projectReference) {
+    # Prefer ProjectReference (development mode with submodule) - version comes from manifest.commonVersion
     $usingProjectRef = $true
+}
+elseif ($packageReference) {
+    $packageVersion = $packageReference.Version
+    # Handle centralized package management (Directory.Packages.props) where Version is not on the PackageReference
+    if (-not $packageVersion) {
+        # Check for Directory.Packages.props in the repository
+        $projectDir = Split-Path -Parent (Resolve-Path -LiteralPath $ProjectPath)
+        $searchDir = $projectDir
+        for ($i = 0; $i -lt 5; $i++) {
+            $packagesPropsPath = Join-Path $searchDir 'Directory.Packages.props'
+            if (Test-Path -LiteralPath $packagesPropsPath) {
+                [xml]$packagesProps = Get-Content -LiteralPath $packagesPropsPath
+                $pkgNsmgr = New-Object System.Xml.XmlNamespaceManager($packagesProps.NameTable)
+                $pkgNsmgr.AddNamespace('msb', 'http://schemas.microsoft.com/developer/msbuild/2003')
+                $pkgVersionNode = $packagesProps.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:PackageVersion[@Include='$AbstractionsPackage']/@Version", $pkgNsmgr)
+                if (-not $pkgVersionNode) { $pkgVersionNode = $packagesProps.SelectSingleNode("//Project/ItemGroup/PackageVersion[@Include='$AbstractionsPackage']/@Version") }
+                if ($pkgVersionNode) {
+                    $packageVersion = $pkgVersionNode.Value
+                }
+                break
+            }
+            $parentDir = Split-Path -Parent $searchDir
+            if (-not $parentDir -or $parentDir -eq $searchDir) { break }
+            $searchDir = $parentDir
+        }
+        
+        if (-not $packageVersion) {
+            # PackageReference exists but version not resolvable - treat as ProjectReference scenario
+            $usingProjectRef = $true
+        }
+    }
+    if ($packageVersion) {
+        $packageMajor = ($packageVersion -split '\.')[0]
+    }
 }
 else {
     throw "Project '$ProjectPath' must reference $AbstractionsPackage either as a PackageReference or ProjectReference."
