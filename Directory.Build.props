@@ -5,6 +5,12 @@
     <FileVersion>10.0.0.35686</FileVersion>
   </PropertyGroup>
 
+  <!-- CLI Framework: default to false, enable with -p:IncludeCLIFramework=true -->
+  <!-- Setting this here ensures all projects have the same value, preventing duplicate builds -->
+  <PropertyGroup>
+    <IncludeCLIFramework Condition="'$(IncludeCLIFramework)' == ''">false</IncludeCLIFramework>
+  </PropertyGroup>
+
   <!-- SourceLink + PathMap to strip local paths from PDBs -->
   <PropertyGroup>
     <PublishRepositoryUrl>true</PublishRepositoryUrl>
@@ -20,4 +26,3 @@
     <PackageReference Update="Microsoft.SourceLink.GitHub" Version="8.0.0" PrivateAssets="All" />
   </ItemGroup>
 </Project>
-
