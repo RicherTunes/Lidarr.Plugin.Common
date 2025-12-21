@@ -83,8 +83,9 @@ if (-not $manifest.version) {
 }
 
 # Check for ProjectReference first (preferred for development with submodules)
-$projectReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:ProjectReference[contains(@Include, 'Lidarr.Plugin.Abstractions.csproj') or contains(@Include, 'Abstractions')]", $nsmgr)
-if (-not $projectReference) { $projectReference = $project.SelectSingleNode("//Project/ItemGroup/ProjectReference[contains(@Include, 'Lidarr.Plugin.Abstractions.csproj') or contains(@Include, 'Abstractions')]") }
+# Also check for Lidarr.Plugin.Common which transitively includes Abstractions
+$projectReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:ProjectReference[contains(@Include, 'Lidarr.Plugin.Abstractions.csproj') or contains(@Include, 'Abstractions') or contains(@Include, 'Lidarr.Plugin.Common.csproj')]", $nsmgr)
+if (-not $projectReference) { $projectReference = $project.SelectSingleNode("//Project/ItemGroup/ProjectReference[contains(@Include, 'Lidarr.Plugin.Abstractions.csproj') or contains(@Include, 'Abstractions') or contains(@Include, 'Lidarr.Plugin.Common.csproj')]") }
 
 # Check for PackageReference (used in package-based consumption)
 $packageReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:PackageReference[@Include='$AbstractionsPackage']", $nsmgr)

@@ -148,7 +148,7 @@ function New-PluginPackage {
         packageId = $pluginId
         version = $version
         framework = $Framework
-        build = @{ commit = ($commit ?? 'unknown'); date = (Get-Date).ToString('s') }
+        build = @{ commit = $(if ($commit) { $commit } else { 'unknown' }); date = (Get-Date).ToString('s') }
         assemblies = $assemblyInfos
     }
     $metadataPath = Join-Path $publishPath 'package-metadata.json'
