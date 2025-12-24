@@ -50,10 +50,18 @@ if (-not $projectVersion) {
     try {
         $msbuildOutput = & dotnet msbuild $ProjectPath -getProperty:Version -nologo 2>&1
         if ($LASTEXITCODE -eq 0 -and $msbuildOutput) {
-            $projectVersion = ($msbuildOutput | Out-String).Trim()
+            $rawVersion = ($msbuildOutput | Out-String).Trim()
+            # Extract semver pattern (X.Y.Z or X.Y.Z-suffix) from potentially noisy output
+            # This handles cases where MSBuild outputs warnings along with the version
+            if ($rawVersion -match '(\d+\.\d+\.\d+(?:-[\w\.\+]+)?)') {
+                $projectVersion = $matches[1]
+            } elseif ($rawVersion -and $rawVersion -notmatch '[\r\n]') {
+                # If it is a single line without semver pattern, use it directly
+                $projectVersion = $rawVersion
+            }
         }
     } catch {
-        # MSBuild evaluation failed, continue to error
+        # MSBuild evaluation failed, continue to VERSION file fallback
     }
 }
 
