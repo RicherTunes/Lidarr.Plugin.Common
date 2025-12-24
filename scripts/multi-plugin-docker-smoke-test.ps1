@@ -360,28 +360,22 @@ try {
         "--name", $ContainerName,
         "-p", "${Port}:8686",
         "-v", "${configMount}:/config",
-        "-v", "${pluginMount}:/config/plugins:ro",
+        "-v", "${pluginMount}:/config/plugins:ro"
+    )
+
+    if ($RunSearchGate) {
+        $dockerArgs += @("-v", "${musicMount}:/music")
+    }
+    if ($RunDownloadClientGate) {
+        $dockerArgs += @("-v", "${downloadsMount}:/downloads")
+    }
+
+    $dockerArgs += @(
         "-e", "PUID=1000",
         "-e", "PGID=1000",
         "-e", "TZ=UTC",
         "ghcr.io/hotio/lidarr:$LidarrTag"
     )
-
-    if ($RunSearchGate -or $RunDownloadClientGate) {
-        $dockerArgs = @(
-            "run", "-d",
-            "--name", $ContainerName,
-            "-p", "${Port}:8686",
-            "-v", "${configMount}:/config",
-            "-v", "${pluginMount}:/config/plugins:ro",
-            "-v", "${musicMount}:/music",
-            "-v", "${downloadsMount}:/downloads",
-            "-e", "PUID=1000",
-            "-e", "PGID=1000",
-            "-e", "TZ=UTC",
-            "ghcr.io/hotio/lidarr:$LidarrTag"
-        )
-    }
 
     $startResult = & docker @dockerArgs 2>&1
     if ($LASTEXITCODE -ne 0) {
