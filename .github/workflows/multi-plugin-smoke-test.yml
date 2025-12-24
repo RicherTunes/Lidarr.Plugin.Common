@@ -121,13 +121,46 @@ jobs:
         shell: pwsh
         working-directory: qobuzarr
         run: |
-          ./build.ps1 -Configuration Release -Restore -Package -VerboseOutput
+          $buildSuccess = $false
+          try {
+            ./build.ps1 -Configuration Release -Restore -Package -VerboseOutput
+            if ($LASTEXITCODE -eq 0) { $buildSuccess = $true }
+          } catch {
+            Write-Host "build.ps1 threw exception: $_" -ForegroundColor Red
+          }
+          if (-not $buildSuccess) {
+            Write-Host ""
+            Write-Host "::group::Detailed build error output"
+            dotnet restore --verbosity quiet 2>&1 | Out-Null
+            dotnet build Qobuzarr.csproj --configuration Release --no-restore --verbosity normal -p:RunAnalyzersDuringBuild=false -p:EnableNETAnalyzers=false -p:TreatWarningsAsErrors=false 2>&1
+            Write-Host "::endgroup::"
+            exit 1
+          }
 
       - name: Build Tidalarr package
         shell: pwsh
         working-directory: tidalarr
         run: |
-          ./build.ps1 -Configuration Release -Restore -Package -VerboseOutput
+          $buildSuccess = $false
+          try {
+            ./build.ps1 -Configuration Release -Restore -Package -VerboseOutput
+            if ($LASTEXITCODE -eq 0) { $buildSuccess = $true }
+          } catch {
+            Write-Host "build.ps1 threw exception: $_" -ForegroundColor Red
+          }
+          if (-not $buildSuccess) {
+            Write-Host ""
+            Write-Host "::group::Detailed build error output"
+            dotnet restore --verbosity quiet 2>&1 | Out-Null
+            $csproj = Get-ChildItem -Filter "*.csproj" | Where-Object { $_.Name -notmatch "Tests" } | Select-Object -First 1
+            if ($csproj) {
+              dotnet build $csproj.Name --configuration Release --no-restore --verbosity normal -p:RunAnalyzersDuringBuild=false -p:EnableNETAnalyzers=false -p:TreatWarningsAsErrors=false 2>&1
+            } else {
+              dotnet build --configuration Release --no-restore --verbosity normal -p:RunAnalyzersDuringBuild=false -p:EnableNETAnalyzers=false -p:TreatWarningsAsErrors=false 2>&1
+            }
+            Write-Host "::endgroup::"
+            exit 1
+          }
 
       - name: Locate plugin zips
         shell: pwsh
