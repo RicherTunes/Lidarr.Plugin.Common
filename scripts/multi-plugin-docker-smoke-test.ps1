@@ -34,6 +34,10 @@
 .PARAMETER MediumGateTimeoutSeconds
     Max time to wait for medium-gate API calls to complete. Default: 60
 
+.PARAMETER RunDownloadClientGate
+    Optional gate that configures and tests supported download clients via Lidarr's API.
+    This is credential-gated (depends on the same env vars used by the medium gate).
+
 .PARAMETER RunSearchGate
     Optional "search gate" that performs a real Lidarr album search and asserts
     that the release list is non-empty (and, when both indexers are configured,
@@ -93,6 +97,7 @@ param(
     [int]$SchemaTimeoutSeconds = 60,
     [switch]$RunMediumGate,
     [int]$MediumGateTimeoutSeconds = 60,
+    [switch]$RunDownloadClientGate,
     [switch]$RunSearchGate,
     [int]$SearchTimeoutSeconds = 180,
     [string]$SearchArtistTerm = "Miles Davis",
@@ -111,6 +116,9 @@ $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 
 if ($RunSearchGate) {
+    $RunMediumGate = $true
+}
+if ($RunDownloadClientGate) {
     $RunMediumGate = $true
 }
 
@@ -299,6 +307,7 @@ try {
     $pluginsRoot = Join-Path $workRoot "plugins"
     $configRoot = Join-Path $workRoot "config"
     $musicRoot = Join-Path $workRoot "music"
+    $downloadsRoot = Join-Path $workRoot "downloads"
 
     if (Test-Path $workRoot) {
         Remove-Item -Recurse -Force $workRoot
@@ -307,6 +316,9 @@ try {
     New-Item -ItemType Directory -Force -Path $configRoot | Out-Null
     if ($RunSearchGate) {
         New-Item -ItemType Directory -Force -Path $musicRoot | Out-Null
+    }
+    if ($RunDownloadClientGate) {
+        New-Item -ItemType Directory -Force -Path $downloadsRoot | Out-Null
     }
 
     $pluginNames = New-Object System.Collections.Generic.List[string]
@@ -341,6 +353,7 @@ try {
     $pluginMount = $pluginsRoot.Replace('\', '/')
     $configMount = $configRoot.Replace('\', '/')
     $musicMount = $musicRoot.Replace('\', '/')
+    $downloadsMount = $downloadsRoot.Replace('\', '/')
 
     $dockerArgs = @(
         "run", "-d",
@@ -354,7 +367,7 @@ try {
         "ghcr.io/hotio/lidarr:$LidarrTag"
     )
 
-    if ($RunSearchGate) {
+    if ($RunSearchGate -or $RunDownloadClientGate) {
         $dockerArgs = @(
             "run", "-d",
             "--name", $ContainerName,
@@ -362,6 +375,7 @@ try {
             "-v", "${configMount}:/config",
             "-v", "${pluginMount}:/config/plugins:ro",
             "-v", "${musicMount}:/music",
+            "-v", "${downloadsMount}:/downloads",
             "-e", "PUID=1000",
             "-e", "PGID=1000",
             "-e", "TZ=UTC",
@@ -492,6 +506,7 @@ try {
     }
 
     $configuredIndexerNames = New-Object System.Collections.Generic.List[string]
+    $configuredDownloadClientNames = New-Object System.Collections.Generic.List[string]
 
     if ($RunMediumGate) {
         Write-Host "`n=== Medium gate: configure + test indexers ===" -ForegroundColor Cyan
@@ -633,6 +648,95 @@ try {
             Write-Host "↷ medium gate skipped (no supported credentials provided)." -ForegroundColor Yellow
         }
         elseif ($mediumFailed) {
+            exit 1
+        }
+    }
+
+    if ($RunDownloadClientGate) {
+        Write-Host "`n=== Download client gate: configure + test download clients ===" -ForegroundColor Cyan
+
+        $downloadConfigured = $false
+        $downloadFailed = $false
+
+        foreach ($plugin in $pluginNames) {
+            if (-not $expectations.ContainsKey($plugin)) { continue }
+            $exp = $expectations[$plugin]
+
+            foreach ($impl in $exp.DownloadClients) {
+                $schema = $downloadClientSchemas | Where-Object { $_.implementation -eq $impl } | Select-Object -First 1
+                if (-not $schema) {
+                    Write-Host "✗ download gate: missing schema for $impl" -ForegroundColor Red
+                    $downloadFailed = $true
+                    continue
+                }
+
+                if ($impl -eq "QobuzDownloadClient") {
+                    if (-not $RunMediumGate -or $configuredIndexerNames.Count -eq 0) {
+                        Write-Host "↷ download gate: skipping QobuzDownloadClient (indexer not configured; credentials may be unavailable)" -ForegroundColor Yellow
+                        continue
+                    }
+
+                    $downloadConfigured = $true
+                    $payload = Copy-JsonObject $schema
+                    $payload.name = "SmokeTest - Qobuzarr DL"
+                    $payload.enable = $true
+
+                    Set-FieldValue -Schema $payload -CandidateNames @("downloadPath", "DownloadPath") -Value "/downloads/qobuzarr"
+
+                    try {
+                        $created = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/downloadclient" -Headers $headers -Body $payload -TimeoutSeconds $MediumGateTimeoutSeconds
+                        $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/downloadclient/test" -Headers $headers -Body $created -TimeoutSeconds $MediumGateTimeoutSeconds
+                        Write-Host "✓ download gate: QobuzDownloadClient configured + test succeeded" -ForegroundColor Green
+                        $configuredDownloadClientNames.Add($payload.name) | Out-Null
+                    }
+                    catch {
+                        Write-Host "✗ download gate: QobuzDownloadClient test failed`n$($_.Exception.Message)" -ForegroundColor Red
+                        $downloadFailed = $true
+                    }
+
+                    continue
+                }
+
+                if ($impl -eq "TidalLidarrDownloadClient") {
+                    $tRedirectUrl = Get-NonEmptyEnvValue "TIDALARR_REDIRECT_URL"
+                    if ([string]::IsNullOrWhiteSpace($tRedirectUrl)) { $tRedirectUrl = Get-NonEmptyEnvValue "TIDAL_REDIRECT_URL" }
+
+                    if ([string]::IsNullOrWhiteSpace($tRedirectUrl)) {
+                        Write-Host "↷ download gate: skipping TidalLidarrDownloadClient (missing TIDALARR_REDIRECT_URL)" -ForegroundColor Yellow
+                        continue
+                    }
+
+                    $downloadConfigured = $true
+                    $payload = Copy-JsonObject $schema
+                    $payload.name = "SmokeTest - Tidalarr DL"
+                    $payload.enable = $true
+
+                    Set-FieldValue -Schema $payload -CandidateNames @("configPath", "ConfigPath") -Value "/config/tidalarr"
+                    Set-FieldValue -Schema $payload -CandidateNames @("redirectUrl", "RedirectUrl") -Value $tRedirectUrl
+                    Set-FieldValue -Schema $payload -CandidateNames @("downloadPath", "DownloadPath") -Value "/downloads/tidalarr"
+
+                    try {
+                        $created = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/downloadclient" -Headers $headers -Body $payload -TimeoutSeconds $MediumGateTimeoutSeconds
+                        $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/downloadclient/test" -Headers $headers -Body $created -TimeoutSeconds $MediumGateTimeoutSeconds
+                        Write-Host "✓ download gate: TidalLidarrDownloadClient configured + test succeeded" -ForegroundColor Green
+                        $configuredDownloadClientNames.Add($payload.name) | Out-Null
+                    }
+                    catch {
+                        Write-Host "✗ download gate: TidalLidarrDownloadClient test failed`n$($_.Exception.Message)" -ForegroundColor Red
+                        $downloadFailed = $true
+                    }
+
+                    continue
+                }
+
+                Write-Host "↷ download gate: no config mapping for $impl (skipping)" -ForegroundColor Yellow
+            }
+        }
+
+        if (-not $downloadConfigured) {
+            Write-Host "↷ download client gate skipped (no supported credentials provided)." -ForegroundColor Yellow
+        }
+        elseif ($downloadFailed) {
             exit 1
         }
     }
