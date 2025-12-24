@@ -70,7 +70,10 @@ jobs:
         env:
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
         run: |
-          if [[ -z "${CROSS_REPO_PAT}" ]]; then
+          set -euo pipefail
+          echo "::add-mask::${CROSS_REPO_PAT:-}"
+
+          if [[ -z "${CROSS_REPO_PAT:-}" ]]; then
             echo "::error::CROSS_REPO_PAT secret is missing or empty."
             echo ""
             echo "This workflow requires a Personal Access Token with 'repo' scope to checkout"
@@ -277,7 +280,7 @@ jobs:
             echo "::endgroup::"
 
             echo "::group::Container inspect"
-            docker inspect "${SMOKE_CONTAINER_NAME}" > .docker-multi-smoke-test/diagnostics/inspect.json 2>&1 || true
+            docker inspect "${SMOKE_CONTAINER_NAME}" > .docker-multi-smoke-test/diagnostics/inspect.json 2> .docker-multi-smoke-test/diagnostics/inspect.error.txt || true
             echo "::endgroup::"
 
             docker rm -f "${SMOKE_CONTAINER_NAME}" || true
