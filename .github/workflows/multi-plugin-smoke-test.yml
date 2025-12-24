@@ -121,13 +121,13 @@ jobs:
         shell: pwsh
         working-directory: qobuzarr
         run: |
-          ./build.ps1 -Configuration Release -Restore -Package
+          ./build.ps1 -Configuration Release -Restore -Package -VerboseOutput
 
       - name: Build Tidalarr package
         shell: pwsh
         working-directory: tidalarr
         run: |
-          ./build.ps1 -Configuration Release -Restore -Package
+          ./build.ps1 -Configuration Release -Restore -Package -VerboseOutput
 
       - name: Locate plugin zips
         shell: pwsh
