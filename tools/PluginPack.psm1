@@ -71,7 +71,12 @@ function New-PluginPackage {
 
     Test-PluginManifest -Csproj $csprojPath -Manifest $manifestPath
 
-    # Parse project metadata FIRST (before any cleanup/merge operations)
+    # Ensure the validated manifest is included in the final package.
+    # Some repos generate `plugin.json` outside the publish output (e.g., bin/plugin.json),
+    # which would otherwise pass validation but never be shipped.
+    Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $publishPath 'plugin.json') -Force
+
+    # Parse project metadata FIRST (before any cleanup/merge operations)  
     $projectXml = [xml](Get-Content -LiteralPath $csprojPath)
     $assemblyName = $projectXml.Project.PropertyGroup.AssemblyName | Select-Object -Last 1
     if (-not $assemblyName) { $assemblyName = [IO.Path]::GetFileNameWithoutExtension($csprojPath) }
