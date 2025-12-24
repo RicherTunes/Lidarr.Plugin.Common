@@ -187,7 +187,11 @@ function Invoke-PluginCleanup {
     - Lidarr.Plugin.Abstractions.dll
     - Microsoft.Extensions.DependencyInjection.Abstractions.dll
     - Microsoft.Extensions.Logging.Abstractions.dll
-    - FluentValidation.dll (breaks Test() signature if merged)
+    
+    NOTE: FluentValidation.dll is intentionally NOT kept/shipped.
+    If a plugin ships its own FluentValidation.dll, ValidationFailure will have
+    different type identity than the host's copy and can cause TypeLoadException
+    such as: "Method 'Test' ... does not have an implementation."
     #>
     [CmdletBinding()]
     param(
@@ -202,7 +206,6 @@ function Invoke-PluginCleanup {
         "$AssemblyName.dll",                                    # Plugin itself
         'Lidarr.Plugin.Abstractions.dll',                       # Type identity with host
         'Lidarr.Plugin.Common.dll',                             # Shared library (if used)
-        'FluentValidation.dll',                                 # Type identity - breaks Test() if merged
         'Microsoft.Extensions.DependencyInjection.Abstractions.dll',  # Type identity with host
         'Microsoft.Extensions.Logging.Abstractions.dll'               # Type identity with host
     )
