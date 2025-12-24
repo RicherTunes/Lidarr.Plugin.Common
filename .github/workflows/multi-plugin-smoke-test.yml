@@ -117,6 +117,64 @@ jobs:
           token: ${{ secrets.CROSS_REPO_PAT }}
           submodules: recursive
 
+      - name: Extract Lidarr assemblies from Docker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Extracting Lidarr assemblies from plugins branch Docker image..."
+
+          IMAGE="ghcr.io/hotio/lidarr:${{ matrix.lidarr_tag }}"
+          echo "Pulling $IMAGE (with retry)"
+
+          n=0
+          until [ "$n" -ge 3 ]; do
+            docker pull "$IMAGE" && break
+            n=$((n+1))
+            echo "Pull failed ($n). Retrying in 10s..." && sleep 10
+          done
+
+          if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -q "ghcr.io/hotio/lidarr:${{ matrix.lidarr_tag }}"; then
+            echo "::error::Failed to pull Docker image $IMAGE after 3 attempts"
+            exit 1
+          fi
+
+          echo "Creating temporary container..."
+          cid=$(docker create "$IMAGE")
+
+          echo "Extracting assemblies from container..."
+          mkdir -p _lidarr_extracted
+          docker cp "$cid:/app" _lidarr_extracted/ 2>/dev/null || docker cp "$cid:/opt/lidarr" _lidarr_extracted/ 2>/dev/null || {
+            echo "::error::Could not extract from /app or /opt/lidarr"
+            docker rm "$cid" >/dev/null
+            exit 1
+          }
+          docker rm "$cid" >/dev/null
+
+          echo "Copying assemblies to plugin ext directories..."
+
+          # Create target directories for both plugins
+          mkdir -p qobuzarr/ext/Lidarr/_output/net8.0
+          mkdir -p tidalarr/ext/Lidarr/_output/net8.0
+
+          # Copy all DLLs to both plugin directories
+          find _lidarr_extracted -type f -name "*.dll" -exec cp {} qobuzarr/ext/Lidarr/_output/net8.0/ \;
+          find _lidarr_extracted -type f -name "*.dll" -exec cp {} tidalarr/ext/Lidarr/_output/net8.0/ \;
+
+          # Verify critical assemblies exist
+          for plugin_dir in qobuzarr tidalarr; do
+            if [ ! -f "$plugin_dir/ext/Lidarr/_output/net8.0/Lidarr.dll" ]; then
+              echo "::error::Missing Lidarr.dll in $plugin_dir after extraction"
+              ls -la "$plugin_dir/ext/Lidarr/_output/net8.0/" || true
+              exit 1
+            fi
+          done
+
+          echo "Assembly extraction complete:"
+          ls -la qobuzarr/ext/Lidarr/_output/net8.0/Lidarr*.dll || true
+
+          # Cleanup
+          rm -rf _lidarr_extracted
+
       - name: Build Qobuzarr package
         shell: pwsh
         working-directory: qobuzarr
@@ -303,7 +361,7 @@ jobs:
           mkdir -p .docker-multi-smoke-test/diagnostics
 
           echo "::group::All containers (docker ps -a)"
-          docker ps -a --format "table {{.Names}}	{{.Status}}	{{.Image}}" | tee .docker-multi-smoke-test/diagnostics/containers.txt || true
+          docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" | tee .docker-multi-smoke-test/diagnostics/containers.txt || true
           echo "::endgroup::"
 
           if docker ps -a --format '{{.Names}}' | grep -q "^${SMOKE_CONTAINER_NAME:-}$"; then
