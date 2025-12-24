@@ -27,6 +27,29 @@
 .PARAMETER SchemaTimeoutSeconds
     Max time to wait for schemas to include plugin implementations. Default: 60
 
+.PARAMETER RunMediumGate
+    Optional "medium gate" that attempts to configure and test supported indexers
+    via Lidarr's API (requires credentials via environment variables; see notes below).
+
+.PARAMETER MediumGateTimeoutSeconds
+    Max time to wait for medium-gate API calls to complete. Default: 60
+
+.PARAMETER RunSearchGate
+    Optional "search gate" that performs a real Lidarr album search and asserts
+    that the release list is non-empty (and, when both indexers are configured,
+    that results include releases attributed to each indexer name).
+
+.PARAMETER SearchTimeoutSeconds
+    Max time to wait for Lidarr search commands and results. Default: 180
+
+.PARAMETER SearchArtistTerm
+    Artist term used to seed Lidarr with a known artist via /api/v1/artist/lookup.
+    Default: "Miles Davis"
+
+.PARAMETER SearchAlbumTitle
+    Album title expected to exist under the seeded artist and used for AlbumSearch.
+    Default: "Kind of Blue"
+
 .PARAMETER PluginZip
     One or more plugin zips in the form: name=path
     Example: qobuzarr=D:\repo\Qobuzarr-latest.zip
@@ -37,10 +60,24 @@
 .PARAMETER KeepRunning
     Do not stop/remove the container after the test.
 
+.NOTES
+    Medium gate environment variables:
+      Qobuzarr (implementation: QobuzIndexer)
+        - QOBUZARR_AUTH_METHOD: Email|Token (optional; auto-detect if omitted)
+        - QOBUZARR_EMAIL + QOBUZARR_PASSWORD (Email mode)
+        - QOBUZARR_USER_ID + QOBUZARR_AUTH_TOKEN (Token mode)
+        - QOBUZARR_APP_ID + QOBUZARR_APP_SECRET (recommended)
+        - QOBUZARR_COUNTRY_CODE (optional; default US)
+
+      Tidalarr (implementation: TidalLidarrIndexer)
+        - TIDALARR_REDIRECT_URL (required)
+        - TIDALARR_MARKET (optional; default US)
+
 .EXAMPLE
     .\scripts\multi-plugin-docker-smoke-test.ps1 `
       -PluginZip "qobuzarr=D:\Alex\github\qobuzarr\Qobuzarr-latest.zip" `
-      -PluginZip "tidalarr=D:\Alex\github\tidalarr\Tidalarr-latest.zip"
+      -PluginZip "tidalarr=D:\Alex\github\tidalarr\Tidalarr-latest.zip" `
+      -RunMediumGate
 #>
 
 [CmdletBinding()]
@@ -50,6 +87,12 @@ param(
     [int]$Port = 8689,
     [int]$StartupTimeoutSeconds = 120,
     [int]$SchemaTimeoutSeconds = 60,
+    [switch]$RunMediumGate,
+    [int]$MediumGateTimeoutSeconds = 60,
+    [switch]$RunSearchGate,
+    [int]$SearchTimeoutSeconds = 180,
+    [string]$SearchArtistTerm = "Miles Davis",
+    [string]$SearchAlbumTitle = "Kind of Blue",
     [string[]]$PluginZip = @(),
     [string]$PluginsOwner = "RicherTunes",
     [switch]$KeepRunning
@@ -61,6 +104,10 @@ $ProgressPreference = "SilentlyContinue"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
+
+if ($RunSearchGate) {
+    $RunMediumGate = $true
+}
 
 $expectations = @{
     "qobuzarr" = @{
@@ -89,6 +136,137 @@ function Ensure-DockerAvailable {
     }
 }
 
+function Get-NonEmptyEnvValue {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $v = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($v)) { return $null }
+    return $v.Trim()
+}
+
+function Copy-JsonObject {
+    param([Parameter(Mandatory = $true)]$Object)
+    return ($Object | ConvertTo-Json -Depth 50) | ConvertFrom-Json
+}
+
+function UrlEncode {
+    param([Parameter(Mandatory = $true)][string]$Value)
+    return [uri]::EscapeDataString($Value)
+}
+
+function Set-FieldValue {
+    param(
+        [Parameter(Mandatory = $true)]$Schema,
+        [Parameter(Mandatory = $true)][string[]]$CandidateNames,
+        [Parameter(Mandatory = $true)]$Value
+    )
+
+    if (-not $Schema.fields) {
+        throw "Schema for '$($Schema.implementation)' does not include a 'fields' array."
+    }
+
+    $found = $null
+    foreach ($name in $CandidateNames) {
+        $found = $Schema.fields | Where-Object {
+            $_.name -and $_.name.ToString().Equals($name, [StringComparison]::OrdinalIgnoreCase)
+        } | Select-Object -First 1
+
+        if ($found) { break }
+    }
+
+    if (-not $found) {
+        $available = ($Schema.fields | ForEach-Object { $_.name } | Sort-Object -Unique) -join ", "
+        throw "Could not find field '$($CandidateNames -join '|')' for '$($Schema.implementation)'. Available: $available"
+    }
+
+    if ($found.PSObject.Properties.Match("value").Count -gt 0) {
+        $found.value = $Value
+    }
+    else {
+        $found | Add-Member -NotePropertyName "value" -NotePropertyValue $Value -Force
+    }
+}
+
+function Invoke-LidarrApiJson {
+    param(
+        [Parameter(Mandatory = $true)][ValidateSet("GET", "POST", "PUT", "DELETE")][string]$Method,
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][hashtable]$Headers,
+        [Parameter()][object]$Body,
+        [Parameter()][int]$TimeoutSeconds = 60
+    )
+
+    $bodyJson = $null
+    if ($null -ne $Body) {
+        $bodyJson = $Body | ConvertTo-Json -Depth 50 -Compress
+    }
+
+    try {
+        if ($null -ne $bodyJson) {
+            return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $Headers -Body $bodyJson -ContentType "application/json" -TimeoutSec $TimeoutSeconds -ErrorAction Stop
+        }
+
+        return Invoke-RestMethod -Method $Method -Uri $Uri -Headers $Headers -TimeoutSec $TimeoutSeconds -ErrorAction Stop
+    }
+    catch {
+        $message = $_.Exception.Message
+        $statusCode = $null
+        $responseBody = $null
+
+        try {
+            $resp = $_.Exception.Response
+            if ($resp) {
+                $statusCode = [int]$resp.StatusCode
+                $stream = $resp.GetResponseStream()
+                if ($stream) {
+                    $reader = New-Object System.IO.StreamReader($stream)
+                    $responseBody = $reader.ReadToEnd()
+                }
+            }
+        }
+        catch {
+            # Best-effort only
+        }
+
+        $detail = $message
+        if ($statusCode) { $detail = "${detail} (HTTP $statusCode)" }
+        if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+            $snippet = $responseBody
+            $snippet = $snippet -replace '(?i)"(apiKey|password|authToken|appSecret|token|secret|session|credential)"\s*:\s*"[^"]*"', '"$1":"***"'
+            $snippet = $snippet -replace '[\x00-\x08\x0B\x0C\x0E-\x1F]', ''
+            if ($snippet.Length -gt 800) { $snippet = $snippet.Substring(0, 800) + "..." }
+            $detail = "${detail}`nResponse:`n$snippet"
+        }
+
+        throw $detail
+    }
+}
+
+function Wait-LidarrCommandCompleted {
+    param(
+        [Parameter(Mandatory = $true)][int]$CommandId,
+        [Parameter(Mandatory = $true)][string]$LidarrUrl,
+        [Parameter(Mandatory = $true)][hashtable]$Headers,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $start = Get-Date
+    while (((Get-Date) - $start).TotalSeconds -lt $TimeoutSeconds) {
+        $cmd = Invoke-LidarrApiJson -Method "GET" -Uri "$LidarrUrl/api/v1/command/$CommandId" -Headers $Headers -TimeoutSeconds 30
+        $status = $cmd.status
+        if ($status -eq "completed") { return $cmd }
+        if ($status -eq "failed" -or $status -eq "aborted" -or $status -eq "cancelled") {
+            $msg = $cmd.message
+            if ([string]::IsNullOrWhiteSpace($msg)) { $msg = "Lidarr command ended with status '$status'." }
+            throw $msg
+        }
+
+        Start-Sleep -Seconds 3
+    }
+
+    throw "Timeout waiting for Lidarr command $CommandId to complete within ${TimeoutSeconds}s."
+}
+
 function Cleanup {
     if (-not $KeepRunning) {
         & docker rm -f $ContainerName 2>$null | Out-Null
@@ -115,12 +293,16 @@ try {
     $workRoot = Join-Path $repoRoot ".docker-multi-smoke-test/$ContainerName"
     $pluginsRoot = Join-Path $workRoot "plugins"
     $configRoot = Join-Path $workRoot "config"
+    $musicRoot = Join-Path $workRoot "music"
 
     if (Test-Path $workRoot) {
         Remove-Item -Recurse -Force $workRoot
     }
     New-Item -ItemType Directory -Force -Path $pluginsRoot | Out-Null
     New-Item -ItemType Directory -Force -Path $configRoot | Out-Null
+    if ($RunSearchGate) {
+        New-Item -ItemType Directory -Force -Path $musicRoot | Out-Null
+    }
 
     $pluginNames = New-Object System.Collections.Generic.List[string]
 
@@ -153,6 +335,7 @@ try {
 
     $pluginMount = $pluginsRoot.Replace('\', '/')
     $configMount = $configRoot.Replace('\', '/')
+    $musicMount = $musicRoot.Replace('\', '/')
 
     $dockerArgs = @(
         "run", "-d",
@@ -165,6 +348,21 @@ try {
         "-e", "TZ=UTC",
         "ghcr.io/hotio/lidarr:$LidarrTag"
     )
+
+    if ($RunSearchGate) {
+        $dockerArgs = @(
+            "run", "-d",
+            "--name", $ContainerName,
+            "-p", "${Port}:8686",
+            "-v", "${configMount}:/config",
+            "-v", "${pluginMount}:/config/plugins:ro",
+            "-v", "${musicMount}:/music",
+            "-e", "PUID=1000",
+            "-e", "PGID=1000",
+            "-e", "TZ=UTC",
+            "ghcr.io/hotio/lidarr:$LidarrTag"
+        )
+    }
 
     $startResult = & docker @dockerArgs 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -288,9 +486,247 @@ try {
         exit 1
     }
 
+    $configuredIndexerNames = New-Object System.Collections.Generic.List[string]
+
+    if ($RunMediumGate) {
+        Write-Host "`n=== Medium gate: configure + test indexers ===" -ForegroundColor Cyan
+
+        $mediumConfigured = $false
+        $mediumFailed = $false
+
+        foreach ($plugin in $pluginNames) {
+            if (-not $expectations.ContainsKey($plugin)) { continue }
+            $exp = $expectations[$plugin]
+
+            foreach ($impl in $exp.Indexers) {
+                $schema = $indexerSchemas | Where-Object { $_.implementation -eq $impl } | Select-Object -First 1
+                if (-not $schema) {
+                    Write-Host "✗ medium gate: missing schema for $impl" -ForegroundColor Red
+                    $mediumFailed = $true
+                    continue
+                }
+
+                if ($impl -eq "QobuzIndexer") {
+                    $qEmail = Get-NonEmptyEnvValue "QOBUZARR_EMAIL"
+                    $qPassword = Get-NonEmptyEnvValue "QOBUZARR_PASSWORD"
+                    $qUserId = Get-NonEmptyEnvValue "QOBUZARR_USER_ID"
+                    $qAuthToken = Get-NonEmptyEnvValue "QOBUZARR_AUTH_TOKEN"
+                    $qAuthMethod = Get-NonEmptyEnvValue "QOBUZARR_AUTH_METHOD"
+                    $qAppId = Get-NonEmptyEnvValue "QOBUZARR_APP_ID"
+                    $qAppSecret = Get-NonEmptyEnvValue "QOBUZARR_APP_SECRET"
+                    $qCountry = Get-NonEmptyEnvValue "QOBUZARR_COUNTRY_CODE"
+                    if ([string]::IsNullOrWhiteSpace($qCountry)) { $qCountry = "US" }
+
+                    $mode = $null
+                    if (-not [string]::IsNullOrWhiteSpace($qAuthMethod)) {
+                        if ($qAuthMethod.Equals("Token", [StringComparison]::OrdinalIgnoreCase)) { $mode = "Token" }
+                        elseif ($qAuthMethod.Equals("Email", [StringComparison]::OrdinalIgnoreCase)) { $mode = "Email" }
+                        else { throw "Invalid QOBUZARR_AUTH_METHOD='$qAuthMethod'. Expected: Email|Token." }
+                    }
+                    elseif (-not [string]::IsNullOrWhiteSpace($qUserId) -and -not [string]::IsNullOrWhiteSpace($qAuthToken)) {
+                        $mode = "Token"
+                    }
+                    elseif (-not [string]::IsNullOrWhiteSpace($qEmail) -and -not [string]::IsNullOrWhiteSpace($qPassword)) {
+                        $mode = "Email"
+                    }
+
+                    if ([string]::IsNullOrWhiteSpace($mode)) {
+                        Write-Host "↷ medium gate: skipping QobuzIndexer (missing Qobuz credentials env vars)" -ForegroundColor Yellow
+                        continue
+                    }
+
+                    $mediumConfigured = $true
+                    $payload = Copy-JsonObject $schema
+                    $payload.name = "SmokeTest - Qobuzarr"
+                    $payload.enable = $true
+
+                    if ($mode -eq "Email") {
+                        Set-FieldValue -Schema $payload -CandidateNames @("authMethod", "AuthMethod") -Value 0
+                        Set-FieldValue -Schema $payload -CandidateNames @("email", "Email") -Value $qEmail
+                        Set-FieldValue -Schema $payload -CandidateNames @("password", "Password") -Value $qPassword
+                    }
+                    else {
+                        Set-FieldValue -Schema $payload -CandidateNames @("authMethod", "AuthMethod") -Value 1
+                        Set-FieldValue -Schema $payload -CandidateNames @("userId", "UserId") -Value $qUserId
+                        Set-FieldValue -Schema $payload -CandidateNames @("authToken", "AuthToken") -Value $qAuthToken
+                    }
+
+                    Set-FieldValue -Schema $payload -CandidateNames @("countryCode", "CountryCode") -Value $qCountry
+                    if (-not [string]::IsNullOrWhiteSpace($qAppId)) { Set-FieldValue -Schema $payload -CandidateNames @("appId", "AppId") -Value $qAppId }
+                    if (-not [string]::IsNullOrWhiteSpace($qAppSecret)) { Set-FieldValue -Schema $payload -CandidateNames @("appSecret", "AppSecret") -Value $qAppSecret }
+
+                    try {
+                        $created = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/indexer" -Headers $headers -Body $payload -TimeoutSeconds $MediumGateTimeoutSeconds
+                        $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/indexer/test" -Headers $headers -Body $created -TimeoutSeconds $MediumGateTimeoutSeconds
+                        Write-Host "✓ medium gate: QobuzIndexer configured + test succeeded" -ForegroundColor Green
+                        $configuredIndexerNames.Add($payload.name) | Out-Null
+                    }
+                    catch {
+                        Write-Host "✗ medium gate: QobuzIndexer test failed`n$($_.Exception.Message)" -ForegroundColor Red
+                        $mediumFailed = $true
+                    }
+
+                    continue
+                }
+
+                if ($impl -eq "TidalLidarrIndexer") {
+                    $tRedirectUrl = Get-NonEmptyEnvValue "TIDALARR_REDIRECT_URL"
+                    $tMarket = Get-NonEmptyEnvValue "TIDALARR_MARKET"
+                    if ([string]::IsNullOrWhiteSpace($tMarket)) { $tMarket = "US" }
+
+                    if ([string]::IsNullOrWhiteSpace($tRedirectUrl)) {
+                        Write-Host "↷ medium gate: skipping TidalLidarrIndexer (missing TIDALARR_REDIRECT_URL)" -ForegroundColor Yellow
+                        continue
+                    }
+
+                    $mediumConfigured = $true
+                    $payload = Copy-JsonObject $schema
+                    $payload.name = "SmokeTest - Tidalarr"
+                    $payload.enable = $true
+
+                    Set-FieldValue -Schema $payload -CandidateNames @("configPath", "ConfigPath") -Value "/config/tidalarr"
+                    Set-FieldValue -Schema $payload -CandidateNames @("redirectUrl", "RedirectUrl") -Value $tRedirectUrl
+                    Set-FieldValue -Schema $payload -CandidateNames @("tidalMarket", "TidalMarket") -Value $tMarket
+
+                    try {
+                        $created = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/indexer" -Headers $headers -Body $payload -TimeoutSeconds $MediumGateTimeoutSeconds
+                        $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/indexer/test" -Headers $headers -Body $created -TimeoutSeconds $MediumGateTimeoutSeconds
+                        Write-Host "✓ medium gate: TidalLidarrIndexer configured + test succeeded" -ForegroundColor Green
+                        $configuredIndexerNames.Add($payload.name) | Out-Null
+                    }
+                    catch {
+                        Write-Host "✗ medium gate: TidalLidarrIndexer test failed`n$($_.Exception.Message)" -ForegroundColor Red
+                        $mediumFailed = $true
+                    }
+
+                    continue
+                }
+
+                Write-Host "↷ medium gate: no config mapping for $impl (skipping)" -ForegroundColor Yellow
+            }
+        }
+
+        if (-not $mediumConfigured) {
+            Write-Host "↷ medium gate skipped (no supported credentials provided)." -ForegroundColor Yellow
+        }
+        elseif ($mediumFailed) {
+            exit 1
+        }
+    }
+
+    if ($RunSearchGate) {
+        Write-Host "`n=== Search gate: AlbumSearch + releases ===" -ForegroundColor Cyan
+
+        if (-not $configuredIndexerNames -or $configuredIndexerNames.Count -eq 0) {
+            Write-Host "↷ search gate skipped (no indexers configured in medium gate)." -ForegroundColor Yellow
+        }
+        else {
+            $rootFolders = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/rootfolder" -Headers $headers -TimeoutSeconds 30
+            $musicRootFolder = $rootFolders | Where-Object { $_.path -eq "/music" } | Select-Object -First 1
+
+            if (-not $musicRootFolder) {
+                $musicRootFolder = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/rootfolder" -Headers $headers -Body @{ path = "/music" } -TimeoutSeconds 30
+            }
+
+            if (-not $musicRootFolder -or $musicRootFolder.path -ne "/music") {
+                throw "Failed to create/find root folder '/music' required for search gate."
+            }
+
+            $qualityProfiles = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/qualityprofile" -Headers $headers -TimeoutSeconds 30
+            $metadataProfiles = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/metadataprofile" -Headers $headers -TimeoutSeconds 30
+
+            $qualityProfileId = ($qualityProfiles | Select-Object -First 1).id
+            $metadataProfileId = ($metadataProfiles | Select-Object -First 1).id
+
+            if (-not $qualityProfileId -or -not $metadataProfileId) {
+                throw "Failed to resolve quality/metadata profiles required for artist add."
+            }
+
+            $artistTerm = UrlEncode $SearchArtistTerm
+            $artistLookup = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/artist/lookup?term=$artistTerm" -Headers $headers -TimeoutSeconds 30
+            $artistCandidate = $artistLookup | Select-Object -First 1
+
+            if (-not $artistCandidate) {
+                throw "No artists returned from lookup for '$SearchArtistTerm'."
+            }
+
+            $artistPayload = Copy-JsonObject $artistCandidate
+            $artistPayload.qualityProfileId = $qualityProfileId
+            $artistPayload.metadataProfileId = $metadataProfileId
+            $artistPayload.rootFolderPath = "/music"
+            $artistPayload.monitored = $true
+            $artistPayload.monitorNewItems = "all"
+            $artistPayload.addOptions = @{
+                monitor = "all"
+                monitored = $true
+                searchForMissingAlbums = $false
+            }
+
+            $createdArtist = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/artist" -Headers $headers -Body $artistPayload -TimeoutSeconds 60
+            if (-not $createdArtist -or -not $createdArtist.id) {
+                throw "Failed to create artist in Lidarr for search gate."
+            }
+
+            Write-Host "Seeded artist: $($createdArtist.artistName) (id=$($createdArtist.id))" -ForegroundColor Green
+
+            $albums = $null
+            $start = Get-Date
+            while (((Get-Date) - $start).TotalSeconds -lt $SearchTimeoutSeconds) {
+                $albums = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/album?artistId=$($createdArtist.id)&includeAllArtistAlbums=true" -Headers $headers -TimeoutSeconds 30
+                if ($albums -and $albums.Count -gt 0) { break }
+                Start-Sleep -Seconds 3
+            }
+
+            if (-not $albums -or $albums.Count -eq 0) {
+                throw "Timeout waiting for albums to be available for artist '$($createdArtist.artistName)'."
+            }
+
+            $targetTitle = $SearchAlbumTitle.Trim()
+            $album = $albums | Where-Object { $_.title -and $_.title.ToString().Equals($targetTitle, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+            if (-not $album) {
+                $album = $albums | Where-Object { $_.title -and $_.title.ToString().IndexOf($targetTitle, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | Select-Object -First 1
+            }
+
+            if (-not $album) {
+                $sample = ($albums | Select-Object -First 20 | ForEach-Object { $_.title }) -join ", "
+                throw "Could not find an album matching '$SearchAlbumTitle' for artist '$($createdArtist.artistName)'. Sample albums: $sample"
+            }
+
+            Write-Host "Search gate album: $($album.title) (id=$($album.id))" -ForegroundColor Green
+
+            $cmd = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/command" -Headers $headers -Body @{ name = "AlbumSearch"; albumIds = @($album.id) } -TimeoutSeconds 30
+            if (-not $cmd -or -not $cmd.id) {
+                throw "Failed to enqueue AlbumSearch command."
+            }
+
+            $null = Wait-LidarrCommandCompleted -CommandId $cmd.id -LidarrUrl $lidarrUrl -Headers $headers -TimeoutSeconds $SearchTimeoutSeconds
+
+            $releases = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/release?albumId=$($album.id)" -Headers $headers -TimeoutSeconds 30
+            $releaseCount = 0
+            if ($releases) { $releaseCount = $releases.Count }
+
+            if ($releaseCount -eq 0) {
+                throw "Search gate failure: release list is empty for albumId=$($album.id)."
+            }
+
+            $seenIndexerNames = $releases | ForEach-Object { $_.indexer } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
+            Write-Host "Search gate releases: $releaseCount (indexers: $($seenIndexerNames -join ', '))" -ForegroundColor Green
+
+            $missingFromConfigured = @()
+            foreach ($idxName in $configuredIndexerNames) {
+                if ($seenIndexerNames -notcontains $idxName) {
+                    $missingFromConfigured += $idxName
+                }
+            }
+
+            if ($missingFromConfigured.Count -gt 0) {
+                throw "Search gate failure: no releases attributed to configured indexer(s): $($missingFromConfigured -join ', '). Consider using a more mainstream album or verify credentials."
+            }
+        }
+    }
+
     Write-Host "`n🎉 Multi-plugin schema smoke test passed." -ForegroundColor Green
 }
 finally {
     Cleanup
 }
-
