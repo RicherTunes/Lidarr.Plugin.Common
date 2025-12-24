@@ -175,6 +175,39 @@ jobs:
           # Cleanup
           rm -rf _lidarr_extracted
 
+      - name: Sync tools from main checkout to submodules
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Syncing tools and build assets from main checkout to plugin submodules..."
+
+          # Both plugins have submodules at ext/Lidarr.Plugin.Common
+          # The submodules may point to older commits, so we sync from this checkout
+          for plugin_dir in qobuzarr tidalarr; do
+            submod_common="$plugin_dir/ext/Lidarr.Plugin.Common"
+            if [ -d "$submod_common" ]; then
+              echo "Syncing to $submod_common..."
+
+              # Sync tools directory (includes ManifestCheck.ps1, PluginPack.psm1)
+              if [ -d "tools" ]; then
+                rm -rf "$submod_common/tools"
+                cp -r tools "$submod_common/tools"
+                echo "  - tools/ synced"
+              fi
+
+              # Sync build directory (includes PluginPackaging.targets)
+              if [ -d "build" ]; then
+                rm -rf "$submod_common/build"
+                cp -r build "$submod_common/build"
+                echo "  - build/ synced"
+              fi
+            else
+              echo "Warning: $submod_common not found, skipping sync"
+            fi
+          done
+
+          echo "Tool sync complete"
+
       - name: Build Qobuzarr package
         shell: pwsh
         working-directory: qobuzarr
