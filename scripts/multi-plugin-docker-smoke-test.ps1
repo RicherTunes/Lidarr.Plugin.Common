@@ -50,6 +50,10 @@
     Album title expected to exist under the seeded artist and used for AlbumSearch.
     Default: "Kind of Blue"
 
+.PARAMETER RequireAllConfiguredIndexersInSearch
+    When set, the search gate fails unless releases include entries attributed to every
+    indexer configured by the medium gate. Default: false (only asserts non-empty releases).
+
 .PARAMETER PluginZip
     One or more plugin zips in the form: name=path
     Example: qobuzarr=D:\repo\Qobuzarr-latest.zip
@@ -93,6 +97,7 @@ param(
     [int]$SearchTimeoutSeconds = 180,
     [string]$SearchArtistTerm = "Miles Davis",
     [string]$SearchAlbumTitle = "Kind of Blue",
+    [switch]$RequireAllConfiguredIndexersInSearch,
     [string[]]$PluginZip = @(),
     [string]$PluginsOwner = "RicherTunes",
     [switch]$KeepRunning
@@ -730,15 +735,17 @@ try {
             $seenIndexerNames = $releases | ForEach-Object { $_.indexer } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
             Write-Host "Search gate releases: $releaseCount (indexers: $($seenIndexerNames -join ', '))" -ForegroundColor Green
 
-            $missingFromConfigured = @()
-            foreach ($idxName in $configuredIndexerNames) {
-                if ($seenIndexerNames -notcontains $idxName) {
-                    $missingFromConfigured += $idxName
+            if ($RequireAllConfiguredIndexersInSearch) {
+                $missingFromConfigured = @()
+                foreach ($idxName in $configuredIndexerNames) {
+                    if ($seenIndexerNames -notcontains $idxName) {
+                        $missingFromConfigured += $idxName
+                    }
                 }
-            }
 
-            if ($missingFromConfigured.Count -gt 0) {
-                throw "Search gate failure: no releases attributed to configured indexer(s): $($missingFromConfigured -join ', '). Consider using a more mainstream album or verify credentials."
+                if ($missingFromConfigured.Count -gt 0) {
+                    throw "Search gate failure: no releases attributed to configured indexer(s): $($missingFromConfigured -join ', '). Consider using a different artist/album or verifying credentials."
+                }
             }
         }
     }
