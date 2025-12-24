@@ -8,10 +8,10 @@ on:
         required: true
         type: string
       lidarr_docker_version:
-        description: 'Lidarr Docker image version (e.g., pr-plugins-3.1.1.4884)'
+        description: 'Lidarr Docker image version (plugins branch tag, e.g., pr-plugins-2.14.2.4786)'
         required: false
         type: string
-        default: 'pr-plugins-3.1.1.4884'
+        default: 'pr-plugins-2.14.2.4786'
       test_plugins:
         description: 'Comma-separated list of plugins to test (default: all)'
         required: false
