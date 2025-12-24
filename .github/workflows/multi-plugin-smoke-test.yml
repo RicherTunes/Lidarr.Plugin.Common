@@ -371,20 +371,19 @@ jobs:
           $containerName = "lidarr-multi-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}"
           "SMOKE_CONTAINER_NAME=$containerName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          $args = @(
-            "-LidarrTag", "${{ matrix.lidarr_tag }}",
-            "-ContainerName", $containerName,
-            "-PluginZip", "qobuzarr=$env:QOBUZ_ZIP",
-            "-PluginZip", "tidalarr=$env:TIDAL_ZIP",
-            "-KeepRunning"
-          )
+          $params = @{
+            LidarrTag = "${{ matrix.lidarr_tag }}"
+            ContainerName = $containerName
+            PluginZip = @("qobuzarr=$env:QOBUZ_ZIP", "tidalarr=$env:TIDAL_ZIP")
+            KeepRunning = $true
+          }
 
-          if ("${{ inputs.run_medium_gate }}" -eq "true") { $args += "-RunMediumGate" }
-          if ("${{ inputs.run_downloadclient_gate }}" -eq "true") { $args += "-RunDownloadClientGate" }
-          if ("${{ inputs.run_search_gate }}" -eq "true") { $args += "-RunSearchGate" }
-          if ("${{ inputs.require_all_indexers_in_search }}" -eq "true") { $args += "-RequireAllConfiguredIndexersInSearch" }
+          if ("${{ inputs.run_medium_gate }}" -eq "true") { $params.RunMediumGate = $true }
+          if ("${{ inputs.run_downloadclient_gate }}" -eq "true") { $params.RunDownloadClientGate = $true }
+          if ("${{ inputs.run_search_gate }}" -eq "true") { $params.RunSearchGate = $true }
+          if ("${{ inputs.require_all_indexers_in_search }}" -eq "true") { $params.RequireAllConfiguredIndexersInSearch = $true }
 
-          & pwsh -File "scripts/multi-plugin-docker-smoke-test.ps1" @args
+          & ./scripts/multi-plugin-docker-smoke-test.ps1 @params
 
       - name: Collect container diagnostics
         if: always()
