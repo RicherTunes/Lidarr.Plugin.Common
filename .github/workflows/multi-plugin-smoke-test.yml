@@ -65,6 +65,28 @@ jobs:
             lidarr_tag: pr-plugins
             allow_failure: true
     steps:
+      - name: Preflight - Validate CROSS_REPO_PAT secret
+        shell: bash
+        env:
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          if [[ -z "${CROSS_REPO_PAT}" ]]; then
+            echo "::error::CROSS_REPO_PAT secret is missing or empty."
+            echo ""
+            echo "This workflow requires a Personal Access Token with 'repo' scope to checkout"
+            echo "the private Qobuzarr and Tidalarr repositories."
+            echo ""
+            echo "To fix this:"
+            echo "  1. Go to: https://github.com/settings/tokens"
+            echo "  2. Create a PAT (classic) with 'repo' scope"
+            echo "  3. Go to: https://github.com/RicherTunes/Lidarr.Plugin.Common/settings/secrets/actions"
+            echo "  4. Add secret named 'CROSS_REPO_PAT' with the token value"
+            echo ""
+            echo "See docs/MULTI_PLUGIN_SMOKE_TEST.md for full setup instructions."
+            exit 1
+          fi
+          echo "CROSS_REPO_PAT secret is configured"
+
       - name: Checkout Lidarr.Plugin.Common
         uses: actions/checkout@v4
 
@@ -108,16 +130,35 @@ jobs:
       - name: Locate plugin zips
         shell: pwsh
         run: |
-          function Find-LatestZip {
+          function Find-PluginZip {
             param(
               [Parameter(Mandatory=$true)][string]$RepoDir,
               [Parameter(Mandatory=$true)][string]$NamePattern
             )
 
             $root = Resolve-Path $RepoDir
+
+            # Strategy 1: Prefer plugin.json-adjacent zips (canonical build output)
+            $manifestFiles = Get-ChildItem -Path $root -Recurse -File -Filter 'plugin.json' -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -notmatch '[\\/](\.git|ext|obj)[\\/]' }
+
+            foreach ($manifest in $manifestFiles) {
+              $dir = $manifest.DirectoryName
+              $adjacentZips = Get-ChildItem -Path $dir -File -Filter '*.zip' -ErrorAction SilentlyContinue |
+                Where-Object { $_.Name -match $NamePattern } |
+                Sort-Object LastWriteTimeUtc -Descending
+              $zip = $adjacentZips | Select-Object -First 1
+              if ($zip) {
+                Write-Host "Found plugin.json-adjacent zip: $($zip.FullName)"
+                return $zip.FullName
+              }
+            }
+
+            # Strategy 2: Fallback to latest zip anywhere (legacy/fallback)
+            Write-Host "No plugin.json-adjacent zip found, falling back to latest zip search..."
             $candidates = Get-ChildItem -Path $root -Recurse -File -Filter '*.zip' -ErrorAction Stop |
               Where-Object {
-                $_.FullName -notmatch '[\\\\/](\\.git|ext)[\\\\/]' -and
+                $_.FullName -notmatch '[\\/](\.git|ext|obj)[\\/]' -and
                 $_.Name -match $NamePattern
               } |
               Sort-Object LastWriteTimeUtc -Descending
@@ -126,11 +167,12 @@ jobs:
             if (-not $zip) {
               throw "Could not find a zip for '$RepoDir' matching pattern '$NamePattern'."
             }
+            Write-Host "Found fallback zip: $($zip.FullName)"
             return $zip.FullName
           }
 
-          $qobuzZip = Find-LatestZip -RepoDir 'qobuzarr' -NamePattern 'Qobuzarr'
-          $tidalZip = Find-LatestZip -RepoDir 'tidalarr' -NamePattern 'Tidalarr'
+          $qobuzZip = Find-PluginZip -RepoDir 'qobuzarr' -NamePattern 'Qobuzarr'
+          $tidalZip = Find-PluginZip -RepoDir 'tidalarr' -NamePattern 'Tidalarr'
 
           "QOBUZ_ZIP=$qobuzZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "TIDAL_ZIP=$tidalZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
@@ -218,16 +260,29 @@ jobs:
 
           & pwsh -File "scripts/multi-plugin-docker-smoke-test.ps1" @args
 
-      - name: Collect container logs
+      - name: Collect container diagnostics
         if: always()
         shell: bash
         run: |
           set +e
+          mkdir -p .docker-multi-smoke-test/diagnostics
+
+          echo "::group::All containers (docker ps -a)"
+          docker ps -a --format "table {{.Names}}	{{.Status}}	{{.Image}}" | tee .docker-multi-smoke-test/diagnostics/containers.txt || true
+          echo "::endgroup::"
+
           if docker ps -a --format '{{.Names}}' | grep -q "^${SMOKE_CONTAINER_NAME:-}$"; then
-            echo "::group::docker logs (${SMOKE_CONTAINER_NAME})"
-            docker logs "${SMOKE_CONTAINER_NAME}" --tail 5000 || true
+            echo "::group::Container logs (${SMOKE_CONTAINER_NAME})"
+            docker logs "${SMOKE_CONTAINER_NAME}" --tail 5000 2>&1 | tee .docker-multi-smoke-test/diagnostics/container.log || true
             echo "::endgroup::"
+
+            echo "::group::Container inspect"
+            docker inspect "${SMOKE_CONTAINER_NAME}" > .docker-multi-smoke-test/diagnostics/inspect.json 2>&1 || true
+            echo "::endgroup::"
+
             docker rm -f "${SMOKE_CONTAINER_NAME}" || true
+          else
+            echo "Container ${SMOKE_CONTAINER_NAME:-<unknown>} not found"
           fi
 
       - name: Upload smoke artifacts
@@ -238,5 +293,5 @@ jobs:
           path: |
             ${{ env.QOBUZ_ZIP }}
             ${{ env.TIDAL_ZIP }}
-            .docker-multi-smoke-test/${{ env.SMOKE_CONTAINER_NAME }}/
+            .docker-multi-smoke-test/
           if-no-files-found: warn
