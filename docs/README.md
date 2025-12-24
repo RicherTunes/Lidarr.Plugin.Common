@@ -56,6 +56,7 @@ Pick the guide that matches what you need to do.
 - [Release policy](dev-guide/RELEASE_POLICY.md)
 - [CI & automation](dev-guide/CI.md)
 - [Unified plugin pipeline](dev-guide/UNIFIED_PLUGIN_PIPELINE.md)
+- [Multi-plugin smoke test](MULTI_PLUGIN_SMOKE_TEST.md)
 - [Documentation style guide](dev-guide/STYLE_GUIDE.md)
 - [Doc testing & snippet verification](dev-guide/TESTING_DOCS.md)
 
