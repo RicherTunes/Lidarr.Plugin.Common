@@ -508,13 +508,28 @@ try {
 
                 if ($impl -eq "QobuzIndexer") {
                     $qEmail = Get-NonEmptyEnvValue "QOBUZARR_EMAIL"
+                    if ([string]::IsNullOrWhiteSpace($qEmail)) { $qEmail = Get-NonEmptyEnvValue "QOBUZ_EMAIL" }
+
                     $qPassword = Get-NonEmptyEnvValue "QOBUZARR_PASSWORD"
+                    if ([string]::IsNullOrWhiteSpace($qPassword)) { $qPassword = Get-NonEmptyEnvValue "QOBUZ_PASSWORD" }
+
                     $qUserId = Get-NonEmptyEnvValue "QOBUZARR_USER_ID"
+                    if ([string]::IsNullOrWhiteSpace($qUserId)) { $qUserId = Get-NonEmptyEnvValue "QOBUZ_USER_ID" }
+
                     $qAuthToken = Get-NonEmptyEnvValue "QOBUZARR_AUTH_TOKEN"
+                    if ([string]::IsNullOrWhiteSpace($qAuthToken)) { $qAuthToken = Get-NonEmptyEnvValue "QOBUZ_AUTH_TOKEN" }
+
                     $qAuthMethod = Get-NonEmptyEnvValue "QOBUZARR_AUTH_METHOD"
+                    if ([string]::IsNullOrWhiteSpace($qAuthMethod)) { $qAuthMethod = Get-NonEmptyEnvValue "QOBUZ_AUTH_METHOD" }
+
                     $qAppId = Get-NonEmptyEnvValue "QOBUZARR_APP_ID"
+                    if ([string]::IsNullOrWhiteSpace($qAppId)) { $qAppId = Get-NonEmptyEnvValue "QOBUZ_APP_ID" }
+
                     $qAppSecret = Get-NonEmptyEnvValue "QOBUZARR_APP_SECRET"
+                    if ([string]::IsNullOrWhiteSpace($qAppSecret)) { $qAppSecret = Get-NonEmptyEnvValue "QOBUZ_APP_SECRET" }
+
                     $qCountry = Get-NonEmptyEnvValue "QOBUZARR_COUNTRY_CODE"
+                    if ([string]::IsNullOrWhiteSpace($qCountry)) { $qCountry = Get-NonEmptyEnvValue "QOBUZ_COUNTRY_CODE" }
                     if ([string]::IsNullOrWhiteSpace($qCountry)) { $qCountry = "US" }
 
                     $mode = $null
@@ -571,7 +586,10 @@ try {
 
                 if ($impl -eq "TidalLidarrIndexer") {
                     $tRedirectUrl = Get-NonEmptyEnvValue "TIDALARR_REDIRECT_URL"
+                    if ([string]::IsNullOrWhiteSpace($tRedirectUrl)) { $tRedirectUrl = Get-NonEmptyEnvValue "TIDAL_REDIRECT_URL" }
+
                     $tMarket = Get-NonEmptyEnvValue "TIDALARR_MARKET"
+                    if ([string]::IsNullOrWhiteSpace($tMarket)) { $tMarket = Get-NonEmptyEnvValue "TIDAL_MARKET" }
                     if ([string]::IsNullOrWhiteSpace($tMarket)) { $tMarket = "US" }
 
                     if ([string]::IsNullOrWhiteSpace($tRedirectUrl)) {
