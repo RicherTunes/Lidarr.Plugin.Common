@@ -145,6 +145,8 @@ On failure (or always), the workflow uploads:
   - `diagnostics/container.log` - Lidarr container logs
   - `diagnostics/inspect.json` - Docker container inspect output
 
+> **Security Note**: Container logs may contain sensitive data if a plugin logs credentials or tokens. Be cautious when enabling gates with real provider credentials, and review artifacts before sharing them publicly.
+
 ## Troubleshooting
 
 ### "CROSS_REPO_PAT secret is missing or empty"
