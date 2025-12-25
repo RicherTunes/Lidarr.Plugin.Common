@@ -189,13 +189,16 @@ function Invoke-PluginCleanup {
     - Extra dependencies that were merged into the plugin DLL
     - System.* and other runtime assemblies provided by the host
     
-    Keeps (type-identity assemblies that must match host):
+    Keeps:
     - Plugin assembly (merged)
-    - Lidarr.Plugin.Abstractions.dll
-    - Microsoft.Extensions.DependencyInjection.Abstractions.dll
-    - Microsoft.Extensions.Logging.Abstractions.dll
     
-    NOTE: FluentValidation.dll is intentionally NOT kept/shipped.
+    NOTE: Do NOT ship host-provided / cross-boundary assemblies (type identity).
+    In multi-plugin scenarios, shipping these can cause load failures when a second plugin
+    attempts to load another copy into the same load context.
+      - Lidarr.Plugin.Abstractions.dll
+      - Microsoft.Extensions.DependencyInjection.Abstractions.dll
+      - Microsoft.Extensions.Logging.Abstractions.dll
+      - FluentValidation.dll
     If a plugin ships its own FluentValidation.dll, ValidationFailure will have
     different type identity than the host's copy and can cause TypeLoadException
     such as: "Method 'Test' ... does not have an implementation."
@@ -208,13 +211,9 @@ function Invoke-PluginCleanup {
         [string]$AssemblyName
     )
 
-    # Assemblies to KEEP in the package (must match PluginPackaging.targets _PluginRuntimeDeps)
+    # Assemblies to KEEP in the package.
     $keepAssemblies = @(
-        "$AssemblyName.dll",                                    # Plugin itself
-        'Lidarr.Plugin.Abstractions.dll',                       # Type identity with host
-        'Lidarr.Plugin.Common.dll',                             # Shared library (if used)
-        'Microsoft.Extensions.DependencyInjection.Abstractions.dll',  # Type identity with host
-        'Microsoft.Extensions.Logging.Abstractions.dll'               # Type identity with host
+        "$AssemblyName.dll" # Plugin itself (merged)
     )
 
     # Remove everything except kept assemblies
@@ -234,6 +233,10 @@ function Invoke-PluginCleanup {
 
     # Remove deps.json (not needed for plugin)
     Get-ChildItem -LiteralPath $PublishPath -Filter '*.deps.json' | Remove-Item -Force -ErrorAction SilentlyContinue
+
+    # Remove NuGet pack artifacts (not used at runtime, and can appear in output when OutDir is overridden)
+    Get-ChildItem -LiteralPath $PublishPath -Filter '*.nupkg' | Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $PublishPath -Filter '*.snupkg' | Remove-Item -Force -ErrorAction SilentlyContinue
 
     # Remove runtimes folder (native dependencies should be handled by host)
     $runtimesPath = Join-Path $PublishPath 'runtimes'
