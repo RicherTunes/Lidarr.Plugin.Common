@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       lidarr_tag:
-        description: Lidarr Docker tag (plugins branch)
+        description: Lidarr Docker tag (plugins branch; must support net8 plugins)
         required: true
-        default: pr-plugins-2.14.2.4786
+        default: pr-plugins-3.1.1.4884
       qobuzarr_ref:
         description: Qobuzarr branch/tag/SHA
         required: true
