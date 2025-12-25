@@ -15,6 +15,10 @@
 .PARAMETER LidarrTag
     Lidarr Docker image tag to run (plugins branch). Default: pr-plugins-3.1.1.4884
 
+.PARAMETER LidarrImage
+    Full Lidarr Docker image name (overrides LidarrTag).
+    Example: ghcr.io/hotio/lidarr:pr-plugins-3.1.1.4884
+
 .PARAMETER ContainerName
     Docker container name. Default: lidarr-multi-plugin-smoke
 
@@ -65,6 +69,15 @@
 .PARAMETER PluginsOwner
     Owner folder under /config/plugins. Default: RicherTunes
 
+.PARAMETER HostBinPath
+    Container path where Lidarr binaries live (used by HostOverrideAssembly mounts).
+    Default: /app/bin
+
+.PARAMETER HostOverrideAssembly
+    One or more local DLL paths to mount into the Lidarr container's HostBinPath.
+    Intended for local validation against an upstream fix before a new host image
+    tag is published.
+
 .PARAMETER KeepRunning
     Do not stop/remove the container after the test.
 
@@ -83,14 +96,17 @@
 
 .EXAMPLE
     .\scripts\multi-plugin-docker-smoke-test.ps1 `
-      -PluginZip "qobuzarr=D:\Alex\github\qobuzarr\Qobuzarr-latest.zip" `
-      -PluginZip "tidalarr=D:\Alex\github\tidalarr\Tidalarr-latest.zip" `
+      -PluginZip @(
+        "qobuzarr=D:\Alex\github\qobuzarr\artifacts\packages\qobuzarr-latest.zip",
+        "tidalarr=D:\Alex\github\tidalarr\src\Tidalarr\artifacts\packages\tidalarr-latest.zip"
+      ) `
       -RunMediumGate
 #>
 
 [CmdletBinding()]
 param(
     [string]$LidarrTag = "pr-plugins-3.1.1.4884",
+    [string]$LidarrImage,
     [string]$ContainerName = "lidarr-multi-plugin-smoke",
     [int]$Port = 8689,
     [int]$StartupTimeoutSeconds = 120,
@@ -105,6 +121,8 @@ param(
     [switch]$RequireAllConfiguredIndexersInSearch,
     [string[]]$PluginZip = @(),
     [string]$PluginsOwner = "RicherTunes",
+    [string]$HostBinPath = "/app/bin",
+    [string[]]$HostOverrideAssembly = @(),
     [switch]$KeepRunning
 )
 
@@ -114,6 +132,8 @@ $ProgressPreference = "SilentlyContinue"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
+
+$image = if ([string]::IsNullOrWhiteSpace($LidarrImage)) { "ghcr.io/hotio/lidarr:$LidarrTag" } else { $LidarrImage.Trim() }
 
 if ($RunSearchGate) {
     $RunMediumGate = $true
@@ -210,13 +230,11 @@ function Get-PluginTargetFrameworkFromZip {
 }
 
 function Get-LidarrHostTargetFrameworkFromImage {
-    param([Parameter(Mandatory = $true)][string]$LidarrTag)
-
-    $image = "ghcr.io/hotio/lidarr:$LidarrTag"
+    param([Parameter(Mandatory = $true)][string]$LidarrImage)
     $cid = $null
     $tmp = $null
     try {
-        $cid = (& docker create $image 2>$null).Trim()
+        $cid = (& docker create $LidarrImage 2>$null).Trim()
         if ([string]::IsNullOrWhiteSpace($cid)) { return $null }
 
         $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("lidarr-runtimeconfig-" + [Guid]::NewGuid().ToString("N") + ".json")
@@ -244,13 +262,14 @@ function Get-LidarrHostTargetFrameworkFromImage {
 
 function Assert-HostSupportsPlugins {
     param(
+        [Parameter(Mandatory = $true)][string]$LidarrImage,
         [Parameter(Mandatory = $true)][string]$LidarrTag,
         [Parameter(Mandatory = $true)][string[]]$ZipPaths
     )
 
-    $hostTfm = Get-LidarrHostTargetFrameworkFromImage -LidarrTag $LidarrTag
+    $hostTfm = Get-LidarrHostTargetFrameworkFromImage -LidarrImage $LidarrImage
     if ([string]::IsNullOrWhiteSpace($hostTfm)) {
-        Write-Host "Could not determine host TFM from Lidarr image tag '$LidarrTag' (skipping TFM compatibility check)." -ForegroundColor Yellow
+        Write-Host "Could not determine host TFM from Lidarr image '$LidarrImage' (skipping TFM compatibility check)." -ForegroundColor Yellow
         return
     }
 
@@ -477,6 +496,7 @@ try {
 
     Write-Host "=== Multi-Plugin Docker Smoke Test ===" -ForegroundColor Cyan
     Write-Host "Lidarr tag: $LidarrTag"
+    Write-Host "Lidarr image: $image"
     Write-Host "Container: $ContainerName"
     Write-Host "Port: $Port"
 
@@ -530,7 +550,7 @@ try {
 
     Normalize-PluginAbstractions -PluginsRoot $pluginsRoot
 
-    Assert-HostSupportsPlugins -LidarrTag $LidarrTag -ZipPaths $pluginZipPaths.ToArray()
+    Assert-HostSupportsPlugins -LidarrImage $image -LidarrTag $LidarrTag -ZipPaths $pluginZipPaths.ToArray()
 
     & docker rm -f $ContainerName 2>$null | Out-Null
 
@@ -547,6 +567,31 @@ try {
         "-v", "${pluginMount}:/config/plugins"
     )
 
+    if ($HostOverrideAssembly.Count -gt 0) {
+        $hostBin = $HostBinPath.TrimEnd('/')
+        foreach ($overridePath in $HostOverrideAssembly) {
+            if ([string]::IsNullOrWhiteSpace($overridePath)) { continue }
+            if (-not (Test-Path -LiteralPath $overridePath)) {
+                throw "HostOverrideAssembly file not found: $overridePath"
+            }
+
+            $fileName = [System.IO.Path]::GetFileName($overridePath)
+            if ([string]::IsNullOrWhiteSpace($fileName)) {
+                throw "HostOverrideAssembly path has no file name: $overridePath"
+            }
+
+            $src = (Resolve-Path -LiteralPath $overridePath).Path.Replace('\', '/')
+            $dst = "$hostBin/$fileName"
+            $dockerArgs += @("-v", "${src}:${dst}:ro")
+        }
+
+        Write-Host "Host overrides:" -ForegroundColor Yellow
+        foreach ($overridePath in $HostOverrideAssembly) {
+            if ([string]::IsNullOrWhiteSpace($overridePath)) { continue }
+            Write-Host "  - $overridePath -> $HostBinPath" -ForegroundColor Yellow
+        }
+    }
+
     if ($RunSearchGate) {
         $dockerArgs += @("-v", "${musicMount}:/music")
     }
@@ -558,7 +603,7 @@ try {
         "-e", "PUID=1000",
         "-e", "PGID=1000",
         "-e", "TZ=UTC",
-        "ghcr.io/hotio/lidarr:$LidarrTag"
+        $image
     )
 
     $startResult = & docker @dockerArgs 2>&1
