@@ -17,12 +17,14 @@ function Get-PluginOutput {
         New-Item -ItemType Directory -Path $publishDirectory -Force | Out-Null
     }
 
-    dotnet publish $projectPath -c $Configuration -f $Framework -o $publishDirectory `
+    # Use `dotnet build` instead of `dotnet publish` so projects using PluginPackaging.targets
+    # (ILRepack) produce the same merged output that is used in real plugin deployment.
+    dotnet build $projectPath -c $Configuration -f $Framework -o $publishDirectory `
         /p:CopyLocalLockFileAssemblies=true `
         /p:ContinuousIntegrationBuild=true | Out-Null
 
     if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish failed for $Csproj ($Framework|$Configuration)."
+        throw "dotnet build failed for $Csproj ($Framework|$Configuration)."
     }
 
     return $publishDirectory

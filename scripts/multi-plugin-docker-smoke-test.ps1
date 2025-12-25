@@ -360,7 +360,7 @@ try {
         "--name", $ContainerName,
         "-p", "${Port}:8686",
         "-v", "${configMount}:/config",
-        "-v", "${pluginMount}:/config/plugins:ro"
+        "-v", "${pluginMount}:/config/plugins"
     )
 
     if ($RunSearchGate) {
