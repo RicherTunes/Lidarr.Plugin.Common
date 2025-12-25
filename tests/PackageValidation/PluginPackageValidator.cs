@@ -11,7 +11,7 @@ namespace Lidarr.Plugin.Common.Tests.PackageValidation;
 /// Use this in plugin test suites to ensure packaging meets Lidarr plugin requirements.
 /// 
 /// ECOSYSTEM PACKAGING POLICY:
-/// - SHIP (not merged, type identity with host):
+/// - HOST-PROVIDED (do not ship):
 ///   - Lidarr.Plugin.Abstractions.dll
 ///   - Microsoft.Extensions.DependencyInjection.Abstractions.dll
 ///   - Microsoft.Extensions.Logging.Abstractions.dll
@@ -24,11 +24,10 @@ namespace Lidarr.Plugin.Common.Tests.PackageValidation;
 public static class PluginPackageValidator
 {
     /// <summary>
-    /// Assemblies that SHOULD be PRESENT in the package for type identity with host.
-    /// These are NOT merged but shipped alongside the merged plugin DLL.
-    /// Missing these is a WARNING (host might provide them).
+    /// Assemblies that must NOT be shipped in plugin packages.
+    /// Shipping these can break multi-plugin cohabitation by loading multiple copies of the same assembly identity.
     /// </summary>
-    public static readonly string[] ExpectedRuntimeDependencies =
+    public static readonly string[] ExpectedHostProvidedAssemblies =
     [
         "Lidarr.Plugin.Abstractions.dll",
         "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
@@ -43,6 +42,9 @@ public static class PluginPackageValidator
     public static readonly string[] DisallowedHostAssemblies =
     [
         "FluentValidation.dll",
+        "Lidarr.Plugin.Abstractions.dll",
+        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+        "Microsoft.Extensions.Logging.Abstractions.dll",
         "Lidarr.Core.dll",
         "Lidarr.Common.dll",
         "Lidarr.Host.dll",
@@ -96,23 +98,9 @@ public static class PluginPackageValidator
                 result.AddError($"Host assembly '{dll}' should not be in package (host provides it)");
             }
 
-            // Check for expected runtime dependencies (type-identity assemblies)
-            // In strict mode (CI/release): ERROR if missing
-            // In non-strict mode (local dev): WARNING
-            var missingExpected = ExpectedRuntimeDependencies
-                .Except(dlls, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            foreach (var dll in missingExpected)
-            {
-                if (isStrict)
-                {
-                    result.AddError($"Required type-identity assembly '{dll}' missing from package");
-                }
-                else
-                {
-                    result.AddWarning($"Expected type-identity assembly '{dll}' not in package (may cause runtime issues)");
-                }
-            }
+            // Host-provided assemblies should not be shipped (see DisallowedHostAssemblies).
+            // Keep a separate list for documentation/searchability.
+            _ = ExpectedHostProvidedAssemblies;
 
             // Check for bloat - should only have a few DLLs
             if (dlls.Count > 10)
