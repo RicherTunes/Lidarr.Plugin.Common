@@ -13,7 +13,7 @@
     mismatches when multiple plugins co-exist in the same Lidarr instance.
 
 .PARAMETER LidarrTag
-    Lidarr Docker image tag to run (plugins branch). Default: pr-plugins-2.14.2.4786
+    Lidarr Docker image tag to run (plugins branch). Default: pr-plugins-3.1.1.4884
 
 .PARAMETER ContainerName
     Docker container name. Default: lidarr-multi-plugin-smoke
@@ -90,7 +90,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$LidarrTag = "pr-plugins-2.14.2.4786",
+    [string]$LidarrTag = "pr-plugins-3.1.1.4884",
     [string]$ContainerName = "lidarr-multi-plugin-smoke",
     [int]$Port = 8689,
     [int]$StartupTimeoutSeconds = 120,
@@ -157,9 +157,137 @@ function Get-NonEmptyEnvValue {
     return $v.Trim()
 }
 
+function Get-TargetFrameworkMajorVersion {
+    param([Parameter(Mandatory = $false)][AllowNull()][string]$TargetFrameworkMoniker)
+
+    if ([string]::IsNullOrWhiteSpace($TargetFrameworkMoniker)) { return $null }
+
+    $tfm = $TargetFrameworkMoniker.Trim()
+    if ($tfm -match '^net(?<major>\d+)\.') {
+        return [int]$Matches['major']
+    }
+
+    return $null
+}
+
+function Get-PluginTargetFrameworkFromZip {
+    param([Parameter(Mandatory = $true)][string]$ZipPath)
+
+    if (-not (Test-Path -LiteralPath $ZipPath)) { return $null }
+
+    $archive = $null
+    try {
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($ZipPath)
+        $entry = $archive.GetEntry('plugin.json')
+        if (-not $entry) { return $null }
+
+        $reader = $null
+        try {
+            $reader = [System.IO.StreamReader]::new($entry.Open())
+            $manifest = $reader.ReadToEnd() | ConvertFrom-Json
+        }
+        finally {
+            if ($reader) { $reader.Dispose() }
+        }
+
+        $tfm = $null
+        if ($manifest.PSObject.Properties.Name -contains 'targetFramework') {
+            $tfm = $manifest.targetFramework
+        }
+        elseif ($manifest.PSObject.Properties.Name -contains 'targetFrameworks' -and $manifest.targetFrameworks) {
+            $tfm = @($manifest.targetFrameworks)[0]
+        }
+
+        if ([string]::IsNullOrWhiteSpace($tfm)) { return $null }
+        return $tfm.ToString().Trim()
+    }
+    catch {
+        return $null
+    }
+    finally {
+        if ($archive) { $archive.Dispose() }
+    }
+}
+
+function Get-LidarrHostTargetFrameworkFromImage {
+    param([Parameter(Mandatory = $true)][string]$LidarrTag)
+
+    $image = "ghcr.io/hotio/lidarr:$LidarrTag"
+    $cid = $null
+    $tmp = $null
+    try {
+        $cid = (& docker create $image 2>$null).Trim()
+        if ([string]::IsNullOrWhiteSpace($cid)) { return $null }
+
+        $tmp = Join-Path ([System.IO.Path]::GetTempPath()) ("lidarr-runtimeconfig-" + [Guid]::NewGuid().ToString("N") + ".json")
+        $copied = $false
+        foreach ($candidate in @(
+            "/app/bin/Lidarr.runtimeconfig.json",
+            "/opt/lidarr/bin/Lidarr.runtimeconfig.json"
+        )) {
+            Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
+            & docker cp "$cid`:$candidate" $tmp 2>$null
+            if ($LASTEXITCODE -eq 0 -and (Test-Path -LiteralPath $tmp)) {
+                $copied = $true
+                break
+            }
+        }
+
+        if (-not $copied) { return $null }
+        return ((Get-Content -LiteralPath $tmp -Raw | ConvertFrom-Json).runtimeOptions.tfm)
+    }
+    finally {
+        if ($tmp) { Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue }
+        if (-not [string]::IsNullOrWhiteSpace($cid)) { & docker rm $cid 2>$null | Out-Null }
+    }
+}
+
+function Assert-HostSupportsPlugins {
+    param(
+        [Parameter(Mandatory = $true)][string]$LidarrTag,
+        [Parameter(Mandatory = $true)][string[]]$ZipPaths
+    )
+
+    $hostTfm = Get-LidarrHostTargetFrameworkFromImage -LidarrTag $LidarrTag
+    if ([string]::IsNullOrWhiteSpace($hostTfm)) {
+        Write-Host "Could not determine host TFM from Lidarr image tag '$LidarrTag' (skipping TFM compatibility check)." -ForegroundColor Yellow
+        return
+    }
+
+    $hostMajor = Get-TargetFrameworkMajorVersion -TargetFrameworkMoniker $hostTfm
+    if (-not $hostMajor) {
+        Write-Host "Could not parse host TFM '$hostTfm' (skipping TFM compatibility check)." -ForegroundColor Yellow
+        return
+    }
+
+    $pluginTfms = @()
+    foreach ($zip in $ZipPaths) {
+        $tfm = Get-PluginTargetFrameworkFromZip -ZipPath $zip
+        if (-not [string]::IsNullOrWhiteSpace($tfm)) {
+            $pluginTfms += $tfm
+        }
+    }
+
+    if ($pluginTfms.Count -eq 0) {
+        Write-Host "No plugin targetFramework found in plugin.json (skipping TFM compatibility check)." -ForegroundColor Yellow
+        return
+    }
+
+    $pluginMajors = $pluginTfms | ForEach-Object { Get-TargetFrameworkMajorVersion -TargetFrameworkMoniker $_ } | Where-Object { $_ }
+    if ($pluginMajors.Count -eq 0) {
+        Write-Host "Could not parse plugin targetFramework values ($($pluginTfms -join ', ')) (skipping TFM compatibility check)." -ForegroundColor Yellow
+        return
+    }
+
+    $requiredMajor = ($pluginMajors | Measure-Object -Maximum).Maximum
+    if ($hostMajor -lt $requiredMajor) {
+        throw "TFM mismatch: Lidarr host '$LidarrTag' targets '$hostTfm' but plugin(s) require net$requiredMajor.0 ($($pluginTfms -join ', ')). Use a net$requiredMajor host tag (e.g. pr-plugins-3.1.1.4884 for net8) or build net$hostMajor plugins."
+    }
+}
+
 function Copy-JsonObject {
     param([Parameter(Mandatory = $true)]$Object)
-    return ($Object | ConvertTo-Json -Depth 50) | ConvertFrom-Json
+    return ($Object | ConvertTo-Json -Depth 50) | ConvertFrom-Json        
 }
 
 function UrlEncode {
@@ -287,8 +415,9 @@ function Cleanup {
 }
 
 trap {
+    $err = $_
     Cleanup
-    throw
+    throw $err
 }
 
 try {
@@ -322,6 +451,7 @@ try {
     }
 
     $pluginNames = New-Object System.Collections.Generic.List[string]
+    $pluginZipPaths = New-Object System.Collections.Generic.List[string]
 
     foreach ($spec in $PluginZip) {
         $parts = $spec.Split("=", 2)
@@ -338,15 +468,19 @@ try {
             throw "Plugin zip not found: $zipPath"
         }
 
+        $pluginZipPaths.Add((Resolve-Path -LiteralPath $zipPath).Path) | Out-Null
+
         $folderName = Get-PluginFolderName $name
-        $targetDir = Join-Path $pluginsRoot "$PluginsOwner/$folderName"
-        New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
+        $targetDir = Join-Path $pluginsRoot "$PluginsOwner/$folderName"   
+        New-Item -ItemType Directory -Force -Path $targetDir | Out-Null   
 
         Expand-Archive -Path $zipPath -DestinationPath $targetDir -Force
 
-        Write-Host "Staged $name => $targetDir" -ForegroundColor Green
+        Write-Host "Staged $name => $targetDir" -ForegroundColor Green    
         $pluginNames.Add($name.ToLowerInvariant()) | Out-Null
     }
+
+    Assert-HostSupportsPlugins -LidarrTag $LidarrTag -ZipPaths @($pluginZipPaths)
 
     & docker rm -f $ContainerName 2>$null | Out-Null
 

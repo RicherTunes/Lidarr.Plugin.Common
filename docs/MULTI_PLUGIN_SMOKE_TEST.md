@@ -42,7 +42,7 @@ Secrets can use either `QOBUZARR_*` or `QOBUZ_*` prefix (and similarly `TIDALARR
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `lidarr_tag` | string | `pr-plugins-2.14.2.4786` | Lidarr Docker image tag (plugins branch) |
+| `lidarr_tag` | string | `pr-plugins-3.1.1.4884` | Lidarr Docker image tag (plugins branch; must support net8 plugins) |
 | `qobuzarr_ref` | string | `main` | Qobuzarr branch/tag/SHA to test |
 | `tidalarr_ref` | string | `main` | Tidalarr branch/tag/SHA to test |
 | `run_medium_gate` | boolean | `false` | Configure and test indexers (requires credentials) |
