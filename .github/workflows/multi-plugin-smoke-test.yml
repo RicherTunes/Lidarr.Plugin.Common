@@ -26,10 +26,25 @@ on:
         required: true
         default: false
       run_search_gate:
-        description: Run AlbumSearch + require releases (requires credentials)
+        description: Run AlbumSearch + require releases (requires credentials)  
         type: boolean
         required: true
         default: false
+      run_grab_gate:
+        description: POST /api/v1/release to queue downloads (requires credentials)
+        type: boolean
+        required: true
+        default: false
+      require_downloaded_files:
+        description: Require at least one downloaded file on disk (grab gate only; slow)
+        type: boolean
+        required: true
+        default: false
+      grab_timeout_seconds:
+        description: Timeout for grab gate queue/files checks
+        type: string
+        required: true
+        default: "300"
       require_all_indexers_in_search:
         description: Fail search unless releases include each configured indexer name
         type: boolean
@@ -307,7 +322,7 @@ jobs:
           Write-Host "Tidalarr zip: $tidalZip"
 
       - name: Validate credentials (if gates enabled)
-        if: ${{ inputs.run_medium_gate || inputs.run_downloadclient_gate || inputs.run_search_gate }}
+        if: ${{ inputs.run_medium_gate || inputs.run_downloadclient_gate || inputs.run_search_gate || inputs.run_grab_gate }}
         shell: bash
         env:
           QOBUZARR_EMAIL: ${{ secrets.QOBUZARR_EMAIL }}
@@ -381,6 +396,9 @@ jobs:
           if ("${{ inputs.run_medium_gate }}" -eq "true") { $params.RunMediumGate = $true }
           if ("${{ inputs.run_downloadclient_gate }}" -eq "true") { $params.RunDownloadClientGate = $true }
           if ("${{ inputs.run_search_gate }}" -eq "true") { $params.RunSearchGate = $true }
+          if ("${{ inputs.run_grab_gate }}" -eq "true") { $params.RunGrabGate = $true }
+          if ("${{ inputs.require_downloaded_files }}" -eq "true") { $params.RequireDownloadedFiles = $true }
+          if (-not [string]::IsNullOrWhiteSpace("${{ inputs.grab_timeout_seconds }}")) { $params.GrabTimeoutSeconds = [int]"${{ inputs.grab_timeout_seconds }}" }
           if ("${{ inputs.require_all_indexers_in_search }}" -eq "true") { $params.RequireAllConfiguredIndexersInSearch = $true }
 
           & ./scripts/multi-plugin-docker-smoke-test.ps1 @params
