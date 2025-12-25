@@ -11,29 +11,25 @@ namespace Lidarr.Plugin.Common.Tests.PackageValidation;
 /// Use this in plugin test suites to ensure packaging meets Lidarr plugin requirements.
 /// 
 /// ECOSYSTEM PACKAGING POLICY:
-/// - SHIP (not merged, type identity with host):
-///   - Lidarr.Plugin.Abstractions.dll
+/// - SHIP (not merged):
+///   - Lidarr.Plugin.Abstractions.dll (required for plugin discovery/loading; host image does not ship it)
+/// - HOST-PROVIDED (do not ship):
 ///   - Microsoft.Extensions.DependencyInjection.Abstractions.dll
 ///   - Microsoft.Extensions.Logging.Abstractions.dll
-///   - FluentValidation.dll
 /// - MERGE into plugin DLL (internalized):
 ///   - Lidarr.Plugin.Common.dll, Polly*, TagLibSharp*, MS.Ext.DI (impl), etc.
 /// - DELETE (host provides):
+///   - FluentValidation.dll
 ///   - Lidarr.Core.dll, Lidarr.Common.dll, Lidarr.Host.dll, etc.
 /// </summary>
 public static class PluginPackageValidator
 {
     /// <summary>
-    /// Assemblies that SHOULD be PRESENT in the package for type identity with host.
-    /// These are NOT merged but shipped alongside the merged plugin DLL.
-    /// Missing these is a WARNING (host might provide them).
+    /// Assemblies required to be present in plugin packages.
     /// </summary>
-    public static readonly string[] ExpectedRuntimeDependencies =
+    public static readonly string[] RequiredPluginAssemblies =
     [
-        "Lidarr.Plugin.Abstractions.dll",
-        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
-        "Microsoft.Extensions.Logging.Abstractions.dll",
-        "FluentValidation.dll"
+        "Lidarr.Plugin.Abstractions.dll"
     ];
 
     /// <summary>
@@ -43,6 +39,9 @@ public static class PluginPackageValidator
     /// </summary>
     public static readonly string[] DisallowedHostAssemblies =
     [
+        "FluentValidation.dll",
+        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",      
+        "Microsoft.Extensions.Logging.Abstractions.dll",
         "Lidarr.Core.dll",
         "Lidarr.Common.dll",
         "Lidarr.Host.dll",
@@ -89,29 +88,26 @@ public static class PluginPackageValidator
                 result.AddError($"Plugin assembly '{pluginAssemblyName}' not found in package");
             }
 
+            foreach (var required in RequiredPluginAssemblies)
+            {
+                if (!dlls.Contains(required))
+                {
+                    if (isStrict)
+                    {
+                        result.AddError($"Required assembly '{required}' missing from package");
+                    }
+                    else
+                    {
+                        result.AddWarning($"Required assembly '{required}' missing from package");
+                    }
+                }
+            }
+
             // Check for disallowed host assemblies
             var foundDisallowed = dlls.Intersect(DisallowedHostAssemblies, StringComparer.OrdinalIgnoreCase).ToList();
             foreach (var dll in foundDisallowed)
             {
                 result.AddError($"Host assembly '{dll}' should not be in package (host provides it)");
-            }
-
-            // Check for expected runtime dependencies (type-identity assemblies)
-            // In strict mode (CI/release): ERROR if missing
-            // In non-strict mode (local dev): WARNING
-            var missingExpected = ExpectedRuntimeDependencies
-                .Except(dlls, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            foreach (var dll in missingExpected)
-            {
-                if (isStrict)
-                {
-                    result.AddError($"Required type-identity assembly '{dll}' missing from package");
-                }
-                else
-                {
-                    result.AddWarning($"Expected type-identity assembly '{dll}' not in package (may cause runtime issues)");
-                }
             }
 
             // Check for bloat - should only have a few DLLs

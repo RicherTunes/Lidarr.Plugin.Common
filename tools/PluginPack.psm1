@@ -17,12 +17,14 @@ function Get-PluginOutput {
         New-Item -ItemType Directory -Path $publishDirectory -Force | Out-Null
     }
 
-    dotnet publish $projectPath -c $Configuration -f $Framework -o $publishDirectory `
+    # Use `dotnet build` instead of `dotnet publish` so projects using PluginPackaging.targets
+    # (ILRepack) produce the same merged output that is used in real plugin deployment.
+    dotnet build $projectPath -c $Configuration -f $Framework -o $publishDirectory `
         /p:CopyLocalLockFileAssemblies=true `
         /p:ContinuousIntegrationBuild=true | Out-Null
 
     if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish failed for $Csproj ($Framework|$Configuration)."
+        throw "dotnet build failed for $Csproj ($Framework|$Configuration)."
     }
 
     return $publishDirectory
@@ -71,7 +73,12 @@ function New-PluginPackage {
 
     Test-PluginManifest -Csproj $csprojPath -Manifest $manifestPath
 
-    # Parse project metadata FIRST (before any cleanup/merge operations)
+    # Ensure the validated manifest is included in the final package.
+    # Some repos generate `plugin.json` outside the publish output (e.g., bin/plugin.json),
+    # which would otherwise pass validation but never be shipped.
+    Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $publishPath 'plugin.json') -Force
+
+    # Parse project metadata FIRST (before any cleanup/merge operations)  
     $projectXml = [xml](Get-Content -LiteralPath $csprojPath)
     $assemblyName = $projectXml.Project.PropertyGroup.AssemblyName | Select-Object -Last 1
     if (-not $assemblyName) { $assemblyName = [IO.Path]::GetFileNameWithoutExtension($csprojPath) }
@@ -182,12 +189,19 @@ function Invoke-PluginCleanup {
     - Extra dependencies that were merged into the plugin DLL
     - System.* and other runtime assemblies provided by the host
     
-    Keeps (type-identity assemblies that must match host):
+    Keeps:
     - Plugin assembly (merged)
-    - Lidarr.Plugin.Abstractions.dll
-    - Microsoft.Extensions.DependencyInjection.Abstractions.dll
-    - Microsoft.Extensions.Logging.Abstractions.dll
-    - FluentValidation.dll (breaks Test() signature if merged)
+    - Lidarr.Plugin.Abstractions.dll (required for plugin discovery/loading; host image does not ship it)
+
+    NOTE: Do NOT ship host-provided / cross-boundary assemblies (type identity).
+    In multi-plugin scenarios, shipping these can cause load failures when a second plugin
+    attempts to load another copy into the same load context.
+      - Microsoft.Extensions.DependencyInjection.Abstractions.dll
+      - Microsoft.Extensions.Logging.Abstractions.dll
+      - FluentValidation.dll
+    If a plugin ships its own FluentValidation.dll, ValidationFailure will have
+    different type identity than the host's copy and can cause TypeLoadException
+    such as: "Method 'Test' ... does not have an implementation."
     #>
     [CmdletBinding()]
     param(
@@ -197,14 +211,10 @@ function Invoke-PluginCleanup {
         [string]$AssemblyName
     )
 
-    # Assemblies to KEEP in the package (must match PluginPackaging.targets _PluginRuntimeDeps)
+    # Assemblies to KEEP in the package (must match PluginPackaging.targets _PluginRuntimeDeps).
     $keepAssemblies = @(
-        "$AssemblyName.dll",                                    # Plugin itself
-        'Lidarr.Plugin.Abstractions.dll',                       # Type identity with host
-        'Lidarr.Plugin.Common.dll',                             # Shared library (if used)
-        'FluentValidation.dll',                                 # Type identity - breaks Test() if merged
-        'Microsoft.Extensions.DependencyInjection.Abstractions.dll',  # Type identity with host
-        'Microsoft.Extensions.Logging.Abstractions.dll'               # Type identity with host
+        "$AssemblyName.dll",                  # Plugin itself (merged)
+        'Lidarr.Plugin.Abstractions.dll'       # Required for plugin discovery/loading
     )
 
     # Remove everything except kept assemblies
@@ -224,6 +234,10 @@ function Invoke-PluginCleanup {
 
     # Remove deps.json (not needed for plugin)
     Get-ChildItem -LiteralPath $PublishPath -Filter '*.deps.json' | Remove-Item -Force -ErrorAction SilentlyContinue
+
+    # Remove NuGet pack artifacts (not used at runtime, and can appear in output when OutDir is overridden)
+    Get-ChildItem -LiteralPath $PublishPath -Filter '*.nupkg' | Remove-Item -Force -ErrorAction SilentlyContinue
+    Get-ChildItem -LiteralPath $PublishPath -Filter '*.snupkg' | Remove-Item -Force -ErrorAction SilentlyContinue
 
     # Remove runtimes folder (native dependencies should be handled by host)
     $runtimesPath = Join-Path $PublishPath 'runtimes'
