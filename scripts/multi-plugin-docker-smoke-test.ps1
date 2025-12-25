@@ -273,7 +273,11 @@ function Assert-HostSupportsPlugins {
         return
     }
 
-    $pluginMajors = $pluginTfms | ForEach-Object { Get-TargetFrameworkMajorVersion -TargetFrameworkMoniker $_ } | Where-Object { $_ }
+    $pluginMajors = @(
+        $pluginTfms |
+            ForEach-Object { Get-TargetFrameworkMajorVersion -TargetFrameworkMoniker $_ } |
+            Where-Object { $_ }
+    )
     if ($pluginMajors.Count -eq 0) {
         Write-Host "Could not parse plugin targetFramework values ($($pluginTfms -join ', ')) (skipping TFM compatibility check)." -ForegroundColor Yellow
         return
@@ -288,9 +292,30 @@ function Assert-HostSupportsPlugins {
 function Normalize-PluginAbstractions {
     param([Parameter(Mandatory = $true)][string]$PluginsRoot)
 
-    $abstractionDlls = Get-ChildItem -LiteralPath $PluginsRoot -Recurse -File -Filter 'Lidarr.Plugin.Abstractions.dll' -ErrorAction SilentlyContinue
-    if (-not $abstractionDlls -or $abstractionDlls.Count -le 1) {
+    $abstractionDlls = @(Get-ChildItem -LiteralPath $PluginsRoot -Recurse -File -Filter 'Lidarr.Plugin.Abstractions.dll' -ErrorAction SilentlyContinue)
+    if (-not $abstractionDlls -or $abstractionDlls.Count -eq 0) {
+        throw "No Lidarr.Plugin.Abstractions.dll found under '$PluginsRoot'. Plugins must ship it (it is not present in the host image)."
+    }
+
+    if ($abstractionDlls.Count -eq 1) {
         return
+    }
+
+    $identities = $abstractionDlls | ForEach-Object {
+        [pscustomobject]@{
+            Path = $_.FullName
+            FullName = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName).FullName
+        }
+    }
+
+    $uniqueIdentities = @($identities | Group-Object FullName)
+    if ($uniqueIdentities.Count -gt 1) {
+        $details = $uniqueIdentities | ForEach-Object {
+            $paths = ($_.Group | Select-Object -ExpandProperty Path) -join "`n  - "
+            "$($_.Name):`n  - $paths"
+        } | Out-String
+
+        throw "Multiple DIFFERENT Lidarr.Plugin.Abstractions identities detected. All plugins must reference the same Abstractions assembly identity to avoid type identity conflicts.`n$details"
     }
 
     $hashes = $abstractionDlls | ForEach-Object {
@@ -300,17 +325,12 @@ function Normalize-PluginAbstractions {
         }
     }
 
-    $uniqueHashes = $hashes | Group-Object Hash
+    $uniqueHashes = @($hashes | Group-Object Hash)
     if ($uniqueHashes.Count -gt 1) {
-        $details = $uniqueHashes | ForEach-Object {
-            $paths = ($_.Group | Select-Object -ExpandProperty Path) -join "`n  - "
-            "Hash $($_.Name):`n  - $paths"
-        } | Out-String
-
-        throw "Multiple DIFFERENT Lidarr.Plugin.Abstractions.dll copies detected. All plugins must ship the same Abstractions assembly to avoid type identity conflicts.`n$details"
+        Write-Host "Multiple Lidarr.Plugin.Abstractions.dll copies with the same identity but different bytes detected ($($abstractionDlls.Count)). This is usually OK (the host should unify by assembly identity), but consider standardizing how Abstractions is produced to reduce risk." -ForegroundColor Yellow
+    } else {
+        Write-Host "Multiple identical Lidarr.Plugin.Abstractions.dll copies detected ($($abstractionDlls.Count)); leaving as-is." -ForegroundColor Yellow
     }
-
-    Write-Host "Multiple identical Lidarr.Plugin.Abstractions.dll copies detected ($($abstractionDlls.Count)); leaving as-is." -ForegroundColor Yellow
 }
 
 function Copy-JsonObject {
@@ -510,7 +530,7 @@ try {
 
     Normalize-PluginAbstractions -PluginsRoot $pluginsRoot
 
-    Assert-HostSupportsPlugins -LidarrTag $LidarrTag -ZipPaths @($pluginZipPaths)
+    Assert-HostSupportsPlugins -LidarrTag $LidarrTag -ZipPaths $pluginZipPaths.ToArray()
 
     & docker rm -f $ContainerName 2>$null | Out-Null
 
