@@ -24,7 +24,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\Abstractions\Lidarr.Plugin.Abstractions.csproj" />
+    <!-- Abstractions comes transitively via Common - removed direct reference to prevent duplicate builds -->
     <ProjectReference Include="..\src\Lidarr.Plugin.Common.csproj" />
   </ItemGroup>
 

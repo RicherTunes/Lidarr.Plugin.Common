@@ -18,10 +18,9 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\Lidarr.Plugin.Common.csproj">
-      <AdditionalProperties>IncludeCLIFramework=$(IncludeCLIFramework)</AdditionalProperties>
-    </ProjectReference>
-    <ProjectReference Include="..\src\Abstractions\Lidarr.Plugin.Abstractions.csproj" />
+    <!-- IncludeCLIFramework is set in Directory.Build.props - no AdditionalProperties needed -->
+    <!-- Abstractions comes transitively via Common - removed direct reference to prevent duplicate builds -->
+    <ProjectReference Include="..\src\Lidarr.Plugin.Common.csproj" />
     <ProjectReference Include="..\testkit\Lidarr.Plugin.Common.TestKit.csproj" />
   </ItemGroup>
 
