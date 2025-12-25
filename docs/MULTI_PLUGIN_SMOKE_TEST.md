@@ -81,6 +81,7 @@ Secrets can use either `QOBUZARR_*` or `QOBUZ_*` prefix (and similarly `TIDALARR
 - Queues a release download via POST to `/api/v1/release`
 - Verifies the grabbed release appears in `/api/v1/queue`
 - Optionally requires files to exist on disk (`require_downloaded_files=true`)
+- If only one provider is configured, the gate runs for that provider and skips the others
 
 ### Canary (`run_canary=true`)
 - Runs all enabled gates against the moving `pr-plugins` Docker tag

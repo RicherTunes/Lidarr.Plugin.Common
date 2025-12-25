@@ -1181,12 +1181,12 @@ try {
             }
 
             if ([string]::IsNullOrWhiteSpace($indexerName) -or [string]::IsNullOrWhiteSpace($downloadClientName) -or -not $downloadClientId) {
-                Write-Host "✗ grab gate: missing configured indexer/download client for $plugin (indexer=$indexerImpl, downloadClient=$downloadImpl)" -ForegroundColor Red
-                $grabFailed = $true
+                Write-Host "↷ grab gate: skipping $plugin (indexer=$indexerImpl, downloadClient=$downloadImpl not configured)" -ForegroundColor Yellow
                 continue
             }
 
-            $release = $searchGateReleases | Where-Object { $_.indexer -eq $indexerName } | Select-Object -First 1
+            $candidates = $searchGateReleases | Where-Object { $_.indexer -eq $indexerName -and $_.downloadAllowed -ne $false }
+            $release = $candidates | Sort-Object { if ($_.size) { [long]$_.size } else { [long]::MaxValue } } | Select-Object -First 1
             if (-not $release) {
                 Write-Host "✗ grab gate: no releases attributed to indexer '$indexerName' (plugin=$plugin). Consider a different SearchArtistTerm/SearchAlbumTitle." -ForegroundColor Red
                 $grabFailed = $true
@@ -1198,7 +1198,11 @@ try {
 
             try {
                 $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/release" -Headers $headers -Body $payload -TimeoutSeconds 60
-                Write-Host "✓ grab gate: queued release via indexer '$indexerName' -> download client '$downloadClientName'" -ForegroundColor Green
+
+                $mb = $null
+                try { if ($release.size) { $mb = [Math]::Round(([double]$release.size) / 1MB, 1) } } catch { }
+                $sizeLabel = if ($mb -ne $null) { " (${mb}MB)" } else { "" }
+                Write-Host "✓ grab gate: queued '$($release.title)'$sizeLabel via indexer '$indexerName' -> download client '$downloadClientName'" -ForegroundColor Green
 
                 $grabRequests.Add([pscustomobject]@{
                     Plugin = $plugin
