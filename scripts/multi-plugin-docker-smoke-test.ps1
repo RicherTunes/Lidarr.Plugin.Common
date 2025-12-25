@@ -63,7 +63,8 @@
     Example: qobuzarr=D:\repo\Qobuzarr-latest.zip
 
 .PARAMETER PluginsOwner
-    Owner folder under /config/plugins. Default: RicherTunes
+    Optional owner folder under /config/plugins (not used by Lidarr plugin discovery on the plugins branch).
+    Default: empty (plugins staged directly under /config/plugins/<PluginName>).
 
 .PARAMETER KeepRunning
     Do not stop/remove the container after the test.
@@ -104,7 +105,7 @@ param(
     [string]$SearchAlbumTitle = "Kind of Blue",
     [switch]$RequireAllConfiguredIndexersInSearch,
     [string[]]$PluginZip = @(),
-    [string]$PluginsOwner = "RicherTunes",
+    [string]$PluginsOwner = "",
     [switch]$KeepRunning
 )
 
@@ -293,21 +294,23 @@ function Normalize-PluginAbstractions {
         return
     }
 
-    $hashes = $abstractionDlls | ForEach-Object {
+    $identities = $abstractionDlls | ForEach-Object {
+        $asmName = $null
+        try { $asmName = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName) } catch { }
         [pscustomobject]@{
             Path = $_.FullName
-            Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+            FullName = if ($asmName) { $asmName.FullName } else { '<unreadable>' }
         }
     }
 
-    $uniqueHashes = $hashes | Group-Object Hash
-    if ($uniqueHashes.Count -gt 1) {
-        $details = $uniqueHashes | ForEach-Object {
+    $uniqueFullNames = @($identities | Group-Object FullName)
+    if ($uniqueFullNames.Length -gt 1) {
+        $details = $uniqueFullNames | ForEach-Object {
             $paths = ($_.Group | Select-Object -ExpandProperty Path) -join "`n  - "
-            "Hash $($_.Name):`n  - $paths"
+            "$($_.Name):`n  - $paths"
         } | Out-String
 
-        throw "Multiple DIFFERENT Lidarr.Plugin.Abstractions.dll copies detected. All plugins must ship the same Abstractions assembly to avoid type identity conflicts.`n$details"
+        throw "Multiple DIFFERENT Lidarr.Plugin.Abstractions.dll identities detected. All plugins must ship the same Abstractions assembly identity to avoid type identity conflicts.`n$details"
     }
 
     Write-Host "Multiple identical Lidarr.Plugin.Abstractions.dll copies detected ($($abstractionDlls.Count)); leaving as-is." -ForegroundColor Yellow
@@ -499,7 +502,8 @@ try {
         $pluginZipPaths.Add((Resolve-Path -LiteralPath $zipPath).Path) | Out-Null
 
         $folderName = Get-PluginFolderName $name
-        $targetDir = Join-Path $pluginsRoot "$PluginsOwner/$folderName"   
+        $relativeDir = if ([string]::IsNullOrWhiteSpace($PluginsOwner)) { $folderName } else { Join-Path $PluginsOwner $folderName }
+        $targetDir = Join-Path $pluginsRoot $relativeDir
         New-Item -ItemType Directory -Force -Path $targetDir | Out-Null   
 
         Expand-Archive -Path $zipPath -DestinationPath $targetDir -Force
