@@ -145,7 +145,7 @@ public abstract DownloadProtocol Protocol { get; }  // ENUM type
 
 **Evidence supporting this**:
 - Workflow builds with `-p:TargetFramework=net6.0`
-- Container is `ghcr.io/hotio/lidarr:pr-plugins-2.14.2.4786`
+- Container is `ghcr.io/hotio/lidarr:pr-plugins-2.14.2.4786` (net6 host; cannot load net8 plugins)
 - CLAUDE.md in Qobuzarr has extensive documentation about this exact issue
 - Working plugins (TrevTV's, TypNull's) use specific patterns for plugins branch
 
@@ -175,7 +175,7 @@ Plugin DLL might be:
 ```yaml
 env:
   DOTNET_VERSION: '8.0.x'
-  LIDARR_DOCKER_VERSION: 'pr-plugins-2.14.2.4786'
+  LIDARR_DOCKER_VERSION: 'pr-plugins-2.14.2.4786'  # net6 host (use pr-plugins-3.x for net8 plugins)
 
 # Build step
 dotnet restore src/Tidalarr/Tidalarr.csproj -p:TargetFramework=net6.0
