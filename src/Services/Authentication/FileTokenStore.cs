@@ -168,9 +168,10 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                         }
                         break; // success
                     }
-                    catch (IOException) when (attempt < 10)
+                    catch (IOException ex) when (attempt < 10)
                     {
-                        Thread.Sleep(50);
+                        _logger?.LogDebug(ex, "Transient file lock during save attempt {Attempt}, retrying", attempt);
+                        await Task.Delay(50, cancellationToken).ConfigureAwait(false);
                         continue;
                     }
                 }
@@ -370,9 +371,10 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 }
 #endif
             }
-            catch
+            catch (Exception ex)
             {
-                // best-effort migration: ignore failures
+                // Best-effort migration - log but don't fail the load operation
+                _logger?.LogDebug(ex, "Token migration to protected format failed, will retry on next save");
             }
         }
     }
