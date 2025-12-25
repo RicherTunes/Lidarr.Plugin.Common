@@ -11,9 +11,8 @@ namespace Lidarr.Plugin.Common.Tests.PackageValidation;
 /// Use this in plugin test suites to ensure packaging meets Lidarr plugin requirements.
 /// 
 /// ECOSYSTEM PACKAGING POLICY:
-/// - SHIP (not merged):
-///   - Lidarr.Plugin.Abstractions.dll (required for plugin discovery/loading; host image does not ship it)
 /// - HOST-PROVIDED (do not ship):
+///   - Lidarr.Plugin.Abstractions.dll
 ///   - Microsoft.Extensions.DependencyInjection.Abstractions.dll
 ///   - Microsoft.Extensions.Logging.Abstractions.dll
 /// - MERGE into plugin DLL (internalized):
@@ -27,10 +26,7 @@ public static class PluginPackageValidator
     /// <summary>
     /// Assemblies required to be present in plugin packages.
     /// </summary>
-    public static readonly string[] RequiredPluginAssemblies =
-    [
-        "Lidarr.Plugin.Abstractions.dll"
-    ];
+    public static readonly string[] RequiredPluginAssemblies = [];
 
     /// <summary>
     /// Assemblies that must NOT be in the package (host provides them).
@@ -39,6 +35,7 @@ public static class PluginPackageValidator
     /// </summary>
     public static readonly string[] DisallowedHostAssemblies =
     [
+        "Lidarr.Plugin.Abstractions.dll",
         "FluentValidation.dll",
         "Microsoft.Extensions.DependencyInjection.Abstractions.dll",      
         "Microsoft.Extensions.Logging.Abstractions.dll",

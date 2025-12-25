@@ -119,11 +119,10 @@
 
     <!-- Assemblies to keep (NOT merged but required at runtime).
          Notes:
-           - Lidarr.Plugin.Abstractions is required for plugin discovery/loading, and is not shipped by the Lidarr host image.
-           - Microsoft.Extensions.*.Abstractions are shipped by the host and should not be bundled with plugins to avoid duplicates. -->
+           - Do NOT ship host-provided contract assemblies (e.g., Lidarr.Plugin.Abstractions).
+             In multi-plugin scenarios, shipping duplicate copies can break plugin loading due to type identity conflicts.
+           - Microsoft.Extensions.*.Abstractions are host-provided and must not be bundled with plugins. -->
     <ItemGroup>
-      <_PluginRuntimeDeps Include="$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll"
-                         Condition="Exists('$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll')" />
       <_PluginRuntimeDeps Include="@(PluginPackagingAdditionalKeep)" />
       <_ExtraAssemblies Include="$(_PluginOutputPath)*.dll" Exclude="$(_PluginOutputPath)$(PluginAssemblyFileName);@(_PluginRuntimeDeps)" />
       <_ExtraSymbols Include="$(_PluginOutputPath)*.pdb" Exclude="$(_PluginOutputPath)$(PluginSymbolFileName)" />

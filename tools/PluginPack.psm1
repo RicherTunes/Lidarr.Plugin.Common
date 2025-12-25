@@ -191,11 +191,11 @@ function Invoke-PluginCleanup {
     
     Keeps:
     - Plugin assembly (merged)
-    - Lidarr.Plugin.Abstractions.dll (required for plugin discovery/loading; host image does not ship it)
 
     NOTE: Do NOT ship host-provided / cross-boundary assemblies (type identity).
     In multi-plugin scenarios, shipping these can cause load failures when a second plugin
     attempts to load another copy into the same load context.
+      - Lidarr.Plugin.Abstractions.dll
       - Microsoft.Extensions.DependencyInjection.Abstractions.dll
       - Microsoft.Extensions.Logging.Abstractions.dll
       - FluentValidation.dll
@@ -213,8 +213,7 @@ function Invoke-PluginCleanup {
 
     # Assemblies to KEEP in the package (must match PluginPackaging.targets _PluginRuntimeDeps).
     $keepAssemblies = @(
-        "$AssemblyName.dll",                  # Plugin itself (merged)
-        'Lidarr.Plugin.Abstractions.dll'       # Required for plugin discovery/loading
+        "$AssemblyName.dll"                  # Plugin itself (merged)
     )
 
     # Remove everything except kept assemblies

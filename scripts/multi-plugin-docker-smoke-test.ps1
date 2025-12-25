@@ -292,30 +292,12 @@ function Normalize-PluginAbstractions {
     param([Parameter(Mandatory = $true)][string]$PluginsRoot)
 
     $abstractionDlls = @(Get-ChildItem -LiteralPath $PluginsRoot -Recurse -File -Filter 'Lidarr.Plugin.Abstractions.dll' -ErrorAction SilentlyContinue)
-    if ($abstractionDlls.Length -le 1) {
+    if ($abstractionDlls.Length -eq 0) {
         return
     }
 
-    $identities = $abstractionDlls | ForEach-Object {
-        $asmName = $null
-        try { $asmName = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName) } catch { }
-        [pscustomobject]@{
-            Path = $_.FullName
-            FullName = if ($asmName) { $asmName.FullName } else { '<unreadable>' }
-        }
-    }
-
-    $uniqueFullNames = @($identities | Group-Object FullName)
-    if ($uniqueFullNames.Length -gt 1) {
-        $details = $uniqueFullNames | ForEach-Object {
-            $paths = ($_.Group | Select-Object -ExpandProperty Path) -join "`n  - "
-            "$($_.Name):`n  - $paths"
-        } | Out-String
-
-        throw "Multiple DIFFERENT Lidarr.Plugin.Abstractions.dll identities detected. All plugins must ship the same Abstractions assembly identity to avoid type identity conflicts.`n$details"
-    }
-
-    Write-Host "Multiple identical Lidarr.Plugin.Abstractions.dll copies detected ($($abstractionDlls.Length)); leaving as-is." -ForegroundColor Yellow
+    $paths = ($abstractionDlls | Select-Object -ExpandProperty FullName) -join "`n  - "
+    throw "Plugins must NOT ship Lidarr.Plugin.Abstractions.dll (host provides it; shipping can break plugin loading in multi-plugin scenarios).`nFound:`n  - $paths"
 }
 
 function Copy-JsonObject {
