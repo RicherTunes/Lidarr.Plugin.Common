@@ -1,0 +1,35 @@
+# Lidarr.Plugin.Common - Markdownlint Configuration
+# Copy this to your plugin root directory
+# https://github.com/DavidAnson/markdownlint
+
+# Default state for all rules
+default: true
+
+# MD013/line-length - Line length
+MD013:
+  line_length: 200
+  code_blocks: false
+  tables: false
+
+# MD024/no-duplicate-heading - Multiple headings with same content
+MD024:
+  siblings_only: true
+
+# MD033/no-inline-html - Inline HTML
+MD033:
+  allowed_elements:
+    - br
+    - sup
+    - sub
+    - details
+    - summary
+    - kbd
+
+# MD041/first-line-h1 - First line in file should be a top-level heading
+MD041: false
+
+# MD034/no-bare-urls - Bare URL used
+MD034: false
+
+# MD036/no-emphasis-as-heading - Emphasis used instead of heading
+MD036: false
