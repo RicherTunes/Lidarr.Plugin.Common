@@ -285,6 +285,34 @@ function Assert-HostSupportsPlugins {
     }
 }
 
+function Normalize-PluginAbstractions {
+    param([Parameter(Mandatory = $true)][string]$PluginsRoot)
+
+    $abstractionDlls = Get-ChildItem -LiteralPath $PluginsRoot -Recurse -File -Filter 'Lidarr.Plugin.Abstractions.dll' -ErrorAction SilentlyContinue
+    if (-not $abstractionDlls -or $abstractionDlls.Count -le 1) {
+        return
+    }
+
+    $hashes = $abstractionDlls | ForEach-Object {
+        [pscustomobject]@{
+            Path = $_.FullName
+            Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
+        }
+    }
+
+    $uniqueHashes = $hashes | Group-Object Hash
+    if ($uniqueHashes.Count -gt 1) {
+        $details = $uniqueHashes | ForEach-Object {
+            $paths = ($_.Group | Select-Object -ExpandProperty Path) -join "`n  - "
+            "Hash $($_.Name):`n  - $paths"
+        } | Out-String
+
+        throw "Multiple DIFFERENT Lidarr.Plugin.Abstractions.dll copies detected. All plugins must ship the same Abstractions assembly to avoid type identity conflicts.`n$details"
+    }
+
+    Write-Host "Multiple identical Lidarr.Plugin.Abstractions.dll copies detected ($($abstractionDlls.Count)); leaving as-is." -ForegroundColor Yellow
+}
+
 function Copy-JsonObject {
     param([Parameter(Mandatory = $true)]$Object)
     return ($Object | ConvertTo-Json -Depth 50) | ConvertFrom-Json        
@@ -479,6 +507,8 @@ try {
         Write-Host "Staged $name => $targetDir" -ForegroundColor Green    
         $pluginNames.Add($name.ToLowerInvariant()) | Out-Null
     }
+
+    Normalize-PluginAbstractions -PluginsRoot $pluginsRoot
 
     Assert-HostSupportsPlugins -LidarrTag $LidarrTag -ZipPaths @($pluginZipPaths)
 
