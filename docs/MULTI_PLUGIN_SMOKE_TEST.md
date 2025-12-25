@@ -152,6 +152,28 @@ On failure (or always), the workflow uploads:
 ### "CROSS_REPO_PAT secret is missing or empty"
 The workflow requires a PAT to checkout private plugin repositories. See "Required Secrets" above.
 
+### Local validation against an upstream Lidarr fix (host override)
+When the Lidarr host has a known bug (e.g., plugin loader issues) and you want to validate a fix before a new `pr-plugins-*` image is published, you can run the harness locally and **override a host assembly** via a Docker bind mount.
+
+Example (override `Lidarr.Common.dll`):
+
+```powershell
+# Build the patched host assembly from your local Lidarr checkout (disable analyzers if needed)
+dotnet build D:\Alex\github\_upstream\Lidarr\src\NzbDrone.Common\Lidarr.Common.csproj -c Release `
+  -p:RunAnalyzersDuringBuild=false -p:EnableNETAnalyzers=false -p:TreatWarningsAsErrors=false
+
+# Run schema gate with host override
+pwsh D:\Alex\github\lidarr.plugin.common\scripts\multi-plugin-docker-smoke-test.ps1 `
+  -LidarrTag pr-plugins-3.1.1.4884 `
+  -PluginZip @(
+    "qobuzarr=D:\Alex\github\qobuzarr\artifacts\packages\qobuzarr-0.1.0-dev-net8.0.zip",
+    "tidalarr=D:\Alex\github\tidalarr\src\Tidalarr\artifacts\packages\tidalarr-1.0.1-net8.0.zip"
+  ) `
+  -HostOverrideAssembly D:\Alex\github\_upstream\Lidarr\_output\net8.0\Lidarr.Common.dll
+```
+
+This is intended for local debugging only; the workflow continues to use published host images.
+
 ### Plugin not appearing in schema
 - Check container logs for assembly load errors
 - Verify plugin.json manifest is correct
