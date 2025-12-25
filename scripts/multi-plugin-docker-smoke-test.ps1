@@ -80,6 +80,33 @@
     One or more plugin zips in the form: name=path
     Example: qobuzarr=D:\repo\Qobuzarr-latest.zip
 
+.PARAMETER WorkRoot
+    Override the working directory used for staging plugins/config/music/downloads.
+    Default: `.docker-multi-smoke-test/<ContainerName>` under the repo root.
+
+.PARAMETER PreserveState
+    Preserve the work directory contents (especially `/config`) between runs.
+    When set, only the plugin staging directory is refreshed each run.
+
+.PARAMETER CleanState
+    Deletes the WorkRoot directory before starting (useful with PreserveState).
+
+.PARAMETER UseExistingConfigForSearchGate
+    Allows `-RunSearchGate` to proceed even if no indexers were configured by the
+    medium gate. When set, the search gate will use any already-configured/enabled
+    indexers in the Lidarr instance.
+
+.PARAMETER UseExistingConfigForDownloadClientGate
+    If no download clients were configured by the download client gate, use any
+    already-configured/enabled download clients in the Lidarr instance (matching
+    expected plugin implementations) and run `/api/v1/downloadclient/test` for
+    each.
+
+.PARAMETER UseExistingConfigForGrabGate
+    Allows the grab gate to run using already-configured/enabled indexers and
+    download clients in the Lidarr instance (matching expected plugin
+    implementations), instead of only those created by the medium/download gates.
+
 .PARAMETER PluginsOwner
     Owner folder under /config/plugins. Default: RicherTunes
 
@@ -137,6 +164,12 @@ param(
     [string]$SearchAlbumTitle = "Kind of Blue",
     [switch]$RequireAllConfiguredIndexersInSearch,
     [string[]]$PluginZip = @(),
+    [string]$WorkRoot,
+    [switch]$PreserveState,
+    [switch]$CleanState,
+    [switch]$UseExistingConfigForSearchGate,
+    [switch]$UseExistingConfigForDownloadClientGate,
+    [switch]$UseExistingConfigForGrabGate,
     [string]$PluginsOwner = "RicherTunes",
     [string]$HostBinPath = "/app/bin",
     [string[]]$HostOverrideAssembly = @(),
@@ -555,19 +588,34 @@ try {
     Write-Host "Container: $ContainerName"
     Write-Host "Port: $Port"
 
-    $workRoot = Join-Path $repoRoot ".docker-multi-smoke-test/$ContainerName"
+    $workRootBase = if ([string]::IsNullOrWhiteSpace($WorkRoot)) {
+        Join-Path $repoRoot ".docker-multi-smoke-test"
+    }
+    else {
+        $WorkRoot.Trim()
+    }
+
+    $workRoot = Join-Path $workRootBase $ContainerName
     $pluginsRoot = Join-Path $workRoot "plugins"
     $configRoot = Join-Path $workRoot "config"
     $musicRoot = Join-Path $workRoot "music"
     $downloadsRoot = Join-Path $workRoot "downloads"
 
-    if (Test-Path $workRoot) {
+    if ($CleanState -and (Test-Path $workRoot)) {
         Remove-Item -Recurse -Force $workRoot
     }
-    New-Item -ItemType Directory -Force -Path $pluginsRoot | Out-Null
-    New-Item -ItemType Directory -Force -Path $configRoot | Out-Null
+    elseif ((-not $PreserveState) -and (Test-Path $workRoot)) {
+        Remove-Item -Recurse -Force $workRoot
+    }
+
+    if (Test-Path $pluginsRoot) {
+        Remove-Item -Recurse -Force $pluginsRoot
+    }
+
+    New-Item -ItemType Directory -Force -Path $pluginsRoot | Out-Null     
+    New-Item -ItemType Directory -Force -Path $configRoot | Out-Null      
     if ($RunSearchGate) {
-        New-Item -ItemType Directory -Force -Path $musicRoot | Out-Null
+        New-Item -ItemType Directory -Force -Path $musicRoot | Out-Null   
     }
     if ($RunDownloadClientGate) {
         New-Item -ItemType Directory -Force -Path $downloadsRoot | Out-Null
@@ -945,8 +993,42 @@ try {
         $downloadConfigured = $false
         $downloadFailed = $false
 
+        if ($UseExistingConfigForDownloadClientGate) {
+            try {
+                $existingDownloadClients = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/downloadclient" -Headers $headers -TimeoutSeconds 30
+                $enabled = @($existingDownloadClients | Where-Object { $_.enable -eq $true })
+
+                foreach ($plugin in $pluginNames) {
+                    if (-not $expectations.ContainsKey($plugin)) { continue }
+                    $exp = $expectations[$plugin]
+
+                    foreach ($impl in $exp.DownloadClients) {
+                        $match = $enabled | Where-Object { $_.implementation -eq $impl } | Select-Object -First 1
+                        if (-not $match) { continue }
+
+                        $downloadConfigured = $true
+                        $configuredDownloadClientNames.Add($match.name) | Out-Null
+                        $configuredDownloadClientIdByImplementation[$impl] = $match.id
+                        $configuredDownloadClientNameByImplementation[$impl] = $match.name
+
+                        try {
+                            $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/downloadclient/test" -Headers $headers -Body $match -TimeoutSeconds $MediumGateTimeoutSeconds
+                            Write-Host "✓ download gate: existing '$($match.name)' ($impl) test succeeded" -ForegroundColor Green
+                        }
+                        catch {
+                            Write-Host "✗ download gate: existing '$($match.name)' ($impl) test failed`n$($_.Exception.Message)" -ForegroundColor Red
+                            $downloadFailed = $true
+                        }
+                    }
+                }
+            }
+            catch {
+                Write-Host "↷ download gate: failed to query existing download clients`n$($_.Exception.Message)" -ForegroundColor Yellow
+            }
+        }
+
         foreach ($plugin in $pluginNames) {
-            if (-not $expectations.ContainsKey($plugin)) { continue }
+            if (-not $expectations.ContainsKey($plugin)) { continue }     
             $exp = $expectations[$plugin]
 
             foreach ($impl in $exp.DownloadClients) {
@@ -1035,8 +1117,16 @@ try {
     if ($RunSearchGate) {
         Write-Host "`n=== Search gate: AlbumSearch + releases ===" -ForegroundColor Cyan
 
+        if ((-not $configuredIndexerNames -or $configuredIndexerNames.Count -eq 0) -and $UseExistingConfigForSearchGate) {
+            $existingIndexers = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/indexer" -Headers $headers -TimeoutSeconds 30
+            $enabled = $existingIndexers | Where-Object { $_.enable -eq $true -and -not [string]::IsNullOrWhiteSpace($_.name) }
+            foreach ($idx in $enabled) {
+                $configuredIndexerNames.Add($idx.name) | Out-Null
+            }
+        }
+
         if (-not $configuredIndexerNames -or $configuredIndexerNames.Count -eq 0) {
-            Write-Host "↷ search gate skipped (no indexers configured in medium gate)." -ForegroundColor Yellow
+            Write-Host "↷ search gate skipped (no indexers configured)." -ForegroundColor Yellow
         }
         else {
             $rootFolders = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/rootfolder" -Headers $headers -TimeoutSeconds 30
@@ -1153,6 +1243,47 @@ try {
 
         if (-not $searchGateAlbum -or -not $searchGateReleases -or $searchGateReleases.Count -eq 0) {
             throw "Grab gate requested, but search gate did not produce releases. Verify credentials and set -RunSearchGate."
+        }
+
+        if ($UseExistingConfigForGrabGate) {
+            try {
+                $existingIndexers = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/indexer" -Headers $headers -TimeoutSeconds 30
+                $enabledIndexers = @($existingIndexers | Where-Object { $_.enable -eq $true })
+                foreach ($plugin in $pluginNames) {
+                    if (-not $expectations.ContainsKey($plugin)) { continue }
+                    $exp = $expectations[$plugin]
+                    foreach ($impl in $exp.Indexers) {
+                        if ($configuredIndexerNameByImplementation.ContainsKey($impl)) { continue }
+                        $match = $enabledIndexers | Where-Object { $_.implementation -eq $impl } | Select-Object -First 1
+                        if ($match -and -not [string]::IsNullOrWhiteSpace($match.name)) {
+                            $configuredIndexerNames.Add($match.name) | Out-Null
+                            $configuredIndexerNameByImplementation[$impl] = $match.name
+                        }
+                    }
+                }
+            }
+            catch {
+            }
+
+            try {
+                $existingDownloadClients = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/downloadclient" -Headers $headers -TimeoutSeconds 30
+                $enabledDownloadClients = @($existingDownloadClients | Where-Object { $_.enable -eq $true })
+                foreach ($plugin in $pluginNames) {
+                    if (-not $expectations.ContainsKey($plugin)) { continue }
+                    $exp = $expectations[$plugin]
+                    foreach ($impl in $exp.DownloadClients) {
+                        if ($configuredDownloadClientIdByImplementation.ContainsKey($impl)) { continue }
+                        $match = $enabledDownloadClients | Where-Object { $_.implementation -eq $impl } | Select-Object -First 1
+                        if ($match -and $match.id -and -not [string]::IsNullOrWhiteSpace($match.name)) {
+                            $configuredDownloadClientNames.Add($match.name) | Out-Null
+                            $configuredDownloadClientIdByImplementation[$impl] = $match.id
+                            $configuredDownloadClientNameByImplementation[$impl] = $match.name
+                        }
+                    }
+                }
+            }
+            catch {
+            }
         }
 
         $grabRequests = New-Object System.Collections.Generic.List[object]
