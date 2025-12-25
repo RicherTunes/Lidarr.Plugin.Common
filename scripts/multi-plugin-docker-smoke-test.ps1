@@ -249,6 +249,8 @@ function Assert-HostSupportsPlugins {
         [Parameter(Mandatory = $true)][string[]]$ZipPaths
     )
 
+    $ZipPaths = @($ZipPaths)
+
     $hostTfm = Get-LidarrHostTargetFrameworkFromImage -LidarrTag $LidarrTag
     if ([string]::IsNullOrWhiteSpace($hostTfm)) {
         Write-Host "Could not determine host TFM from Lidarr image tag '$LidarrTag' (skipping TFM compatibility check)." -ForegroundColor Yellow
@@ -269,13 +271,13 @@ function Assert-HostSupportsPlugins {
         }
     }
 
-    if ($pluginTfms.Count -eq 0) {
+    if (@($pluginTfms).Count -eq 0) {
         Write-Host "No plugin targetFramework found in plugin.json (skipping TFM compatibility check)." -ForegroundColor Yellow
         return
     }
 
     $pluginMajors = $pluginTfms | ForEach-Object { Get-TargetFrameworkMajorVersion -TargetFrameworkMoniker $_ } | Where-Object { $_ }
-    if ($pluginMajors.Count -eq 0) {
+    if (@($pluginMajors).Count -eq 0) {
         Write-Host "Could not parse plugin targetFramework values ($($pluginTfms -join ', ')) (skipping TFM compatibility check)." -ForegroundColor Yellow
         return
     }
@@ -289,8 +291,8 @@ function Assert-HostSupportsPlugins {
 function Normalize-PluginAbstractions {
     param([Parameter(Mandatory = $true)][string]$PluginsRoot)
 
-    $abstractionDlls = Get-ChildItem -LiteralPath $PluginsRoot -Recurse -File -Filter 'Lidarr.Plugin.Abstractions.dll' -ErrorAction SilentlyContinue
-    if (-not $abstractionDlls -or $abstractionDlls.Count -le 1) {
+    $abstractionDlls = @(Get-ChildItem -LiteralPath $PluginsRoot -Recurse -File -Filter 'Lidarr.Plugin.Abstractions.dll' -ErrorAction SilentlyContinue)
+    if ($abstractionDlls.Length -le 1) {
         return
     }
 
@@ -313,7 +315,7 @@ function Normalize-PluginAbstractions {
         throw "Multiple DIFFERENT Lidarr.Plugin.Abstractions.dll identities detected. All plugins must ship the same Abstractions assembly identity to avoid type identity conflicts.`n$details"
     }
 
-    Write-Host "Multiple identical Lidarr.Plugin.Abstractions.dll copies detected ($($abstractionDlls.Count)); leaving as-is." -ForegroundColor Yellow
+    Write-Host "Multiple identical Lidarr.Plugin.Abstractions.dll copies detected ($($abstractionDlls.Length)); leaving as-is." -ForegroundColor Yellow
 }
 
 function Copy-JsonObject {
@@ -514,7 +516,7 @@ try {
 
     Normalize-PluginAbstractions -PluginsRoot $pluginsRoot
 
-    Assert-HostSupportsPlugins -LidarrTag $LidarrTag -ZipPaths @($pluginZipPaths)
+    Assert-HostSupportsPlugins -LidarrTag $LidarrTag -ZipPaths $pluginZipPaths.ToArray()
 
     & docker rm -f $ContainerName 2>$null | Out-Null
 

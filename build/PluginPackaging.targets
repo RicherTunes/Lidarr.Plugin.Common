@@ -42,7 +42,9 @@
       <_CommonLibraryPath>$(MSBuildThisFileDirectory)../src/bin/$(Configuration)/$(TargetFramework)</_CommonLibraryPath>
       <_AbstractionsPath>$(MSBuildThisFileDirectory)../src/Abstractions/bin/$(Configuration)/$(TargetFramework)</_AbstractionsPath>
       <!-- Paths to Lidarr assemblies (for reference resolution, typically at repo root/ext/Lidarr) -->
-      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net6.0;$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net8.0</_LidarrAssembliesPath>
+      <!-- Prefer matching TFM first (ILRepack resolves from the first directory containing a DLL). -->
+      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == '' and $([System.String]::Copy('$(TargetFramework)').StartsWith('net8'))">$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net8.0;$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net6.0</_LidarrAssembliesPath>
+      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == '' and !$([System.String]::Copy('$(TargetFramework)').StartsWith('net8'))">$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net6.0;$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net8.0</_LidarrAssembliesPath>
       <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' != ''">$(LidarrAssembliesPath)</_LidarrAssembliesPath>
       <!-- Combined library paths for ILRepack - plugin output first (has all NuGet deps) -->
       <_ILRepackLibraryPaths>$(_PluginOutputDir);$(_LidarrAssembliesPath);$(_CommonLibraryPath);$(_AbstractionsPath)</_ILRepackLibraryPaths>
