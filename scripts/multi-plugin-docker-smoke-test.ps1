@@ -360,7 +360,7 @@ try {
         "--name", $ContainerName,
         "-p", "${Port}:8686",
         "-v", "${configMount}:/config",
-        "-v", "${pluginMount}:/config/plugins:ro"
+        "-v", "${pluginMount}:/config/plugins"
     )
 
     if ($RunSearchGate) {
@@ -390,7 +390,7 @@ try {
     while (((Get-Date) - $start).TotalSeconds -lt $StartupTimeoutSeconds) {
         $null = & docker exec $ContainerName sh -c "test -f /config/config.xml" 2>$null
         if ($LASTEXITCODE -eq 0) {
-            $apiKey = & docker exec $ContainerName sh -c "sed -n 's:.*<ApiKey>\\(.*\\)</ApiKey>.*:\\1:p' /config/config.xml" 2>$null
+            $apiKey = & docker exec $ContainerName sh -c "sed -n 's:.*<ApiKey>\(.*\)</ApiKey>.*:\1:p' /config/config.xml" 2>$null
             if (-not [string]::IsNullOrWhiteSpace($apiKey)) {
                 break
             }
