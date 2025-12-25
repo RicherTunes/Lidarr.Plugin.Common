@@ -126,7 +126,6 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                using var cp = AcquireCrossProcessLock(_lockName, cancellationToken);
                 var persisted = PersistedEnvelope.FromEnvelope(envelope);
                 var protectedEnv = CreateProtectedEnvelope(persisted);
 
@@ -144,6 +143,10 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     await JsonSerializer.SerializeAsync(stream, protectedEnv, _serializerOptions, cancellationToken).ConfigureAwait(false);
                     await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 }
+
+                // Acquire a cross-process lock only for the final replace/move to minimize the time
+                // the lock is held (reduces contention and rare timeouts on busy Windows CI runners).
+                using var cp = AcquireCrossProcessLock(_lockName, cancellationToken);
 
                 // Replace atomically when destination exists; otherwise a simple move is sufficient.
                 // Add a small retry to mitigate transient Windows file locks (e.g., antivirus/indexer).
