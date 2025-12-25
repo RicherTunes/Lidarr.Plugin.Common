@@ -36,8 +36,8 @@
     <!-- Compute library paths at runtime (after build) when OutputPath is fully resolved -->
     <PropertyGroup>
       <!-- Absolute path to plugin output directory (where all runtime deps are copied) -->
-      <_PluginOutputDir>$([System.IO.Path]::GetFullPath('$(OutputPath)', '$(MSBuildProjectDirectory)'))</_PluginOutputDir>
-      <_PluginOutputPath>$([System.IO.Path]::EndInDirectorySeparator('$(_PluginOutputDir)'))</_PluginOutputPath>
+      <_PluginOutputDir>$(TargetDir)</_PluginOutputDir>
+      <_PluginOutputPath>$(TargetDir)</_PluginOutputPath>
       <!-- Paths relative to this targets file (inside Common submodule) -->
       <_CommonLibraryPath>$(MSBuildThisFileDirectory)../src/bin/$(Configuration)/$(TargetFramework)</_CommonLibraryPath>
       <_AbstractionsPath>$(MSBuildThisFileDirectory)../src/Abstractions/bin/$(Configuration)/$(TargetFramework)</_AbstractionsPath>
