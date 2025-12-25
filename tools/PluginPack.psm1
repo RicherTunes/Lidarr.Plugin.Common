@@ -17,12 +17,14 @@ function Get-PluginOutput {
         New-Item -ItemType Directory -Path $publishDirectory -Force | Out-Null
     }
 
-    dotnet publish $projectPath -c $Configuration -f $Framework -o $publishDirectory `
+    # Use `dotnet build` instead of `dotnet publish` so projects using PluginPackaging.targets
+    # (ILRepack) produce the same merged output that is used in real plugin deployment.
+    dotnet build $projectPath -c $Configuration -f $Framework -o $publishDirectory `
         /p:CopyLocalLockFileAssemblies=true `
         /p:ContinuousIntegrationBuild=true | Out-Null
 
     if ($LASTEXITCODE -ne 0) {
-        throw "dotnet publish failed for $Csproj ($Framework|$Configuration)."
+        throw "dotnet build failed for $Csproj ($Framework|$Configuration)."
     }
 
     return $publishDirectory
@@ -71,7 +73,12 @@ function New-PluginPackage {
 
     Test-PluginManifest -Csproj $csprojPath -Manifest $manifestPath
 
-    # Parse project metadata FIRST (before any cleanup/merge operations)
+    # Ensure the validated manifest is included in the final package.
+    # Some repos generate `plugin.json` outside the publish output (e.g., bin/plugin.json),
+    # which would otherwise pass validation but never be shipped.
+    Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $publishPath 'plugin.json') -Force
+
+    # Parse project metadata FIRST (before any cleanup/merge operations)  
     $projectXml = [xml](Get-Content -LiteralPath $csprojPath)
     $assemblyName = $projectXml.Project.PropertyGroup.AssemblyName | Select-Object -Last 1
     if (-not $assemblyName) { $assemblyName = [IO.Path]::GetFileNameWithoutExtension($csprojPath) }
@@ -187,7 +194,11 @@ function Invoke-PluginCleanup {
     - Lidarr.Plugin.Abstractions.dll
     - Microsoft.Extensions.DependencyInjection.Abstractions.dll
     - Microsoft.Extensions.Logging.Abstractions.dll
-    - FluentValidation.dll (breaks Test() signature if merged)
+    
+    NOTE: FluentValidation.dll is intentionally NOT kept/shipped.
+    If a plugin ships its own FluentValidation.dll, ValidationFailure will have
+    different type identity than the host's copy and can cause TypeLoadException
+    such as: "Method 'Test' ... does not have an implementation."
     #>
     [CmdletBinding()]
     param(
@@ -202,7 +213,6 @@ function Invoke-PluginCleanup {
         "$AssemblyName.dll",                                    # Plugin itself
         'Lidarr.Plugin.Abstractions.dll',                       # Type identity with host
         'Lidarr.Plugin.Common.dll',                             # Shared library (if used)
-        'FluentValidation.dll',                                 # Type identity - breaks Test() if merged
         'Microsoft.Extensions.DependencyInjection.Abstractions.dll',  # Type identity with host
         'Microsoft.Extensions.Logging.Abstractions.dll'               # Type identity with host
     )

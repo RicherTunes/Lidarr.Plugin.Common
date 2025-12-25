@@ -15,10 +15,10 @@ namespace Lidarr.Plugin.Common.Tests.PackageValidation;
 ///   - Lidarr.Plugin.Abstractions.dll
 ///   - Microsoft.Extensions.DependencyInjection.Abstractions.dll
 ///   - Microsoft.Extensions.Logging.Abstractions.dll
-///   - FluentValidation.dll
 /// - MERGE into plugin DLL (internalized):
 ///   - Lidarr.Plugin.Common.dll, Polly*, TagLibSharp*, MS.Ext.DI (impl), etc.
 /// - DELETE (host provides):
+///   - FluentValidation.dll
 ///   - Lidarr.Core.dll, Lidarr.Common.dll, Lidarr.Host.dll, etc.
 /// </summary>
 public static class PluginPackageValidator
@@ -32,8 +32,7 @@ public static class PluginPackageValidator
     [
         "Lidarr.Plugin.Abstractions.dll",
         "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
-        "Microsoft.Extensions.Logging.Abstractions.dll",
-        "FluentValidation.dll"
+        "Microsoft.Extensions.Logging.Abstractions.dll"
     ];
 
     /// <summary>
@@ -43,6 +42,7 @@ public static class PluginPackageValidator
     /// </summary>
     public static readonly string[] DisallowedHostAssemblies =
     [
+        "FluentValidation.dll",
         "Lidarr.Core.dll",
         "Lidarr.Common.dll",
         "Lidarr.Host.dll",

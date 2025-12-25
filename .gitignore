@@ -59,6 +59,9 @@ _nupkg_extract/
 # Local package output
 /dist/
 
+# Local Docker smoke test staging
+.docker-multi-smoke-test/
+
 # Test artifacts
 [Tt]est[Rr]esults*/
 *.trx

@@ -122,8 +122,10 @@
       <!-- DI/Logging abstractions - MUST match host type identity for IServiceProvider, ILogger, etc. -->
       <_PluginRuntimeDeps Include="$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll')" />
       <_PluginRuntimeDeps Include="$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Logging.Abstractions.dll')" />
-      <!-- FluentValidation - breaks DownloadClient.Test() signature if merged -->
-      <_PluginRuntimeDeps Include="$(OutputPath)FluentValidation.dll" Condition="Exists('$(OutputPath)FluentValidation.dll')" />
+      <!-- FluentValidation is provided by the Lidarr host.
+           IMPORTANT: Do NOT ship it with plugins. If a plugin ships its own FluentValidation.dll,
+           FluentValidation.Results.ValidationFailure will have different type identity than the host's,
+           causing TypeLoadException such as: "Method 'Test' ... does not have an implementation." -->
       <_PluginRuntimeDeps Include="@(PluginPackagingAdditionalKeep)" />
       <_ExtraAssemblies Include="$(OutputPath)*.dll" Exclude="$(OutputPath)$(PluginAssemblyFileName);@(_PluginRuntimeDeps)" />
       <_ExtraSymbols Include="$(OutputPath)*.pdb" Exclude="$(OutputPath)$(PluginSymbolFileName)" />
