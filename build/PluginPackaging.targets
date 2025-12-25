@@ -36,7 +36,8 @@
     <!-- Compute library paths at runtime (after build) when OutputPath is fully resolved -->
     <PropertyGroup>
       <!-- Absolute path to plugin output directory (where all runtime deps are copied) -->
-      <_PluginOutputDir>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/$(OutputPath)'))</_PluginOutputDir>
+      <_PluginOutputDir>$([System.IO.Path]::GetFullPath('$(OutputPath)', '$(MSBuildProjectDirectory)'))</_PluginOutputDir>
+      <_PluginOutputPath>$([System.IO.Path]::EndInDirectorySeparator('$(_PluginOutputDir)'))</_PluginOutputPath>
       <!-- Paths relative to this targets file (inside Common submodule) -->
       <_CommonLibraryPath>$(MSBuildThisFileDirectory)../src/bin/$(Configuration)/$(TargetFramework)</_CommonLibraryPath>
       <_AbstractionsPath>$(MSBuildThisFileDirectory)../src/Abstractions/bin/$(Configuration)/$(TargetFramework)</_AbstractionsPath>
@@ -49,24 +50,24 @@
 
     <!-- Detect dependencies at runtime (after build), not at project load time -->
     <ItemGroup>
-      <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Common.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(_PluginOutputPath)Lidarr.Plugin.Common.dll')" />
       <!-- NOTE: Lidarr.Plugin.Abstractions must NOT be merged - it contains IPlugin and other interfaces
            that must have identical type identity with the host. Merging breaks plugin loading. -->
       <!-- <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Abstractions.dll" /> DO NOT ENABLE - breaks IPlugin type identity -->
-      <_PluginDeps Include="$(OutputPath)Polly.dll" Condition="Exists('$(OutputPath)Polly.dll')" />
-      <_PluginDeps Include="$(OutputPath)Polly.Core.dll" Condition="Exists('$(OutputPath)Polly.Core.dll')" />
-      <_PluginDeps Include="$(OutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(OutputPath)Polly.Extensions.Http.dll')" />
-      <_PluginDeps Include="$(OutputPath)TagLibSharp*.dll" />
+      <_PluginDeps Include="$(_PluginOutputPath)Polly.dll" Condition="Exists('$(_PluginOutputPath)Polly.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Polly.Core.dll" Condition="Exists('$(_PluginOutputPath)Polly.Core.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(_PluginOutputPath)Polly.Extensions.Http.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)TagLibSharp*.dll" />
       <!-- Microsoft.Extensions packages - merge implementation assemblies but NOT abstractions.
            Abstractions must maintain type identity with host for DI to work correctly. -->
       <!-- DO NOT MERGE: Microsoft.Extensions.DependencyInjection.Abstractions - breaks IServiceProvider contracts -->
       <!-- DO NOT MERGE: Microsoft.Extensions.Logging.Abstractions - breaks ILogger contracts -->
-      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.DependencyInjection.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.DependencyInjection.dll')" />
-      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Caching.Abstractions.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Caching.Abstractions.dll')" />
-      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Caching.Memory.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Caching.Memory.dll')" />
-      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Options.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Options.dll')" />
-      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Primitives.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Primitives.dll')" />
-      <_PluginDeps Include="$(OutputPath)Microsoft.Extensions.Http.dll" Condition="Exists('$(OutputPath)Microsoft.Extensions.Http.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.DependencyInjection.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.DependencyInjection.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Caching.Abstractions.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Caching.Abstractions.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Caching.Memory.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Caching.Memory.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Options.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Options.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Primitives.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Primitives.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Http.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Http.dll')" />
       <!-- NOTE: FluentValidation must NOT be merged - it breaks DownloadClient.Test(List<ValidationFailure>) -->
       <!-- <_PluginDeps Include="$(OutputPath)FluentValidation.dll" /> DO NOT ENABLE - breaks Test() signature -->
       <!-- NOTE: System.Text.Json must NOT be merged - its types cross the host/plugin boundary -->
@@ -76,7 +77,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <_AssembliesToMerge Include="$(OutputPath)$(AssemblyName).dll" />
+      <_AssembliesToMerge Include="$(TargetPath)" />
       <_AssembliesToMerge Include="@(_PluginDeps)" />
     </ItemGroup>
 
@@ -103,11 +104,11 @@
       LibraryPath="$(_ILRepackLibraryPaths)" />
 
     <Copy SourceFiles="$(_ILRepackTempDir)$(AssemblyName).dll"
-          DestinationFiles="$(OutputPath)$(PluginAssemblyFileName)"
+          DestinationFiles="$(_PluginOutputPath)$(PluginAssemblyFileName)"
           OverwriteReadOnlyFiles="true" />
 
     <Copy SourceFiles="$(_ILRepackTempDir)$(AssemblyName).pdb"
-          DestinationFiles="$(OutputPath)$(PluginSymbolFileName)"
+          DestinationFiles="$(_PluginOutputPath)$(PluginSymbolFileName)"
           OverwriteReadOnlyFiles="true"
           Condition="Exists('$(_ILRepackTempDir)$(AssemblyName).pdb')" />
 
