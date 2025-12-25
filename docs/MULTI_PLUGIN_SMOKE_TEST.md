@@ -48,6 +48,9 @@ Secrets can use either `QOBUZARR_*` or `QOBUZ_*` prefix (and similarly `TIDALARR
 | `run_medium_gate` | boolean | `false` | Configure and test indexers (requires credentials) |
 | `run_downloadclient_gate` | boolean | `false` | Configure and test download clients (requires credentials) |
 | `run_search_gate` | boolean | `false` | Run AlbumSearch and verify releases (requires credentials) |
+| `run_grab_gate` | boolean | `false` | POST `/api/v1/release` to queue a download (requires credentials) |
+| `require_downloaded_files` | boolean | `false` | Grab gate also requires files on disk (slow; local use) |
+| `grab_timeout_seconds` | string | `300` | Grab gate timeout for queue/files checks |
 | `require_all_indexers_in_search` | boolean | `false` | Fail if releases don't include all configured indexers |
 | `run_canary` | boolean | `false` | Also run against moving `pr-plugins` tag (allowed to fail) |
 
@@ -73,6 +76,11 @@ Secrets can use either `QOBUZARR_*` or `QOBUZ_*` prefix (and similarly `TIDALARR
 - Runs AlbumSearch command
 - Verifies releases are returned
 - Optionally requires all indexers in results (`require_all_indexers_in_search`)
+
+### Grab Gate (`run_grab_gate=true`)
+- Queues a release download via POST to `/api/v1/release`
+- Verifies the grabbed release appears in `/api/v1/queue`
+- Optionally requires files to exist on disk (`require_downloaded_files=true`)
 
 ### Canary (`run_canary=true`)
 - Runs all enabled gates against the moving `pr-plugins` Docker tag

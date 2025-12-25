@@ -43,9 +43,23 @@
     This is credential-gated (depends on the same env vars used by the medium gate).
 
 .PARAMETER RunSearchGate
-    Optional "search gate" that performs a real Lidarr album search and asserts
-    that the release list is non-empty (and, when both indexers are configured,
+    Optional "search gate" that performs a real Lidarr album search and asserts 
+    that the release list is non-empty (and, when both indexers are configured, 
     that results include releases attributed to each indexer name).
+
+.PARAMETER RunGrabGate
+    Optional "grab gate" that POSTs one release back to Lidarr's `/api/v1/release`
+    endpoint to initiate a download via a specific configured download client.
+    This is credential-gated and depends on successful Medium + Download Client +
+    Search gates.
+
+.PARAMETER GrabTimeoutSeconds
+    Max time to wait for a grabbed release to appear in Lidarr's queue. Default: 300
+
+.PARAMETER RequireDownloadedFiles
+    When set, the grab gate also requires that at least one file appears under the
+    configured download path for each plugin (e.g., `/downloads/qobuzarr`). This is
+    intended for local validation and can be slow/flaky depending on album size.
 
 .PARAMETER SearchTimeoutSeconds
     Max time to wait for Lidarr search commands and results. Default: 180
@@ -115,6 +129,9 @@ param(
     [int]$MediumGateTimeoutSeconds = 60,
     [switch]$RunDownloadClientGate,
     [switch]$RunSearchGate,
+    [switch]$RunGrabGate,
+    [int]$GrabTimeoutSeconds = 300,
+    [switch]$RequireDownloadedFiles,
     [int]$SearchTimeoutSeconds = 180,
     [string]$SearchArtistTerm = "Miles Davis",
     [string]$SearchAlbumTitle = "Kind of Blue",
@@ -139,6 +156,11 @@ if ($RunSearchGate) {
     $RunMediumGate = $true
 }
 if ($RunDownloadClientGate) {
+    $RunMediumGate = $true
+}
+if ($RunGrabGate) {
+    $RunSearchGate = $true
+    $RunDownloadClientGate = $true
     $RunMediumGate = $true
 }
 
@@ -475,6 +497,39 @@ function Wait-LidarrCommandCompleted {
     throw "Timeout waiting for Lidarr command $CommandId to complete within ${TimeoutSeconds}s."
 }
 
+function Get-LidarrQueueRecords {
+    param([Parameter(Mandatory = $false)][AllowNull()]$QueueResponse)
+
+    if ($null -eq $QueueResponse) { return @() }
+
+    $props = $QueueResponse.PSObject.Properties.Name
+    if ($props -contains 'records') {
+        if ($QueueResponse.records) { return @($QueueResponse.records) }
+        return @()
+    }
+
+    return @($QueueResponse)
+}
+
+function Wait-DirectoryHasAnyFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$DirectoryPath,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $start = Get-Date
+    while (((Get-Date) - $start).TotalSeconds -lt $TimeoutSeconds) {
+        if (Test-Path -LiteralPath $DirectoryPath) {
+            $file = Get-ChildItem -LiteralPath $DirectoryPath -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($file) { return $file }
+        }
+
+        Start-Sleep -Seconds 5
+    }
+
+    return $null
+}
+
 function Cleanup {
     if (-not $KeepRunning) {
         & docker rm -f $ContainerName 2>$null | Out-Null
@@ -731,6 +786,13 @@ try {
     $configuredIndexerNames = New-Object System.Collections.Generic.List[string]
     $configuredDownloadClientNames = New-Object System.Collections.Generic.List[string]
 
+    $configuredIndexerNameByImplementation = @{}
+    $configuredDownloadClientIdByImplementation = @{}
+    $configuredDownloadClientNameByImplementation = @{}
+
+    $searchGateAlbum = $null
+    $searchGateReleases = $null
+
     if ($RunMediumGate) {
         Write-Host "`n=== Medium gate: configure + test indexers ===" -ForegroundColor Cyan
 
@@ -818,6 +880,7 @@ try {
                         $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/indexer/test" -Headers $headers -Body $created -TimeoutSeconds $MediumGateTimeoutSeconds
                         Write-Host "✓ medium gate: QobuzIndexer configured + test succeeded" -ForegroundColor Green
                         $configuredIndexerNames.Add($payload.name) | Out-Null
+                        $configuredIndexerNameByImplementation[$impl] = $payload.name
                     }
                     catch {
                         Write-Host "✗ medium gate: QobuzIndexer test failed`n$($_.Exception.Message)" -ForegroundColor Red
@@ -854,6 +917,7 @@ try {
                         $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/indexer/test" -Headers $headers -Body $created -TimeoutSeconds $MediumGateTimeoutSeconds
                         Write-Host "✓ medium gate: TidalLidarrIndexer configured + test succeeded" -ForegroundColor Green
                         $configuredIndexerNames.Add($payload.name) | Out-Null
+                        $configuredIndexerNameByImplementation[$impl] = $payload.name
                     }
                     catch {
                         Write-Host "✗ medium gate: TidalLidarrIndexer test failed`n$($_.Exception.Message)" -ForegroundColor Red
@@ -911,6 +975,8 @@ try {
                         $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/downloadclient/test" -Headers $headers -Body $created -TimeoutSeconds $MediumGateTimeoutSeconds
                         Write-Host "✓ download gate: QobuzDownloadClient configured + test succeeded" -ForegroundColor Green
                         $configuredDownloadClientNames.Add($payload.name) | Out-Null
+                        $configuredDownloadClientIdByImplementation[$impl] = $created.id
+                        $configuredDownloadClientNameByImplementation[$impl] = $payload.name
                     }
                     catch {
                         Write-Host "✗ download gate: QobuzDownloadClient test failed`n$($_.Exception.Message)" -ForegroundColor Red
@@ -943,6 +1009,8 @@ try {
                         $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/downloadclient/test" -Headers $headers -Body $created -TimeoutSeconds $MediumGateTimeoutSeconds
                         Write-Host "✓ download gate: TidalLidarrDownloadClient configured + test succeeded" -ForegroundColor Green
                         $configuredDownloadClientNames.Add($payload.name) | Out-Null
+                        $configuredDownloadClientIdByImplementation[$impl] = $created.id
+                        $configuredDownloadClientNameByImplementation[$impl] = $payload.name
                     }
                     catch {
                         Write-Host "✗ download gate: TidalLidarrDownloadClient test failed`n$($_.Exception.Message)" -ForegroundColor Red
@@ -1059,7 +1127,7 @@ try {
                 throw "Search gate failure: release list is empty for albumId=$($album.id)."
             }
 
-            $seenIndexerNames = $releases | ForEach-Object { $_.indexer } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
+            $seenIndexerNames = $releases | ForEach-Object { $_.indexer } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique        
             Write-Host "Search gate releases: $releaseCount (indexers: $($seenIndexerNames -join ', '))" -ForegroundColor Green
 
             if ($RequireAllConfiguredIndexersInSearch) {
@@ -1073,6 +1141,136 @@ try {
                 if ($missingFromConfigured.Count -gt 0) {
                     throw "Search gate failure: no releases attributed to configured indexer(s): $($missingFromConfigured -join ', '). Consider using a different artist/album or verifying credentials."
                 }
+            }
+
+            $searchGateAlbum = $album
+            $searchGateReleases = $releases
+        }
+    }
+
+    if ($RunGrabGate) {
+        Write-Host "`n=== Grab gate: queue a release download ===" -ForegroundColor Cyan
+
+        if (-not $searchGateAlbum -or -not $searchGateReleases -or $searchGateReleases.Count -eq 0) {
+            throw "Grab gate requested, but search gate did not produce releases. Verify credentials and set -RunSearchGate."
+        }
+
+        $grabRequests = New-Object System.Collections.Generic.List[object]
+        $grabFailed = $false
+
+        foreach ($plugin in $pluginNames) {
+            if (-not $expectations.ContainsKey($plugin)) { continue }
+
+            $exp = $expectations[$plugin]
+            $indexerImpl = @($exp.Indexers)[0]
+            $downloadImpl = @($exp.DownloadClients)[0]
+
+            $indexerName = $null
+            if ($configuredIndexerNameByImplementation.ContainsKey($indexerImpl)) {
+                $indexerName = $configuredIndexerNameByImplementation[$indexerImpl]
+            }
+
+            $downloadClientId = $null
+            if ($configuredDownloadClientIdByImplementation.ContainsKey($downloadImpl)) {
+                $downloadClientId = $configuredDownloadClientIdByImplementation[$downloadImpl]
+            }
+
+            $downloadClientName = $null
+            if ($configuredDownloadClientNameByImplementation.ContainsKey($downloadImpl)) {
+                $downloadClientName = $configuredDownloadClientNameByImplementation[$downloadImpl]
+            }
+
+            if ([string]::IsNullOrWhiteSpace($indexerName) -or [string]::IsNullOrWhiteSpace($downloadClientName) -or -not $downloadClientId) {
+                Write-Host "✗ grab gate: missing configured indexer/download client for $plugin (indexer=$indexerImpl, downloadClient=$downloadImpl)" -ForegroundColor Red
+                $grabFailed = $true
+                continue
+            }
+
+            $release = $searchGateReleases | Where-Object { $_.indexer -eq $indexerName } | Select-Object -First 1
+            if (-not $release) {
+                Write-Host "✗ grab gate: no releases attributed to indexer '$indexerName' (plugin=$plugin). Consider a different SearchArtistTerm/SearchAlbumTitle." -ForegroundColor Red
+                $grabFailed = $true
+                continue
+            }
+
+            $payload = Copy-JsonObject $release
+            $payload | Add-Member -NotePropertyName "downloadClientId" -NotePropertyValue $downloadClientId -Force
+
+            try {
+                $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/release" -Headers $headers -Body $payload -TimeoutSeconds 60
+                Write-Host "✓ grab gate: queued release via indexer '$indexerName' -> download client '$downloadClientName'" -ForegroundColor Green
+
+                $grabRequests.Add([pscustomobject]@{
+                    Plugin = $plugin
+                    IndexerName = $indexerName
+                    DownloadClientName = $downloadClientName
+                    DownloadClientId = $downloadClientId
+                    DownloadDir = (Join-Path $downloadsRoot $plugin)
+                }) | Out-Null
+            }
+            catch {
+                Write-Host "✗ grab gate: failed to queue release via '$downloadClientName'`n$($_.Exception.Message)" -ForegroundColor Red
+                $grabFailed = $true
+            }
+        }
+
+        if ($grabFailed) { exit 1 }
+        if ($grabRequests.Count -eq 0) {
+            throw "Grab gate requested, but no grab requests were issued (no supported plugins configured)."
+        }
+
+        $queueSeen = @{}
+        $queueStart = Get-Date
+        while (((Get-Date) - $queueStart).TotalSeconds -lt $GrabTimeoutSeconds) {
+            $queue = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/queue?page=1&pageSize=50" -Headers $headers -TimeoutSeconds 30
+            $records = Get-LidarrQueueRecords -QueueResponse $queue
+
+            foreach ($req in $grabRequests) {
+                $key = "$($req.Plugin)|$($req.DownloadClientName)"
+                if ($queueSeen.ContainsKey($key)) { continue }
+
+                $match = $records | Where-Object {
+                    $_.downloadClient -eq $req.DownloadClientName -and $_.albumId -eq $searchGateAlbum.id
+                } | Select-Object -First 1
+
+                if (-not $match) {
+                    $match = $records | Where-Object {
+                        $_.downloadClient -eq $req.DownloadClientName -and $_.title -and $_.title.ToString().IndexOf($searchGateAlbum.title, [StringComparison]::OrdinalIgnoreCase) -ge 0
+                    } | Select-Object -First 1
+                }
+
+                if ($match) {
+                    if ($match.status -eq "failed" -or -not [string]::IsNullOrWhiteSpace($match.errorMessage)) {
+                        $err = $match.errorMessage
+                        if ([string]::IsNullOrWhiteSpace($err)) { $err = "Queue item status='$($match.status)'." }
+                        throw "Grab gate failure: queue item for '$($req.DownloadClientName)' reported an error: $err"
+                    }
+
+                    $queueSeen[$key] = $match
+                    Write-Host "✓ grab gate: queue item observed for '$($req.DownloadClientName)' (status=$($match.status))" -ForegroundColor Green
+                }
+            }
+
+            if ($queueSeen.Count -ge $grabRequests.Count) { break }
+            Start-Sleep -Seconds 5
+        }
+
+        if ($queueSeen.Count -lt $grabRequests.Count) {
+            $missing = $grabRequests | Where-Object { -not $queueSeen.ContainsKey("$($_.Plugin)|$($_.DownloadClientName)") } | ForEach-Object { $_.DownloadClientName }
+            throw "Grab gate failure: did not observe queue items within ${GrabTimeoutSeconds}s for: $($missing -join ', ')"
+        }
+
+        if ($RequireDownloadedFiles) {
+            Write-Host "`n=== Grab gate: verify download artifacts exist ===" -ForegroundColor Cyan
+
+            foreach ($req in $grabRequests) {
+                $downloadDir = $req.DownloadDir
+                $file = Wait-DirectoryHasAnyFiles -DirectoryPath $downloadDir -TimeoutSeconds $GrabTimeoutSeconds
+                if (-not $file) {
+                    throw "Grab gate failure: no downloaded files found under '$downloadDir' within ${GrabTimeoutSeconds}s."
+                }
+
+                Write-Host "✓ download artifacts: $($file.FullName)" -ForegroundColor Green
             }
         }
     }
