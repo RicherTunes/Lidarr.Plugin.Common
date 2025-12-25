@@ -116,12 +116,12 @@
 
 
     <!-- Assemblies to keep (NOT merged but required at runtime).
-         IMPORTANT: In a multi-plugin Lidarr instance, shipping shared assemblies that the host already provides
-         (e.g., Lidarr.Plugin.Abstractions, Microsoft.Extensions.*.Abstractions) can cause load failures:
-         the first plugin may load the assembly, and subsequent plugins attempting to load a second copy
-         can trigger InvalidOperationException / TypeLoadException due to duplicate identities.
-         Prefer host-provided copies for cross-boundary type identity. -->
+         Notes:
+           - Lidarr.Plugin.Abstractions is required for plugin discovery/loading, and is not shipped by the Lidarr host image.
+           - Microsoft.Extensions.*.Abstractions are shipped by the host and should not be bundled with plugins to avoid duplicates. -->
     <ItemGroup>
+      <_PluginRuntimeDeps Include="$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll"
+                         Condition="Exists('$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll')" />
       <_PluginRuntimeDeps Include="@(PluginPackagingAdditionalKeep)" />
       <_ExtraAssemblies Include="$(_PluginOutputPath)*.dll" Exclude="$(_PluginOutputPath)$(PluginAssemblyFileName);@(_PluginRuntimeDeps)" />
       <_ExtraSymbols Include="$(_PluginOutputPath)*.pdb" Exclude="$(_PluginOutputPath)$(PluginSymbolFileName)" />

@@ -11,8 +11,9 @@ namespace Lidarr.Plugin.Common.Tests.PackageValidation;
 /// Use this in plugin test suites to ensure packaging meets Lidarr plugin requirements.
 /// 
 /// ECOSYSTEM PACKAGING POLICY:
+/// - SHIP (not merged):
+///   - Lidarr.Plugin.Abstractions.dll (required for plugin discovery/loading; host image does not ship it)
 /// - HOST-PROVIDED (do not ship):
-///   - Lidarr.Plugin.Abstractions.dll
 ///   - Microsoft.Extensions.DependencyInjection.Abstractions.dll
 ///   - Microsoft.Extensions.Logging.Abstractions.dll
 /// - MERGE into plugin DLL (internalized):
@@ -24,14 +25,11 @@ namespace Lidarr.Plugin.Common.Tests.PackageValidation;
 public static class PluginPackageValidator
 {
     /// <summary>
-    /// Assemblies that must NOT be shipped in plugin packages.
-    /// Shipping these can break multi-plugin cohabitation by loading multiple copies of the same assembly identity.
+    /// Assemblies required to be present in plugin packages.
     /// </summary>
-    public static readonly string[] ExpectedHostProvidedAssemblies =
+    public static readonly string[] RequiredPluginAssemblies =
     [
-        "Lidarr.Plugin.Abstractions.dll",
-        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
-        "Microsoft.Extensions.Logging.Abstractions.dll"
+        "Lidarr.Plugin.Abstractions.dll"
     ];
 
     /// <summary>
@@ -42,8 +40,7 @@ public static class PluginPackageValidator
     public static readonly string[] DisallowedHostAssemblies =
     [
         "FluentValidation.dll",
-        "Lidarr.Plugin.Abstractions.dll",
-        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",      
         "Microsoft.Extensions.Logging.Abstractions.dll",
         "Lidarr.Core.dll",
         "Lidarr.Common.dll",
@@ -91,16 +88,27 @@ public static class PluginPackageValidator
                 result.AddError($"Plugin assembly '{pluginAssemblyName}' not found in package");
             }
 
+            foreach (var required in RequiredPluginAssemblies)
+            {
+                if (!dlls.Contains(required))
+                {
+                    if (isStrict)
+                    {
+                        result.AddError($"Required assembly '{required}' missing from package");
+                    }
+                    else
+                    {
+                        result.AddWarning($"Required assembly '{required}' missing from package");
+                    }
+                }
+            }
+
             // Check for disallowed host assemblies
             var foundDisallowed = dlls.Intersect(DisallowedHostAssemblies, StringComparer.OrdinalIgnoreCase).ToList();
             foreach (var dll in foundDisallowed)
             {
                 result.AddError($"Host assembly '{dll}' should not be in package (host provides it)");
             }
-
-            // Host-provided assemblies should not be shipped (see DisallowedHostAssemblies).
-            // Keep a separate list for documentation/searchability.
-            _ = ExpectedHostProvidedAssemblies;
 
             // Check for bloat - should only have a few DLLs
             if (dlls.Count > 10)
