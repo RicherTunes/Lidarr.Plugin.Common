@@ -39,8 +39,7 @@ namespace Lidarr.Plugin.Common.Utilities
         /// </summary>
         public static readonly IReadOnlyList<string> DefaultAllowedAssemblies = new[]
         {
-            "Lidarr.Plugin.Common.dll",
-            "Lidarr.Plugin.Abstractions.dll"
+            "Lidarr.Plugin.Common.dll"
         };
 
         /// <summary>
