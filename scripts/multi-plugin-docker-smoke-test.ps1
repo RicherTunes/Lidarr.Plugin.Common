@@ -695,12 +695,9 @@ try {
         }
     }
 
-    if ($RunSearchGate) {
-        $dockerArgs += @("-v", "${musicMount}:/music")
-    }
-    if ($RunDownloadClientGate) {
-        $dockerArgs += @("-v", "${downloadsMount}:/downloads")
-    }
+    # Always mount /music and /downloads for interactive setup and gate tests
+    $dockerArgs += @("-v", "${musicMount}:/music")
+    $dockerArgs += @("-v", "${downloadsMount}:/downloads")
 
     $dockerArgs += @(
         "-e", "PUID=1000",
