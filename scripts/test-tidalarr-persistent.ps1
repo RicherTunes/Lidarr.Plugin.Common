@@ -86,6 +86,19 @@ Write-Host "Extracting plugin to persistent directory..." -ForegroundColor Cyan
 Remove-Item -Path (Join-Path $pluginsDir "*") -Recurse -Force -ErrorAction SilentlyContinue
 Expand-Archive -Path $zip.FullName -DestinationPath $pluginsDir -Force
 
+$requiredFiles = @(
+    "plugin.json",
+    "Lidarr.Plugin.Tidalarr.dll",
+    "Lidarr.Plugin.Abstractions.dll"
+)
+$missing = @($requiredFiles | Where-Object { -not (Test-Path (Join-Path $pluginsDir $_)) })
+if ($missing.Count -gt 0) {
+    Write-Warning "Plugin zip is missing required files: $($missing -join ', ')"
+    Write-Host "Extracted files:" -ForegroundColor Yellow
+    Get-ChildItem -LiteralPath $pluginsDir -File | Select-Object Name, Length | Format-Table -AutoSize | Out-Host
+    throw "Tidalarr plugin package is incomplete; cannot start Lidarr."
+}
+
 docker stop $ContainerName 2>$null | Out-Null
 docker rm $ContainerName 2>$null | Out-Null
 
