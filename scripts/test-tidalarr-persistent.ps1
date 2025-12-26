@@ -28,7 +28,8 @@ param(
     [switch]$Clean,
     [string]$LidarrTag = "pr-plugins-3.1.1.4884",
     [int]$Port = 8690,
-    [string]$ContainerName = "tidalarr-test"
+    [string]$ContainerName = "tidalarr-test",
+    [switch]$SkipSchemaCheck
 )
 
 Set-StrictMode -Version Latest
@@ -66,6 +67,7 @@ New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
 New-Item -ItemType Directory -Path $downloadsDir -Force | Out-Null
 New-Item -ItemType Directory -Path $musicDir -Force | Out-Null
+New-Item -ItemType Directory -Path (Join-Path $downloadsDir "tidalarr") -Force | Out-Null
 
 if ($Rebuild) {
     Write-Host "Building Tidalarr package..." -ForegroundColor Cyan
@@ -147,6 +149,47 @@ if (-not $ready) {
         docker logs $ContainerName --tail 200 | Out-Host
     }
     catch { }
+}
+
+if (-not $SkipSchemaCheck) {
+    $apiKey = $null
+    $configXmlPath = Join-Path $configDir "config.xml"
+
+    $apiKeyDeadline = (Get-Date).AddSeconds(30)
+    while (-not $apiKey -and (Get-Date) -lt $apiKeyDeadline) {
+        if (Test-Path $configXmlPath) {
+            try {
+                $xml = [xml](Get-Content -LiteralPath $configXmlPath -Raw)
+                $apiKey = $xml.Config.ApiKey
+            }
+            catch { }
+        }
+        if (-not $apiKey) { Start-Sleep -Seconds 2 }
+    }
+
+    if ($apiKey) {
+        try {
+            $headers = @{ "X-Api-Key" = $apiKey }
+            $indexers = Invoke-RestMethod -Uri "http://localhost:$Port/api/v1/indexer/schema" -Headers $headers -TimeoutSec 15
+            $downloadClients = Invoke-RestMethod -Uri "http://localhost:$Port/api/v1/downloadclient/schema" -Headers $headers -TimeoutSec 15
+
+            $hasTidalIndexer = @($indexers | Where-Object { ($_.implementation -like "*Tidal*") -or ($_.name -like "*Tidal*") }).Count -gt 0
+            $hasTidalDownloadClient = @($downloadClients | Where-Object { ($_.implementation -like "*Tidal*") -or ($_.name -like "*Tidal*") }).Count -gt 0
+
+            if (-not $hasTidalIndexer -or -not $hasTidalDownloadClient) {
+                throw "Tidalarr schema not detected via API (indexer=$hasTidalIndexer downloadClient=$hasTidalDownloadClient)."
+            }
+
+            Write-Host "Schema check OK: Tidalarr indexer + download client detected." -ForegroundColor Green
+        }
+        catch {
+            Write-Warning "Schema check failed: $($_.Exception.Message)"
+            Write-Host "Tip: check container logs with: docker logs -f $ContainerName" -ForegroundColor Yellow
+        }
+    }
+    else {
+        Write-Warning "Could not read Lidarr API key from $configXmlPath; skipping schema check."
+    }
 }
 
 Write-Host ""
