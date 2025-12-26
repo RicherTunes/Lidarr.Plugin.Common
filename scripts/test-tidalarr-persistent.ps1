@@ -51,9 +51,11 @@ function Find-LatestZip {
             Select-Object -First 1)
 }
 
-$persistentRoot = Join-Path $commonRoot ".persistent-tidalarr-test-config"
+$persistentRoot = Join-Path $commonRoot ".persistent-tidalarr-test-config"      
 $configDir = Join-Path $persistentRoot "config"
 $pluginsDir = Join-Path $persistentRoot "plugins/RicherTunes/Tidalarr"
+$downloadsDir = Join-Path $persistentRoot "downloads"
+$musicDir = Join-Path $persistentRoot "music"
 
 if ($Clean) {
     Write-Host "Cleaning persistent config..." -ForegroundColor Yellow
@@ -62,6 +64,8 @@ if ($Clean) {
 
 New-Item -ItemType Directory -Path $configDir -Force | Out-Null
 New-Item -ItemType Directory -Path $pluginsDir -Force | Out-Null
+New-Item -ItemType Directory -Path $downloadsDir -Force | Out-Null
+New-Item -ItemType Directory -Path $musicDir -Force | Out-Null
 
 if ($Rebuild) {
     Write-Host "Building Tidalarr package..." -ForegroundColor Cyan
@@ -104,6 +108,8 @@ docker rm $ContainerName 2>$null | Out-Null
 
 $configMount = $configDir.Replace('\', '/')
 $pluginsMount = (Split-Path $pluginsDir -Parent).Replace('\', '/')
+$downloadsMount = $downloadsDir.Replace('\', '/')
+$musicMount = $musicDir.Replace('\', '/')
 
 Write-Host "Starting Lidarr with persistent config..." -ForegroundColor Cyan
 docker run -d `
@@ -111,6 +117,8 @@ docker run -d `
     -p "${Port}:8686" `
     -v "${configMount}:/config" `
     -v "${pluginsMount}:/config/plugins/RicherTunes" `
+    -v "${downloadsMount}:/downloads" `
+    -v "${musicMount}:/music" `
     -e PUID=1000 `
     -e PGID=1000 `
     -e TZ=UTC `
@@ -146,12 +154,18 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host "Lidarr is running at: http://localhost:$Port" -ForegroundColor Green
 Write-Host "Config persisted at: $configDir" -ForegroundColor Green
 Write-Host "Plugin persisted at: $pluginsDir" -ForegroundColor Green
+Write-Host "Downloads persisted at: $downloadsDir" -ForegroundColor Green
+Write-Host "Music persisted at: $musicDir" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "Tidalarr OAuth setup (first run):" -ForegroundColor Yellow
 Write-Host "1) Add Tidalarr indexer/download client in Lidarr UI" -ForegroundColor Yellow
-Write-Host "2) Set ConfigPath to: /config/tidalarr" -ForegroundColor Yellow
+Write-Host "2) Set ConfigPath to: /config/tidalarr" -ForegroundColor Yellow     
 Write-Host "3) Click to generate the auth URL, login, then paste the RedirectUrl back" -ForegroundColor Yellow
 Write-Host "4) Set TidalMarket (e.g., US) and click Test" -ForegroundColor Yellow
+Write-Host ""
+Write-Host "Recommended paths (for E2E):" -ForegroundColor Yellow
+Write-Host "- Download folder in Lidarr / client settings: /downloads/tidalarr" -ForegroundColor Yellow
+Write-Host "- Music root in Lidarr: /music" -ForegroundColor Yellow
 Write-Host ""
 Write-Host "To stop: docker stop $ContainerName" -ForegroundColor Gray
