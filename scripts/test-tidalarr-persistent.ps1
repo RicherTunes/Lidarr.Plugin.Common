@@ -29,7 +29,14 @@ param(
     [string]$LidarrTag = "pr-plugins-3.1.1.4884",
     [int]$Port = 8690,
     [string]$ContainerName = "tidalarr-test",
-    [switch]$SkipSchemaCheck
+    [switch]$SkipSchemaCheck,
+    [switch]$RunSearchGate,
+    [switch]$RunGrabGate,
+    [int]$SearchTimeoutSeconds = 180,
+    [int]$GrabTimeoutSeconds = 300,
+    [string]$SearchArtistTerm = "Miles Davis",
+    [string]$SearchAlbumTitle = "Kind of Blue",
+    [switch]$RequireDownloadedFiles
 )
 
 Set-StrictMode -Version Latest
@@ -41,6 +48,80 @@ $tidalarrRoot = Join-Path $repoRoot "tidalarr"
 
 if (-not (Test-Path (Join-Path $tidalarrRoot "Tidalarr.sln"))) {
     throw "Tidalarr repo not found at '$tidalarrRoot'."
+}
+
+function UrlEncode([string]$value) {
+    if ($null -eq $value) { return "" }
+    return [System.Web.HttpUtility]::UrlEncode($value)
+}
+
+function Invoke-LidarrApiJson {
+    param(
+        [Parameter(Mandatory = $true)][string]$Method,
+        [Parameter(Mandatory = $true)][string]$Uri,
+        [Parameter(Mandatory = $true)][hashtable]$Headers,
+        [Parameter()][object]$Body = $null,
+        [Parameter()][int]$TimeoutSeconds = 30
+    )
+
+    $params = @{
+        Method = $Method
+        Uri = $Uri
+        Headers = $Headers
+        TimeoutSec = $TimeoutSeconds
+        ErrorAction = "Stop"
+    }
+
+    if ($null -ne $Body) {
+        $params.ContentType = "application/json"
+        $params.Body = ($Body | ConvertTo-Json -Depth 64)
+    }
+
+    return Invoke-RestMethod @params
+}
+
+function Wait-LidarrCommandCompleted {
+    param(
+        [Parameter(Mandatory = $true)][int]$CommandId,
+        [Parameter(Mandatory = $true)][string]$LidarrUrl,
+        [Parameter(Mandatory = $true)][hashtable]$Headers,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $start = Get-Date
+    while (((Get-Date) - $start).TotalSeconds -lt $TimeoutSeconds) {
+        $cmd = Invoke-LidarrApiJson -Method "GET" -Uri "$LidarrUrl/api/v1/command/$CommandId" -Headers $Headers -TimeoutSeconds 30
+        if ($cmd -and $cmd.status) {
+            if ($cmd.status -eq "completed") { return $cmd }
+            if ($cmd.status -eq "failed") { throw "Command $CommandId failed: $($cmd.message)" }
+        }
+        Start-Sleep -Seconds 3
+    }
+
+    throw "Timeout waiting for command $CommandId to complete."
+}
+
+function Wait-DirectoryHasAnyFiles {
+    param(
+        [Parameter(Mandatory = $true)][string]$DirectoryPath,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds
+    )
+
+    $start = Get-Date
+    while (((Get-Date) - $start).TotalSeconds -lt $TimeoutSeconds) {
+        if (Test-Path $DirectoryPath) {
+            $file = Get-ChildItem -LiteralPath $DirectoryPath -File -Recurse -ErrorAction SilentlyContinue |
+                Where-Object { $_.Length -gt 0 } |
+                Sort-Object LastWriteTimeUtc -Descending |
+                Select-Object -First 1
+
+            if ($file) { return $file }
+        }
+
+        Start-Sleep -Seconds 5
+    }
+
+    return $null
 }
 
 function Find-LatestZip {
@@ -170,8 +251,9 @@ if (-not $SkipSchemaCheck) {
     if ($apiKey) {
         try {
             $headers = @{ "X-Api-Key" = $apiKey }
-            $indexers = Invoke-RestMethod -Uri "http://localhost:$Port/api/v1/indexer/schema" -Headers $headers -TimeoutSec 15
-            $downloadClients = Invoke-RestMethod -Uri "http://localhost:$Port/api/v1/downloadclient/schema" -Headers $headers -TimeoutSec 15
+            $lidarrUrl = "http://localhost:$Port"
+            $indexers = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/indexer/schema" -Headers $headers -TimeoutSeconds 30
+            $downloadClients = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/downloadclient/schema" -Headers $headers -TimeoutSeconds 30
 
             $hasTidalIndexer = @($indexers | Where-Object { ($_.implementation -like "*Tidal*") -or ($_.name -like "*Tidal*") }).Count -gt 0
             $hasTidalDownloadClient = @($downloadClients | Where-Object { ($_.implementation -like "*Tidal*") -or ($_.name -like "*Tidal*") }).Count -gt 0
@@ -189,6 +271,167 @@ if (-not $SkipSchemaCheck) {
     }
     else {
         Write-Warning "Could not read Lidarr API key from $configXmlPath; skipping schema check."
+    }
+}
+
+if ($RunGrabGate) { $RunSearchGate = $true }
+
+if ($RunSearchGate -or $RunGrabGate) {
+    $lidarrUrl = "http://localhost:$Port"
+
+    $configXmlPath = Join-Path $configDir "config.xml"
+    if (-not (Test-Path $configXmlPath)) { throw "Cannot run gates: missing Lidarr config file at $configXmlPath." }
+
+    $xml = [xml](Get-Content -LiteralPath $configXmlPath -Raw)
+    $apiKey = $xml.Config.ApiKey
+    if ([string]::IsNullOrWhiteSpace($apiKey)) { throw "Cannot run gates: Lidarr ApiKey missing from $configXmlPath." }
+
+    $headers = @{ "X-Api-Key" = $apiKey }
+
+    Write-Host "`n=== Gate: Search (AlbumSearch + releases) ===" -ForegroundColor Cyan
+
+    $existingIndexers = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/indexer" -Headers $headers -TimeoutSeconds 30
+    $tidalIndexer = $existingIndexers | Where-Object { $_.enable -eq $true -and $_.implementation -like "*Tidal*" } | Select-Object -First 1
+    if (-not $tidalIndexer) { throw "Search gate requires an enabled Tidal indexer. Configure it in the UI and click Test." }
+
+    $existingDownloadClients = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/downloadclient" -Headers $headers -TimeoutSeconds 30
+    $tidalDownloadClient = $existingDownloadClients | Where-Object { $_.enable -eq $true -and $_.implementation -like "*Tidal*" } | Select-Object -First 1
+    if (-not $tidalDownloadClient) { throw "Search gate expects an enabled Tidal download client (needed for grab gate). Configure it in the UI and click Test." }
+
+    $rootFolders = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/rootfolder" -Headers $headers -TimeoutSeconds 30
+    $musicRootFolder = $rootFolders | Where-Object { $_.path -eq "/music" } | Select-Object -First 1
+    if (-not $musicRootFolder) {
+        $musicRootFolder = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/rootfolder" -Headers $headers -Body @{ path = "/music" } -TimeoutSeconds 30
+    }
+    if (-not $musicRootFolder -or $musicRootFolder.path -ne "/music") {
+        throw "Failed to create/find root folder '/music' required for search gate."
+    }
+
+    $qualityProfiles = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/qualityprofile" -Headers $headers -TimeoutSeconds 30
+    $metadataProfiles = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/metadataprofile" -Headers $headers -TimeoutSeconds 30
+    $qualityProfileId = ($qualityProfiles | Select-Object -First 1).id
+    $metadataProfileId = ($metadataProfiles | Select-Object -First 1).id
+    if (-not $qualityProfileId -or -not $metadataProfileId) {
+        throw "Failed to resolve quality/metadata profiles required for artist add."
+    }
+
+    $artistTerm = UrlEncode $SearchArtistTerm
+    $artistLookup = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/artist/lookup?term=$artistTerm" -Headers $headers -TimeoutSeconds 30
+    $artistCandidate = $artistLookup | Select-Object -First 1
+    if (-not $artistCandidate) {
+        throw "No artists returned from lookup for '$SearchArtistTerm'."
+    }
+
+    $artistPayload = $artistCandidate | ConvertTo-Json -Depth 64 | ConvertFrom-Json
+    $artistPayload.qualityProfileId = $qualityProfileId
+    $artistPayload.metadataProfileId = $metadataProfileId
+    $artistPayload.rootFolderPath = "/music"
+    $artistPayload.monitored = $true
+    $artistPayload.monitorNewItems = "all"
+    $artistPayload.addOptions = @{
+        monitor = "all"
+        monitored = $true
+        searchForMissingAlbums = $false
+    }
+
+    $createdArtist = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/artist" -Headers $headers -Body $artistPayload -TimeoutSeconds 60
+    if (-not $createdArtist -or -not $createdArtist.id) {
+        throw "Failed to create artist in Lidarr for search gate."
+    }
+
+    Write-Host "Seeded artist: $($createdArtist.artistName) (id=$($createdArtist.id))" -ForegroundColor Green
+
+    $albums = $null
+    $start = Get-Date
+    while (((Get-Date) - $start).TotalSeconds -lt $SearchTimeoutSeconds) {
+        $albums = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/album?artistId=$($createdArtist.id)&includeAllArtistAlbums=true" -Headers $headers -TimeoutSeconds 30
+        if ($albums -and $albums.Count -gt 0) { break }
+        Start-Sleep -Seconds 3
+    }
+
+    if (-not $albums -or $albums.Count -eq 0) {
+        throw "Timeout waiting for albums to be available for artist '$($createdArtist.artistName)'."
+    }
+
+    $targetTitle = $SearchAlbumTitle.Trim()
+    $album = $albums | Where-Object { $_.title -and $_.title.ToString().Equals($targetTitle, [StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
+    if (-not $album) {
+        $album = $albums | Where-Object { $_.title -and $_.title.ToString().IndexOf($targetTitle, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | Select-Object -First 1
+    }
+    if (-not $album) {
+        $sample = ($albums | Select-Object -First 20 | ForEach-Object { $_.title }) -join ", "
+        throw "Could not find an album matching '$SearchAlbumTitle' for artist '$($createdArtist.artistName)'. Sample albums: $sample"
+    }
+
+    Write-Host "Search gate album: $($album.title) (id=$($album.id))" -ForegroundColor Green
+
+    $cmd = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/command" -Headers $headers -Body @{ name = "AlbumSearch"; albumIds = @($album.id) } -TimeoutSeconds 30
+    if (-not $cmd -or -not $cmd.id) { throw "Failed to enqueue AlbumSearch command." }
+    $null = Wait-LidarrCommandCompleted -CommandId $cmd.id -LidarrUrl $lidarrUrl -Headers $headers -TimeoutSeconds $SearchTimeoutSeconds
+
+    $releases = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/release?albumId=$($album.id)" -Headers $headers -TimeoutSeconds 30
+    $releaseCount = 0
+    if ($releases) { $releaseCount = $releases.Count }
+    if ($releaseCount -eq 0) { throw "Search gate failure: release list is empty for albumId=$($album.id)." }
+
+    $indexerNames = $releases | ForEach-Object { $_.indexer } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Sort-Object -Unique
+    Write-Host "Search gate releases: $releaseCount (indexers: $($indexerNames -join ', '))" -ForegroundColor Green
+
+    if ($RunGrabGate) {
+        Write-Host "`n=== Gate: Grab (queue download) ===" -ForegroundColor Cyan
+
+        $candidates = $releases | Where-Object { $_.indexer -eq $tidalIndexer.name -and $_.downloadAllowed -ne $false }
+        $release = $candidates | Sort-Object { if ($_.size) { [long]$_.size } else { [long]::MaxValue } } | Select-Object -First 1
+        if (-not $release) {
+            throw "Grab gate failure: no releases attributed to Tidal indexer '$($tidalIndexer.name)'. Consider using a different SearchArtistTerm/SearchAlbumTitle."
+        }
+
+        $payload = $release | ConvertTo-Json -Depth 64 | ConvertFrom-Json
+        $payload | Add-Member -NotePropertyName "downloadClientId" -NotePropertyValue $tidalDownloadClient.id -Force
+
+        $null = Invoke-LidarrApiJson -Method "POST" -Uri "$lidarrUrl/api/v1/release" -Headers $headers -Body $payload -TimeoutSeconds 60
+        Write-Host "✓ queued '$($release.title)' via '$($tidalIndexer.name)' -> '$($tidalDownloadClient.name)'" -ForegroundColor Green
+
+        $queueStart = Get-Date
+        $queueOk = $false
+        while (((Get-Date) - $queueStart).TotalSeconds -lt $GrabTimeoutSeconds) {
+            $queue = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/queue?page=1&pageSize=50" -Headers $headers -TimeoutSeconds 30
+            $records = $queue.records
+            if (-not $records) { $records = @() }
+
+            $match = $records | Where-Object { $_.downloadClient -eq $tidalDownloadClient.name -and $_.albumId -eq $album.id } | Select-Object -First 1
+            if (-not $match) {
+                $match = $records | Where-Object { $_.downloadClient -eq $tidalDownloadClient.name -and $_.title -and $_.title.ToString().IndexOf($album.title, [StringComparison]::OrdinalIgnoreCase) -ge 0 } | Select-Object -First 1
+            }
+
+            if ($match) {
+                if ($match.status -eq "failed" -or -not [string]::IsNullOrWhiteSpace($match.errorMessage)) {
+                    $err = $match.errorMessage
+                    if ([string]::IsNullOrWhiteSpace($err)) { $err = "Queue item status='$($match.status)'." }
+                    throw "Grab gate failure: queue item reported an error: $err"
+                }
+
+                Write-Host "✓ queue item observed (status=$($match.status))" -ForegroundColor Green
+                $queueOk = $true
+                break
+            }
+
+            Start-Sleep -Seconds 5
+        }
+
+        if (-not $queueOk) {
+            throw "Grab gate failure: did not observe a queue item within ${GrabTimeoutSeconds}s."
+        }
+
+        if ($RequireDownloadedFiles) {
+            $downloadDir = Join-Path $downloadsDir "tidalarr"
+            Write-Host "Waiting for downloaded files under: $downloadDir" -ForegroundColor Yellow
+            $file = Wait-DirectoryHasAnyFiles -DirectoryPath $downloadDir -TimeoutSeconds $GrabTimeoutSeconds
+            if (-not $file) {
+                throw "Grab gate failure: no downloaded files found under '$downloadDir' within ${GrabTimeoutSeconds}s."
+            }
+            Write-Host "✓ download artifacts: $($file.FullName)" -ForegroundColor Green
+        }
     }
 }
 
