@@ -28,13 +28,59 @@ Full ecosystem parity is achieved when:
 
 ---
 
+## Type-Identity Assembly Policy
+
+### Required Assemblies (All Plugins)
+Plugins **MUST** ship these assemblies for proper plugin discovery and type identity:
+- `Lidarr.Plugin.Abstractions.dll` - Plugin discovery contract
+- `Microsoft.Extensions.DependencyInjection.Abstractions.dll` - DI type identity
+- `Microsoft.Extensions.Logging.Abstractions.dll` - Logging type identity
+
+### Forbidden Assemblies (All Plugins)
+Plugins **MUST NOT** ship these assemblies:
+- `System.Text.Json.dll` - Cross-boundary type identity risk
+- `Lidarr.Core.dll`, `Lidarr.Common.dll`, `Lidarr.Host.dll` - Host assemblies
+- `NzbDrone.*.dll` - Legacy host assemblies
+
+### FluentValidation Exception (Brainarr-Specific)
+
+**Brainarr MUST NOT ship `FluentValidation.dll`.**
+
+Unlike streaming plugins (Qobuzarr, Tidalarr) that don't override validation methods,
+Brainarr's `BrainarrImportList` overrides `Test(List<ValidationFailure>)` from `ImportListBase`.
+
+When FluentValidation.dll was shipped:
+```
+Method 'Test' in type 'Lidarr.Plugin.Brainarr.BrainarrImportList' does not have an implementation.
+```
+
+**Root cause**: Override signature mismatch due to FluentValidation type identity.
+- Plugin's `ValidationResult` ≠ Host's `ValidationResult` (different ALCs)
+- The override signature doesn't match because return types are technically different types
+- Plugin must use host's FluentValidation for type identity to match
+
+**Guard test**: `brainarr/Brainarr.Tests/Packaging/BrainarrPackagingPolicyTests.cs:Package_Must_Not_Ship_FluentValidation()`
+
+### ⚠️ Policy Warning: Do Not Force Uniformity
+
+FluentValidation shipping is **plugin-specific**. Do NOT attempt to standardize all plugins
+to either ship or not ship FluentValidation.dll without verifying the plugin's override
+signatures against the host.
+
+**Before changing FV policy for any plugin:**
+1. Check if the plugin overrides `Test(List<ValidationFailure>)` or similar methods
+2. If yes, the plugin MUST NOT ship FluentValidation.dll
+3. If no overrides, shipping FV is optional (but adds package size)
+
+---
+
 ## Phase 1: Lock Contracts with Tests (High Priority)
 
 ### 1.1 Packaging Content Tests
 - [x] **Common**: PluginPackageValidator with TypeIdentityAssemblies
 - [x] **Tidalarr**: PackagingPolicyBaseline updated to 5-DLL contract
 - [x] **Qobuzarr**: PackagingPolicyTests with RequiredTypeIdentityAssemblies
-- [x] **Brainarr**: BrainarrPackagingPolicyTests with 5-DLL contract
+- [x] **Brainarr**: BrainarrPackagingPolicyTests with 4-DLL contract (no FluentValidation)
 
 ### 1.2 Naming Contract Tests
 - [ ] Multi-disc: D01Txx/D02Txx format validation
@@ -86,38 +132,75 @@ Options:
 
 ## Phase 3: Persistent E2E Gates
 
-### 3.1 Single-Plugin E2E Runner
-**Location**: `lidarr.plugin.common/scripts/`
+### 3.1 Gate Definitions
 
-Gates:
-1. **Schema Gate** (no credentials): Indexer/DownloadClient discovered and configured
-2. **Search Gate** (credentials required): API search returns results
-3. **Grab Gate** (credentials required): Download initiated and completes
+| Gate | Level | Credentials | What It Proves |
+|------|-------|-------------|----------------|
+| **Schema** | 0 | None | Plugin loaded, indexer/downloadclient/importlist schemas registered |
+| **Config/Auth** | 1 | Required | `POST indexer/test` passes (plugin's auth/config validation works) |
+| **ReleaseSearch** | 2 | Required | `AlbumSearch` command → `/api/v1/release?albumId=` returns results |
+| **Grab** | 3 | Required | Release grabbed → file appears in /downloads |
 
-### 3.2 Plugin-Specific Status
-| Plugin | Schema | Search | Grab |
-|--------|--------|--------|------|
-| Qobuzarr | Proven | Proven | Proven |
-| Tidalarr | Pending | Pending | Pending (OAuth stability) |
-| Brainarr | Pending | N/A | N/A |
+**Current implementation**: Gates 0-1 are implemented. Gates 2-3 require additional work.
 
-### 3.3 Multi-Plugin E2E
-**Blocked by**: Upstream Lidarr ALC fix for multi-plugin isolation
+### 3.2 E2E Runner
+**Location**: `lidarr.plugin.common/scripts/e2e-runner.ps1`
 
-Design:
-- Start Lidarr with persisted /config, /downloads, /music
-- Deploy all plugin zips
-- Run gates sequentially per plugin
-- On failure: diagnostics bundle + run manifest JSON
+Features:
+- Per-plugin configuration (search queries, credential field names)
+- Credential skip semantics (graceful skip when creds missing)
+- URL/token redaction in diagnostics
+- Cascade skip (Grab skipped when Search skipped)
+
+### 3.3 Plugin-Specific Status
+
+| Plugin | Schema | Config/Auth | ReleaseSearch | Grab |
+|--------|--------|-------------|---------------|------|
+| Qobuzarr | ✅ PASS | ⏭️ SKIP (no creds) | ❌ Not impl | ❌ Not impl |
+| Tidalarr | ✅ PASS | ✅ PASS | ❌ Not impl | ❌ Not impl |
+| Brainarr | ✅ PASS | N/A (import list) | N/A | N/A |
+
+**3-Plugin Coexistence**: ✅ All three plugins load simultaneously in same Lidarr instance.
+
+### 3.4 Multi-Plugin E2E Command
+```bash
+# Schema gate (no credentials required):
+./e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr' -Gate schema \
+    -LidarrUrl 'http://localhost:8691' \
+    -ExtractApiKeyFromContainer -ContainerName 'lidarr-multi-plugin-persist'
+
+# All gates (skips gracefully when creds missing):
+./e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr' -Gate all \
+    -LidarrUrl 'http://localhost:8691' \
+    -ApiKey '<key>'
+```
 
 ---
 
-## Phase 4: Multi-Plugin Proof (Future)
+## Phase 4: Advanced E2E Gates (Future)
 
-Once upstream Lidarr ALC fix lands:
-1. Enable multi-plugin schema gate as hard pass/fail
-2. Enable search/grab gates with secrets
-3. Prove 3-plugin concurrent operation
+### 4.1 ReleaseSearch Gate (Level 2)
+**Not yet implemented**
+
+Design:
+1. Create temporary album via `POST /api/v1/album`
+2. Trigger `AlbumSearch` command
+3. Assert `/api/v1/release?albumId=` contains results with plugin's indexerId
+4. Clean up temporary album
+
+### 4.2 Grab Gate (Level 3)
+**Not yet implemented**
+
+Design:
+1. Pick deterministic release from ReleaseSearch results
+2. Trigger grab via `POST /api/v1/release`
+3. Assert queue contains item
+4. Assert file appears in /downloads (timeout with polling)
+
+### 4.3 3-Plugin Concurrent Operation
+**Status**: ✅ Proven for Schema gate
+
+All three plugins can coexist in the same Lidarr instance and pass Schema gate simultaneously
 
 ---
 
@@ -135,8 +218,9 @@ Once upstream Lidarr ALC fix lands:
 - `tidalarr/src/Tidalarr/Integration/TidalDownloadClient.cs` (needs consolidation)
 
 ### E2E Scripts
-- `lidarr.plugin.common/scripts/local-e2e-single.ps1`
-- `lidarr.plugin.common/scripts/local-e2e-multi.ps1` (future)
+- `lidarr.plugin.common/scripts/e2e-runner.ps1` - Main gate runner
+- `lidarr.plugin.common/scripts/lib/e2e-gates.psm1` - Gate implementations
+- `lidarr.plugin.common/scripts/lib/e2e-diagnostics.psm1` - Diagnostics bundle
 
 ---
 
@@ -144,6 +228,12 @@ Once upstream Lidarr ALC fix lands:
 
 | Date | Change |
 |------|--------|
+| 2025-12-27 | Brainarr PR #346: FluentValidation exclusion fix with guard test |
+| 2025-12-27 | Added Type-Identity Assembly Policy section with FluentValidation exception |
+| 2025-12-27 | E2E gates: credential skip semantics, indexer/test preference, URL redaction |
+| 2025-12-27 | 3-plugin coexistence proven: Qobuzarr, Tidalarr, Brainarr all pass Schema gate |
+| 2025-12-27 | Tidalarr PR #104: sanitization consolidation with 4 unit tests |
+| 2025-12-27 | Tidalarr PR #105: chunk delay configurability with clamping (0-2000ms) |
 | 2025-12-27 | Common PRs #167/#168 merged - packaging policy complete |
 | 2025-12-27 | Tidalarr packaging baseline updated to 5-DLL contract |
 | 2025-12-27 | Qobuzarr TrackFileNameBuilder delegated to Common |
