@@ -713,23 +713,43 @@ function Test-AlbumSearchGate {
         }
         else {
             # Zero releases from plugin - gather diagnostics
+            $totalReleases = ($releases | Measure-Object).Count
             $otherIndexers = $releases | ForEach-Object { "$($_.indexer):$($_.indexerId)" } | Select-Object -Unique
             $indexerList = if ($otherIndexers) { $otherIndexers -join ', ' } else { '(none)' }
 
-            # Sample release payload for debugging (redacted)
-            $sampleRelease = $null
-            if ($releases -and ($releases | Measure-Object).Count -gt 0) {
-                $first = $releases | Select-Object -First 1
-                $sampleRelease = @{
-                    indexer = $first.indexer
-                    indexerId = $first.indexerId
-                    title = if ($first.title.Length -gt 50) { $first.title.Substring(0,50) + "..." } else { $first.title }
+            $result.Errors += "No releases returned from indexer '$PluginName' (IndexerId: $IndexerId). Total: $totalReleases. Found: $indexerList"
+
+            # Check for null-indexer releases - likely parser/attribution regression
+            $nullIndexerReleases = $releases | Where-Object {
+                [string]::IsNullOrWhiteSpace($_.indexer) -or $_.indexerId -eq 0
+            }
+            $nullIndexerCount = ($nullIndexerReleases | Measure-Object).Count
+
+            if ($nullIndexerCount -gt 0) {
+                # LOUD warning - this is almost always a parser bug
+                Write-Host "       WARNING: $nullIndexerCount releases have null/empty indexer or indexerId=0!" -ForegroundColor Red
+                Write-Host "       This likely indicates a parser attribution regression." -ForegroundColor Red
+
+                $result.Errors += "ATTRIBUTION WARNING: $nullIndexerCount of $totalReleases releases have null/empty indexer or indexerId=0"
+
+                # Sample first 3 suspicious releases
+                $suspiciousSamples = $nullIndexerReleases | Select-Object -First 3 | ForEach-Object {
+                    $title = if ($_.title.Length -gt 40) { $_.title.Substring(0,40) + "..." } else { $_.title }
+                    "indexer='$($_.indexer)' indexerId=$($_.indexerId) title='$title'"
+                }
+                foreach ($sample in $suspiciousSamples) {
+                    $result.Errors += "  Null-indexer sample: $sample"
+                    Write-Host "       - $sample" -ForegroundColor Yellow
                 }
             }
 
-            $result.Errors += "No releases returned from indexer '$PluginName' (IndexerId: $IndexerId). Found: $indexerList"
-            if ($sampleRelease) {
-                $result.Errors += "Sample release: indexer=$($sampleRelease.indexer), indexerId=$($sampleRelease.indexerId)"
+            # Sample of properly-attributed releases for comparison
+            $attributedReleases = $releases | Where-Object {
+                -not [string]::IsNullOrWhiteSpace($_.indexer) -and $_.indexerId -ne 0
+            } | Select-Object -First 1
+            if ($attributedReleases) {
+                $title = if ($attributedReleases.title.Length -gt 40) { $attributedReleases.title.Substring(0,40) + "..." } else { $attributedReleases.title }
+                $result.Errors += "Sample attributed release: indexer='$($attributedReleases.indexer)' indexerId=$($attributedReleases.indexerId)"
             }
         }
     }
