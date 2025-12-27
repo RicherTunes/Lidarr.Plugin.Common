@@ -90,23 +90,34 @@ Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force
 function Get-DockerConfigApiKey {
     param(
         [Parameter(Mandatory)]
-        [string]$Name
+        [string]$Name,
+
+        [int]$TimeoutSeconds = 60
     )
 
-    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {        
         throw "docker is required for -ExtractApiKeyFromContainer but was not found in PATH."
     }
 
-    $apiKey = & docker exec $Name sh -c "sed -n 's:.*<ApiKey>\\(.*\\)</ApiKey>.*:\\1:p' /config/config.xml" 2>$null
-    if ($LASTEXITCODE -ne 0) {
-        return $null
+    $containerName = $Name.Trim()
+
+    $deadline = (Get-Date).AddSeconds([Math]::Max(1, $TimeoutSeconds))
+    while ((Get-Date) -lt $deadline) {
+        $configXml = & docker exec $containerName cat /config/config.xml 2>$null
+        $configXmlText = (@($configXml) -join "`n")
+        if (-not [string]::IsNullOrWhiteSpace($configXmlText)) {
+            if ($configXmlText -match '<ApiKey>(?<key>[^<]+)</ApiKey>') {
+                $key = $Matches['key'].Trim()
+                if (-not [string]::IsNullOrWhiteSpace($key)) {
+                    return $key
+                }
+            }
+        }
+
+        Start-Sleep -Milliseconds 500
     }
 
-    if ([string]::IsNullOrWhiteSpace($apiKey)) {
-        return $null
-    }
-
-    return $apiKey.Trim()
+    throw "Timed out extracting Lidarr API key from container '$containerName'. Ensure the container is running and /config/config.xml exists."
 }
 
 function New-OutcomeResult {
