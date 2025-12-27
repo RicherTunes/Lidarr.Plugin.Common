@@ -61,6 +61,17 @@ Method 'Test' in type 'Lidarr.Plugin.Brainarr.BrainarrImportList' does not have 
 
 **Guard test**: `brainarr/Brainarr.Tests/Packaging/BrainarrPackagingPolicyTests.cs:Package_Must_Not_Ship_FluentValidation()`
 
+### ⚠️ Policy Warning: Do Not Force Uniformity
+
+FluentValidation shipping is **plugin-specific**. Do NOT attempt to standardize all plugins
+to either ship or not ship FluentValidation.dll without verifying the plugin's override
+signatures against the host.
+
+**Before changing FV policy for any plugin:**
+1. Check if the plugin overrides `Test(List<ValidationFailure>)` or similar methods
+2. If yes, the plugin MUST NOT ship FluentValidation.dll
+3. If no overrides, shipping FV is optional (but adds package size)
+
 ---
 
 ## Phase 1: Lock Contracts with Tests (High Priority)
@@ -69,7 +80,7 @@ Method 'Test' in type 'Lidarr.Plugin.Brainarr.BrainarrImportList' does not have 
 - [x] **Common**: PluginPackageValidator with TypeIdentityAssemblies
 - [x] **Tidalarr**: PackagingPolicyBaseline updated to 5-DLL contract
 - [x] **Qobuzarr**: PackagingPolicyTests with RequiredTypeIdentityAssemblies
-- [x] **Brainarr**: BrainarrPackagingPolicyTests with 5-DLL contract
+- [x] **Brainarr**: BrainarrPackagingPolicyTests with 4-DLL contract (no FluentValidation)
 
 ### 1.2 Naming Contract Tests
 - [ ] Multi-disc: D01Txx/D02Txx format validation
