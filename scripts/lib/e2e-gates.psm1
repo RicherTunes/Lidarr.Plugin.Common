@@ -510,6 +510,8 @@ function Test-AlbumSearchGate {
         Gate = 'AlbumSearch'
         PluginName = $PluginName
         IndexerId = $IndexerId
+        IndexerName = $null
+        IndexerImplementation = $null
         Outcome = 'failed'
         Success = $false
         ArtistId = $null
@@ -529,6 +531,10 @@ function Test-AlbumSearchGate {
             $result.Errors += "Indexer $IndexerId not found"
             return $result
         }
+
+        # Store indexer details for diagnostics
+        $result.IndexerName = $indexer.name
+        $result.IndexerImplementation = $indexer.implementation
 
         # Check for credentials
         function Get-FieldValue {
@@ -717,7 +723,9 @@ function Test-AlbumSearchGate {
             $otherIndexers = $releases | ForEach-Object { "$($_.indexer):$($_.indexerId)" } | Select-Object -Unique
             $indexerList = if ($otherIndexers) { $otherIndexers -join ', ' } else { '(none)' }
 
-            $result.Errors += "No releases returned from indexer '$PluginName' (IndexerId: $IndexerId). Total: $totalReleases. Found: $indexerList"
+            # Include full indexer context for triage (no extra API call needed)
+            $indexerContext = "name='$($result.IndexerName)' impl='$($result.IndexerImplementation)' id=$IndexerId"
+            $result.Errors += "No releases from configured indexer [$indexerContext]. Total: $totalReleases. Found: $indexerList"
 
             # Check for null-indexer releases - likely parser/attribution regression
             $nullIndexerReleases = $releases | Where-Object {
@@ -732,9 +740,10 @@ function Test-AlbumSearchGate {
 
                 $result.Errors += "ATTRIBUTION WARNING: $nullIndexerCount of $totalReleases releases have null/empty indexer or indexerId=0"
 
-                # Sample first 3 suspicious releases
+                # Sample first 3 suspicious releases (redact sensitive fields)
                 $suspiciousSamples = $nullIndexerReleases | Select-Object -First 3 | ForEach-Object {
-                    $title = if ($_.title.Length -gt 40) { $_.title.Substring(0,40) + "..." } else { $_.title }
+                    $title = if ($_.title -and $_.title.Length -gt 40) { $_.title.Substring(0,40) + "..." } else { $_.title }
+                    # Only include safe fields: indexer, indexerId, title (no guid/downloadUrl/infoUrl)
                     "indexer='$($_.indexer)' indexerId=$($_.indexerId) title='$title'"
                 }
                 foreach ($sample in $suspiciousSamples) {
@@ -743,13 +752,14 @@ function Test-AlbumSearchGate {
                 }
             }
 
-            # Sample of properly-attributed releases for comparison
+            # Sample of properly-attributed releases for comparison (redacted)
             $attributedReleases = $releases | Where-Object {
                 -not [string]::IsNullOrWhiteSpace($_.indexer) -and $_.indexerId -ne 0
             } | Select-Object -First 1
             if ($attributedReleases) {
-                $title = if ($attributedReleases.title.Length -gt 40) { $attributedReleases.title.Substring(0,40) + "..." } else { $attributedReleases.title }
-                $result.Errors += "Sample attributed release: indexer='$($attributedReleases.indexer)' indexerId=$($attributedReleases.indexerId)"
+                $title = if ($attributedReleases.title -and $attributedReleases.title.Length -gt 40) { $attributedReleases.title.Substring(0,40) + "..." } else { $attributedReleases.title }
+                # Only include safe fields (no guid/downloadUrl/infoUrl)
+                $result.Errors += "Sample attributed release: indexer='$($attributedReleases.indexer)' indexerId=$($attributedReleases.indexerId) title='$title'"
             }
         }
     }
