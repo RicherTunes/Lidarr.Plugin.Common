@@ -33,7 +33,8 @@ function Invoke-SecretRedaction {
         Safe for JSON serialization after redaction.
     #>
     param(
-        [Parameter(Mandatory)]
+        [Parameter(Mandatory = $false)]
+        [AllowNull()]
         $Object
     )
 
