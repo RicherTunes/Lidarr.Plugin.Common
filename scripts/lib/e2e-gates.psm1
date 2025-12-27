@@ -575,8 +575,9 @@ function Test-PluginGrabGate {
             $indexerContext = "name='$($result.IndexerName)' impl='$($result.IndexerImplementation)' id=$IndexerId"
             Write-Host "       No releases found for album $AlbumId (indexer: $indexerContext)" -ForegroundColor Yellow
             Write-Host "       This is expected if album has no releases cached - not an attribution issue" -ForegroundColor DarkGray
+            Write-Host "       Note: If you ran -Gate grab alone, run -Gate all to trigger AlbumSearch first" -ForegroundColor DarkGray
             $result.Outcome = 'skipped'
-            $result.SkipReason = "No releases available for album $AlbumId (indexer: $indexerContext). Try running AlbumSearch first to populate releases."
+            $result.SkipReason = "No releases available for album $AlbumId (indexer: $indexerContext). If running -Gate grab alone, use -Gate all to run AlbumSearch first."
             return $result
         }
 
@@ -647,8 +648,9 @@ function Test-PluginGrabGate {
         catch {
             $grabErr = "$_"
             # Auth pattern: only these specific conditions are credential issues → SKIP
-            # 5xx, 4xx (except 401/403), or generic errors indicate API/host drift → FAIL
-            $authPattern = '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403)'
+            # Includes OAuth token exchange failures (invalid_grant, invalid_client)
+            # 5xx, other 4xx, or generic errors indicate API/host drift → FAIL
+            $authPattern = '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403|invalid_grant|invalid_client)'
             if ($grabErr -match $authPattern) {
                 $result.Outcome = 'skipped'
                 $result.SkipReason = "Grab failed with auth error: $grabErr"
@@ -698,7 +700,7 @@ function Test-PluginGrabGate {
     catch {
         $errMsg = "$_"
         # Check if exception is auth-related
-        if ($errMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403)') {
+        if ($errMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403|invalid_grant|invalid_client)') {
             $result.Outcome = 'skipped'
             $result.SkipReason = "Grab gate failed with auth error: $errMsg"
             return $result
@@ -932,7 +934,7 @@ function Test-AlbumSearchGate {
             elseif ($commandStatus.status -eq 'failed') {
                 $failMsg = $commandStatus.message
                 # Check if failure is auth/config related - should SKIP not FAIL
-                if ($failMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403)') {
+                if ($failMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403|invalid_grant|invalid_client)') {
                     $result.Outcome = 'skipped'
                     $result.SkipReason = "AlbumSearch command failed with auth/config error: $failMsg"
                     return $result
@@ -1024,8 +1026,8 @@ function Test-AlbumSearchGate {
     }
     catch {
         $errMsg = "$_"
-        # Check if catch is auth-related
-        if ($errMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403)') {
+        # Check if catch is auth-related (includes OAuth token exchange failures)
+        if ($errMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403|invalid_grant|invalid_client)') {
             $result.Outcome = 'skipped'
             $result.SkipReason = "AlbumSearch gate failed with auth error: $errMsg"
             return $result
