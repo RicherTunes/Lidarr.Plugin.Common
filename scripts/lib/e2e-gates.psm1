@@ -58,11 +58,11 @@ function Invoke-LidarrApi {
 function Test-SchemaGate {
     <#
     .SYNOPSIS
-        Gate 1: Verify plugin schema is registered (no credentials required).
+        Gate 1: Verify plugin schema is registered (requires Lidarr API key).
 
     .DESCRIPTION
         Checks that the plugin's indexer and/or download client schemas
-        are present in Lidarr's schema endpoints.
+        are present in Lidarr's schema endpoints. Also supports import list schemas.
 
     .PARAMETER PluginName
         Name of the plugin (e.g., "Qobuzarr", "Tidalarr", "Brainarr")
@@ -73,15 +73,19 @@ function Test-SchemaGate {
     .PARAMETER ExpectDownloadClient
         Whether to expect a download client schema.
 
+    .PARAMETER ExpectImportList
+        Whether to expect an import list schema.
+
     .OUTPUTS
-        PSCustomObject with Success, IndexerFound, DownloadClientFound, Errors
+        PSCustomObject with Success, IndexerFound, DownloadClientFound, ImportListFound, Errors
     #>
     param(
         [Parameter(Mandatory)]
         [string]$PluginName,
 
         [switch]$ExpectIndexer,
-        [switch]$ExpectDownloadClient
+        [switch]$ExpectDownloadClient,
+        [switch]$ExpectImportList
     )
 
     $result = [PSCustomObject]@{
@@ -90,13 +94,14 @@ function Test-SchemaGate {
         Success = $false
         IndexerFound = $false
         DownloadClientFound = $false
+        ImportListFound = $false
         Errors = @()
     }
 
     try {
         # Check indexer schemas
         if ($ExpectIndexer) {
-            $indexerSchemas = Invoke-LidarrApi -Endpoint 'indexer/schema'
+            $indexerSchemas = Invoke-LidarrApi -Endpoint 'indexer/schema'       
             $found = $indexerSchemas | Where-Object {
                 $_.implementation -like "*$PluginName*" -or
                 $_.implementationName -like "*$PluginName*"
@@ -104,13 +109,13 @@ function Test-SchemaGate {
             $result.IndexerFound = $null -ne $found
 
             if (-not $result.IndexerFound) {
-                $result.Errors += "Indexer schema for '$PluginName' not found"
+                $result.Errors += "Indexer schema for '$PluginName' not found"  
             }
         }
 
         # Check download client schemas
         if ($ExpectDownloadClient) {
-            $clientSchemas = Invoke-LidarrApi -Endpoint 'downloadclient/schema'
+            $clientSchemas = Invoke-LidarrApi -Endpoint 'downloadclient/schema' 
             $found = $clientSchemas | Where-Object {
                 $_.implementation -like "*$PluginName*" -or
                 $_.implementationName -like "*$PluginName*"
@@ -119,6 +124,20 @@ function Test-SchemaGate {
 
             if (-not $result.DownloadClientFound) {
                 $result.Errors += "DownloadClient schema for '$PluginName' not found"
+            }
+        }
+
+        # Check import list schemas
+        if ($ExpectImportList) {
+            $importListSchemas = Invoke-LidarrApi -Endpoint 'importlist/schema'
+            $found = $importListSchemas | Where-Object {
+                $_.implementation -like "*$PluginName*" -or
+                $_.implementationName -like "*$PluginName*"
+            }
+            $result.ImportListFound = $null -ne $found
+
+            if (-not $result.ImportListFound) {
+                $result.Errors += "ImportList schema for '$PluginName' not found"
             }
         }
 

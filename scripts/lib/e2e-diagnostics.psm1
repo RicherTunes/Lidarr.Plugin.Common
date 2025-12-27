@@ -41,12 +41,14 @@ function Invoke-SecretRedaction {
 
     # Handle arrays
     if ($Object -is [array]) {
-        return @($Object | ForEach-Object { Invoke-SecretRedaction -Object $_ })
+        $redacted = @($Object | ForEach-Object { Invoke-SecretRedaction -Object $_ })
+        Write-Output -NoEnumerate $redacted
+        return
     }
 
     # Handle PSCustomObject or hashtable-like objects
     if ($Object -is [PSCustomObject] -or $Object -is [hashtable]) {
-        $result = [PSCustomObject]@{}
+        $result = [ordered]@{}
 
         $properties = if ($Object -is [hashtable]) { $Object.Keys } else { $Object.PSObject.Properties.Name }
 
@@ -63,38 +65,61 @@ function Invoke-SecretRedaction {
             }
 
             if ($isSensitive -and $null -ne $value -and $value -ne '') {
-                $result | Add-Member -NotePropertyName $prop -NotePropertyValue '[REDACTED]'
+                $result[$prop] = '[REDACTED]'
+                continue
             }
-            elseif ($value -is [array] -or $value -is [PSCustomObject] -or $value -is [hashtable]) {
-                $result | Add-Member -NotePropertyName $prop -NotePropertyValue (Invoke-SecretRedaction -Object $value)
+
+            if ($value -is [array]) {
+                $result[$prop] = @($value | ForEach-Object { Invoke-SecretRedaction -Object $_ })
+                continue
             }
-            else {
-                $result | Add-Member -NotePropertyName $prop -NotePropertyValue $value
+
+            if ($value -is [PSCustomObject] -or $value -is [hashtable]) {
+                $result[$prop] = Invoke-SecretRedaction -Object $value
+                continue
             }
+
+            $result[$prop] = $value
         }
 
         # Special handling for Lidarr 'fields' array pattern
-        if ($result.PSObject.Properties['fields'] -and $result.fields -is [array]) {
-            $result.fields = @($result.fields | ForEach-Object {
+        # Lidarr uses an array of { name, value } items; normalize to an array even if a single item was provided.
+        if ($result.Contains('fields') -and $null -ne $result['fields']) {
+            $fields = $result['fields']
+            if (-not ($fields -is [array])) {
+                $fields = @($fields)
+            }
+
+            $result['fields'] = @($fields | ForEach-Object {
                 $field = $_
+
+                $fieldName = if ($field -is [hashtable]) { $field['name'] } else { $field.name }
+                $fieldValue = if ($field -is [hashtable]) { $field['value'] } else { $field.value }
+
                 $isSensitive = $false
-                if ($field.name) {
+                if ($fieldName) {
                     foreach ($pattern in $script:SensitivePatterns) {
-                        if ($field.name -match $pattern) {
+                        if ($fieldName -match $pattern) {
                             $isSensitive = $true
                             break
                         }
                     }
                 }
-                if ($isSensitive -and $field.value) {
-                    $field = $field.PSObject.Copy()
-                    $field.value = '[REDACTED]'
+
+                if ($isSensitive -and -not [string]::IsNullOrWhiteSpace("$fieldValue")) {
+                    if ($field -is [hashtable]) {
+                        $field['value'] = '[REDACTED]'
+                    }
+                    else {
+                        $field.value = '[REDACTED]'
+                    }
                 }
+
                 $field
             })
         }
 
-        return $result
+        return [PSCustomObject]$result
     }
 
     # Return primitives as-is
@@ -187,11 +212,26 @@ function New-DiagnosticsBundle {
         [string]$LidarrApiKey,
 
         [Parameter(Mandatory)]
-        [array]$GateResults
+        [array]$GateResults,
+
+        [string]$RequestedGate = "schema",
+
+        [string[]]$Plugins = @(),
+
+        [string[]]$RunnerArgs = @(),
+
+        [switch]$RedactionSelfTestExecuted,
+
+        [bool]$RedactionSelfTestPassed = $false
     )
 
-    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss"
-    $bundleDir = Join-Path $OutputPath "diagnostics-$timestamp"
+    if ($RedactionSelfTestExecuted -and -not $RedactionSelfTestPassed) {
+        throw "Diagnostics redaction self-test did not pass; refusing to write a bundle."
+    }
+
+    $timestamp = Get-Date -Format "yyyyMMdd-HHmmss-fff"
+    $runId = ([Guid]::NewGuid()).ToString("N")
+    $bundleDir = Join-Path $OutputPath "diagnostics-$timestamp-$runId"
     New-Item -ItemType Directory -Path $bundleDir -Force | Out-Null
 
     Write-Host "Creating diagnostics bundle at $bundleDir..." -ForegroundColor Yellow
@@ -243,6 +283,16 @@ function New-DiagnosticsBundle {
         Write-Host "  - Failed to collect download client schemas: $_" -ForegroundColor Red
     }
 
+    # Import list schemas
+    try {
+        $importListSchemas = Invoke-RestMethod -Uri "$apiUrl/api/v1/importlist/schema" -Headers $headers -TimeoutSec 10
+        $importListSchemas | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "importlist-schemas.json") -Encoding UTF8
+        Write-Host "  - Import list schemas collected" -ForegroundColor Green
+    }
+    catch {
+        Write-Host "  - Failed to collect import list schemas: $_" -ForegroundColor Red
+    }
+
     # Configured indexers
     try {
         $indexers = Invoke-RestMethod -Uri "$apiUrl/api/v1/indexer" -Headers $headers -TimeoutSec 10
@@ -276,15 +326,36 @@ function New-DiagnosticsBundle {
     }
 
     # 3. Write run manifest
+    $failedResults = @(
+        $GateResults | Where-Object {
+            if ($_.PSObject.Properties['Outcome']) { $_.Outcome -eq 'failed' } else { -not $_.Success }
+        }
+    )
+
     $manifest = [PSCustomObject]@{
+        schemaVersion = "1.0"
         timestamp = (Get-Date).ToString('o')
-        container = $ContainerName
-        lidarrUrl = $LidarrApiUrl
-        gates = $GateResults
-        overallSuccess = ($GateResults | Where-Object { -not $_.Success }).Count -eq 0
-        failedGates = $GateResults | Where-Object { -not $_.Success } | Select-Object -ExpandProperty Gate
+        runId = $runId
+        runner = @{
+            name = "lidarr.plugin.common:e2e-runner.ps1"
+            args = $RunnerArgs
+        }
+        lidarr = @{
+            url = $LidarrApiUrl
+            containerName = $ContainerName
+        }
+        requestedGate = $RequestedGate
+        plugins = $Plugins
+        redaction = @{
+            selfTestExecuted = [bool]$RedactionSelfTestExecuted
+            selfTestPassed = [bool]$RedactionSelfTestPassed
+            patternsCount = $script:SensitivePatterns.Count
+        }
+        results = $GateResults
+        overallSuccess = ($failedResults.Count -eq 0)
+        failedGates = @($failedResults | Select-Object -ExpandProperty Gate -ErrorAction SilentlyContinue)
     }
-    $manifest | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "run-manifest.json") -Encoding UTF8
+    $manifest | ConvertTo-Json -Depth 8 | Out-File -FilePath (Join-Path $bundleDir "run-manifest.json") -Encoding UTF8
     Write-Host "  - Run manifest created" -ForegroundColor Green
 
     # 4. Create zip bundle
@@ -315,7 +386,16 @@ function Get-FailureSummary {
     $summary += ""
 
     foreach ($gate in $GateResults) {
-        $status = if ($gate.Success) { "[PASS]" } else { "[FAIL]" }
+        $status =
+            if ($gate.PSObject.Properties['Outcome']) {
+                switch ($gate.Outcome) {
+                    'success' { "[PASS]" }
+                    'skipped' { "[SKIP]" }
+                    default { "[FAIL]" }
+                }
+            }
+            elseif ($gate.Success) { "[PASS]" }
+            else { "[FAIL]" }
         $summary += "$status $($gate.Gate) Gate"
 
         if ($gate.Errors -and $gate.Errors.Count -gt 0) {
