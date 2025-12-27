@@ -147,22 +147,31 @@ function New-OutcomeResult {
     }
 }
 
-# Plugin configurations
+# Plugin configurations (including search gate settings)
 $pluginConfigs = @{
     'Qobuzarr' = @{
         ExpectIndexer = $true
         ExpectDownloadClient = $true
         ExpectImportList = $false
+        # Search gate settings
+        SearchQuery = "Kind of Blue Miles Davis"
+        ExpectedMinResults = 1
     }
     'Tidalarr' = @{
         ExpectIndexer = $true
         ExpectDownloadClient = $true
         ExpectImportList = $false
+        # Search gate settings
+        SearchQuery = "Kind of Blue Miles Davis"
+        ExpectedMinResults = 1
     }
     'Brainarr' = @{
         ExpectIndexer = $false
         ExpectDownloadClient = $false
         ExpectImportList = $true
+        # No search for import lists
+        SearchQuery = $null
+        ExpectedMinResults = 0
     }
 }
 
@@ -292,21 +301,30 @@ foreach ($plugin in $pluginList) {
                     }
                 }
                 else {
-                    $searchResult = Test-SearchGate -IndexerId $pluginIndexer.id
+                    # Use per-plugin search config
+                    $searchQuery = $config.SearchQuery
+                    $expectedMin = $config.ExpectedMinResults
+                    if (-not $searchQuery) { $searchQuery = "Kind of Blue Miles Davis" }
+                    if ($expectedMin -lt 1) { $expectedMin = 1 }
+
+                    $searchResult = Test-SearchGate -IndexerId $pluginIndexer.id `
+                        -SearchQuery $searchQuery `
+                        -ExpectedMinResults $expectedMin
 
                     $searchOutcome = if ($searchResult.Success) { "success" } else { "failed" }
                     $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome $searchOutcome -Errors $searchResult.Errors -Details @{
                         IndexerId = $pluginIndexer.id
                         ResultCount = $searchResult.ResultCount
+                        SearchQuery = $searchQuery
                     }
 
                     if ($searchResult.Success) {
-                        Write-Host "       PASS ($($searchResult.ResultCount) results)" -ForegroundColor Green
+                        Write-Host "       PASS ($($searchResult.ResultCount) results for '$searchQuery')" -ForegroundColor Green
                     }
                     else {
                         Write-Host "       FAIL" -ForegroundColor Red
                         foreach ($err in $searchResult.Errors) {
-                            Write-Host "       - $err" -ForegroundColor Red     
+                            Write-Host "       - $err" -ForegroundColor Red
                         }
                         $overallSuccess = $false
                         $stopNow = $true
