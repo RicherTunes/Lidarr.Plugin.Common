@@ -28,6 +28,41 @@ Full ecosystem parity is achieved when:
 
 ---
 
+## Type-Identity Assembly Policy
+
+### Required Assemblies (All Plugins)
+Plugins **MUST** ship these assemblies for proper plugin discovery and type identity:
+- `Lidarr.Plugin.Abstractions.dll` - Plugin discovery contract
+- `Microsoft.Extensions.DependencyInjection.Abstractions.dll` - DI type identity
+- `Microsoft.Extensions.Logging.Abstractions.dll` - Logging type identity
+
+### Forbidden Assemblies (All Plugins)
+Plugins **MUST NOT** ship these assemblies:
+- `System.Text.Json.dll` - Cross-boundary type identity risk
+- `Lidarr.Core.dll`, `Lidarr.Common.dll`, `Lidarr.Host.dll` - Host assemblies
+- `NzbDrone.*.dll` - Legacy host assemblies
+
+### FluentValidation Exception (Brainarr-Specific)
+
+**Brainarr MUST NOT ship `FluentValidation.dll`.**
+
+Unlike streaming plugins (Qobuzarr, Tidalarr) that don't override validation methods,
+Brainarr's `BrainarrImportList` overrides `Test(List<ValidationFailure>)` from `ImportListBase`.
+
+When FluentValidation.dll was shipped:
+```
+Method 'Test' in type 'Lidarr.Plugin.Brainarr.BrainarrImportList' does not have an implementation.
+```
+
+**Root cause**: Override signature mismatch due to FluentValidation type identity.
+- Plugin's `ValidationResult` ≠ Host's `ValidationResult` (different ALCs)
+- The override signature doesn't match because return types are technically different types
+- Plugin must use host's FluentValidation for type identity to match
+
+**Guard test**: `brainarr/Brainarr.Tests/Packaging/BrainarrPackagingPolicyTests.cs:Package_Must_Not_Ship_FluentValidation()`
+
+---
+
 ## Phase 1: Lock Contracts with Tests (High Priority)
 
 ### 1.1 Packaging Content Tests
@@ -182,6 +217,8 @@ All three plugins can coexist in the same Lidarr instance and pass Schema gate s
 
 | Date | Change |
 |------|--------|
+| 2025-12-27 | Brainarr PR #346: FluentValidation exclusion fix with guard test |
+| 2025-12-27 | Added Type-Identity Assembly Policy section with FluentValidation exception |
 | 2025-12-27 | E2E gates: credential skip semantics, indexer/test preference, URL redaction |
 | 2025-12-27 | 3-plugin coexistence proven: Qobuzarr, Tidalarr, Brainarr all pass Schema gate |
 | 2025-12-27 | Tidalarr PR #104: sanitization consolidation with 4 unit tests |
