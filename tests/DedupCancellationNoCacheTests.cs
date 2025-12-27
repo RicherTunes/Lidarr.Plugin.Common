@@ -14,11 +14,20 @@ namespace Lidarr.Plugin.Common.Tests
 {
     public class DedupCancellationNoCacheTests
     {
-        private sealed class SlowHandler : DelegatingHandler
+        private sealed class BlockUntilCancelledHandler : DelegatingHandler
         {
+            private int _callCount;
+            private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public int CallCount => Volatile.Read(ref _callCount);
+            public Task Started => _started.Task;
+
             protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
             {
-                await Task.Delay(300, cancellationToken);
+                Interlocked.Increment(ref _callCount);
+                _started.TrySetResult();
+
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("ok") };
             }
         }
@@ -46,7 +55,8 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public async Task Cancel_During_Upstream_Prevents_Cache_Write_And_Cleans_Dedup()
         {
-            using var client = new HttpClient(new SlowHandler()) { BaseAddress = new Uri("https://cancel.test/") };
+            var handler = new BlockUntilCancelledHandler();
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("https://cancel.test/") };
             var provider = new PolicyProvider();
             var cache = new TestCache(provider);
             var deduper = new Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator(NullLogger<Lidarr.Plugin.Common.Services.Deduplication.RequestDeduplicator>.Instance);
@@ -59,10 +69,13 @@ namespace Lidarr.Plugin.Common.Tests
             req2.Options.Set(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.EndpointKey, "/res");
             req2.Options.Set(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.ParametersKey, "q=1");
 
-            using var cts = new CancellationTokenSource(TimeSpan.FromMilliseconds(50));
+            using var cts = new CancellationTokenSource();
 
             var t1 = client.ExecuteWithResilienceAndCachingAsync(req1, provider, cache, deduper, cancellationToken: cts.Token);
             var t2 = client.ExecuteWithResilienceAndCachingAsync(req2, provider, cache, deduper, cancellationToken: cts.Token);
+
+            await handler.Started;
+            cts.Cancel();
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => t1);
             await Assert.ThrowsAnyAsync<OperationCanceledException>(() => t2);
