@@ -18,9 +18,10 @@
     - Clear separation of concerns (setup vs validation)
 
     Gates:
-    1. Schema Gate (no provider credentials): Verifies plugin schemas are registered (requires Lidarr API key)
-    2. Search Gate (credentials required): Verifies API search works        
-    3. Grab Gate (credentials required): Verifies download works
+    1. Schema Gate (requires Lidarr API key): Verifies plugin schemas are registered
+    2. Search Gate (credentials required): Verifies indexer/test passes
+    3. AlbumSearch Gate (credentials required): Triggers AlbumSearch command, verifies releases from plugin
+    4. Grab Gate (credentials required): Verifies download works
 
     On failure, creates a diagnostics bundle for AI-assisted triage.
 
@@ -64,7 +65,7 @@ param(
     [Parameter(Mandatory)]
     [string]$Plugins,
 
-    [ValidateSet("schema", "search", "grab", "all")]
+    [ValidateSet("schema", "search", "albumsearch", "grab", "all")]
     [string]$Gate = "schema",
 
     [string]$LidarrUrl = "http://localhost:8686",
@@ -229,6 +230,7 @@ $overallSuccess = $true
 $stopNow = $false
 
 $runSearch = ($Gate -eq "search" -or $Gate -eq "all")
+$runAlbumSearch = ($Gate -eq "albumsearch" -or $Gate -eq "all")
 $runGrab = ($Gate -eq "grab" -or $Gate -eq "all")
 
 foreach ($plugin in $pluginList) {
@@ -237,6 +239,8 @@ foreach ($plugin in $pluginList) {
     Write-Host "----------------------------------------" -ForegroundColor DarkGray
 
     $skipGrabForPlugin = $false
+    $lastAlbumSearchResult = $null  # Used to pass AlbumId to Grab gate
+    $lastPluginIndexer = $null      # Used to pass IndexerId to Grab gate
 
     $config = $pluginConfigs[$plugin]
     if (-not $config) {
@@ -249,7 +253,7 @@ foreach ($plugin in $pluginList) {
     }
 
     # Gate 1: Schema (always run)
-    Write-Host "  [1/3] Schema Gate..." -ForegroundColor Cyan
+    Write-Host "  [1/4] Schema Gate..." -ForegroundColor Cyan
 
     $schemaResult = Test-SchemaGate -PluginName $plugin `
         -ExpectIndexer:$config.ExpectIndexer `
@@ -280,9 +284,9 @@ foreach ($plugin in $pluginList) {
         break
     }
 
-    # Gate 2: Search (credentials required)
+    # Gate 2: Search (credentials required) - quick indexer/test validation
     if ($runSearch) {
-        Write-Host "  [2/3] Search Gate..." -ForegroundColor Cyan
+        Write-Host "  [2/4] Search Gate..." -ForegroundColor Cyan
 
         if (-not $config.ExpectIndexer) {
             if ($config.ExpectImportList) {
@@ -426,14 +430,110 @@ foreach ($plugin in $pluginList) {
         }
     }
 
-    # Gate 3: Grab (credentials required)
-    if ($runGrab) {
-        Write-Host "  [3/3] Grab Gate..." -ForegroundColor Cyan
+    # Gate 3: AlbumSearch (credentials required) - thorough search verification
+    if ($runAlbumSearch) {
+        Write-Host "  [3/4] AlbumSearch Gate..." -ForegroundColor Cyan
 
         if ($skipGrabForPlugin) {
             Write-Host "       SKIP (Search gate skipped due to missing credentials)" -ForegroundColor DarkGray
-            $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome "skipped" -Details @{
+            $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "skipped" -Details @{
                 Reason = "Search gate skipped due to missing credentials"
+            }
+        }
+        elseif (-not $config.ExpectIndexer) {
+            if ($config.ExpectImportList) {
+                Write-Host "       SKIP (import list only)" -ForegroundColor DarkGray
+            }
+            else {
+                Write-Host "       SKIP (no indexer expected)" -ForegroundColor DarkGray
+            }
+            $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "skipped" -Details @{
+                Reason = "No indexer expected for plugin"
+            }
+        }
+        else {
+            try {
+                # Find configured indexer for this plugin
+                $indexers = Invoke-LidarrApi -Endpoint "indexer"
+                $pluginIndexer = $indexers | Where-Object {
+                    $_.implementation -like "*$plugin*" -or
+                    $_.name -like "*$plugin*"
+                } | Select-Object -First 1
+
+                if (-not $pluginIndexer) {
+                    Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
+                    $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "skipped" -Errors @("No configured indexer found for $plugin")
+                }
+                else {
+                    $credFieldNames = @()
+                    if ($config.ContainsKey("CredentialFieldNames")) {
+                        $credFieldNames = @($config.CredentialFieldNames)
+                    }
+
+                    # Use per-plugin test artist/album or defaults
+                    $testArtist = if ($config.ContainsKey("TestArtistName")) { $config.TestArtistName } else { "Miles Davis" }
+                    $testAlbum = if ($config.ContainsKey("TestAlbumName")) { $config.TestAlbumName } else { "Kind of Blue" }
+
+                    $albumSearchResult = Test-AlbumSearchGate -IndexerId $pluginIndexer.id `
+                        -PluginName $plugin `
+                        -TestArtistName $testArtist `
+                        -TestAlbumName $testAlbum `
+                        -CredentialFieldNames $credFieldNames `
+                        -SkipIfNoCreds:$true
+
+                    # Store for Grab gate
+                    $lastAlbumSearchResult = $albumSearchResult
+                    $lastPluginIndexer = $pluginIndexer
+
+                    $outcome = if ($albumSearchResult.Outcome) { $albumSearchResult.Outcome } elseif ($albumSearchResult.Success) { "success" } else { "failed" }
+                    $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome $outcome -Errors $albumSearchResult.Errors -Details @{
+                        IndexerId = $pluginIndexer.id
+                        ArtistId = $albumSearchResult.ArtistId
+                        AlbumId = $albumSearchResult.AlbumId
+                        CommandId = $albumSearchResult.CommandId
+                        ReleaseCount = $albumSearchResult.ReleaseCount
+                        PluginReleaseCount = $albumSearchResult.PluginReleaseCount
+                        SkipReason = $albumSearchResult.SkipReason
+                    }
+
+                    if ($outcome -eq "skipped") {
+                        $reason = $albumSearchResult.SkipReason
+                        if (-not $reason) { $reason = "Skipped by gate policy" }
+                        Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+                        $skipGrabForPlugin = $true
+                    }
+                    elseif ($albumSearchResult.Success) {
+                        Write-Host "       PASS ($($albumSearchResult.PluginReleaseCount) releases from $plugin)" -ForegroundColor Green
+                    }
+                    else {
+                        Write-Host "       FAIL" -ForegroundColor Red
+                        foreach ($err in $albumSearchResult.Errors) {
+                            Write-Host "       - $err" -ForegroundColor Red
+                        }
+                        $overallSuccess = $false
+                        $stopNow = $true
+                        break
+                    }
+                }
+            }
+            catch {
+                Write-Host "       ERROR: $_" -ForegroundColor Red
+                $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "failed" -Errors @("AlbumSearch gate error: $_")
+                $overallSuccess = $false
+                $stopNow = $true
+                break
+            }
+        }
+    }
+
+    # Gate 4: Grab (credentials required)
+    if ($runGrab) {
+        Write-Host "  [4/4] Grab Gate..." -ForegroundColor Cyan
+
+        if ($skipGrabForPlugin) {
+            Write-Host "       SKIP (previous gate skipped due to missing credentials)" -ForegroundColor DarkGray
+            $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome "skipped" -Details @{
+                Reason = "Previous gate skipped due to missing credentials"
             }
         }
         elseif (-not $config.ExpectDownloadClient) {
@@ -447,11 +547,59 @@ foreach ($plugin in $pluginList) {
                 Reason = "No download client expected for plugin"
             }
         }
-        else {
-            Write-Host "       SKIP (manual verification required)" -ForegroundColor Yellow
-            Write-Host "       (Grab gate requires a specific release GUID)" -ForegroundColor DarkGray
+        elseif (-not $lastAlbumSearchResult -or -not $lastAlbumSearchResult.AlbumId) {
+            Write-Host "       SKIP (no AlbumId from AlbumSearch gate - run with -Gate all)" -ForegroundColor Yellow
             $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome "skipped" -Details @{
-                Reason = "Manual verification required (release GUID needed)"
+                Reason = "No AlbumId available (AlbumSearch gate not run or failed)"
+            }
+        }
+        else {
+            try {
+                $credFieldNames = @()
+                if ($config.ContainsKey("CredentialFieldNames")) {
+                    $credFieldNames = @($config.CredentialFieldNames)
+                }
+
+                $grabResult = Test-PluginGrabGate -IndexerId $lastPluginIndexer.id `
+                    -PluginName $plugin `
+                    -AlbumId $lastAlbumSearchResult.AlbumId `
+                    -CredentialFieldNames $credFieldNames `
+                    -SkipIfNoCreds:$true
+
+                $outcome = if ($grabResult.Outcome) { $grabResult.Outcome } elseif ($grabResult.Success) { "success" } else { "failed" }
+                $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome $outcome -Errors $grabResult.Errors -Details @{
+                    IndexerId = $lastPluginIndexer.id
+                    AlbumId = $lastAlbumSearchResult.AlbumId
+                    ReleaseTitle = $grabResult.ReleaseTitle
+                    QueueItemId = $grabResult.QueueItemId
+                    DownloadId = $grabResult.DownloadId
+                    SkipReason = $grabResult.SkipReason
+                }
+
+                if ($outcome -eq "skipped") {
+                    $reason = $grabResult.SkipReason
+                    if (-not $reason) { $reason = "Skipped by gate policy" }
+                    Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+                }
+                elseif ($grabResult.Success) {
+                    Write-Host "       PASS (queued: $($grabResult.ReleaseTitle))" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "       FAIL" -ForegroundColor Red
+                    foreach ($err in $grabResult.Errors) {
+                        Write-Host "       - $err" -ForegroundColor Red
+                    }
+                    $overallSuccess = $false
+                    $stopNow = $true
+                    break
+                }
+            }
+            catch {
+                Write-Host "       ERROR: $_" -ForegroundColor Red
+                $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome "failed" -Errors @("Grab gate error: $_")
+                $overallSuccess = $false
+                $stopNow = $true
+                break
             }
         }
     }
