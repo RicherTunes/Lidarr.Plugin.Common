@@ -69,7 +69,9 @@
     "Tubifarry",
     "hotio",
     "TrevTV",
-    "APIKEY"
+    "APIKEY",
+    "importlist",
+    "creds"
   ],
   "ignorePaths": [
     "**/bin",
