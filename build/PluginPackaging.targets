@@ -116,13 +116,23 @@
     <RemoveDir Directories="$(_ILRepackTempDir)" />
 
 
-    <!-- Assemblies to keep (NOT merged but required at runtime).
+    <!-- Type-identity assemblies to keep (NOT merged but required at runtime).
+         These must maintain identical type identity with the host for proper method signature matching.
+         Based on empirical testing of working Tidalarr/Qobuzarr packages.
+
          Notes:
-           - Lidarr.Plugin.Abstractions is required for plugin discovery/loading, and is not shipped by the Lidarr host image.
-           - Microsoft.Extensions.*.Abstractions are shipped by the host and should not be bundled with plugins to avoid duplicates. -->
+           - Lidarr.Plugin.Abstractions: Required for plugin discovery/loading
+           - FluentValidation: Required for DownloadClient.Test() method signature
+           - MS.Extensions.*.Abstractions: Required for DI/logging type identity -->
     <ItemGroup>
       <_PluginRuntimeDeps Include="$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll"
                          Condition="Exists('$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll')" />
+      <_PluginRuntimeDeps Include="$(_PluginOutputPath)FluentValidation.dll"
+                         Condition="Exists('$(_PluginOutputPath)FluentValidation.dll')" />
+      <_PluginRuntimeDeps Include="$(_PluginOutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll"
+                         Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.DependencyInjection.Abstractions.dll')" />
+      <_PluginRuntimeDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Logging.Abstractions.dll"
+                         Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Logging.Abstractions.dll')" />
       <_PluginRuntimeDeps Include="@(PluginPackagingAdditionalKeep)" />
       <_ExtraAssemblies Include="$(_PluginOutputPath)*.dll" Exclude="$(_PluginOutputPath)$(PluginAssemblyFileName);@(_PluginRuntimeDeps)" />
       <_ExtraSymbols Include="$(_PluginOutputPath)*.pdb" Exclude="$(_PluginOutputPath)$(PluginSymbolFileName)" />
