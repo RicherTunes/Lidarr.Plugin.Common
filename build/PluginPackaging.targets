@@ -68,7 +68,8 @@
       <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Options.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Options.dll')" />
       <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Primitives.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Primitives.dll')" />
       <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Http.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Http.dll')" />
-      <!-- NOTE: FluentValidation must NOT be merged - it breaks DownloadClient.Test(List<ValidationFailure>) -->
+      <!-- NOTE: FluentValidation must NOT be merged (ILRepacked) - it breaks DownloadClient.Test(List<ValidationFailure>) -->
+      <!-- However, FluentValidation.dll MUST be shipped as a separate file in the package for type-identity. -->
       <!-- <_PluginDeps Include="$(OutputPath)FluentValidation.dll" /> DO NOT ENABLE - breaks Test() signature -->
       <!-- NOTE: System.Text.Json must NOT be merged - its types cross the host/plugin boundary -->
       <!-- and can cause TypeLoadException or serialization issues -->
