@@ -571,8 +571,12 @@ function Test-PluginGrabGate {
         $totalReleases = ($releases | Measure-Object).Count
 
         if ($totalReleases -eq 0) {
+            # Log album identity so it's clear this isn't an attribution bug
+            $indexerContext = "name='$($result.IndexerName)' impl='$($result.IndexerImplementation)' id=$IndexerId"
+            Write-Host "       No releases found for album $AlbumId (indexer: $indexerContext)" -ForegroundColor Yellow
+            Write-Host "       This is expected if album has no releases cached - not an attribution issue" -ForegroundColor DarkGray
             $result.Outcome = 'skipped'
-            $result.SkipReason = "No releases available for album $AlbumId"
+            $result.SkipReason = "No releases available for album $AlbumId (indexer: $indexerContext). Try running AlbumSearch first to populate releases."
             return $result
         }
 
@@ -642,13 +646,17 @@ function Test-PluginGrabGate {
         }
         catch {
             $grabErr = "$_"
-            # Check for auth-related grab failures
-            if ($grabErr -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403)') {
+            # Auth pattern: only these specific conditions are credential issues → SKIP
+            # 5xx, 4xx (except 401/403), or generic errors indicate API/host drift → FAIL
+            $authPattern = '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403)'
+            if ($grabErr -match $authPattern) {
                 $result.Outcome = 'skipped'
                 $result.SkipReason = "Grab failed with auth error: $grabErr"
                 return $result
             }
-            throw
+            # Non-auth error (5xx, bad payload, endpoint drift) → let it FAIL
+            $result.Errors += "Grab request failed: $grabErr"
+            return $result
         }
 
         if (-not $grabResult) {
