@@ -585,11 +585,40 @@ function Test-PluginGrabGate {
         }
 
         $pluginReleaseCount = ($pluginReleases | Measure-Object).Count
-        Write-Host "       Releases from $PluginName: $pluginReleaseCount" -ForegroundColor $(if ($pluginReleaseCount -gt 0) { 'Green' } else { 'Yellow' })
+        Write-Host "       Releases from $PluginName: $pluginReleaseCount" -ForegroundColor $(if ($pluginReleaseCount -gt 0) { 'Green' } else { 'Red' })
 
         if ($pluginReleaseCount -eq 0) {
-            $result.Outcome = 'skipped'
-            $result.SkipReason = "No releases from indexer '$PluginName' (run AlbumSearch gate first)"
+            # Releases exist but none attributed to plugin - this is a FAIL (attribution regression)
+            # Same diagnostics style as AlbumSearch gate
+            $indexerContext = "name='$($result.IndexerName)' impl='$($result.IndexerImplementation)' id=$IndexerId"
+            $otherIndexers = $releases | ForEach-Object { "$($_.indexer):$($_.indexerId)" } | Select-Object -Unique
+            $indexerList = if ($otherIndexers) { $otherIndexers -join ', ' } else { '(none)' }
+
+            Write-Host "       FAIL: No releases attributed to plugin!" -ForegroundColor Red
+            $result.Errors += "No releases from configured indexer [$indexerContext]. Total: $totalReleases. Found: $indexerList"
+
+            # Check for null-indexer releases (same as AlbumSearch gate)
+            $nullIndexerReleases = $releases | Where-Object {
+                [string]::IsNullOrWhiteSpace($_.indexer) -or $_.indexerId -eq 0
+            }
+            $nullIndexerCount = ($nullIndexerReleases | Measure-Object).Count
+
+            if ($nullIndexerCount -gt 0) {
+                Write-Host "       WARNING: $nullIndexerCount releases have null/empty indexer or indexerId=0!" -ForegroundColor Red
+                $result.Errors += "ATTRIBUTION WARNING: $nullIndexerCount of $totalReleases releases have null/empty indexer or indexerId=0"
+
+                # Sample first 3 suspicious releases (redacted)
+                $suspiciousSamples = $nullIndexerReleases | Select-Object -First 3 | ForEach-Object {
+                    $title = if ($_.title -and $_.title.Length -gt 40) { $_.title.Substring(0,40) + "..." } else { $_.title }
+                    "indexer='$($_.indexer)' indexerId=$($_.indexerId) title='$title'"
+                }
+                foreach ($sample in $suspiciousSamples) {
+                    $result.Errors += "  Null-indexer sample: $sample"
+                    Write-Host "       - $sample" -ForegroundColor Yellow
+                }
+            }
+
+            # Outcome is FAIL, not SKIP - this is a regression
             return $result
         }
 
