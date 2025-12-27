@@ -200,7 +200,7 @@ $allResults = @()
 $overallSuccess = $true
 $stopNow = $false
 
-$runSearch = ($Gate -eq "search" -or $Gate -eq "all" -or $Gate -eq "grab")
+$runSearch = ($Gate -eq "search" -or $Gate -eq "all")
 $runGrab = ($Gate -eq "grab" -or $Gate -eq "all")
 
 foreach ($plugin in $pluginList) {
