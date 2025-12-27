@@ -450,4 +450,268 @@ function Test-GrabGate {
     return $result
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-SchemaGate, Test-SearchGate, Test-GrabGate, Invoke-LidarrApi
+function Test-AlbumSearchGate {
+    <#
+    .SYNOPSIS
+        Gate 2.5 (Medium): Verify plugin returns releases for AlbumSearch command.
+
+    .DESCRIPTION
+        This is a more thorough search gate that:
+        1. Finds or creates a test artist/album in Lidarr
+        2. Triggers AlbumSearch command
+        3. Waits for command completion
+        4. Verifies releases appear from the specified indexer
+
+        This proves the indexer is actually returning parseable releases,
+        not just that it responds to test requests.
+
+    .PARAMETER IndexerId
+        ID of the configured indexer to test.
+
+    .PARAMETER PluginName
+        Name of the plugin (for filtering releases by indexer).
+
+    .PARAMETER TestArtistName
+        Artist name to search for (default: "Miles Davis")
+
+    .PARAMETER TestAlbumName
+        Album name to search for (default: "Kind of Blue")
+
+    .PARAMETER CommandTimeoutSec
+        Timeout for AlbumSearch command (default: 60)
+
+    .PARAMETER CredentialFieldNames
+        Field names to check for credentials (for skip logic).
+
+    .PARAMETER SkipIfNoCreds
+        Skip gate if credentials are missing.
+
+    .OUTPUTS
+        PSCustomObject with Success, ReleaseCount, Errors, etc.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [int]$IndexerId,
+
+        [Parameter(Mandatory)]
+        [string]$PluginName,
+
+        [string]$TestArtistName = "Miles Davis",
+        [string]$TestAlbumName = "Kind of Blue",
+
+        [int]$CommandTimeoutSec = 60,
+
+        [string[]]$CredentialFieldNames = @(),
+
+        [switch]$SkipIfNoCreds = $true
+    )
+
+    $result = [PSCustomObject]@{
+        Gate = 'AlbumSearch'
+        PluginName = $PluginName
+        IndexerId = $IndexerId
+        Outcome = 'failed'
+        Success = $false
+        ArtistId = $null
+        AlbumId = $null
+        CommandId = $null
+        ReleaseCount = 0
+        PluginReleaseCount = 0
+        Errors = @()
+        SkipReason = $null
+    }
+
+    try {
+        # Get indexer info
+        $indexer = Invoke-LidarrApi -Endpoint "indexer/$IndexerId"
+
+        if (-not $indexer) {
+            $result.Errors += "Indexer $IndexerId not found"
+            return $result
+        }
+
+        # Check for credentials
+        function Get-FieldValue {
+            param($Fields, [string]$Name)
+            if ($null -eq $Fields) { return $null }
+            $arr = if ($Fields -is [array]) { $Fields } else { @($Fields) }
+            foreach ($f in $arr) {
+                $fname = if ($f -is [hashtable]) { $f['name'] } else { $f.name }
+                if ([string]::Equals("$fname", $Name, [StringComparison]::OrdinalIgnoreCase)) {
+                    if ($f -is [hashtable]) { return $f['value'] }
+                    return $f.value
+                }
+            }
+            return $null
+        }
+
+        function Has-Field {
+            param($Fields, [string]$Name)
+            if ($null -eq $Fields) { return $false }
+            $arr = if ($Fields -is [array]) { $Fields } else { @($Fields) }
+            foreach ($f in $arr) {
+                $fname = if ($f -is [hashtable]) { $f['name'] } else { $f.name }
+                if ([string]::Equals("$fname", $Name, [StringComparison]::OrdinalIgnoreCase)) {
+                    return $true
+                }
+            }
+            return $false
+        }
+
+        if ($SkipIfNoCreds -and $CredentialFieldNames.Count -gt 0) {
+            foreach ($fieldName in $CredentialFieldNames) {
+                if (Has-Field -Fields $indexer.fields -Name $fieldName) {
+                    $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
+                    if ([string]::IsNullOrWhiteSpace("$value")) {
+                        $result.Outcome = 'skipped'
+                        $result.SkipReason = "Credentials not configured (missing: $fieldName)"
+                        return $result
+                    }
+                }
+            }
+        }
+
+        # Step 1: Find or create artist
+        Write-Host "       Looking up artist: $TestArtistName" -ForegroundColor Gray
+        $artists = Invoke-LidarrApi -Endpoint "artist"
+        $artist = $artists | Where-Object { $_.artistName -like "*$TestArtistName*" } | Select-Object -First 1
+
+        if (-not $artist) {
+            # Search for artist in MusicBrainz via Lidarr
+            Write-Host "       Artist not found, searching MusicBrainz..." -ForegroundColor Gray
+            $searchResults = Invoke-LidarrApi -Endpoint "artist/lookup?term=$([Uri]::EscapeDataString($TestArtistName))"
+            $mbArtist = $searchResults | Select-Object -First 1
+
+            if (-not $mbArtist) {
+                $result.Errors += "Cannot find artist '$TestArtistName' in MusicBrainz"
+                return $result
+            }
+
+            # Add artist to Lidarr (minimal config)
+            Write-Host "       Adding artist to Lidarr: $($mbArtist.artistName)" -ForegroundColor Gray
+            $rootFolders = Invoke-LidarrApi -Endpoint "rootfolder"
+            $rootFolder = $rootFolders | Select-Object -First 1
+
+            if (-not $rootFolder) {
+                $result.Errors += "No root folder configured in Lidarr"
+                return $result
+            }
+
+            $qualityProfiles = Invoke-LidarrApi -Endpoint "qualityprofile"
+            $qualityProfile = $qualityProfiles | Select-Object -First 1
+
+            $metadataProfiles = Invoke-LidarrApi -Endpoint "metadataprofile"
+            $metadataProfile = $metadataProfiles | Select-Object -First 1
+
+            $addArtistBody = @{
+                foreignArtistId = $mbArtist.foreignArtistId
+                artistName = $mbArtist.artistName
+                qualityProfileId = $qualityProfile.id
+                metadataProfileId = $metadataProfile.id
+                rootFolderPath = $rootFolder.path
+                monitored = $true
+                addOptions = @{
+                    monitor = "all"
+                    searchForMissingAlbums = $false
+                }
+            }
+
+            $artist = Invoke-LidarrApi -Endpoint "artist" -Method POST -Body $addArtistBody
+            Write-Host "       Artist added with ID: $($artist.id)" -ForegroundColor Green
+        }
+
+        $result.ArtistId = $artist.id
+
+        # Step 2: Find album
+        Write-Host "       Looking up album: $TestAlbumName" -ForegroundColor Gray
+        $albums = Invoke-LidarrApi -Endpoint "album?artistId=$($artist.id)"
+        $album = $albums | Where-Object { $_.title -like "*$TestAlbumName*" } | Select-Object -First 1
+
+        if (-not $album) {
+            # Just pick the first album if specific one not found
+            $album = $albums | Select-Object -First 1
+            if (-not $album) {
+                $result.Errors += "No albums found for artist $($artist.artistName)"
+                return $result
+            }
+            Write-Host "       Using album: $($album.title)" -ForegroundColor Gray
+        }
+
+        $result.AlbumId = $album.id
+        Write-Host "       Album ID: $($album.id) - $($album.title)" -ForegroundColor Gray
+
+        # Step 3: Trigger AlbumSearch command
+        Write-Host "       Triggering AlbumSearch command..." -ForegroundColor Gray
+        $commandBody = @{
+            name = "AlbumSearch"
+            albumIds = @($album.id)
+        }
+
+        $command = Invoke-LidarrApi -Endpoint "command" -Method POST -Body $commandBody
+        $result.CommandId = $command.id
+        Write-Host "       Command ID: $($command.id)" -ForegroundColor Gray
+
+        # Step 4: Wait for command completion
+        $startTime = Get-Date
+        $timeout = $startTime.AddSeconds($CommandTimeoutSec)
+        $completed = $false
+
+        while ((Get-Date) -lt $timeout -and -not $completed) {
+            Start-Sleep -Seconds 2
+            $commandStatus = Invoke-LidarrApi -Endpoint "command/$($command.id)"
+
+            if ($commandStatus.status -eq 'completed') {
+                $completed = $true
+                Write-Host "       Command completed" -ForegroundColor Green
+            }
+            elseif ($commandStatus.status -eq 'failed') {
+                $result.Errors += "AlbumSearch command failed: $($commandStatus.message)"
+                return $result
+            }
+            else {
+                Write-Host "       Command status: $($commandStatus.status)..." -ForegroundColor Gray
+            }
+        }
+
+        if (-not $completed) {
+            $result.Errors += "AlbumSearch command timed out after ${CommandTimeoutSec}s"
+            return $result
+        }
+
+        # Step 5: Check releases for this album
+        Write-Host "       Fetching releases for album $($album.id)..." -ForegroundColor Gray
+        $releases = Invoke-LidarrApi -Endpoint "release?albumId=$($album.id)"
+
+        $result.ReleaseCount = ($releases | Measure-Object).Count
+        Write-Host "       Total releases: $($result.ReleaseCount)" -ForegroundColor Gray
+
+        # Filter releases from our indexer
+        $pluginReleases = $releases | Where-Object {
+            $_.indexer -like "*$PluginName*" -or
+            $_.indexerId -eq $IndexerId
+        }
+
+        $result.PluginReleaseCount = ($pluginReleases | Measure-Object).Count
+        Write-Host "       Releases from $PluginName: $($result.PluginReleaseCount)" -ForegroundColor $(if ($result.PluginReleaseCount -gt 0) { 'Green' } else { 'Yellow' })
+
+        if ($result.PluginReleaseCount -gt 0) {
+            $result.Success = $true
+            $result.Outcome = 'success'
+        }
+        else {
+            $result.Errors += "No releases returned from indexer '$PluginName' (IndexerId: $IndexerId)"
+            # Log first few release indexers for debugging
+            $otherIndexers = $releases | Select-Object -First 5 | ForEach-Object { $_.indexer } | Select-Object -Unique
+            if ($otherIndexers) {
+                $result.Errors += "Releases found from: $($otherIndexers -join ', ')"
+            }
+        }
+    }
+    catch {
+        $result.Errors += "AlbumSearch gate failed: $_"
+    }
+
+    return $result
+}
+
+Export-ModuleMember -Function Initialize-E2EGates, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-GrabGate, Invoke-LidarrApi
