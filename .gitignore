@@ -62,6 +62,7 @@ _nupkg_extract/
 # Local Docker smoke test staging
 .docker-multi-smoke-test/
 .docker-e2e-runner-*/
+diagnostics/
 
 # Persistent local test state
 .persistent-*/
