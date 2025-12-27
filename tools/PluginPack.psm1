@@ -182,26 +182,21 @@ function Invoke-PluginCleanup {
     <#
     .SYNOPSIS
     Cleans up the publish output to match PluginPackaging.targets behavior.
-    
+
     .DESCRIPTION
     Removes assemblies that should not be in the final package:
     - Host assemblies (Lidarr.Core, Lidarr.Common, etc.)
     - Extra dependencies that were merged into the plugin DLL
     - System.* and other runtime assemblies provided by the host
-    
+
     Keeps:
     - Plugin assembly (merged)
-    - Lidarr.Plugin.Abstractions.dll (required for plugin discovery/loading; host image does not ship it)
+    - Lidarr.Plugin.Abstractions.dll (required for plugin discovery/loading)
+    - FluentValidation.dll (type-identity with host; required for DownloadClient.Test() signature)
+    - Microsoft.Extensions.*.Abstractions.dll (type-identity with host)
 
-    NOTE: Do NOT ship host-provided / cross-boundary assemblies (type identity).
-    In multi-plugin scenarios, shipping these can cause load failures when a second plugin
-    attempts to load another copy into the same load context.
-      - Microsoft.Extensions.DependencyInjection.Abstractions.dll
-      - Microsoft.Extensions.Logging.Abstractions.dll
-      - FluentValidation.dll
-    If a plugin ships its own FluentValidation.dll, ValidationFailure will have
-    different type identity than the host's copy and can cause TypeLoadException
-    such as: "Method 'Test' ... does not have an implementation."
+    NOTE: This policy is based on empirical testing - Tidalarr and Qobuzarr both
+    ship these assemblies and work correctly in production.
     #>
     [CmdletBinding()]
     param(
@@ -211,10 +206,14 @@ function Invoke-PluginCleanup {
         [string]$AssemblyName
     )
 
-    # Assemblies to KEEP in the package (must match PluginPackaging.targets _PluginRuntimeDeps).
+    # Assemblies to KEEP in the package (type-identity assemblies that working plugins ship).
+    # Based on empirical evidence from successful Tidalarr/Qobuzarr packages.
     $keepAssemblies = @(
-        "$AssemblyName.dll",                  # Plugin itself (merged)
-        'Lidarr.Plugin.Abstractions.dll'       # Required for plugin discovery/loading
+        "$AssemblyName.dll",                                    # Plugin itself (merged)
+        'Lidarr.Plugin.Abstractions.dll',                       # Required for plugin discovery/loading
+        'FluentValidation.dll',                                 # Type-identity with host for Test() method
+        'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
+        'Microsoft.Extensions.Logging.Abstractions.dll'
     )
 
     # Remove everything except kept assemblies

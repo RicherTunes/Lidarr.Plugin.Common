@@ -9,28 +9,43 @@ namespace Lidarr.Plugin.Common.Tests.PackageValidation;
 /// <summary>
 /// Shared validation utilities for plugin package correctness.
 /// Use this in plugin test suites to ensure packaging meets Lidarr plugin requirements.
-/// 
-/// ECOSYSTEM PACKAGING POLICY:
-/// - SHIP (not merged):
-///   - Lidarr.Plugin.Abstractions.dll (required for plugin discovery/loading; host image does not ship it)
-/// - HOST-PROVIDED (do not ship):
+///
+/// ECOSYSTEM PACKAGING POLICY (empirically validated with working packages):
+/// - SHIP (type-identity assemblies - must be present):
+///   - FluentValidation.dll (required for DownloadClient.Test() signature match)
 ///   - Microsoft.Extensions.DependencyInjection.Abstractions.dll
 ///   - Microsoft.Extensions.Logging.Abstractions.dll
-/// - MERGE into plugin DLL (internalized):
+///   - Lidarr.Plugin.Abstractions.dll (recommended; some plugins work without it)
+/// - MERGE into plugin DLL (internalized via ILRepack):
 ///   - Lidarr.Plugin.Common.dll, Polly*, TagLibSharp*, MS.Ext.DI (impl), etc.
-/// - DELETE (host provides):
-///   - FluentValidation.dll
-///   - Lidarr.Core.dll, Lidarr.Common.dll, Lidarr.Host.dll, etc.
+/// - DO NOT SHIP (host assemblies - causes conflicts):
+///   - Lidarr.Core.dll, Lidarr.Common.dll, Lidarr.Host.dll, Lidarr.Http.dll, etc.
+///   - NzbDrone.*.dll
+///
+/// NOTE: This policy is based on empirical testing - Tidalarr and Qobuzarr both
+/// ship FluentValidation + MS.Extensions.*Abstractions and work correctly.
 /// </summary>
 public static class PluginPackageValidator
 {
     /// <summary>
-    /// Assemblies required to be present in plugin packages.
+    /// Type-identity assemblies that should be present in plugin packages.
+    /// These ensure method signatures match between plugin and host.
+    /// Missing these is a warning (not error) since some plugins work without all of them.
     /// </summary>
-    public static readonly string[] RequiredPluginAssemblies =
+    public static readonly string[] TypeIdentityAssemblies =
     [
+        "FluentValidation.dll",
+        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+        "Microsoft.Extensions.Logging.Abstractions.dll",
         "Lidarr.Plugin.Abstractions.dll"
     ];
+
+    /// <summary>
+    /// Assemblies required to be present in plugin packages.
+    /// Only the main plugin assembly is strictly required - type-identity assemblies
+    /// are validated separately with warnings.
+    /// </summary>
+    public static readonly string[] RequiredPluginAssemblies = [];
 
     /// <summary>
     /// Assemblies that must NOT be in the package (host provides them).
@@ -39,9 +54,6 @@ public static class PluginPackageValidator
     /// </summary>
     public static readonly string[] DisallowedHostAssemblies =
     [
-        "FluentValidation.dll",
-        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",      
-        "Microsoft.Extensions.Logging.Abstractions.dll",
         "Lidarr.Core.dll",
         "Lidarr.Common.dll",
         "Lidarr.Host.dll",
@@ -99,6 +111,22 @@ public static class PluginPackageValidator
                     else
                     {
                         result.AddWarning($"Required assembly '{required}' missing from package");
+                    }
+                }
+            }
+
+            // Check for type-identity assemblies (error in CI, warning locally)
+            foreach (var typeIdentity in TypeIdentityAssemblies)
+            {
+                if (!dlls.Contains(typeIdentity))
+                {
+                    if (isStrict)
+                    {
+                        result.AddError($"Type-identity assembly '{typeIdentity}' missing - will cause runtime method signature mismatches");
+                    }
+                    else
+                    {
+                        result.AddWarning($"Type-identity assembly '{typeIdentity}' missing - may cause method signature mismatches");
                     }
                 }
             }
