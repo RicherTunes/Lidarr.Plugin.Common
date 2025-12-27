@@ -255,7 +255,12 @@ foreach ($plugin in $pluginList) {
         Write-Host "  [2/3] Search Gate..." -ForegroundColor Cyan
 
         if (-not $config.ExpectIndexer) {
-            Write-Host "       SKIP (no indexer expected)" -ForegroundColor DarkGray
+            if ($config.ExpectImportList) {
+                Write-Host "       SKIP (import list only; configure provider to run functional gates)" -ForegroundColor DarkGray
+            }
+            else {
+                Write-Host "       SKIP (no indexer expected)" -ForegroundColor DarkGray
+            }
             $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome "skipped" -Details @{
                 Reason = "No indexer expected for plugin"
             }
@@ -313,7 +318,12 @@ foreach ($plugin in $pluginList) {
         Write-Host "  [3/3] Grab Gate..." -ForegroundColor Cyan
 
         if (-not $config.ExpectDownloadClient) {
-            Write-Host "       SKIP (no download client expected)" -ForegroundColor DarkGray
+            if ($config.ExpectImportList) {
+                Write-Host "       SKIP (import list only; configure provider to run functional gates)" -ForegroundColor DarkGray
+            }
+            else {
+                Write-Host "       SKIP (no download client expected)" -ForegroundColor DarkGray
+            }
             $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome "skipped" -Details @{
                 Reason = "No download client expected for plugin"
             }

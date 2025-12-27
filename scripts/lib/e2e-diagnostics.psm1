@@ -141,18 +141,42 @@ function Test-SecretRedaction {
     $testCases = @(
         @{ Input = @{ password = 'secret123' }; Field = 'password' }
         @{ Input = @{ apiKey = 'key123' }; Field = 'apiKey' }
-        @{ Input = @{ accessToken = 'token123' }; Field = 'accessToken' }
-        @{ Input = @{ client_secret = 'secret' }; Field = 'client_secret' }
-        @{ Input = @{ bearerToken = 'bearer123' }; Field = 'bearerToken' }
+        @{ Input = @{ accessToken = 'token123' }; Field = 'accessToken' }       
+        @{ Input = @{ client_secret = 'secret' }; Field = 'client_secret' }     
+        @{ Input = @{ bearerToken = 'bearer123' }; Field = 'bearerToken' }      
         @{ Input = @{ fields = @(@{ name = 'password'; value = 'secret' }) }; Field = 'fields[0].value' }
+        @{
+            Input = @{
+                implementation = 'QobuzIndexer'
+                name = 'Qobuzarr Test'
+                fields = @(
+                    @{ name = 'password'; value = 'p@ssw0rd' }
+                    @{ name = 'apiKey'; value = 'abc123' }
+                    @{ name = 'host'; value = 'example.test' }
+                )
+            }
+            Field = 'lidarrSchema.fields[0].value'
+        }
     )
 
     foreach ($case in $testCases) {
-        $result = Invoke-SecretRedaction -Object ([PSCustomObject]$case.Input)
+        $inputObject = [PSCustomObject]$case.Input
+        $result = Invoke-SecretRedaction -Object $inputObject
 
         if ($case.Field -eq 'fields[0].value') {
             if ($result.fields[0].value -ne '[REDACTED]') {
                 throw "Redaction failed for nested field pattern: $($case.Field)"
+            }
+        }
+        elseif ($case.Field -eq 'lidarrSchema.fields[0].value') {
+            if ($result.fields[0].value -ne '[REDACTED]') {
+                throw "Redaction failed for Lidarr schema fields[0].value pattern"
+            }
+            if ($result.fields[1].value -ne '[REDACTED]') {
+                throw "Redaction failed for Lidarr schema fields[1].value pattern"
+            }
+            if ($result.fields[2].value -eq '[REDACTED]') {
+                throw "Redaction incorrectly redacted non-sensitive field value"
             }
         }
         else {
