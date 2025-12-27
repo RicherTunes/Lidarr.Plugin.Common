@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -25,6 +25,7 @@ namespace Lidarr.Plugin.Common.Services.Download
         private readonly Func<string, Task<IReadOnlyList<string>>> _getAlbumTrackIdsAsync;
         private readonly Func<string, StreamingQuality?, Task<(string Url, string Extension)>> _getStreamAsync;
         private readonly IAudioStreamProvider? _streamProvider;
+        private readonly int _maxConcurrentTracks;
 
         public string ServiceName { get; }
 
@@ -35,6 +36,7 @@ namespace Lidarr.Plugin.Common.Services.Download
             Func<string, Task<StreamingTrack>> getTrackAsync,
             Func<string, Task<IReadOnlyList<string>>> getAlbumTrackIdsAsync,
             Func<string, StreamingQuality?, Task<(string Url, string Extension)>> getStreamAsync,
+            int maxConcurrentTracks = 1,
             IAudioStreamProvider? streamProvider = null)
         {
             ServiceName = serviceName;
@@ -43,6 +45,7 @@ namespace Lidarr.Plugin.Common.Services.Download
             _getTrackAsync = getTrackAsync ?? throw new ArgumentNullException(nameof(getTrackAsync));
             _getAlbumTrackIdsAsync = getAlbumTrackIdsAsync ?? throw new ArgumentNullException(nameof(getAlbumTrackIdsAsync));
             _getStreamAsync = getStreamAsync ?? throw new ArgumentNullException(nameof(getStreamAsync));
+            _maxConcurrentTracks = Math.Max(1, maxConcurrentTracks);
             _streamProvider = streamProvider;
         }
 
@@ -64,29 +67,83 @@ namespace Lidarr.Plugin.Common.Services.Download
 
             Directory.CreateDirectory(outputDirectory);
             var trackIds = await _getAlbumTrackIdsAsync(albumId).ConfigureAwait(false);
-            int done = 0, total = trackIds?.Count ?? album.TrackCount;
+            int total = trackIds?.Count ?? album.TrackCount;
 
-            foreach (var trackId in trackIds ?? Array.Empty<string>())
+            if (_maxConcurrentTracks <= 1)
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                var track = await _getTrackAsync(trackId).ConfigureAwait(false);
-                var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
-
-                var tr = await DownloadTrackInternalAsync(trackId, track, trackPath, quality, progress, done, total, cancellationToken).ConfigureAwait(false);
-                result.TrackResults.Add(new TrackDownloadResult
+                // Sequential download path (original behavior)
+                int done = 0;
+                foreach (var trackId in trackIds ?? Array.Empty<string>())
                 {
-                    TrackId = trackId,
-                    Success = tr.Success,
-                    FilePath = tr.FilePath,
-                    FileSize = tr.FileSize,
-                    ActualQuality = tr.ActualQuality,
-                    DownloadTime = TimeSpan.Zero,
-                    ErrorMessage = tr.ErrorMessage
-                });
-                if (tr.Success) files.Add(tr.FilePath);
-                done++;
-                ReportProgress(progress, done, Math.Max(total, trackIds?.Count ?? total), track?.Title, 0, 0, null);
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var track = await _getTrackAsync(trackId).ConfigureAwait(false);
+                    var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
+
+                    var tr = await DownloadTrackInternalAsync(trackId, track, trackPath, quality, progress, done, total, cancellationToken).ConfigureAwait(false);
+                    result.TrackResults.Add(new TrackDownloadResult
+                    {
+                        TrackId = trackId,
+                        Success = tr.Success,
+                        FilePath = tr.FilePath,
+                        FileSize = tr.FileSize,
+                        ActualQuality = tr.ActualQuality,
+                        DownloadTime = TimeSpan.Zero,
+                        ErrorMessage = tr.ErrorMessage
+                    });
+                    if (tr.Success) files.Add(tr.FilePath);
+                    done++;
+                    ReportProgress(progress, done, Math.Max(total, trackIds?.Count ?? total), track?.Title, 0, 0, null);
+                }
+            }
+            else
+            {
+                // Bounded parallel download path
+                using var semaphore = new SemaphoreSlim(_maxConcurrentTracks, _maxConcurrentTracks);
+                var trackResultsLock = new object();
+                int completed = 0;
+
+                var tasks = (trackIds ?? Array.Empty<string>()).Select(async trackId =>
+                {
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        var track = await _getTrackAsync(trackId).ConfigureAwait(false);
+                        var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
+
+                        var currentCompleted = Interlocked.CompareExchange(ref completed, 0, 0);
+                        var tr = await DownloadTrackInternalAsync(trackId, track, trackPath, quality, progress, currentCompleted, total, cancellationToken).ConfigureAwait(false);
+
+                        lock (trackResultsLock)
+                        {
+                            result.TrackResults.Add(new TrackDownloadResult
+                            {
+                                TrackId = trackId,
+                                Success = tr.Success,
+                                FilePath = tr.FilePath,
+                                FileSize = tr.FileSize,
+                                ActualQuality = tr.ActualQuality,
+                                DownloadTime = TimeSpan.Zero,
+                                ErrorMessage = tr.ErrorMessage
+                            });
+                            if (tr.Success && !string.IsNullOrEmpty(tr.FilePath))
+                            {
+                                files.Add(tr.FilePath);
+                            }
+                        }
+
+                        var done = Interlocked.Increment(ref completed);
+                        ReportProgress(progress, done, total, track?.Title, 0, 0, null);
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                }).ToList();
+
+                await Task.WhenAll(tasks).ConfigureAwait(false);
             }
 
             result.FilePaths = files;
@@ -331,4 +388,3 @@ namespace Lidarr.Plugin.Common.Services.Download
         }
     }
 }
-
