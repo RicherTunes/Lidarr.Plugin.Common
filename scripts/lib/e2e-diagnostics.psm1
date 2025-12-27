@@ -1,6 +1,146 @@
 # E2E Diagnostics Bundle for Plugin Testing
 # Collects logs, config, and state on failure for AI-assisted triage
 
+# Sensitive field patterns to redact (comprehensive list)
+$script:SensitivePatterns = @(
+    'password',
+    'secret',
+    'token',
+    'key',
+    'apikey',
+    'api_key',
+    'bearer',
+    'credential',
+    'auth',
+    'accesstoken',
+    'access_token',
+    'refreshtoken',
+    'refresh_token',
+    'clientsecret',
+    'client_secret',
+    'privatekey',
+    'private_key'
+)
+
+function Invoke-SecretRedaction {
+    <#
+    .SYNOPSIS
+        Redacts sensitive fields from objects before serialization.
+
+    .DESCRIPTION
+        Uses a denylist of known sensitive field patterns.
+        Recursively processes nested objects and arrays.
+        Safe for JSON serialization after redaction.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        $Object
+    )
+
+    if ($null -eq $Object) { return $null }
+
+    # Handle arrays
+    if ($Object -is [array]) {
+        return @($Object | ForEach-Object { Invoke-SecretRedaction -Object $_ })
+    }
+
+    # Handle PSCustomObject or hashtable-like objects
+    if ($Object -is [PSCustomObject] -or $Object -is [hashtable]) {
+        $result = [PSCustomObject]@{}
+
+        $properties = if ($Object -is [hashtable]) { $Object.Keys } else { $Object.PSObject.Properties.Name }
+
+        foreach ($prop in $properties) {
+            $value = if ($Object -is [hashtable]) { $Object[$prop] } else { $Object.$prop }
+
+            # Check if property name matches sensitive patterns
+            $isSensitive = $false
+            foreach ($pattern in $script:SensitivePatterns) {
+                if ($prop -match $pattern) {
+                    $isSensitive = $true
+                    break
+                }
+            }
+
+            if ($isSensitive -and $null -ne $value -and $value -ne '') {
+                $result | Add-Member -NotePropertyName $prop -NotePropertyValue '[REDACTED]'
+            }
+            elseif ($value -is [array] -or $value -is [PSCustomObject] -or $value -is [hashtable]) {
+                $result | Add-Member -NotePropertyName $prop -NotePropertyValue (Invoke-SecretRedaction -Object $value)
+            }
+            else {
+                $result | Add-Member -NotePropertyName $prop -NotePropertyValue $value
+            }
+        }
+
+        # Special handling for Lidarr 'fields' array pattern
+        if ($result.PSObject.Properties['fields'] -and $result.fields -is [array]) {
+            $result.fields = @($result.fields | ForEach-Object {
+                $field = $_
+                $isSensitive = $false
+                if ($field.name) {
+                    foreach ($pattern in $script:SensitivePatterns) {
+                        if ($field.name -match $pattern) {
+                            $isSensitive = $true
+                            break
+                        }
+                    }
+                }
+                if ($isSensitive -and $field.value) {
+                    $field = $field.PSObject.Copy()
+                    $field.value = '[REDACTED]'
+                }
+                $field
+            })
+        }
+
+        return $result
+    }
+
+    # Return primitives as-is
+    return $Object
+}
+
+function Test-SecretRedaction {
+    <#
+    .SYNOPSIS
+        Verifies the redactor removes common sensitive patterns.
+
+    .DESCRIPTION
+        Self-test function to validate redaction logic.
+        Call this to verify the redactor is working correctly.
+
+    .OUTPUTS
+        $true if all patterns are properly redacted, throws otherwise.
+    #>
+    $testCases = @(
+        @{ Input = @{ password = 'secret123' }; Field = 'password' }
+        @{ Input = @{ apiKey = 'key123' }; Field = 'apiKey' }
+        @{ Input = @{ accessToken = 'token123' }; Field = 'accessToken' }
+        @{ Input = @{ client_secret = 'secret' }; Field = 'client_secret' }
+        @{ Input = @{ bearerToken = 'bearer123' }; Field = 'bearerToken' }
+        @{ Input = @{ fields = @(@{ name = 'password'; value = 'secret' }) }; Field = 'fields[0].value' }
+    )
+
+    foreach ($case in $testCases) {
+        $result = Invoke-SecretRedaction -Object ([PSCustomObject]$case.Input)
+
+        if ($case.Field -eq 'fields[0].value') {
+            if ($result.fields[0].value -ne '[REDACTED]') {
+                throw "Redaction failed for nested field pattern: $($case.Field)"
+            }
+        }
+        else {
+            $fieldName = $case.Field
+            if ($result.$fieldName -ne '[REDACTED]') {
+                throw "Redaction failed for pattern: $fieldName"
+            }
+        }
+    }
+
+    return $true
+}
+
 function New-DiagnosticsBundle {
     <#
     .SYNOPSIS
@@ -106,12 +246,7 @@ function New-DiagnosticsBundle {
     # Configured indexers
     try {
         $indexers = Invoke-RestMethod -Uri "$apiUrl/api/v1/indexer" -Headers $headers -TimeoutSec 10
-        # Redact sensitive fields
-        $indexers | ForEach-Object {
-            $_.fields | Where-Object { $_.name -match 'password|secret|token|key' } | ForEach-Object {
-                $_.value = '[REDACTED]'
-            }
-        }
+        $indexers = Invoke-SecretRedaction -Object $indexers
         $indexers | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "configured-indexers.json") -Encoding UTF8
         Write-Host "  - Configured indexers collected (secrets redacted)" -ForegroundColor Green
     }
@@ -122,12 +257,7 @@ function New-DiagnosticsBundle {
     # Configured download clients
     try {
         $clients = Invoke-RestMethod -Uri "$apiUrl/api/v1/downloadclient" -Headers $headers -TimeoutSec 10
-        # Redact sensitive fields
-        $clients | ForEach-Object {
-            $_.fields | Where-Object { $_.name -match 'password|secret|token|key' } | ForEach-Object {
-                $_.value = '[REDACTED]'
-            }
-        }
+        $clients = Invoke-SecretRedaction -Object $clients
         $clients | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "configured-downloadclients.json") -Encoding UTF8
         Write-Host "  - Configured download clients collected (secrets redacted)" -ForegroundColor Green
     }
@@ -198,4 +328,4 @@ function Get-FailureSummary {
     return $summary -join "`n"
 }
 
-Export-ModuleMember -Function New-DiagnosticsBundle, Get-FailureSummary
+Export-ModuleMember -Function New-DiagnosticsBundle, Get-FailureSummary, Invoke-SecretRedaction, Test-SecretRedaction

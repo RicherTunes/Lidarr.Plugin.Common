@@ -1,10 +1,21 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Unified E2E runner for plugin ecosystem testing.
+    Unified E2E gate runner for plugin ecosystem testing.
 
 .DESCRIPTION
-    Runs E2E gates against one or more plugins with persistent Lidarr config.
+    GATES-ONLY LAYER: This script runs E2E gates against an already-running Lidarr instance.
+    It does NOT handle build, deploy, or container lifecycle.
+
+    INTENDED WORKFLOW:
+    1. Use test-multi-plugin-persistent.ps1 to build/deploy plugins and start Lidarr
+    2. Use this script (e2e-runner.ps1) to run gates against the running instance
+    3. On failure, diagnostics bundle is created for AI-assisted triage
+
+    This separation allows:
+    - Iterative gate testing without rebuilding
+    - Integration with existing proven deploy logic
+    - Clear separation of concerns (setup vs validation)
 
     Gates:
     1. Schema Gate (no credentials): Verifies plugin schemas are registered
@@ -12,6 +23,10 @@
     3. Grab Gate (credentials required): Verifies download works
 
     On failure, creates a diagnostics bundle for AI-assisted triage.
+
+    RELATED SCRIPTS:
+    - test-multi-plugin-persistent.ps1: Build + deploy + start Lidarr (run first)
+    - test-qobuzarr-persistent.ps1: Single-plugin persistent testing
 
 .PARAMETER Plugins
     Comma-separated list of plugins to test (e.g., "Qobuzarr,Tidalarr")
