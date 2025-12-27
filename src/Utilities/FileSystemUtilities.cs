@@ -10,30 +10,41 @@ namespace Lidarr.Plugin.Common.Utilities
     /// </summary>
     public static class FileSystemUtilities
     {
+        private static readonly System.Collections.Generic.HashSet<string> ReservedNames = new()
+        {
+            "CON","PRN","AUX","NUL",
+            "COM1","COM2","COM3","COM4","COM5","COM6","COM7","COM8","COM9",
+            "LPT1","LPT2","LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9"
+        };
+
         public static void MoveFile(string sourcePath, string destinationPath, bool overwrite)
         {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentNullException(nameof(sourcePath));
             if (string.IsNullOrWhiteSpace(destinationPath)) throw new ArgumentNullException(nameof(destinationPath));
             File.Move(sourcePath, destinationPath, overwrite);
         }
+
         public static string SanitizeFileName(string fileName, int maxLength = 255)
         {
             // Normalize to NFC to avoid cross-OS inconsistencies
             var normalized = (fileName ?? string.Empty).Normalize(NormalizationForm.FormC);
             var sanitized = FileNameSanitizer.SanitizeFileName(normalized);
 
-            // Extra reserved name guard after sanitization (defense in depth)
-            var upper = sanitized.ToUpperInvariant();
-            var reserved = new System.Collections.Generic.HashSet<string>{
-                "CON","PRN","AUX","NUL","COM1","COM2","COM3","COM4","COM5","COM6","COM7","COM8","COM9",
-                "LPT1","LPT2","LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9"
-            };
-            if (reserved.Contains(upper)) sanitized = "_" + sanitized;
-
+            // Trim trailing chars that cause Windows issues BEFORE reserved-name check
+            // This ensures "CON." becomes "_CON" not "CON"
             sanitized = sanitized.TrimEnd(' ', '.', '_', '-');
+
             if (string.IsNullOrWhiteSpace(sanitized))
             {
                 sanitized = "_";
+            }
+
+            // Reserved name guard AFTER trimming (defense in depth)
+            // Windows treats CON, CON., CON.txt all as reserved
+            var upper = sanitized.ToUpperInvariant();
+            if (ReservedNames.Contains(upper))
+            {
+                sanitized = "_" + sanitized;
             }
 
             if (sanitized.Length > maxLength)
@@ -45,7 +56,15 @@ namespace Lidarr.Plugin.Common.Utilities
                     sanitized = sanitized[..lastSpace];
                 }
                 sanitized = sanitized.TrimEnd(' ', '.', '_', '-');
+
+                // Re-check after truncation in case we exposed a reserved name
+                upper = sanitized.ToUpperInvariant();
+                if (ReservedNames.Contains(upper))
+                {
+                    sanitized = "_" + sanitized;
+                }
             }
+
             return sanitized;
         }
 

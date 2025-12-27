@@ -9,15 +9,18 @@ namespace Lidarr.Plugin.Common.Tests;
 /// </summary>
 public class FileSystemUtilitiesSanitizeTests
 {
+    // FileNameSanitizer returns "Unknown" for empty/whitespace inputs
     [Theory]
     [InlineData("   ", "Unknown")]              // Whitespace-only -> Unknown (from FileNameSanitizer)
     [InlineData("", "Unknown")]                 // Empty string -> Unknown
-    public void SanitizeFileName_WhitespaceOrEmpty_ReturnsUnknown(string input, string expected)
+    [InlineData(null, "Unknown")]               // Null -> Unknown
+    public void SanitizeFileName_WhitespaceOrEmpty_ReturnsUnknown(string? input, string expected)
     {
-        var result = FileSystemUtilities.SanitizeFileName(input);
+        var result = FileSystemUtilities.SanitizeFileName(input!);
         Assert.Equal(expected, result);
     }
 
+    // All-invalid inputs also return Unknown (invalid chars -> spaces -> trim -> empty -> Unknown)
     [Theory]
     [InlineData("???", "Unknown")]              // All invalid chars -> Unknown
     [InlineData("***", "Unknown")]              // Asterisks only -> Unknown
@@ -52,22 +55,19 @@ public class FileSystemUtilitiesSanitizeTests
         Assert.Equal(expected, result);
     }
 
-    // NOTE: "CON." produces "CON" (not "_CON") because reserved check happens 
-    // before TrimEnd. This is documented behavior, not necessarily ideal.
+    // FIXED: Reserved name check now runs AFTER TrimEnd
+    // "CON." -> trim to "CON" -> reserved check adds prefix -> "_CON"
     [Theory]
-    [InlineData("CON.", "CON")]                 // Reserved + trailing dot: dot trimmed, but prefix not added
-    [InlineData("AUX   ", "_AUX")]              // Reserved + trailing spaces: spaces in FileNameSanitizer, prefix added
-    public void SanitizeFileName_ReservedWithTrailing_DocumentedBehavior(string input, string expected)
+    [InlineData("CON.", "_CON")]                // Reserved + trailing dot: now correctly prefixed
+    [InlineData("CON...", "_CON")]              // Multiple trailing dots
+    [InlineData("AUX   ", "_AUX")]              // Reserved + trailing spaces
+    [InlineData("NUL._", "_NUL")]               // Reserved + mixed trailing
+    [InlineData("prn.", "_prn")]                // Case insensitive
+    [InlineData("COM1.txt", "COM1.txt")]        // Not reserved (has extension content)
+    public void SanitizeFileName_ReservedWithTrailing_CorrectlyPrefixed(string input, string expected)
     {
         var result = FileSystemUtilities.SanitizeFileName(input);
         Assert.Equal(expected, result);
-    }
-
-    [Fact]
-    public void SanitizeFileName_NullInput_ReturnsUnknown()
-    {
-        var result = FileSystemUtilities.SanitizeFileName(null!);
-        Assert.Equal("Unknown", result);
     }
 
     [Theory]
