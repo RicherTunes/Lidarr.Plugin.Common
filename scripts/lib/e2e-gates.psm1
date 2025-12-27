@@ -590,7 +590,7 @@ function Test-PluginGrabGate {
         }
 
         $pluginReleaseCount = ($pluginReleases | Measure-Object).Count
-        Write-Host "       Releases from $PluginName: $pluginReleaseCount" -ForegroundColor $(if ($pluginReleaseCount -gt 0) { 'Green' } else { 'Red' })
+        Write-Host "       Releases from ${PluginName}: $pluginReleaseCount" -ForegroundColor $(if ($pluginReleaseCount -gt 0) { 'Green' } else { 'Red' })
 
         if ($pluginReleaseCount -eq 0) {
             # Releases exist but none attributed to plugin - this is a FAIL (attribution regression)
@@ -972,7 +972,7 @@ function Test-AlbumSearchGate {
         }
 
         $result.PluginReleaseCount = ($pluginReleases | Measure-Object).Count
-        Write-Host "       Releases from $PluginName: $($result.PluginReleaseCount)" -ForegroundColor $(if ($result.PluginReleaseCount -gt 0) { 'Green' } else { 'Yellow' })
+        Write-Host "       Releases from ${PluginName}: $($result.PluginReleaseCount)" -ForegroundColor $(if ($result.PluginReleaseCount -gt 0) { 'Green' } else { 'Yellow' })
 
         if ($result.PluginReleaseCount -gt 0) {
             $result.Success = $true
