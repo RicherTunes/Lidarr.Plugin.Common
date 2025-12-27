@@ -450,6 +450,228 @@ function Test-GrabGate {
     return $result
 }
 
+function Test-PluginGrabGate {
+    <#
+    .SYNOPSIS
+        Gate 4: Verify plugin release can be grabbed and queued.
+
+    .DESCRIPTION
+        Builds on AlbumSearch gate results:
+        1. Fetches releases for the specified album
+        2. Finds a plugin-attributed release (by indexerId or name)
+        3. Triggers a grab via POST /release
+        4. Verifies item appears in queue
+
+        This is credential-gated: skips if no releases from plugin,
+        fails if grab or queue verification fails.
+
+    .PARAMETER IndexerId
+        ID of the configured indexer to match releases.
+
+    .PARAMETER PluginName
+        Name of the plugin (for fallback matching).
+
+    .PARAMETER AlbumId
+        Album ID to fetch releases for (from AlbumSearch gate).
+
+    .PARAMETER CredentialFieldNames
+        Field names to check for credentials (for skip logic).
+
+    .PARAMETER SkipIfNoCreds
+        Skip gate if credentials are missing.
+
+    .OUTPUTS
+        PSCustomObject with Success, Outcome, ReleaseGuid, QueueItemId, Errors
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [int]$IndexerId,
+
+        [Parameter(Mandatory)]
+        [string]$PluginName,
+
+        [Parameter(Mandatory)]
+        [int]$AlbumId,
+
+        [string[]]$CredentialFieldNames = @(),
+
+        [switch]$SkipIfNoCreds = $true
+    )
+
+    $result = [PSCustomObject]@{
+        Gate = 'Grab'
+        PluginName = $PluginName
+        IndexerId = $IndexerId
+        IndexerName = $null
+        IndexerImplementation = $null
+        AlbumId = $AlbumId
+        Outcome = 'failed'
+        Success = $false
+        ReleaseGuid = $null
+        ReleaseTitle = $null
+        QueueItemId = $null
+        DownloadId = $null
+        Errors = @()
+        SkipReason = $null
+    }
+
+    try {
+        # Get indexer info for diagnostics
+        $indexer = Invoke-LidarrApi -Endpoint "indexer/$IndexerId"
+        if ($indexer) {
+            $result.IndexerName = $indexer.name
+            $result.IndexerImplementation = $indexer.implementation
+        }
+
+        # Credential check helpers
+        function Get-FieldValue {
+            param($Fields, [string]$Name)
+            if ($null -eq $Fields) { return $null }
+            $arr = if ($Fields -is [array]) { $Fields } else { @($Fields) }
+            foreach ($f in $arr) {
+                $fname = if ($f -is [hashtable]) { $f['name'] } else { $f.name }
+                if ([string]::Equals("$fname", $Name, [StringComparison]::OrdinalIgnoreCase)) {
+                    if ($f -is [hashtable]) { return $f['value'] }
+                    return $f.value
+                }
+            }
+            return $null
+        }
+
+        function Has-Field {
+            param($Fields, [string]$Name)
+            if ($null -eq $Fields) { return $false }
+            $arr = if ($Fields -is [array]) { $Fields } else { @($Fields) }
+            foreach ($f in $arr) {
+                $fname = if ($f -is [hashtable]) { $f['name'] } else { $f.name }
+                if ([string]::Equals("$fname", $Name, [StringComparison]::OrdinalIgnoreCase)) {
+                    return $true
+                }
+            }
+            return $false
+        }
+
+        # Check credentials if required
+        if ($SkipIfNoCreds -and $indexer -and $CredentialFieldNames.Count -gt 0) {
+            foreach ($fieldName in $CredentialFieldNames) {
+                if (Has-Field -Fields $indexer.fields -Name $fieldName) {
+                    $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
+                    if ([string]::IsNullOrWhiteSpace("$value")) {
+                        $result.Outcome = 'skipped'
+                        $result.SkipReason = "Credentials not configured (missing: $fieldName)"
+                        return $result
+                    }
+                }
+            }
+        }
+
+        # Step 1: Fetch releases for album
+        Write-Host "       Fetching releases for album $AlbumId..." -ForegroundColor Gray
+        $releases = Invoke-LidarrApi -Endpoint "release?albumId=$AlbumId"
+        $totalReleases = ($releases | Measure-Object).Count
+
+        if ($totalReleases -eq 0) {
+            $result.Outcome = 'skipped'
+            $result.SkipReason = "No releases available for album $AlbumId"
+            return $result
+        }
+
+        Write-Host "       Total releases: $totalReleases" -ForegroundColor Gray
+
+        # Step 2: Find plugin-attributed release
+        $pluginReleases = $releases | Where-Object {
+            $_.indexerId -eq $IndexerId -or
+            [string]::Equals($_.indexer, $PluginName, [StringComparison]::OrdinalIgnoreCase)
+        }
+
+        $pluginReleaseCount = ($pluginReleases | Measure-Object).Count
+        Write-Host "       Releases from $PluginName: $pluginReleaseCount" -ForegroundColor $(if ($pluginReleaseCount -gt 0) { 'Green' } else { 'Yellow' })
+
+        if ($pluginReleaseCount -eq 0) {
+            $result.Outcome = 'skipped'
+            $result.SkipReason = "No releases from indexer '$PluginName' (run AlbumSearch gate first)"
+            return $result
+        }
+
+        # Pick first acceptable release
+        $targetRelease = $pluginReleases | Select-Object -First 1
+        $result.ReleaseGuid = $targetRelease.guid
+        $result.ReleaseTitle = if ($targetRelease.title.Length -gt 50) { $targetRelease.title.Substring(0,50) + "..." } else { $targetRelease.title }
+
+        Write-Host "       Selected: $($result.ReleaseTitle)" -ForegroundColor Gray
+        Write-Host "       Triggering grab..." -ForegroundColor Gray
+
+        # Step 3: Grab the release
+        $grabBody = @{
+            guid = $targetRelease.guid
+            indexerId = $targetRelease.indexerId
+        }
+
+        $grabResult = $null
+        try {
+            $grabResult = Invoke-LidarrApi -Endpoint "release" -Method POST -Body $grabBody
+        }
+        catch {
+            $grabErr = "$_"
+            # Check for auth-related grab failures
+            if ($grabErr -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403)') {
+                $result.Outcome = 'skipped'
+                $result.SkipReason = "Grab failed with auth error: $grabErr"
+                return $result
+            }
+            throw
+        }
+
+        if (-not $grabResult) {
+            $result.Errors += "Grab returned null/empty response"
+            return $result
+        }
+
+        $result.DownloadId = $grabResult.downloadId
+        Write-Host "       Grab initiated, downloadId: $($grabResult.downloadId)" -ForegroundColor Green
+
+        # Step 4: Verify item appears in queue
+        Write-Host "       Checking queue..." -ForegroundColor Gray
+        Start-Sleep -Seconds 2
+
+        $queue = Invoke-LidarrApi -Endpoint "queue"
+        $queueRecords = if ($queue.records) { $queue.records } else { @($queue) }
+
+        $queueItem = $queueRecords | Where-Object {
+            $_.downloadId -eq $grabResult.downloadId
+        } | Select-Object -First 1
+
+        if ($queueItem) {
+            $result.QueueItemId = $queueItem.id
+            $result.Success = $true
+            $result.Outcome = 'success'
+            Write-Host "       Queue item found: id=$($queueItem.id)" -ForegroundColor Green
+        }
+        else {
+            # Item not in queue - might still be processing or failed
+            $queueCount = ($queueRecords | Measure-Object).Count
+            $result.Errors += "Grab succeeded but item not found in queue (queue has $queueCount items)"
+
+            # Check if downloadId is valid but just not queued yet
+            if ($grabResult.downloadId) {
+                $result.Errors += "downloadId=$($grabResult.downloadId) - may need longer wait or check download client"
+            }
+        }
+    }
+    catch {
+        $errMsg = "$_"
+        # Check if exception is auth-related
+        if ($errMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403)') {
+            $result.Outcome = 'skipped'
+            $result.SkipReason = "Grab gate failed with auth error: $errMsg"
+            return $result
+        }
+        $result.Errors += "Grab gate failed: $errMsg"
+    }
+
+    return $result
+}
+
 function Test-AlbumSearchGate {
     <#
     .SYNOPSIS
@@ -777,4 +999,4 @@ function Test-AlbumSearchGate {
     return $result
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-GrabGate, Invoke-LidarrApi
+Export-ModuleMember -Function Initialize-E2EGates, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Invoke-LidarrApi
