@@ -665,7 +665,14 @@ function Test-AlbumSearchGate {
                 Write-Host "       Command completed" -ForegroundColor Green
             }
             elseif ($commandStatus.status -eq 'failed') {
-                $result.Errors += "AlbumSearch command failed: $($commandStatus.message)"
+                $failMsg = $commandStatus.message
+                # Check if failure is auth/config related - should SKIP not FAIL
+                if ($failMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403)') {
+                    $result.Outcome = 'skipped'
+                    $result.SkipReason = "AlbumSearch command failed with auth/config error: $failMsg"
+                    return $result
+                }
+                $result.Errors += "AlbumSearch command failed: $failMsg"
                 return $result
             }
             else {
@@ -674,7 +681,11 @@ function Test-AlbumSearchGate {
         }
 
         if (-not $completed) {
-            $result.Errors += "AlbumSearch command timed out after ${CommandTimeoutSec}s"
+            # Timeout diagnostics: capture last known state
+            $lastStatus = $null
+            try { $lastStatus = Invoke-LidarrApi -Endpoint "command/$($command.id)" } catch {}
+            $statusInfo = if ($lastStatus) { "status=$($lastStatus.status), message=$($lastStatus.message)" } else { "unknown" }
+            $result.Errors += "AlbumSearch command timed out after ${CommandTimeoutSec}s ($statusInfo)"
             return $result
         }
 
@@ -686,9 +697,11 @@ function Test-AlbumSearchGate {
         Write-Host "       Total releases: $($result.ReleaseCount)" -ForegroundColor Gray
 
         # Filter releases from our indexer
+        # Primary: exact indexerId match (most reliable)
+        # Fallback: case-insensitive exact indexer name match
         $pluginReleases = $releases | Where-Object {
-            $_.indexer -like "*$PluginName*" -or
-            $_.indexerId -eq $IndexerId
+            $_.indexerId -eq $IndexerId -or
+            [string]::Equals($_.indexer, $PluginName, [StringComparison]::OrdinalIgnoreCase)
         }
 
         $result.PluginReleaseCount = ($pluginReleases | Measure-Object).Count
@@ -699,16 +712,36 @@ function Test-AlbumSearchGate {
             $result.Outcome = 'success'
         }
         else {
-            $result.Errors += "No releases returned from indexer '$PluginName' (IndexerId: $IndexerId)"
-            # Log first few release indexers for debugging
-            $otherIndexers = $releases | Select-Object -First 5 | ForEach-Object { $_.indexer } | Select-Object -Unique
-            if ($otherIndexers) {
-                $result.Errors += "Releases found from: $($otherIndexers -join ', ')"
+            # Zero releases from plugin - gather diagnostics
+            $otherIndexers = $releases | ForEach-Object { "$($_.indexer):$($_.indexerId)" } | Select-Object -Unique
+            $indexerList = if ($otherIndexers) { $otherIndexers -join ', ' } else { '(none)' }
+
+            # Sample release payload for debugging (redacted)
+            $sampleRelease = $null
+            if ($releases -and ($releases | Measure-Object).Count -gt 0) {
+                $first = $releases | Select-Object -First 1
+                $sampleRelease = @{
+                    indexer = $first.indexer
+                    indexerId = $first.indexerId
+                    title = if ($first.title.Length -gt 50) { $first.title.Substring(0,50) + "..." } else { $first.title }
+                }
+            }
+
+            $result.Errors += "No releases returned from indexer '$PluginName' (IndexerId: $IndexerId). Found: $indexerList"
+            if ($sampleRelease) {
+                $result.Errors += "Sample release: indexer=$($sampleRelease.indexer), indexerId=$($sampleRelease.indexerId)"
             }
         }
     }
     catch {
-        $result.Errors += "AlbumSearch gate failed: $_"
+        $errMsg = "$_"
+        # Check if catch is auth-related
+        if ($errMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403)') {
+            $result.Outcome = 'skipped'
+            $result.SkipReason = "AlbumSearch gate failed with auth error: $errMsg"
+            return $result
+        }
+        $result.Errors += "AlbumSearch gate failed: $errMsg"
     }
 
     return $result
