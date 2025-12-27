@@ -29,6 +29,13 @@ namespace Lidarr.Plugin.Common.Utilities
                 "LPT1","LPT2","LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9"
             };
             if (reserved.Contains(upper)) sanitized = "_" + sanitized;
+
+            sanitized = sanitized.TrimEnd(' ', '.', '_', '-');
+            if (string.IsNullOrWhiteSpace(sanitized))
+            {
+                sanitized = "_";
+            }
+
             if (sanitized.Length > maxLength)
             {
                 sanitized = sanitized[..maxLength];
@@ -53,11 +60,32 @@ namespace Lidarr.Plugin.Common.Utilities
 
         public static string CreateTrackFileName(string title, int trackNumber, string extension = "flac", int maxLength = 200)
         {
+            return CreateTrackFileName(title, trackNumber, extension, discNumber: 1, totalDiscs: 1, maxLength);
+        }
+
+        public static string CreateTrackFileName(
+            string title,
+            int trackNumber,
+            string extension,
+            int discNumber,
+            int totalDiscs,
+            int maxLength = 200)
+        {
             var trackNum = trackNumber.ToString("D2");
+            var dn = discNumber > 0 ? discNumber : 1;
+            var isMultiDisc = totalDiscs > 1;
+            var prefix = isMultiDisc ? $"D{dn:00}T{trackNum}" : trackNum;
+
+            // Normalize extension: trim whitespace, strip leading dots, default to flac
+            var safeExtension = (extension ?? string.Empty).Trim().TrimStart('.');
+            if (string.IsNullOrEmpty(safeExtension))
+                safeExtension = "flac";
+
             // Leave a bit more headroom to avoid cutting grapheme clusters mid-slice
-            var headroom = Math.Max(1, maxLength - trackNum.Length - 4);
+            var overhead = prefix.Length + 3 + 1 + Math.Max(1, safeExtension.Length);
+            var headroom = Math.Max(1, maxLength - overhead);
             var safeTitle = SanitizeFileName(title, headroom);
-            return $"{trackNum} - {safeTitle}.{extension}";
+            return $"{prefix} - {safeTitle}.{safeExtension}";
         }
 
         public static string CreateAlbumDirectoryName(string albumTitle, int? year = null, int maxLength = 200)
@@ -69,4 +97,3 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
-
