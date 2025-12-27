@@ -86,38 +86,75 @@ Options:
 
 ## Phase 3: Persistent E2E Gates
 
-### 3.1 Single-Plugin E2E Runner
-**Location**: `lidarr.plugin.common/scripts/`
+### 3.1 Gate Definitions
 
-Gates:
-1. **Schema Gate** (no credentials): Indexer/DownloadClient discovered and configured
-2. **Search Gate** (credentials required): API search returns results
-3. **Grab Gate** (credentials required): Download initiated and completes
+| Gate | Level | Credentials | What It Proves |
+|------|-------|-------------|----------------|
+| **Schema** | 0 | None | Plugin loaded, indexer/downloadclient/importlist schemas registered |
+| **Config/Auth** | 1 | Required | `POST indexer/test` passes (plugin's auth/config validation works) |
+| **ReleaseSearch** | 2 | Required | `AlbumSearch` command → `/api/v1/release?albumId=` returns results |
+| **Grab** | 3 | Required | Release grabbed → file appears in /downloads |
 
-### 3.2 Plugin-Specific Status
-| Plugin | Schema | Search | Grab |
-|--------|--------|--------|------|
-| Qobuzarr | Proven | Proven | Proven |
-| Tidalarr | Pending | Pending | Pending (OAuth stability) |
-| Brainarr | Pending | N/A | N/A |
+**Current implementation**: Gates 0-1 are implemented. Gates 2-3 require additional work.
 
-### 3.3 Multi-Plugin E2E
-**Blocked by**: Upstream Lidarr ALC fix for multi-plugin isolation
+### 3.2 E2E Runner
+**Location**: `lidarr.plugin.common/scripts/e2e-runner.ps1`
 
-Design:
-- Start Lidarr with persisted /config, /downloads, /music
-- Deploy all plugin zips
-- Run gates sequentially per plugin
-- On failure: diagnostics bundle + run manifest JSON
+Features:
+- Per-plugin configuration (search queries, credential field names)
+- Credential skip semantics (graceful skip when creds missing)
+- URL/token redaction in diagnostics
+- Cascade skip (Grab skipped when Search skipped)
+
+### 3.3 Plugin-Specific Status
+
+| Plugin | Schema | Config/Auth | ReleaseSearch | Grab |
+|--------|--------|-------------|---------------|------|
+| Qobuzarr | ✅ PASS | ⏭️ SKIP (no creds) | ❌ Not impl | ❌ Not impl |
+| Tidalarr | ✅ PASS | ✅ PASS | ❌ Not impl | ❌ Not impl |
+| Brainarr | ✅ PASS | N/A (import list) | N/A | N/A |
+
+**3-Plugin Coexistence**: ✅ All three plugins load simultaneously in same Lidarr instance.
+
+### 3.4 Multi-Plugin E2E Command
+```bash
+# Schema gate (no credentials required):
+./e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr' -Gate schema \
+    -LidarrUrl 'http://localhost:8691' \
+    -ExtractApiKeyFromContainer -ContainerName 'lidarr-multi-plugin-persist'
+
+# All gates (skips gracefully when creds missing):
+./e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr' -Gate all \
+    -LidarrUrl 'http://localhost:8691' \
+    -ApiKey '<key>'
+```
 
 ---
 
-## Phase 4: Multi-Plugin Proof (Future)
+## Phase 4: Advanced E2E Gates (Future)
 
-Once upstream Lidarr ALC fix lands:
-1. Enable multi-plugin schema gate as hard pass/fail
-2. Enable search/grab gates with secrets
-3. Prove 3-plugin concurrent operation
+### 4.1 ReleaseSearch Gate (Level 2)
+**Not yet implemented**
+
+Design:
+1. Create temporary album via `POST /api/v1/album`
+2. Trigger `AlbumSearch` command
+3. Assert `/api/v1/release?albumId=` contains results with plugin's indexerId
+4. Clean up temporary album
+
+### 4.2 Grab Gate (Level 3)
+**Not yet implemented**
+
+Design:
+1. Pick deterministic release from ReleaseSearch results
+2. Trigger grab via `POST /api/v1/release`
+3. Assert queue contains item
+4. Assert file appears in /downloads (timeout with polling)
+
+### 4.3 3-Plugin Concurrent Operation
+**Status**: ✅ Proven for Schema gate
+
+All three plugins can coexist in the same Lidarr instance and pass Schema gate simultaneously
 
 ---
 
@@ -135,8 +172,9 @@ Once upstream Lidarr ALC fix lands:
 - `tidalarr/src/Tidalarr/Integration/TidalDownloadClient.cs` (needs consolidation)
 
 ### E2E Scripts
-- `lidarr.plugin.common/scripts/local-e2e-single.ps1`
-- `lidarr.plugin.common/scripts/local-e2e-multi.ps1` (future)
+- `lidarr.plugin.common/scripts/e2e-runner.ps1` - Main gate runner
+- `lidarr.plugin.common/scripts/lib/e2e-gates.psm1` - Gate implementations
+- `lidarr.plugin.common/scripts/lib/e2e-diagnostics.psm1` - Diagnostics bundle
 
 ---
 
@@ -144,6 +182,10 @@ Once upstream Lidarr ALC fix lands:
 
 | Date | Change |
 |------|--------|
+| 2025-12-27 | E2E gates: credential skip semantics, indexer/test preference, URL redaction |
+| 2025-12-27 | 3-plugin coexistence proven: Qobuzarr, Tidalarr, Brainarr all pass Schema gate |
+| 2025-12-27 | Tidalarr PR #104: sanitization consolidation with 4 unit tests |
+| 2025-12-27 | Tidalarr PR #105: chunk delay configurability with clamping (0-2000ms) |
 | 2025-12-27 | Common PRs #167/#168 merged - packaging policy complete |
 | 2025-12-27 | Tidalarr packaging baseline updated to 5-DLL contract |
 | 2025-12-27 | Qobuzarr TrackFileNameBuilder delegated to Common |
