@@ -156,6 +156,8 @@ $pluginConfigs = @{
         # Search gate settings
         SearchQuery = "Kind of Blue Miles Davis"
         ExpectedMinResults = 1
+        CredentialFieldNames = @("email", "username", "password")
+        SkipIndexerTest = $false
     }
     'Tidalarr' = @{
         ExpectIndexer = $true
@@ -164,6 +166,10 @@ $pluginConfigs = @{
         # Search gate settings
         SearchQuery = "Kind of Blue Miles Davis"
         ExpectedMinResults = 1
+        CredentialFieldNames = @("configPath", "redirectUrl", "oauthRedirectUrl")
+        SkipIndexerTest = $false
+        CredentialPathField = "configPath"
+        CredentialFileRelative = "tidal_tokens.json"
     }
     'Brainarr' = @{
         ExpectIndexer = $false
@@ -172,6 +178,8 @@ $pluginConfigs = @{
         # No search for import lists
         SearchQuery = $null
         ExpectedMinResults = 0
+        CredentialFieldNames = @()
+        SkipIndexerTest = $true
     }
 }
 
@@ -227,6 +235,8 @@ foreach ($plugin in $pluginList) {
     if ($stopNow) { break }
     Write-Host "Testing: $plugin" -ForegroundColor Yellow
     Write-Host "----------------------------------------" -ForegroundColor DarkGray
+
+    $skipGrabForPlugin = $false
 
     $config = $pluginConfigs[$plugin]
     if (-not $config) {
@@ -301,25 +311,99 @@ foreach ($plugin in $pluginList) {
                     }
                 }
                 else {
+                    function Get-IndexerFieldValue {
+                        param(
+                            [AllowNull()]
+                            $Indexer,
+                            [Parameter(Mandatory)]
+                            [string]$Name
+                        )
+
+                        if ($null -eq $Indexer) { return $null }
+                        $fields = $Indexer.fields
+                        if ($null -eq $fields) { return $null }
+                        $arr = if ($fields -is [array]) { $fields } else { @($fields) }
+                        foreach ($f in $arr) {
+                            $fname = if ($f -is [hashtable]) { $f['name'] } else { $f.name }
+                            if ([string]::Equals("$fname", $Name, [StringComparison]::OrdinalIgnoreCase)) {
+                                if ($f -is [hashtable]) { return $f['value'] }
+                                return $f.value
+                            }
+                        }
+                        return $null
+                    }
+
+                    # Optional: Credential file probe (Docker-only) to avoid treating "not authenticated yet" as a failure.
+                    if ($config.ContainsKey("CredentialFileRelative") -and $config.ContainsKey("CredentialPathField") -and $ContainerName) {
+                        try {
+                            $probePathField = "$($config.CredentialPathField)"
+                            $probeConfigPath = Get-IndexerFieldValue -Indexer $pluginIndexer -Name $probePathField
+                            if (-not [string]::IsNullOrWhiteSpace("$probeConfigPath")) {
+                                $relative = "$($config.CredentialFileRelative)"
+                                $probeFilePath = "$($probeConfigPath.TrimEnd('/'))/$relative"
+                                $probeOk = docker exec $ContainerName sh -c "test -s '$probeFilePath' && echo ok" 2>$null
+                                if (-not $probeOk) {
+                                    Write-Host "       SKIP (credentials file missing: $probeFilePath)" -ForegroundColor DarkGray
+                                    $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome "skipped" -Details @{
+                                        Reason = "Credentials file missing"
+                                        CredentialFile = $probeFilePath
+                                    }
+                                    $skipGrabForPlugin = $true
+                                    continue
+                                }
+                            }
+                        }
+                        catch {
+                            # If the probe fails (no docker, permissions, etc.), fall back to normal Search gate behavior.
+                        }
+                    }
+
                     # Use per-plugin search config
                     $searchQuery = $config.SearchQuery
                     $expectedMin = $config.ExpectedMinResults
                     if (-not $searchQuery) { $searchQuery = "Kind of Blue Miles Davis" }
                     if ($expectedMin -lt 1) { $expectedMin = 1 }
 
+                    $credFieldNames = @()
+                    if ($config.ContainsKey("CredentialFieldNames")) {
+                        $credFieldNames = @($config.CredentialFieldNames)
+                    }
+                    $skipIndexerTest = $true
+                    if ($config.ContainsKey("SkipIndexerTest")) {
+                        $skipIndexerTest = [bool]$config.SkipIndexerTest
+                    }
+
                     $searchResult = Test-SearchGate -IndexerId $pluginIndexer.id `
                         -SearchQuery $searchQuery `
-                        -ExpectedMinResults $expectedMin
+                        -ExpectedMinResults $expectedMin `
+                        -CredentialFieldNames $credFieldNames `
+                        -SkipIndexerTest:$skipIndexerTest
 
-                    $searchOutcome = if ($searchResult.Success) { "success" } else { "failed" }
+                    $searchOutcome = if ($searchResult.Outcome) { $searchResult.Outcome } elseif ($searchResult.Success) { "success" } else { "failed" }
                     $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome $searchOutcome -Errors $searchResult.Errors -Details @{
                         IndexerId = $pluginIndexer.id
                         ResultCount = $searchResult.ResultCount
                         SearchQuery = $searchQuery
+                        SkipIndexerTest = $skipIndexerTest
+                        RawResponse = $searchResult.RawResponse
+                        SkipReason = $searchResult.SkipReason
                     }
 
-                    if ($searchResult.Success) {
-                        Write-Host "       PASS ($($searchResult.ResultCount) results for '$searchQuery')" -ForegroundColor Green
+                    if ($searchOutcome -eq "skipped") {
+                        $reason = $searchResult.SkipReason
+                        if (-not $reason) { $reason = "Skipped by gate policy" }
+                        Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+
+                        # If Search was skipped due to missing credentials, downstream functional gates should also skip.
+                        if ($Gate -eq "all") { $skipGrabForPlugin = $true }
+                    }
+                    elseif ($searchResult.Success) {
+                        if (-not $skipIndexerTest) {
+                            Write-Host "       PASS (indexer/test)" -ForegroundColor Green
+                        }
+                        else {
+                            Write-Host "       PASS ($($searchResult.ResultCount) results for '$searchQuery')" -ForegroundColor Green
+                        }
                     }
                     else {
                         Write-Host "       FAIL" -ForegroundColor Red
@@ -346,7 +430,13 @@ foreach ($plugin in $pluginList) {
     if ($runGrab) {
         Write-Host "  [3/3] Grab Gate..." -ForegroundColor Cyan
 
-        if (-not $config.ExpectDownloadClient) {
+        if ($skipGrabForPlugin) {
+            Write-Host "       SKIP (Search gate skipped due to missing credentials)" -ForegroundColor DarkGray
+            $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome "skipped" -Details @{
+                Reason = "Search gate skipped due to missing credentials"
+            }
+        }
+        elseif (-not $config.ExpectDownloadClient) {
             if ($config.ExpectImportList) {
                 Write-Host "       SKIP (import list only; configure provider to run functional gates)" -ForegroundColor DarkGray
             }
