@@ -546,7 +546,7 @@ function Test-PluginGrabGate {
         [int]$AlbumId,
 
         [string[]]$CredentialFieldNames = @(),
-
+        [string[]]$CredentialAnyOfFieldNames = @(),
         [switch]$SkipIfNoCreds = $true
     )
 
@@ -604,16 +604,42 @@ function Test-PluginGrabGate {
         }
 
         # Check credentials if required
-        if ($SkipIfNoCreds -and $indexer -and $CredentialFieldNames.Count -gt 0) {
+        if ($SkipIfNoCreds -and $indexer) {
+            $missingAllOf = @()
+            $anyOfApplicable = @()
+            $anyOfHasValue = $false
+
             foreach ($fieldName in $CredentialFieldNames) {
                 if (Has-Field -Fields $indexer.fields -Name $fieldName) {
                     $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
                     if ([string]::IsNullOrWhiteSpace("$value")) {
-                        $result.Outcome = 'skipped'
-                        $result.SkipReason = "Credentials not configured (missing: $fieldName)"
-                        return $result
+                        $missingAllOf += $fieldName
                     }
                 }
+            }
+
+            foreach ($fieldName in $CredentialAnyOfFieldNames) {
+                if (Has-Field -Fields $indexer.fields -Name $fieldName) {
+                    $anyOfApplicable += $fieldName
+                    $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
+                    if (-not [string]::IsNullOrWhiteSpace("$value")) {
+                        $anyOfHasValue = $true
+                    }
+                }
+            }
+
+            $reasons = @()
+            if ($missingAllOf.Count -gt 0) {
+                $reasons += "missing: $($missingAllOf -join ', ')"
+            }
+            if ($anyOfApplicable.Count -gt 0 -and -not $anyOfHasValue) {
+                $reasons += "missing one of: $($anyOfApplicable -join ', ')"
+            }
+
+            if ($reasons.Count -gt 0) {
+                $result.Outcome = 'skipped'
+                $result.SkipReason = "Credentials not configured ($($reasons -join '; '))"
+                return $result
             }
         }
 
@@ -816,6 +842,8 @@ function Test-AlbumSearchGate {
 
         [string[]]$CredentialFieldNames = @(),
 
+        [string[]]$CredentialAnyOfFieldNames = @(),
+
         [switch]$SkipIfNoCreds = $true
     )
 
@@ -877,16 +905,42 @@ function Test-AlbumSearchGate {
             return $false
         }
 
-        if ($SkipIfNoCreds -and $CredentialFieldNames.Count -gt 0) {
+        if ($SkipIfNoCreds) {
+            $missingAllOf = @()
+            $anyOfApplicable = @()
+            $anyOfHasValue = $false
+
             foreach ($fieldName in $CredentialFieldNames) {
                 if (Has-Field -Fields $indexer.fields -Name $fieldName) {
                     $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
                     if ([string]::IsNullOrWhiteSpace("$value")) {
-                        $result.Outcome = 'skipped'
-                        $result.SkipReason = "Credentials not configured (missing: $fieldName)"
-                        return $result
+                        $missingAllOf += $fieldName
                     }
                 }
+            }
+
+            foreach ($fieldName in $CredentialAnyOfFieldNames) {
+                if (Has-Field -Fields $indexer.fields -Name $fieldName) {
+                    $anyOfApplicable += $fieldName
+                    $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
+                    if (-not [string]::IsNullOrWhiteSpace("$value")) {
+                        $anyOfHasValue = $true
+                    }
+                }
+            }
+
+            $reasons = @()
+            if ($missingAllOf.Count -gt 0) {
+                $reasons += "missing: $($missingAllOf -join ', ')"
+            }
+            if ($anyOfApplicable.Count -gt 0 -and -not $anyOfHasValue) {
+                $reasons += "missing one of: $($anyOfApplicable -join ', ')"
+            }
+
+            if ($reasons.Count -gt 0) {
+                $result.Outcome = 'skipped'
+                $result.SkipReason = "Credentials not configured ($($reasons -join '; '))"
+                return $result
             }
         }
 
@@ -898,7 +952,19 @@ function Test-AlbumSearchGate {
         if (-not $artist) {
             # Search for artist in MusicBrainz via Lidarr
             Write-Host "       Artist not found, searching MusicBrainz..." -ForegroundColor Gray
-            $searchResults = Invoke-LidarrApi -Endpoint "artist/lookup?term=$([Uri]::EscapeDataString($TestArtistName))"
+            try {
+                $searchResults = Invoke-LidarrApi -Endpoint "artist/lookup?term=$([Uri]::EscapeDataString($TestArtistName))"
+            }
+            catch {
+                $errMsg = "$_"
+                if ($errMsg -match '(?i)(SkyHookException|api\\.lidarr\\.audio|Unable to communicate with LidarrAPI)') {
+                    $result.Outcome = 'skipped'
+                    $result.SkipReason = "Lidarr metadata API unavailable (cannot lookup artist '$TestArtistName')"
+                    $result.Errors += "Artist lookup failed: $errMsg"
+                    return $result
+                }
+                throw
+            }
             $mbArtist = $searchResults | Select-Object -First 1
 
             if (-not $mbArtist) {

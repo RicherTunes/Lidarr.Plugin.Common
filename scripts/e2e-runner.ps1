@@ -155,10 +155,17 @@ $pluginConfigs = @{
         ExpectDownloadClient = $true
         ExpectImportList = $false
         # Search gate settings
-        SearchQuery = "Kind of Blue Miles Davis"
+        SearchQuery = "Amnesiac Radiohead"
         ExpectedMinResults = 1
-        CredentialFieldNames = @("password")
-        CredentialAnyOfFieldNames = @("email", "username")
+        # Use existing artist/album for reliable testing
+        TestArtistName = "Radiohead"
+        TestAlbumName = "Amnesiac"
+        # Qobuz supports two auth methods:
+        # 1. Email/password: email + password
+        # 2. Token auth: userId + authToken
+        # Check for authToken OR password (one must be present)
+        CredentialFieldNames = @()
+        CredentialAnyOfFieldNames = @("authToken", "password")
         SkipIndexerTest = $false
     }
     'Tidalarr' = @{
@@ -166,8 +173,11 @@ $pluginConfigs = @{
         ExpectDownloadClient = $true
         ExpectImportList = $false
         # Search gate settings
-        SearchQuery = "Kind of Blue Miles Davis"
+        SearchQuery = "Amnesiac Radiohead"
         ExpectedMinResults = 1
+        # Use existing artist/album for reliable testing
+        TestArtistName = "Radiohead"
+        TestAlbumName = "Amnesiac"
         CredentialFieldNames = @("configPath")
         CredentialAnyOfFieldNames = @("redirectUrl", "oauthRedirectUrl")
         SkipIndexerTest = $false
@@ -479,6 +489,10 @@ foreach ($plugin in $pluginList) {
                     $credFieldNames = @()
                     if ($config.ContainsKey("CredentialFieldNames")) {
                         $credFieldNames = @($config.CredentialFieldNames)
+                    }
+                    $credAnyOfFieldNames = @()
+                    if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                        $credAnyOfFieldNames = @($config.CredentialAnyOfFieldNames)
                     }
 
                     # Use per-plugin test artist/album or defaults
