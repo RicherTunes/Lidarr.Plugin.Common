@@ -711,9 +711,13 @@ function Test-PluginGrabGate {
         $result.ReleaseTitle = if ($targetRelease.title.Length -gt 50) { $targetRelease.title.Substring(0,50) + "..." } else { $targetRelease.title }
 
         Write-Host "       Selected: $($result.ReleaseTitle)" -ForegroundColor Gray
-        Write-Host "       Triggering grab..." -ForegroundColor Gray
+        Write-Host "       Triggering grab..." -ForegroundColor Gray      
 
         # Step 3: Grab the release
+        $queueBefore = Invoke-LidarrApi -Endpoint "queue"
+        $queueBeforeRecords = if ($queueBefore.records) { $queueBefore.records } else { @($queueBefore) }
+        $queueBeforeIds = @($queueBeforeRecords | Where-Object { $_ -and $_.id } | ForEach-Object { $_.id })
+
         $grabBody = @{
             guid = $targetRelease.guid
             indexerId = $targetRelease.indexerId
@@ -745,21 +749,40 @@ function Test-PluginGrabGate {
         }
 
         $result.DownloadId = $grabResult.downloadId
-        Write-Host "       Grab initiated, downloadId: $($grabResult.downloadId)" -ForegroundColor Green
+        $downloadIdLabel = if ([string]::IsNullOrWhiteSpace("$($grabResult.downloadId)")) { "(none)" } else { "$($grabResult.downloadId)" }
+        Write-Host "       Grab initiated, downloadId: $downloadIdLabel" -ForegroundColor Green
 
         # Step 4: Verify item appears in queue
-        Write-Host "       Checking queue..." -ForegroundColor Gray
-        Start-Sleep -Seconds 2
+        Write-Host "       Checking queue..." -ForegroundColor Gray       
+        $queueItem = $null
+        $queueRecords = @()
+        $attempts = 15
+        for ($i = 1; $i -le $attempts; $i++) {
+            Start-Sleep -Seconds 2
+            $queue = Invoke-LidarrApi -Endpoint "queue"
+            $queueRecords = if ($queue.records) { $queue.records } else { @($queue) }
 
-        $queue = Invoke-LidarrApi -Endpoint "queue"
-        $queueRecords = if ($queue.records) { $queue.records } else { @($queue) }
+            # Primary: exact downloadId match (when host returns it)
+            if (-not [string]::IsNullOrWhiteSpace("$($grabResult.downloadId)")) {
+                $queueItem = $queueRecords | Where-Object { $_.downloadId -eq $grabResult.downloadId } | Select-Object -First 1
+                if ($queueItem) { break }
+            }
 
-        $queueItem = $queueRecords | Where-Object {
-            $_.downloadId -eq $grabResult.downloadId
-        } | Select-Object -First 1
+            # Fallback: diff queue IDs and match album/indexer (supports hosts with null downloadId response)
+            $newItems = $queueRecords | Where-Object { $_ -and $_.id -and ($queueBeforeIds -notcontains $_.id) }
+            $queueItem = $newItems | Where-Object {
+                $_.albumId -eq $AlbumId -and (
+                    $_.indexerId -eq $IndexerId -or
+                    [string]::Equals($_.indexer, $PluginName, [StringComparison]::OrdinalIgnoreCase)
+                )
+            } | Sort-Object added -Descending | Select-Object -First 1
+
+            if ($queueItem) { break }
+        }
 
         if ($queueItem) {
             $result.QueueItemId = $queueItem.id
+            $result.DownloadId = $queueItem.downloadId
             $result.Success = $true
             $result.Outcome = 'success'
             Write-Host "       Queue item found: id=$($queueItem.id)" -ForegroundColor Green
@@ -772,6 +795,9 @@ function Test-PluginGrabGate {
             # Check if downloadId is valid but just not queued yet
             if ($grabResult.downloadId) {
                 $result.Errors += "downloadId=$($grabResult.downloadId) - may need longer wait or check download client"
+            }
+            else {
+                $result.Errors += "grab response did not include a downloadId; queue diff fallback did not find a new item"
             }
         }
     }
