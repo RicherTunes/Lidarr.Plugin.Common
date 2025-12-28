@@ -185,7 +185,12 @@ function Test-SearchGate {
 
         [switch]$SkipIndexerTest = $true,
 
+        # Backward compatibility: this maps to CredentialAllOfFieldNames.
         [string[]]$CredentialFieldNames = @(),
+
+        [string[]]$CredentialAllOfFieldNames = @(),
+
+        [string[]]$CredentialAnyOfFieldNames = @(),
 
         [switch]$SkipIfNoCreds = $true
     )
@@ -254,31 +259,54 @@ function Test-SearchGate {
             param(
                 [AllowNull()]
                 $Indexer,
-                [string[]]$RequiredFields
+                [string[]]$AllOfFields,
+                [string[]]$AnyOfFields,
+                [ref]$MissingReason
             )
 
-            if (-not $RequiredFields -or $RequiredFields.Count -eq 0) { return $false }
+            $MissingReason.Value = $null
+            $missing = New-Object System.Collections.Generic.List[string]
 
-            # Best-effort: only enforce fields that exist on the indexer config.
-            # This avoids false skips if field naming changes (e.g., email vs username).
-            $anyApplicableField = $false
-
-            foreach ($fieldName in $RequiredFields) {
+            foreach ($fieldName in $AllOfFields) {
                 if (-not (Has-Field -Fields $Indexer.fields -Name $fieldName)) { continue }
-                $anyApplicableField = $true
                 $value = Get-FieldValue -Fields $Indexer.fields -Name $fieldName
                 if ([string]::IsNullOrWhiteSpace("$value")) {
-                    return $true
+                    $missing.Add($fieldName)
                 }
             }
 
-            if (-not $anyApplicableField) { return $false }
-            return $false
+            if ($AnyOfFields -and $AnyOfFields.Count -gt 0) {
+                $anyApplicable = $false
+                $anyHasValue = $false
+
+                foreach ($fieldName in $AnyOfFields) {
+                    if (-not (Has-Field -Fields $Indexer.fields -Name $fieldName)) { continue }
+                    $anyApplicable = $true
+                    $value = Get-FieldValue -Fields $Indexer.fields -Name $fieldName
+                    if (-not [string]::IsNullOrWhiteSpace("$value")) {
+                        $anyHasValue = $true
+                        break
+                    }
+                }
+
+                if ($anyApplicable -and -not $anyHasValue) {
+                    $missing.Add("any of: " + ($AnyOfFields -join ", "))
+                }
+            }
+
+            if ($missing.Count -eq 0) { return $false }
+            $MissingReason.Value = $missing -join "; "
+            return $true
         }
 
-        if ($SkipIfNoCreds -and (Is-MissingCredentials -Indexer $indexer -RequiredFields $CredentialFieldNames)) {
+        if (-not $CredentialAllOfFieldNames -or $CredentialAllOfFieldNames.Count -eq 0) {
+            $CredentialAllOfFieldNames = $CredentialFieldNames
+        }
+
+        $missingReason = $null
+        if ($SkipIfNoCreds -and (Is-MissingCredentials -Indexer $indexer -AllOfFields $CredentialAllOfFieldNames -AnyOfFields $CredentialAnyOfFieldNames -MissingReason ([ref]$missingReason))) {
             $result.Outcome = 'skipped'
-            $result.SkipReason = "Credentials not configured (missing: $($CredentialFieldNames -join ', '))"
+            $result.SkipReason = "Credentials not configured ($missingReason)"
             return $result
         }
 
@@ -493,7 +521,20 @@ function Test-PluginGrabGate {
         [Parameter(Mandatory)]
         [int]$AlbumId,
 
+        # Backward compatibility: this maps to CredentialAllOfFieldNames.
         [string[]]$CredentialFieldNames = @(),
+
+        [string[]]$CredentialAllOfFieldNames = @(),
+
+        [string[]]$CredentialAnyOfFieldNames = @(),
+
+        [int]$QueueTimeoutSec = 60,
+
+        [int]$CompletionTimeoutSec = 600,
+
+        [switch]$ValidateOutputPath = $true,
+
+        [string]$ContainerName = $null,
 
         [switch]$SkipIfNoCreds = $true
     )
@@ -511,6 +552,11 @@ function Test-PluginGrabGate {
         ReleaseTitle = $null
         QueueItemId = $null
         DownloadId = $null
+        OutputPath = $null
+        QueueStatus = $null
+        TrackedDownloadStatus = $null
+        TrackedDownloadState = $null
+        SampleFile = $null
         Errors = @()
         SkipReason = $null
     }
@@ -551,17 +597,45 @@ function Test-PluginGrabGate {
             return $false
         }
 
+        if (-not $CredentialAllOfFieldNames -or $CredentialAllOfFieldNames.Count -eq 0) {
+            $CredentialAllOfFieldNames = $CredentialFieldNames
+        }
+
         # Check credentials if required
-        if ($SkipIfNoCreds -and $indexer -and $CredentialFieldNames.Count -gt 0) {
-            foreach ($fieldName in $CredentialFieldNames) {
-                if (Has-Field -Fields $indexer.fields -Name $fieldName) {
+        if ($SkipIfNoCreds -and $indexer) {
+            $missing = New-Object System.Collections.Generic.List[string]
+
+            foreach ($fieldName in $CredentialAllOfFieldNames) {
+                if (-not (Has-Field -Fields $indexer.fields -Name $fieldName)) { continue }
+                $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
+                if ([string]::IsNullOrWhiteSpace("$value")) {
+                    $missing.Add($fieldName)
+                }
+            }
+
+            if ($CredentialAnyOfFieldNames -and $CredentialAnyOfFieldNames.Count -gt 0) {
+                $anyApplicable = $false
+                $anyHasValue = $false
+
+                foreach ($fieldName in $CredentialAnyOfFieldNames) {
+                    if (-not (Has-Field -Fields $indexer.fields -Name $fieldName)) { continue }
+                    $anyApplicable = $true
                     $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
-                    if ([string]::IsNullOrWhiteSpace("$value")) {
-                        $result.Outcome = 'skipped'
-                        $result.SkipReason = "Credentials not configured (missing: $fieldName)"
-                        return $result
+                    if (-not [string]::IsNullOrWhiteSpace("$value")) {
+                        $anyHasValue = $true
+                        break
                     }
                 }
+
+                if ($anyApplicable -and -not $anyHasValue) {
+                    $missing.Add("any of: " + ($CredentialAnyOfFieldNames -join ", "))
+                }
+            }
+
+            if ($missing.Count -gt 0) {
+                $result.Outcome = 'skipped'
+                $result.SkipReason = "Credentials not configured ($($missing -join '; '))"
+                return $result
             }
         }
 
@@ -669,33 +743,118 @@ function Test-PluginGrabGate {
         $result.DownloadId = $grabResult.downloadId
         Write-Host "       Grab initiated, downloadId: $($grabResult.downloadId)" -ForegroundColor Green
 
-        # Step 4: Verify item appears in queue
-        Write-Host "       Checking queue..." -ForegroundColor Gray
-        Start-Sleep -Seconds 2
-
-        $queue = Invoke-LidarrApi -Endpoint "queue"
-        $queueRecords = if ($queue.records) { $queue.records } else { @($queue) }
-
-        $queueItem = $queueRecords | Where-Object {
-            $_.downloadId -eq $grabResult.downloadId
-        } | Select-Object -First 1
-
-        if ($queueItem) {
-            $result.QueueItemId = $queueItem.id
-            $result.Success = $true
-            $result.Outcome = 'success'
-            Write-Host "       Queue item found: id=$($queueItem.id)" -ForegroundColor Green
+        function Get-QueueRecords {
+            $queue = Invoke-LidarrApi -Endpoint "queue"
+            if ($queue.records) { return $queue.records }
+            return @($queue)
         }
-        else {
-            # Item not in queue - might still be processing or failed
-            $queueCount = ($queueRecords | Measure-Object).Count
-            $result.Errors += "Grab succeeded but item not found in queue (queue has $queueCount items)"
 
-            # Check if downloadId is valid but just not queued yet
-            if ($grabResult.downloadId) {
-                $result.Errors += "downloadId=$($grabResult.downloadId) - may need longer wait or check download client"
+        # Step 4: Wait for queue item
+        Write-Host "       Waiting for queue item..." -ForegroundColor Gray
+        $deadline = (Get-Date).AddSeconds([Math]::Max(1, $QueueTimeoutSec))
+        $queueItem = $null
+
+        while ((Get-Date) -lt $deadline) {
+            $queueRecords = Get-QueueRecords
+            $queueItem = $queueRecords | Where-Object { $_.downloadId -eq $grabResult.downloadId } | Select-Object -First 1
+            if ($queueItem) { break }
+            Start-Sleep -Milliseconds 500
+        }
+
+        if (-not $queueItem) {
+            $queueRecords = Get-QueueRecords
+            $queueCount = ($queueRecords | Measure-Object).Count
+            $result.Errors += "Grab succeeded but item not found in queue (waited ${QueueTimeoutSec}s; queue has $queueCount items)"
+            $result.Errors += "downloadId=$($grabResult.downloadId)"
+            return $result
+        }
+
+        $result.QueueItemId = $queueItem.id
+        $result.OutputPath = $queueItem.outputPath
+        $result.QueueStatus = $queueItem.status
+        $result.TrackedDownloadStatus = $queueItem.trackedDownloadStatus
+        $result.TrackedDownloadState = $queueItem.trackedDownloadState
+
+        Write-Host "       Queue item found: id=$($queueItem.id) status=$($queueItem.status)" -ForegroundColor Green
+
+        # Step 5: Wait for completion
+        $completionDeadline = (Get-Date).AddSeconds([Math]::Max(1, $CompletionTimeoutSec))
+        while ((Get-Date) -lt $completionDeadline) {
+            $queueRecords = Get-QueueRecords
+            $current = $queueRecords | Where-Object { $_.id -eq $result.QueueItemId } | Select-Object -First 1
+            if (-not $current) { break }
+
+            $result.QueueStatus = $current.status
+            $result.TrackedDownloadStatus = $current.trackedDownloadStatus
+            $result.TrackedDownloadState = $current.trackedDownloadState
+            $result.OutputPath = $current.outputPath
+
+            if ([string]::Equals($current.status, "completed", [StringComparison]::OrdinalIgnoreCase)) { break }
+            if ([string]::Equals($current.status, "failed", [StringComparison]::OrdinalIgnoreCase)) { break }
+
+            Start-Sleep -Seconds 2
+        }
+
+        if ([string]::Equals($result.QueueStatus, "failed", [StringComparison]::OrdinalIgnoreCase)) {
+            $result.Errors += "Queue item failed (downloadId=$($grabResult.downloadId)): $($queueItem.errorMessage)"
+            return $result
+        }
+
+        if (-not [string]::Equals($result.QueueStatus, "completed", [StringComparison]::OrdinalIgnoreCase)) {
+            $result.Errors += "Queue item did not complete within ${CompletionTimeoutSec}s (status=$($result.QueueStatus), downloadId=$($grabResult.downloadId))"
+            return $result
+        }
+
+        # Step 6: Validate output path and sample file (requires Docker container access)
+        if ($ValidateOutputPath -and $ContainerName -and (Get-Command docker -ErrorAction SilentlyContinue) -and $result.OutputPath) {
+            try {
+                $container = $ContainerName.Trim()
+                $outPath = $result.OutputPath
+
+                $dirOk = docker exec $container sh -c "test -d '$outPath' && echo ok" 2>$null
+                if ((@($dirOk) -join '').Trim() -ne 'ok') {
+                    $result.Errors += "Output path not found in container: $outPath"
+                    return $result
+                }
+
+                $sampleFile = docker exec $container sh -c "find '$outPath' -type f | head -n 1" 2>$null
+                $sampleFile = (@($sampleFile) -join '').Trim()
+                if (-not $sampleFile) {
+                    $result.Errors += "No files found under outputPath: $outPath"
+                    return $result
+                }
+
+                $result.SampleFile = $sampleFile
+
+                $pythonCode = 'import sys; p=sys.argv[1]; b=open(p,"rb").read(12); print(b.hex())'
+                $magic = docker exec $container python3 -c $pythonCode $sampleFile 2>$null
+                $magic = (@($magic) -join '').Trim().ToLowerInvariant()
+
+                if (-not $magic) {
+                    $result.Errors += "Failed to read magic bytes for sample file: $sampleFile"
+                    return $result
+                }
+
+                $isFlac = $magic.StartsWith("664c6143")
+                $isOgg = $magic.StartsWith("4f676753")
+                $isRiff = $magic.StartsWith("52494646")
+                $isId3 = $magic.StartsWith("494433")
+                $isFtyp = ($magic.Length -ge 16) -and ($magic.Substring(8, 8) -eq "66747970")
+                $isMpeg = ($magic.Length -ge 4) -and ($magic.StartsWith("fffb") -or $magic.StartsWith("fff3") -or $magic.StartsWith("fff2"))
+
+                if (-not ($isFlac -or $isOgg -or $isRiff -or $isId3 -or $isFtyp -or $isMpeg)) {
+                    $result.Errors += "Downloaded file does not look like audio (magic=$magic) sample=$sampleFile"
+                    return $result
+                }
+            }
+            catch {
+                $result.Errors += "Output validation failed: $_"
+                return $result
             }
         }
+
+        $result.Success = $true
+        $result.Outcome = 'success'
     }
     catch {
         $errMsg = "$_"
@@ -762,7 +921,12 @@ function Test-AlbumSearchGate {
 
         [int]$CommandTimeoutSec = 60,
 
+        # Backward compatibility: this maps to CredentialAllOfFieldNames.
         [string[]]$CredentialFieldNames = @(),
+
+        [string[]]$CredentialAllOfFieldNames = @(),
+
+        [string[]]$CredentialAnyOfFieldNames = @(),
 
         [switch]$SkipIfNoCreds = $true
     )
@@ -825,16 +989,44 @@ function Test-AlbumSearchGate {
             return $false
         }
 
-        if ($SkipIfNoCreds -and $CredentialFieldNames.Count -gt 0) {
-            foreach ($fieldName in $CredentialFieldNames) {
-                if (Has-Field -Fields $indexer.fields -Name $fieldName) {
+        if (-not $CredentialAllOfFieldNames -or $CredentialAllOfFieldNames.Count -eq 0) {
+            $CredentialAllOfFieldNames = $CredentialFieldNames
+        }
+
+        if ($SkipIfNoCreds) {
+            $missing = New-Object System.Collections.Generic.List[string]
+
+            foreach ($fieldName in $CredentialAllOfFieldNames) {
+                if (-not (Has-Field -Fields $indexer.fields -Name $fieldName)) { continue }
+                $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
+                if ([string]::IsNullOrWhiteSpace("$value")) {
+                    $missing.Add($fieldName)
+                }
+            }
+
+            if ($CredentialAnyOfFieldNames -and $CredentialAnyOfFieldNames.Count -gt 0) {
+                $anyApplicable = $false
+                $anyHasValue = $false
+
+                foreach ($fieldName in $CredentialAnyOfFieldNames) {
+                    if (-not (Has-Field -Fields $indexer.fields -Name $fieldName)) { continue }
+                    $anyApplicable = $true
                     $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
-                    if ([string]::IsNullOrWhiteSpace("$value")) {
-                        $result.Outcome = 'skipped'
-                        $result.SkipReason = "Credentials not configured (missing: $fieldName)"
-                        return $result
+                    if (-not [string]::IsNullOrWhiteSpace("$value")) {
+                        $anyHasValue = $true
+                        break
                     }
                 }
+
+                if ($anyApplicable -and -not $anyHasValue) {
+                    $missing.Add("any of: " + ($CredentialAnyOfFieldNames -join ", "))
+                }
+            }
+
+            if ($missing.Count -gt 0) {
+                $result.Outcome = 'skipped'
+                $result.SkipReason = "Credentials not configured ($($missing -join '; '))"
+                return $result
             }
         }
 
