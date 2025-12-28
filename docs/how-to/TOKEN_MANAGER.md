@@ -90,9 +90,35 @@ mgr.SessionRefreshFailed += (_, e) => logger.LogWarning(e.Exception, "Session re
 var status = mgr.GetSessionStatus(); // IsValid, TimeUntilExpiry, etc.
 ```
 
+## Proactive (Background) Token Refresh
+
+By default, the manager only refreshes tokens on-demand (when `GetValidSessionAsync` is called). To enable automatic background refresh before tokens expire, configure a credentials provider:
+
+```csharp
+var options = new StreamingTokenManagerOptions<MySession>
+{
+    DefaultSessionLifetime = TimeSpan.FromHours(1),
+    RefreshBuffer = TimeSpan.FromMinutes(5),  // Refresh 5 min before expiry   
+    RefreshCheckInterval = TimeSpan.FromMinutes(1),  // Check every minute     
+    GetSessionExpiry = s => s.ExpiresAt,
+
+    // Enable proactive refresh by providing a credentials factory
+    EnableProactiveRefresh = true,
+    ProactiveRefreshCredentialsProvider = () => new MyCredentials(clientId, clientSecret, refreshToken)
+};
+```
+
+When configured:
+- A background timer runs every `RefreshCheckInterval`
+- If the session is within `RefreshBuffer` of expiry, the manager calls the credentials provider
+- If credentials are available, it performs a refresh automatically
+- Refresh failures are logged but don't throw - the timer will retry on the next interval
+
+This is particularly useful for long-running operations that may exceed token lifetimes.
+
 ## Tips
 
-- Persist sessions with `ITokenStore<T>` (file or OS-backed) so restarts don’t force re-auth.
+- Persist sessions with `ITokenStore<T>` (file or OS-backed) so restarts don't force re-auth.
 - Do not log raw tokens. Use masking helpers and structured logs.
 - Keep refresh single-flight; the manager already guards with a semaphore.
 - Use `OAuthDelegatingHandler` for 401-triggered single-flight refresh on top of proactive refresh.
