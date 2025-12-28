@@ -157,7 +157,8 @@ $pluginConfigs = @{
         # Search gate settings
         SearchQuery = "Kind of Blue Miles Davis"
         ExpectedMinResults = 1
-        CredentialFieldNames = @("email", "username", "password")
+        CredentialAllOfFieldNames = @("password")
+        CredentialAnyOfFieldNames = @("email", "username")
         SkipIndexerTest = $false
     }
     'Tidalarr' = @{
@@ -167,7 +168,8 @@ $pluginConfigs = @{
         # Search gate settings
         SearchQuery = "Kind of Blue Miles Davis"
         ExpectedMinResults = 1
-        CredentialFieldNames = @("configPath", "redirectUrl", "oauthRedirectUrl")
+        CredentialAllOfFieldNames = @("configPath")
+        CredentialAnyOfFieldNames = @("redirectUrl", "oauthRedirectUrl")
         SkipIndexerTest = $false
         CredentialPathField = "configPath"
         CredentialFileRelative = "tidal_tokens.json"
@@ -179,7 +181,8 @@ $pluginConfigs = @{
         # No search for import lists
         SearchQuery = $null
         ExpectedMinResults = 0
-        CredentialFieldNames = @()
+        CredentialAllOfFieldNames = @()
+        CredentialAnyOfFieldNames = @()
         SkipIndexerTest = $true
     }
 }
@@ -368,9 +371,17 @@ foreach ($plugin in $pluginList) {
                     if (-not $searchQuery) { $searchQuery = "Kind of Blue Miles Davis" }
                     if ($expectedMin -lt 1) { $expectedMin = 1 }
 
-                    $credFieldNames = @()
+                    $credAllOf = @()
+                    $credAnyOf = @()
+                    if ($config.ContainsKey("CredentialAllOfFieldNames")) {
+                        $credAllOf = @($config.CredentialAllOfFieldNames)
+                    }
+                    if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                        $credAnyOf = @($config.CredentialAnyOfFieldNames)
+                    }
+                    # Backward compatibility
                     if ($config.ContainsKey("CredentialFieldNames")) {
-                        $credFieldNames = @($config.CredentialFieldNames)
+                        $credAllOf = @($config.CredentialFieldNames)
                     }
                     $skipIndexerTest = $true
                     if ($config.ContainsKey("SkipIndexerTest")) {
@@ -380,7 +391,8 @@ foreach ($plugin in $pluginList) {
                     $searchResult = Test-SearchGate -IndexerId $pluginIndexer.id `
                         -SearchQuery $searchQuery `
                         -ExpectedMinResults $expectedMin `
-                        -CredentialFieldNames $credFieldNames `
+                        -CredentialAllOfFieldNames $credAllOf `
+                        -CredentialAnyOfFieldNames $credAnyOf `
                         -SkipIndexerTest:$skipIndexerTest
 
                     $searchOutcome = if ($searchResult.Outcome) { $searchResult.Outcome } elseif ($searchResult.Success) { "success" } else { "failed" }
@@ -389,6 +401,8 @@ foreach ($plugin in $pluginList) {
                         ResultCount = $searchResult.ResultCount
                         SearchQuery = $searchQuery
                         SkipIndexerTest = $skipIndexerTest
+                        CredentialAllOf = $credAllOf
+                        CredentialAnyOf = $credAnyOf
                         RawResponse = $searchResult.RawResponse
                         SkipReason = $searchResult.SkipReason
                     }
@@ -465,9 +479,17 @@ foreach ($plugin in $pluginList) {
                     $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "skipped" -Errors @("No configured indexer found for $plugin")
                 }
                 else {
-                    $credFieldNames = @()
+                    $credAllOf = @()
+                    $credAnyOf = @()
+                    if ($config.ContainsKey("CredentialAllOfFieldNames")) {
+                        $credAllOf = @($config.CredentialAllOfFieldNames)
+                    }
+                    if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                        $credAnyOf = @($config.CredentialAnyOfFieldNames)
+                    }
+                    # Backward compatibility
                     if ($config.ContainsKey("CredentialFieldNames")) {
-                        $credFieldNames = @($config.CredentialFieldNames)
+                        $credAllOf = @($config.CredentialFieldNames)
                     }
 
                     # Use per-plugin test artist/album or defaults
@@ -478,7 +500,8 @@ foreach ($plugin in $pluginList) {
                         -PluginName $plugin `
                         -TestArtistName $testArtist `
                         -TestAlbumName $testAlbum `
-                        -CredentialFieldNames $credFieldNames `
+                        -CredentialAllOfFieldNames $credAllOf `
+                        -CredentialAnyOfFieldNames $credAnyOf `
                         -SkipIfNoCreds:$true
 
                     # Store for Grab gate
@@ -491,9 +514,11 @@ foreach ($plugin in $pluginList) {
                         ArtistId = $albumSearchResult.ArtistId
                         AlbumId = $albumSearchResult.AlbumId
                         CommandId = $albumSearchResult.CommandId
-                        ReleaseCount = $albumSearchResult.ReleaseCount
+                        ReleaseCount = $albumSearchResult.ReleaseCount    
                         PluginReleaseCount = $albumSearchResult.PluginReleaseCount
-                        SkipReason = $albumSearchResult.SkipReason
+                        CredentialAllOf = $credAllOf
+                        CredentialAnyOf = $credAnyOf
+                        SkipReason = $albumSearchResult.SkipReason        
                     }
 
                     if ($outcome -eq "skipped") {
@@ -555,15 +580,25 @@ foreach ($plugin in $pluginList) {
         }
         else {
             try {
-                $credFieldNames = @()
+                $credAllOf = @()
+                $credAnyOf = @()
+                if ($config.ContainsKey("CredentialAllOfFieldNames")) {
+                    $credAllOf = @($config.CredentialAllOfFieldNames)
+                }
+                if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                    $credAnyOf = @($config.CredentialAnyOfFieldNames)
+                }
+                # Backward compatibility
                 if ($config.ContainsKey("CredentialFieldNames")) {
-                    $credFieldNames = @($config.CredentialFieldNames)
+                    $credAllOf = @($config.CredentialFieldNames)
                 }
 
                 $grabResult = Test-PluginGrabGate -IndexerId $lastPluginIndexer.id `
                     -PluginName $plugin `
                     -AlbumId $lastAlbumSearchResult.AlbumId `
-                    -CredentialFieldNames $credFieldNames `
+                    -CredentialAllOfFieldNames $credAllOf `
+                    -CredentialAnyOfFieldNames $credAnyOf `
+                    -ContainerName $ContainerName `
                     -SkipIfNoCreds:$true
 
                 $outcome = if ($grabResult.Outcome) { $grabResult.Outcome } elseif ($grabResult.Success) { "success" } else { "failed" }
@@ -573,6 +608,13 @@ foreach ($plugin in $pluginList) {
                     ReleaseTitle = $grabResult.ReleaseTitle
                     QueueItemId = $grabResult.QueueItemId
                     DownloadId = $grabResult.DownloadId
+                    OutputPath = $grabResult.OutputPath
+                    QueueStatus = $grabResult.QueueStatus
+                    TrackedDownloadStatus = $grabResult.TrackedDownloadStatus
+                    TrackedDownloadState = $grabResult.TrackedDownloadState
+                    SampleFile = $grabResult.SampleFile
+                    CredentialAllOf = $credAllOf
+                    CredentialAnyOf = $credAnyOf
                     SkipReason = $grabResult.SkipReason
                 }
 

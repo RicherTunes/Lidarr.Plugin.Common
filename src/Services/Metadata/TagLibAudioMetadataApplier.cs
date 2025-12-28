@@ -28,7 +28,16 @@ namespace Lidarr.Plugin.Common.Services.Metadata
 
                 if (!string.IsNullOrEmpty(metadata.Artist?.Name))
                 {
-                    file.Tag.Performers = new[] { metadata.Artist.Name };
+                    file.Tag.Performers = new[] { metadata.Artist.Name };       
+                }
+
+                if (!string.IsNullOrEmpty(metadata.Album?.Artist?.Name))
+                {
+                    file.Tag.AlbumArtists = new[] { metadata.Album.Artist.Name };
+                }
+                else if (!string.IsNullOrEmpty(metadata.Artist?.Name))
+                {
+                    file.Tag.AlbumArtists = new[] { metadata.Artist.Name };
                 }
 
                 if (!string.IsNullOrEmpty(metadata.Album?.Title))
@@ -39,6 +48,11 @@ namespace Lidarr.Plugin.Common.Services.Metadata
                 if (metadata.TrackNumber.HasValue && metadata.TrackNumber.Value > 0)
                 {
                     file.Tag.Track = (uint)metadata.TrackNumber.Value;
+                }
+
+                if (metadata.DiscNumber.HasValue && metadata.DiscNumber.Value > 0)
+                {
+                    file.Tag.Disc = (uint)metadata.DiscNumber.Value;
                 }
 
                 if (metadata.Album?.ReleaseDate.HasValue == true)
@@ -52,6 +66,11 @@ namespace Lidarr.Plugin.Common.Services.Metadata
                 }
 
                 file.Save();
+
+                if (file is TagLib.Mpeg4.File mpeg4File)
+                {
+                    mpeg4File.Save();
+                }
             }, cancellationToken);
         }
     }
