@@ -826,9 +826,48 @@ function Test-PluginGrabGate {
 
                 $result.SampleFile = $sampleFile
 
-                $pythonCode = 'import sys; p=sys.argv[1]; b=open(p,"rb").read(12); print(b.hex())'
-                $magic = docker exec $container python3 -c $pythonCode $sampleFile 2>$null
-                $magic = (@($magic) -join '').Trim().ToLowerInvariant()
+                function Get-ContainerFileMagicHex {
+                    param(
+                        [Parameter(Mandatory)]
+                        [string]$Container,
+
+                        [Parameter(Mandatory)]
+                        [string]$FilePath,
+
+                        [int]$ByteCount = 12
+                    )
+
+                    $hex = $null
+
+                    try {
+                        $pythonCode = "import sys; p=sys.argv[1]; b=open(p,'rb').read($ByteCount); print(b.hex())"
+                        $hex = docker exec $Container python3 -c $pythonCode $FilePath 2>$null
+                        $hex = (@($hex) -join '').Trim().ToLowerInvariant()
+                        if ($hex) { return $hex }
+                    } catch { }
+
+                    try {
+                        $hex = docker exec $Container xxd -p -l $ByteCount $FilePath 2>$null
+                        $hex = (@($hex) -join '').Trim().ToLowerInvariant().Replace("`n", "").Replace("`r", "")
+                        if ($hex) { return $hex }
+                    } catch { }
+
+                    try {
+                        $hex = docker exec $Container hexdump -v -n $ByteCount -e '1/1 "%02x"' $FilePath 2>$null
+                        $hex = (@($hex) -join '').Trim().ToLowerInvariant()
+                        if ($hex) { return $hex }
+                    } catch { }
+
+                    try {
+                        $hex = docker exec $Container od -An -tx1 -N$ByteCount $FilePath 2>$null
+                        $hex = ((@($hex) -join ' ') -replace '\s', '').Trim().ToLowerInvariant()
+                        if ($hex) { return $hex }
+                    } catch { }
+
+                    return $null
+                }
+
+                $magic = Get-ContainerFileMagicHex -Container $container -FilePath $sampleFile -ByteCount 12
 
                 if (-not $magic) {
                     $result.Errors += "Failed to read magic bytes for sample file: $sampleFile"
