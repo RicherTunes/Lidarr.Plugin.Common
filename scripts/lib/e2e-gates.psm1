@@ -536,6 +536,13 @@ function Test-PluginGrabGate {
 
         [string]$ContainerName = $null,
 
+        # v3: Multi-file validation parameters
+        [int]$MaxFilesToValidate = 5,
+
+        [int]$MinBytesPerFile = 65536,  # 64KB - catches HTML/JSON errors
+
+        [int]$ExpectedMinFiles = 1,
+
         [switch]$SkipIfNoCreds = $true
     )
 
@@ -556,7 +563,12 @@ function Test-PluginGrabGate {
         QueueStatus = $null
         TrackedDownloadStatus = $null
         TrackedDownloadState = $null
-        SampleFile = $null
+        # v3: Multi-file validation results
+        TotalFileCount = 0
+        ValidatedFileCount = 0
+        ValidatedFiles = @()
+        ValidationFailures = @()
+        SampleFile = $null  # Kept for backward compat (first validated file)
         Errors = @()
         SkipReason = $null
     }
@@ -805,86 +817,170 @@ function Test-PluginGrabGate {
             return $result
         }
 
-        # Step 6: Validate output path and sample file (requires Docker container access)
+        # Step 6: v3 multi-file validation (requires Docker container access)
         if ($ValidateOutputPath -and $ContainerName -and (Get-Command docker -ErrorAction SilentlyContinue) -and $result.OutputPath) {
             try {
                 $container = $ContainerName.Trim()
                 $outPath = $result.OutputPath
 
+                # Check directory exists
                 $dirOk = docker exec $container sh -c "test -d '$outPath' && echo ok" 2>$null
                 if ((@($dirOk) -join '').Trim() -ne 'ok') {
                     $result.Errors += "Output path not found in container: $outPath"
                     return $result
                 }
 
-                $sampleFile = docker exec $container sh -c "find '$outPath' -type f | head -n 1" 2>$null
-                $sampleFile = (@($sampleFile) -join '').Trim()
-                if (-not $sampleFile) {
-                    $result.Errors += "No files found under outputPath: $outPath"
+                # Get all files with sizes (format: "size path")
+                $fileListRaw = docker exec $container sh -c "find '$outPath' -type f -exec stat -c '%s %n' {} \; 2>/dev/null || find '$outPath' -type f -exec ls -l {} \; 2>/dev/null | awk '{print \$5, \$9}'" 2>$null
+                $fileLines = @($fileListRaw) -split "`n" | Where-Object { $_.Trim() }
+
+                $allFiles = @()
+                foreach ($line in $fileLines) {
+                    $parts = $line.Trim() -split '\s+', 2
+                    if ($parts.Count -ge 2) {
+                        $size = 0
+                        if ([int]::TryParse($parts[0], [ref]$size)) {
+                            $allFiles += [PSCustomObject]@{
+                                Path = $parts[1]
+                                Size = $size
+                                Name = Split-Path -Leaf $parts[1]
+                            }
+                        }
+                    }
+                }
+
+                $result.TotalFileCount = $allFiles.Count
+                Write-Host "       Files in outputPath: $($allFiles.Count)" -ForegroundColor Gray
+
+                # Check minimum file count
+                if ($allFiles.Count -lt $ExpectedMinFiles) {
+                    $result.Errors += "Expected at least $ExpectedMinFiles files, found $($allFiles.Count) under: $outPath"
+                    # Dump file list for diagnostics
+                    $fileListDiag = $allFiles | Select-Object -First 20 | ForEach-Object { "$($_.Name) ($($_.Size) bytes)" }
+                    if ($fileListDiag) {
+                        $result.Errors += "Files found: $($fileListDiag -join '; ')"
+                    }
                     return $result
                 }
 
-                $result.SampleFile = $sampleFile
-
+                # Helper: read magic bytes from container file
                 function Get-ContainerFileMagicHex {
-                    param(
-                        [Parameter(Mandatory)]
-                        [string]$Container,
-
-                        [Parameter(Mandatory)]
-                        [string]$FilePath,
-
-                        [int]$ByteCount = 12
-                    )
-
+                    param([string]$Container, [string]$FilePath, [int]$ByteCount = 12)
                     $hex = $null
-
                     try {
                         $pythonCode = "import sys; p=sys.argv[1]; b=open(p,'rb').read($ByteCount); print(b.hex())"
                         $hex = docker exec $Container python3 -c $pythonCode $FilePath 2>$null
                         $hex = (@($hex) -join '').Trim().ToLowerInvariant()
                         if ($hex) { return $hex }
                     } catch { }
-
                     try {
                         $hex = docker exec $Container xxd -p -l $ByteCount $FilePath 2>$null
                         $hex = (@($hex) -join '').Trim().ToLowerInvariant().Replace("`n", "").Replace("`r", "")
                         if ($hex) { return $hex }
                     } catch { }
-
                     try {
                         $hex = docker exec $Container hexdump -v -n $ByteCount -e '1/1 "%02x"' $FilePath 2>$null
                         $hex = (@($hex) -join '').Trim().ToLowerInvariant()
                         if ($hex) { return $hex }
                     } catch { }
-
                     try {
                         $hex = docker exec $Container od -An -tx1 -N$ByteCount $FilePath 2>$null
                         $hex = ((@($hex) -join ' ') -replace '\s', '').Trim().ToLowerInvariant()
                         if ($hex) { return $hex }
                     } catch { }
-
                     return $null
                 }
 
-                $magic = Get-ContainerFileMagicHex -Container $container -FilePath $sampleFile -ByteCount 12
+                # Helper: check if magic bytes indicate audio
+                function Test-AudioMagic {
+                    param([string]$Magic)
+                    if (-not $Magic -or $Magic.Length -lt 4) { return $false }
+                    $isFlac = $Magic.StartsWith("664c6143")  # fLaC
+                    $isOgg = $Magic.StartsWith("4f676753")   # OggS
+                    $isRiff = $Magic.StartsWith("52494646")  # RIFF (WAV)
+                    $isId3 = $Magic.StartsWith("494433")     # ID3 (MP3)
+                    $isFtyp = ($Magic.Length -ge 16) -and ($Magic.Substring(8, 8) -eq "66747970")  # ftyp (M4A/MP4)
+                    $isMpeg = $Magic.StartsWith("fffb") -or $Magic.StartsWith("fff3") -or $Magic.StartsWith("fff2")  # MPEG audio
+                    return ($isFlac -or $isOgg -or $isRiff -or $isId3 -or $isFtyp -or $isMpeg)
+                }
 
-                if (-not $magic) {
-                    $result.Errors += "Failed to read magic bytes for sample file: $sampleFile"
+                # Select files to validate (first N for deterministic debugging)
+                $filesToValidate = $allFiles | Select-Object -First $MaxFilesToValidate
+                $validatedFiles = @()
+                $validationFailures = @()
+
+                foreach ($file in $filesToValidate) {
+                    $validation = [PSCustomObject]@{
+                        Path = $file.Path
+                        Name = $file.Name
+                        Size = $file.Size
+                        Magic = $null
+                        IsAudio = $false
+                        FailReason = $null
+                    }
+
+                    # Check size floor
+                    if ($file.Size -lt $MinBytesPerFile) {
+                        $validation.FailReason = "File too small: $($file.Size) bytes (min: $MinBytesPerFile)"
+                        $validationFailures += $validation
+                        continue
+                    }
+
+                    # Read and validate magic bytes
+                    $magic = Get-ContainerFileMagicHex -Container $container -FilePath $file.Path -ByteCount 12
+                    $validation.Magic = $magic
+
+                    if (-not $magic) {
+                        $validation.FailReason = "Failed to read magic bytes"
+                        $validationFailures += $validation
+                        continue
+                    }
+
+                    $isAudio = Test-AudioMagic -Magic $magic
+                    $validation.IsAudio = $isAudio
+
+                    if (-not $isAudio) {
+                        $validation.FailReason = "Not audio (magic: $magic)"
+                        $validationFailures += $validation
+                        continue
+                    }
+
+                    $validatedFiles += $validation
+                }
+
+                $result.ValidatedFileCount = $validatedFiles.Count
+                $result.ValidatedFiles = $validatedFiles | ForEach-Object { $_.Name }
+                $result.ValidationFailures = $validationFailures | ForEach-Object { "$($_.Name): $($_.FailReason)" }
+
+                # Set SampleFile for backward compat
+                if ($validatedFiles.Count -gt 0) {
+                    $result.SampleFile = $validatedFiles[0].Path
+                }
+
+                Write-Host "       Validated: $($validatedFiles.Count)/$($filesToValidate.Count) files" -ForegroundColor $(if ($validationFailures.Count -eq 0) { 'Green' } else { 'Yellow' })
+
+                # Fail if any validation failures
+                if ($validationFailures.Count -gt 0) {
+                    $result.Errors += "File validation failed for $($validationFailures.Count) of $($filesToValidate.Count) checked files"
+                    foreach ($failure in $validationFailures) {
+                        $result.Errors += "  FAIL: $($failure.Name) - $($failure.FailReason)"
+                        Write-Host "       FAIL: $($failure.Name) - $($failure.FailReason)" -ForegroundColor Red
+
+                        # Dump first 64 bytes hex for failed files (diagnostics)
+                        if ($failure.Magic) {
+                            Write-Host "             Magic (first 12 bytes): $($failure.Magic)" -ForegroundColor DarkGray
+                        }
+                    }
+
+                    # List all files for context
+                    $fileSummary = $allFiles | Select-Object -First 20 | ForEach-Object { "$($_.Name) ($($_.Size)b)" }
+                    $result.Errors += "All files (first 20): $($fileSummary -join ', ')"
+
                     return $result
                 }
 
-                $isFlac = $magic.StartsWith("664c6143")
-                $isOgg = $magic.StartsWith("4f676753")
-                $isRiff = $magic.StartsWith("52494646")
-                $isId3 = $magic.StartsWith("494433")
-                $isFtyp = ($magic.Length -ge 16) -and ($magic.Substring(8, 8) -eq "66747970")
-                $isMpeg = ($magic.Length -ge 4) -and ($magic.StartsWith("fffb") -or $magic.StartsWith("fff3") -or $magic.StartsWith("fff2"))
-
-                if (-not ($isFlac -or $isOgg -or $isRiff -or $isId3 -or $isFtyp -or $isMpeg)) {
-                    $result.Errors += "Downloaded file does not look like audio (magic=$magic) sample=$sampleFile"
-                    return $result
-                }
+                # All validated files passed
+                Write-Host "       All $($validatedFiles.Count) validated files are valid audio" -ForegroundColor Green
             }
             catch {
                 $result.Errors += "Output validation failed: $_"
