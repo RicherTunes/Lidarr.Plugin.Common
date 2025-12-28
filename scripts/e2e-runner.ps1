@@ -157,7 +157,8 @@ $pluginConfigs = @{
         # Search gate settings
         SearchQuery = "Kind of Blue Miles Davis"
         ExpectedMinResults = 1
-        CredentialFieldNames = @("email", "username", "password")
+        CredentialFieldNames = @("password")
+        CredentialAnyOfFieldNames = @("email", "username")
         SkipIndexerTest = $false
     }
     'Tidalarr' = @{
@@ -167,7 +168,8 @@ $pluginConfigs = @{
         # Search gate settings
         SearchQuery = "Kind of Blue Miles Davis"
         ExpectedMinResults = 1
-        CredentialFieldNames = @("configPath", "redirectUrl", "oauthRedirectUrl")
+        CredentialFieldNames = @("configPath")
+        CredentialAnyOfFieldNames = @("redirectUrl", "oauthRedirectUrl")
         SkipIndexerTest = $false
         CredentialPathField = "configPath"
         CredentialFileRelative = "tidal_tokens.json"
@@ -372,6 +374,14 @@ foreach ($plugin in $pluginList) {
                     if ($config.ContainsKey("CredentialFieldNames")) {
                         $credFieldNames = @($config.CredentialFieldNames)
                     }
+                    $credAnyOfFieldNames = @()
+                    if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                        $credAnyOfFieldNames = @($config.CredentialAnyOfFieldNames)
+                    }
+                    $credAnyOfFieldNames = @()
+                    if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                        $credAnyOfFieldNames = @($config.CredentialAnyOfFieldNames)
+                    }
                     $skipIndexerTest = $true
                     if ($config.ContainsKey("SkipIndexerTest")) {
                         $skipIndexerTest = [bool]$config.SkipIndexerTest
@@ -381,6 +391,7 @@ foreach ($plugin in $pluginList) {
                         -SearchQuery $searchQuery `
                         -ExpectedMinResults $expectedMin `
                         -CredentialFieldNames $credFieldNames `
+                        -CredentialAnyOfFieldNames $credAnyOfFieldNames `
                         -SkipIndexerTest:$skipIndexerTest
 
                     $searchOutcome = if ($searchResult.Outcome) { $searchResult.Outcome } elseif ($searchResult.Success) { "success" } else { "failed" }
@@ -479,6 +490,7 @@ foreach ($plugin in $pluginList) {
                         -TestArtistName $testArtist `
                         -TestAlbumName $testAlbum `
                         -CredentialFieldNames $credFieldNames `
+                        -CredentialAnyOfFieldNames $credAnyOfFieldNames `
                         -SkipIfNoCreds:$true
 
                     # Store for Grab gate
@@ -559,11 +571,16 @@ foreach ($plugin in $pluginList) {
                 if ($config.ContainsKey("CredentialFieldNames")) {
                     $credFieldNames = @($config.CredentialFieldNames)
                 }
+                $credAnyOfFieldNames = @()
+                if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                    $credAnyOfFieldNames = @($config.CredentialAnyOfFieldNames)
+                }
 
                 $grabResult = Test-PluginGrabGate -IndexerId $lastPluginIndexer.id `
                     -PluginName $plugin `
                     -AlbumId $lastAlbumSearchResult.AlbumId `
                     -CredentialFieldNames $credFieldNames `
+                    -CredentialAnyOfFieldNames $credAnyOfFieldNames `
                     -SkipIfNoCreds:$true
 
                 $outcome = if ($grabResult.Outcome) { $grabResult.Outcome } elseif ($grabResult.Success) { "success" } else { "failed" }

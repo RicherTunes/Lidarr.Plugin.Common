@@ -187,6 +187,8 @@ function Test-SearchGate {
 
         [string[]]$CredentialFieldNames = @(),
 
+        [string[]]$CredentialAnyOfFieldNames = @(),
+
         [switch]$SkipIfNoCreds = $true
     )
 
@@ -276,9 +278,59 @@ function Test-SearchGate {
             return $false
         }
 
-        if ($SkipIfNoCreds -and (Is-MissingCredentials -Indexer $indexer -RequiredFields $CredentialFieldNames)) {
+        function Get-MissingCredentialReason {
+            param(
+                [AllowNull()]
+                $Indexer,
+                [string[]]$AllOfFields,
+                [string[]]$AnyOfFields
+            )
+
+            if ($null -eq $Indexer) { return $null }
+
+            $missingAllOf = @()
+            $anyOfApplicable = @()
+            $anyOfHasValue = $false
+
+            if ($AllOfFields) {
+                foreach ($fieldName in $AllOfFields) {
+                    if (Has-Field -Fields $Indexer.fields -Name $fieldName) {
+                        $value = Get-FieldValue -Fields $Indexer.fields -Name $fieldName
+                        if ([string]::IsNullOrWhiteSpace("$value")) {
+                            $missingAllOf += $fieldName
+                        }
+                    }
+                }
+            }
+
+            if ($AnyOfFields) {
+                foreach ($fieldName in $AnyOfFields) {
+                    if (Has-Field -Fields $Indexer.fields -Name $fieldName) {
+                        $anyOfApplicable += $fieldName
+                        $value = Get-FieldValue -Fields $Indexer.fields -Name $fieldName
+                        if (-not [string]::IsNullOrWhiteSpace("$value")) {
+                            $anyOfHasValue = $true
+                        }
+                    }
+                }
+            }
+
+            $reasons = @()
+            if ($missingAllOf.Count -gt 0) {
+                $reasons += "missing: $($missingAllOf -join ', ')"
+            }
+            if ($anyOfApplicable.Count -gt 0 -and -not $anyOfHasValue) {
+                $reasons += "missing one of: $($anyOfApplicable -join ', ')"
+            }
+
+            if ($reasons.Count -eq 0) { return $null }
+            return ($reasons -join '; ')
+        }
+
+        $missingCredReason = Get-MissingCredentialReason -Indexer $indexer -AllOfFields $CredentialFieldNames -AnyOfFields $CredentialAnyOfFieldNames
+        if ($SkipIfNoCreds -and $missingCredReason) {
             $result.Outcome = 'skipped'
-            $result.SkipReason = "Credentials not configured (missing: $($CredentialFieldNames -join ', '))"
+            $result.SkipReason = "Credentials not configured ($missingCredReason)"
             return $result
         }
 
