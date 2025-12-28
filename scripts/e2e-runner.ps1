@@ -155,9 +155,17 @@ $pluginConfigs = @{
         ExpectDownloadClient = $true
         ExpectImportList = $false
         # Search gate settings
-        SearchQuery = "Kind of Blue Miles Davis"
+        SearchQuery = "Amnesiac Radiohead"
         ExpectedMinResults = 1
-        CredentialFieldNames = @("email", "username", "password")
+        # Use existing artist/album for reliable testing
+        TestArtistName = "Radiohead"
+        TestAlbumName = "Amnesiac"
+        # Qobuz supports two auth methods:
+        # 1. Email/password: email + password
+        # 2. Token auth: userId + authToken
+        # Check for authToken OR password (one must be present)
+        CredentialFieldNames = @()
+        CredentialAnyOfFieldNames = @("authToken", "password")
         SkipIndexerTest = $false
     }
     'Tidalarr' = @{
@@ -165,9 +173,13 @@ $pluginConfigs = @{
         ExpectDownloadClient = $true
         ExpectImportList = $false
         # Search gate settings
-        SearchQuery = "Kind of Blue Miles Davis"
+        SearchQuery = "Amnesiac Radiohead"
         ExpectedMinResults = 1
-        CredentialFieldNames = @("configPath", "redirectUrl", "oauthRedirectUrl")
+        # Use existing artist/album for reliable testing
+        TestArtistName = "Radiohead"
+        TestAlbumName = "Amnesiac"
+        CredentialFieldNames = @("configPath")
+        CredentialAnyOfFieldNames = @("redirectUrl", "oauthRedirectUrl")
         SkipIndexerTest = $false
         CredentialPathField = "configPath"
         CredentialFileRelative = "tidal_tokens.json"
@@ -372,6 +384,14 @@ foreach ($plugin in $pluginList) {
                     if ($config.ContainsKey("CredentialFieldNames")) {
                         $credFieldNames = @($config.CredentialFieldNames)
                     }
+                    $credAnyOfFieldNames = @()
+                    if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                        $credAnyOfFieldNames = @($config.CredentialAnyOfFieldNames)
+                    }
+                    $credAnyOfFieldNames = @()
+                    if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                        $credAnyOfFieldNames = @($config.CredentialAnyOfFieldNames)
+                    }
                     $skipIndexerTest = $true
                     if ($config.ContainsKey("SkipIndexerTest")) {
                         $skipIndexerTest = [bool]$config.SkipIndexerTest
@@ -381,6 +401,7 @@ foreach ($plugin in $pluginList) {
                         -SearchQuery $searchQuery `
                         -ExpectedMinResults $expectedMin `
                         -CredentialFieldNames $credFieldNames `
+                        -CredentialAnyOfFieldNames $credAnyOfFieldNames `
                         -SkipIndexerTest:$skipIndexerTest
 
                     $searchOutcome = if ($searchResult.Outcome) { $searchResult.Outcome } elseif ($searchResult.Success) { "success" } else { "failed" }
@@ -469,6 +490,10 @@ foreach ($plugin in $pluginList) {
                     if ($config.ContainsKey("CredentialFieldNames")) {
                         $credFieldNames = @($config.CredentialFieldNames)
                     }
+                    $credAnyOfFieldNames = @()
+                    if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                        $credAnyOfFieldNames = @($config.CredentialAnyOfFieldNames)
+                    }
 
                     # Use per-plugin test artist/album or defaults
                     $testArtist = if ($config.ContainsKey("TestArtistName")) { $config.TestArtistName } else { "Miles Davis" }
@@ -479,6 +504,7 @@ foreach ($plugin in $pluginList) {
                         -TestArtistName $testArtist `
                         -TestAlbumName $testAlbum `
                         -CredentialFieldNames $credFieldNames `
+                        -CredentialAnyOfFieldNames $credAnyOfFieldNames `
                         -SkipIfNoCreds:$true
 
                     # Store for Grab gate
@@ -559,11 +585,16 @@ foreach ($plugin in $pluginList) {
                 if ($config.ContainsKey("CredentialFieldNames")) {
                     $credFieldNames = @($config.CredentialFieldNames)
                 }
+                $credAnyOfFieldNames = @()
+                if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                    $credAnyOfFieldNames = @($config.CredentialAnyOfFieldNames)
+                }
 
                 $grabResult = Test-PluginGrabGate -IndexerId $lastPluginIndexer.id `
                     -PluginName $plugin `
                     -AlbumId $lastAlbumSearchResult.AlbumId `
                     -CredentialFieldNames $credFieldNames `
+                    -CredentialAnyOfFieldNames $credAnyOfFieldNames `
                     -SkipIfNoCreds:$true
 
                 $outcome = if ($grabResult.Outcome) { $grabResult.Outcome } elseif ($grabResult.Success) { "success" } else { "failed" }
