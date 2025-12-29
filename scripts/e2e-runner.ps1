@@ -58,6 +58,10 @@
 .PARAMETER SkipDiagnostics
     Skip diagnostics bundle creation on failure.
 
+.PARAMETER PersistRerun
+    When set, re-runs Search gates after Persist gate to prove functional auth post-restart.
+    Automatically enabled in bootstrap mode.
+
 .EXAMPLE
     # Run schema gate for all plugins (no credentials needed)
     ./e2e-runner.ps1 -Plugins "Qobuzarr,Tidalarr,Brainarr" -Gate schema
@@ -83,7 +87,9 @@ param(
 
     [string]$DiagnosticsPath = "./diagnostics",
 
-    [switch]$SkipDiagnostics
+    [switch]$SkipDiagnostics,
+
+    [switch]$PersistRerun
 )
 
 $ErrorActionPreference = "Stop"
@@ -1034,6 +1040,135 @@ if ($runPersist -and $overallSuccess) {
             Write-Host "  - $err" -ForegroundColor Red
         }
         $overallSuccess = $false
+    }
+    Write-Host ""
+}
+
+# Post-Persist Revalidation: Re-run Search gates after restart to prove functional auth.
+# Automatically enabled in bootstrap mode, or explicitly with -PersistRerun.
+$runPersistRerun = ($PersistRerun -or $Gate -eq "bootstrap") -and $runPersist -and $overallSuccess
+if ($runPersistRerun) {
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Post-Restart Functional Validation" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Re-running Search gates to prove auth works after restart..." -ForegroundColor White
+    Write-Host ""
+
+    foreach ($plugin in $pluginList) {
+        $config = $pluginConfigs[$plugin]
+        if (-not $config) { continue }
+
+        # Skip plugins without indexers (e.g., Brainarr is import-list only)
+        if (-not $config.ExpectIndexer) {
+            Write-Host "  $plugin Revalidation... SKIP (no indexer)" -ForegroundColor DarkGray
+            $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome "skipped" -Details @{
+                Reason = "No indexer expected for plugin"
+            }
+            continue
+        }
+
+        Write-Host "  $plugin Revalidation..." -ForegroundColor Cyan
+
+        try {
+            $indexers = Invoke-LidarrApi -Endpoint "indexer"
+            $pluginIndexer = $indexers | Where-Object {
+                $_.implementation -like "*$plugin*" -or
+                $_.name -like "*$plugin*"
+            } | Select-Object -First 1
+
+            if (-not $pluginIndexer) {
+                Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
+                $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome "skipped" -Details @{
+                    Reason = "No configured indexer found post-restart"
+                }
+                continue
+            }
+
+            # Check for credential file if applicable (same logic as Search gate)
+            if ($config.ContainsKey("CredentialFileRelative") -and $config.ContainsKey("CredentialPathField") -and $ContainerName) {
+                try {
+                    $probePathField = "$($config.CredentialPathField)"
+                    $probeConfigPath = Get-LidarrFieldValue -Fields $pluginIndexer.fields -Name $probePathField
+                    if (-not [string]::IsNullOrWhiteSpace("$probeConfigPath")) {
+                        $relative = "$($config.CredentialFileRelative)"
+                        $probeFilePath = "$($probeConfigPath.TrimEnd('/'))/$relative"
+                        $probeOk = docker exec $ContainerName sh -c "test -s '$probeFilePath' && echo ok" 2>$null
+                        if (-not $probeOk) {
+                            Write-Host "       SKIP (credentials file missing post-restart)" -ForegroundColor DarkGray
+                            $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome "skipped" -Details @{
+                                Reason = "Credentials file missing post-restart"
+                                CredentialFile = $probeFilePath
+                            }
+                            continue
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            $searchQuery = $config.SearchQuery
+            $expectedMin = $config.ExpectedMinResults
+            if (-not $searchQuery) { $searchQuery = "Kind of Blue Miles Davis" }
+            if ($expectedMin -lt 1) { $expectedMin = 1 }
+
+            $credAllOf = @()
+            $credAnyOf = @()
+            if ($config.ContainsKey("CredentialAllOfFieldNames")) {
+                $credAllOf = @($config.CredentialAllOfFieldNames)
+            }
+            if ($config.ContainsKey("CredentialAnyOfFieldNames")) {
+                $credAnyOf = @($config.CredentialAnyOfFieldNames)
+            }
+            if ($config.ContainsKey("CredentialFieldNames")) {
+                $credAllOf = @($config.CredentialFieldNames)
+            }
+            $skipIndexerTest = $true
+            if ($config.ContainsKey("SkipIndexerTest")) {
+                $skipIndexerTest = [bool]$config.SkipIndexerTest
+            }
+
+            $revalResult = Test-SearchGate -IndexerId $pluginIndexer.id `
+                -SearchQuery $searchQuery `
+                -ExpectedMinResults $expectedMin `
+                -CredentialAllOfFieldNames $credAllOf `
+                -CredentialAnyOfFieldNames $credAnyOf `
+                -SkipIndexerTest:$skipIndexerTest
+
+            $revalOutcome = if ($revalResult.Outcome) { $revalResult.Outcome } elseif ($revalResult.Success) { "success" } else { "failed" }
+            $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome $revalOutcome -Errors $revalResult.Errors -Details @{
+                IndexerId = $pluginIndexer.id
+                ResultCount = $revalResult.ResultCount
+                SearchQuery = $searchQuery
+                SkipReason = $revalResult.SkipReason
+                PostRestart = $true
+            }
+
+            if ($revalOutcome -eq "skipped") {
+                $reason = $revalResult.SkipReason
+                if (-not $reason) { $reason = "Skipped by gate policy" }
+                Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+            }
+            elseif ($revalResult.Success) {
+                if (-not $skipIndexerTest) {
+                    Write-Host "       PASS (indexer/test post-restart)" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "       PASS ($($revalResult.ResultCount) results post-restart)" -ForegroundColor Green
+                }
+            }
+            else {
+                Write-Host "       FAIL (auth broken after restart)" -ForegroundColor Red
+                foreach ($err in $revalResult.Errors) {
+                    Write-Host "       - $err" -ForegroundColor Red
+                }
+                $overallSuccess = $false
+            }
+        }
+        catch {
+            Write-Host "       ERROR: $_" -ForegroundColor Red
+            $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome "failed" -Errors @("Revalidation error: $_")
+            $overallSuccess = $false
+        }
     }
     Write-Host ""
 }
