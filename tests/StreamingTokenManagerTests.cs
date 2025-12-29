@@ -16,7 +16,7 @@ namespace Lidarr.Plugin.Common.Tests
             await store.SaveAsync(new TokenEnvelope<TestSession>(new TestSession("persisted"), DateTime.UtcNow.AddMinutes(30)));
 
             var authService = new FakeAuthService();
-            var manager = CreateManager(authService, store);
+            using var manager = CreateManager(authService, store);
 
             var session = await manager.GetValidSessionAsync();
 
@@ -29,7 +29,7 @@ namespace Lidarr.Plugin.Common.Tests
         {
             var store = new MemoryTokenStore<TestSession>();
             var authService = new FakeAuthService();
-            var manager = CreateManager(authService, store);
+            using var manager = CreateManager(authService, store);
 
             await manager.RefreshSessionAsync(new TestCredentials("primary"));
 
@@ -48,7 +48,7 @@ namespace Lidarr.Plugin.Common.Tests
             await store.SaveAsync(new TokenEnvelope<TestSession>(new TestSession("persisted"), DateTime.UtcNow.AddMinutes(30)));
 
             var authService = new FakeAuthService();
-            var manager = CreateManager(authService, store);
+            using var manager = CreateManager(authService, store);
 
             // Explicitly clear before any call that would load the persisted session into memory
             await manager.ClearSessionAsync();
@@ -63,7 +63,7 @@ namespace Lidarr.Plugin.Common.Tests
             await store.SaveAsync(new TokenEnvelope<TestSession>(new TestSession("stale"), DateTime.UtcNow.AddMinutes(-5)));
 
             var authService = new FakeAuthService();
-            var manager = CreateManager(authService, store);
+            using var manager = CreateManager(authService, store);
             var fallback = new TestCredentials("fallback");
 
             var session = await manager.GetValidSessionAsync(fallback);
@@ -77,14 +77,48 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal(session.Id, persisted!.Session.Id);
         }
 
+        [Fact]
+        public async Task ProactiveRefresh_RefreshesSession_WhenApproachingExpiryAndCredentialsAvailable()
+        {
+            var store = new MemoryTokenStore<TestSession>();
+            await store.SaveAsync(new TokenEnvelope<TestSession>(new TestSession("persisted"), DateTime.UtcNow.AddMilliseconds(250)));
+
+            var authService = new FakeAuthService();
+            using var manager = CreateManager(
+                authService,
+                store,
+                proactiveCredentialsProvider: () => new TestCredentials("proactive"));
+
+            // Loads persisted session into memory so the background timer can act.
+            _ = manager.GetSessionStatus();
+
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            while (DateTime.UtcNow < deadline && authService.AuthenticateCalls < 1)
+            {
+                await Task.Delay(25);
+            }
+
+            Assert.True(authService.AuthenticateCalls >= 1, "Expected proactive refresh to authenticate at least once.");
+            Assert.Equal(new TestCredentials("proactive"), authService.LastCredentials);
+
+            var envelope = await store.LoadAsync();
+            Assert.NotNull(envelope);
+            Assert.Equal(authService.LastIssuedSession?.Id, envelope!.Session.Id);
+        }
+
         private static StreamingTokenManager<TestSession, TestCredentials> CreateManager(
             FakeAuthService authService,
-            ITokenStore<TestSession> store)
+            ITokenStore<TestSession> store,
+            Func<TestCredentials?>? proactiveCredentialsProvider = null)
         {
             var options = new StreamingTokenManagerOptions<TestSession>
             {
                 DefaultSessionLifetime = TimeSpan.FromMinutes(15),
-                RefreshBuffer = TimeSpan.FromMinutes(1)
+                RefreshBuffer = TimeSpan.FromMinutes(1),
+                RefreshCheckInterval = TimeSpan.FromMilliseconds(25),
+                ProactiveRefreshCredentialsProvider = proactiveCredentialsProvider == null
+                    ? null
+                    : () => proactiveCredentialsProvider()
             };
 
             return new StreamingTokenManager<TestSession, TestCredentials>(

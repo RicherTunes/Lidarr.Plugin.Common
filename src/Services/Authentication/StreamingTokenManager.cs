@@ -29,6 +29,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private volatile bool _isRefreshing;
         private volatile int _refreshAttempts;
         private Task? _initialLoadTask;
+        private int _proactiveRefreshCredentialTypeMismatchWarningLogged;
 
         public event EventHandler<SessionRefreshEventArgs<TSession>>? SessionRefreshed;
         public event EventHandler<SessionRefreshFailedEventArgs>? SessionRefreshFailed;
@@ -229,13 +230,58 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             return expiry ?? DateTime.UtcNow.Add(_options.DefaultSessionLifetime);
         }
 
-        private void CheckTokenExpiry(object? state)
+        private async void CheckTokenExpiry(object? state)
         {
             try
             {
-                if (!IsSessionValid() && !_isRefreshing)
+                // Check if session is within refresh buffer (needs refresh soon)
+                bool needsRefresh;
+                lock (_tokenLock)
                 {
-                    _logger.LogDebug("Session approaching expiry, awaiting caller-provided refresh");
+                    needsRefresh = _currentSession != null &&
+                                   DateTime.UtcNow >= _sessionExpiryTime.Subtract(_options.RefreshBuffer) &&
+                                   DateTime.UtcNow < _sessionExpiryTime;
+                }
+
+                if (!needsRefresh || _isRefreshing)
+                {
+                    return;
+                }
+
+                // Check if proactive refresh is enabled and credentials are available
+                if (!_options.EnableProactiveRefresh || _options.ProactiveRefreshCredentialsProvider == null)
+                {
+                    _logger.LogDebug("Session approaching expiry, awaiting caller-provided refresh (proactive refresh not configured)");
+                    return;
+                }
+
+                var credentialsObject = _options.ProactiveRefreshCredentialsProvider();
+                if (credentialsObject is not TCredentials credentials)
+                {
+                    if (Interlocked.Exchange(ref _proactiveRefreshCredentialTypeMismatchWarningLogged, 1) == 0)
+                    {
+                        _logger.LogWarning(
+                            "ProactiveRefreshCredentialsProvider returned {ActualType} but expected {ExpectedType}; proactive refresh will not run until this is fixed",
+                            credentialsObject?.GetType().FullName ?? "null",
+                            typeof(TCredentials).FullName);
+                    }
+
+                    _logger.LogDebug("Session approaching expiry, but credentials provider did not return valid credentials");
+                    return;
+                }
+
+                _logger.LogDebug("Proactive token refresh: session expires in {TimeToExpiry}, refreshing preemptively",
+                    _sessionExpiryTime - DateTime.UtcNow);
+
+                try
+                {
+                    await RefreshSessionAsync(credentials).ConfigureAwait(false);
+                    _logger.LogDebug("Proactive token refresh completed successfully");
+                }
+                catch (Exception refreshEx)
+                {
+                    _logger.LogWarning(refreshEx, "Proactive token refresh failed, will retry on next check interval");
+                    // Don't rethrow - this is background maintenance, let the timer retry
                 }
             }
             catch (Exception ex)
