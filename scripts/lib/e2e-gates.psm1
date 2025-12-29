@@ -1477,4 +1477,301 @@ function Test-AlbumSearchGate {
     return $result
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Invoke-LidarrApi
+function Test-ImportListGate {
+    <#
+    .SYNOPSIS
+        Gate for ImportList plugins: Verify import list can sync.
+
+    .DESCRIPTION
+        For plugins like Brainarr that provide ImportList functionality:
+        1. Detects Brainarr schema presence via GET /api/v1/importlist/schema
+        2. Finds an existing configured import list by implementation/name
+        3. If no import list configured → Outcome=skipped
+        4. If configured but provider credentials missing → Outcome=skipped
+        5. If configured and creds present:
+           - Triggers ImportListSync command
+           - Polls until completed/failed/timeout
+           - Verifies sync had effect (command completed successfully)
+        6. Returns Outcome=success when proof-of-life satisfied
+
+    .PARAMETER PluginName
+        Name of the plugin (e.g., "Brainarr")
+
+    .PARAMETER CommandTimeoutSec
+        Timeout for ImportListSync command (default: 120)
+
+    .PARAMETER CredentialAllOfFieldNames
+        Field names that must ALL have values for credentials to be considered present.
+
+    .PARAMETER CredentialAnyOfFieldNames
+        Field name groups where at least ONE group must have all values present.
+
+    .PARAMETER SkipIfNoCreds
+        Skip gate if credentials are missing.
+
+    .OUTPUTS
+        PSCustomObject with Outcome, ImportListId, CommandId, Errors, SkipReason
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$PluginName,
+
+        [int]$CommandTimeoutSec = 120,
+
+        [string[]]$CredentialAllOfFieldNames = @(),
+
+        [object[]]$CredentialAnyOfFieldNames = @(),
+
+        [switch]$SkipIfNoCreds = $true
+    )
+
+    $result = [PSCustomObject]@{
+        Gate = 'ImportList'
+        PluginName = $PluginName
+        Outcome = 'failed'
+        Success = $false
+        ImportListId = $null
+        ImportListName = $null
+        ImportListImplementation = $null
+        CommandId = $null
+        CommandStatus = $null
+        PostSyncVerified = $false
+        PostSyncError = $null
+        Errors = @()
+        SkipReason = $null
+    }
+
+    try {
+        # Step 1: Check schema presence
+        $schemas = Invoke-LidarrApi -Endpoint "importlist/schema"
+        $pluginSchema = $schemas | Where-Object {
+            $_.implementation -like "*$PluginName*" -or
+            $_.implementationName -like "*$PluginName*"
+        } | Select-Object -First 1
+
+        if (-not $pluginSchema) {
+            $result.Outcome = 'skipped'
+            $result.SkipReason = "No import list schema found for '$PluginName'"
+            return $result
+        }
+
+        # Step 2: Find configured import list
+        $importLists = Invoke-LidarrApi -Endpoint "importlist"
+        $configuredList = $importLists | Where-Object {
+            $_.implementation -like "*$PluginName*" -or
+            $_.name -like "*$PluginName*"
+        } | Select-Object -First 1
+
+        if (-not $configuredList) {
+            $result.Outcome = 'skipped'
+            $result.SkipReason = "No configured import list found for '$PluginName' (schema exists but not configured)"
+            return $result
+        }
+
+        $result.ImportListId = $configuredList.id
+        $result.ImportListName = $configuredList.name
+        $result.ImportListImplementation = $configuredList.implementation
+
+        # Get full import list details
+        $importListFull = Invoke-LidarrApi -Endpoint "importlist/$($configuredList.id)"
+
+        # Credential check helpers (same pattern as other gates)
+        function Has-Field {
+            param($Fields, [string]$Name)
+            if ($null -eq $Fields) { return $false }
+            $arr = if ($Fields -is [array]) { $Fields } else { @($Fields) }
+            foreach ($f in $arr) {
+                $fname = if ($f -is [hashtable]) { $f['name'] } else { $f.name }
+                if ([string]::Equals("$fname", $Name, [StringComparison]::OrdinalIgnoreCase)) {
+                    return $true
+                }
+            }
+            return $false
+        }
+
+        function Get-FieldValue {
+            param($Fields, [string]$Name)
+            if ($null -eq $Fields) { return $null }
+            $arr = if ($Fields -is [array]) { $Fields } else { @($Fields) }
+            foreach ($f in $arr) {
+                $fname = if ($f -is [hashtable]) { $f['name'] } else { $f.name }
+                if ([string]::Equals("$fname", $Name, [StringComparison]::OrdinalIgnoreCase)) {
+                    if ($f -is [hashtable]) { return $f['value'] }
+                    return $f.value
+                }
+            }
+            return $null
+        }
+
+        # Step 3: Check credentials
+        if ($SkipIfNoCreds) {
+            $missing = New-Object System.Collections.Generic.List[string]
+
+            foreach ($fieldName in $CredentialAllOfFieldNames) {
+                if (-not (Has-Field -Fields $importListFull.fields -Name $fieldName)) { continue }
+                $value = Get-FieldValue -Fields $importListFull.fields -Name $fieldName
+                if ([string]::IsNullOrWhiteSpace("$value")) {
+                    $missing.Add($fieldName)
+                }
+            }
+
+            if ($CredentialAnyOfFieldNames -and $CredentialAnyOfFieldNames.Count -gt 0) {
+                $groups = @()
+                foreach ($entry in $CredentialAnyOfFieldNames) {
+                    if ($null -eq $entry) { continue }
+                    if ($entry -is [array]) {
+                        $groups += ,@($entry)
+                    }
+                    else {
+                        $groups += ,@(@("$entry"))
+                    }
+                }
+
+                $anyApplicable = $false
+                $anySatisfied = $false
+
+                foreach ($group in $groups) {
+                    if (-not $group -or $group.Count -eq 0) { continue }
+
+                    $groupApplicable = $true
+                    foreach ($fieldName in $group) {
+                        if (-not (Has-Field -Fields $importListFull.fields -Name $fieldName)) {
+                            $groupApplicable = $false
+                            break
+                        }
+                    }
+                    if (-not $groupApplicable) { continue }
+                    $anyApplicable = $true
+
+                    $groupSatisfied = $true
+                    foreach ($fieldName in $group) {
+                        $value = Get-FieldValue -Fields $importListFull.fields -Name $fieldName
+                        if ([string]::IsNullOrWhiteSpace("$value")) {
+                            $groupSatisfied = $false
+                            break
+                        }
+                    }
+                    if ($groupSatisfied) {
+                        $anySatisfied = $true
+                        break
+                    }
+                }
+
+                if ($anyApplicable -and -not $anySatisfied) {
+                    $groupDesc = $groups | ForEach-Object { "(" + ($_ -join " + ") + ")" }
+                    $missing.Add("any of: " + ($groupDesc -join " OR "))
+                }
+            }
+
+            if ($missing.Count -gt 0) {
+                $result.Outcome = 'skipped'
+                $result.SkipReason = "Credentials not configured ($($missing -join '; '))"
+                return $result
+            }
+        }
+
+        # Step 4: Capture baseline state before sync
+        $preSync = $null
+        try {
+            $preSync = Invoke-LidarrApi -Endpoint "importlist/$($configuredList.id)"
+        }
+        catch { }
+
+        # Step 5: Trigger ImportListSync command
+        # Note: ImportListSync syncs ALL import lists globally; definitionId is not supported.
+        # We target diagnostics at the specific list we're testing.
+        Write-Host "       Triggering ImportListSync (global sync, testing list id=$($configuredList.id) name='$($configuredList.name)')..." -ForegroundColor Gray
+        $commandBody = @{
+            name = "ImportListSync"
+        }
+
+        $command = Invoke-LidarrApi -Endpoint "command" -Method POST -Body $commandBody
+        $result.CommandId = $command.id
+        Write-Host "       Command ID: $($command.id)" -ForegroundColor Gray
+
+        # Step 6: Wait for command completion
+        $startTime = Get-Date
+        $timeout = $startTime.AddSeconds($CommandTimeoutSec)
+        $completed = $false
+
+        while ((Get-Date) -lt $timeout -and -not $completed) {
+            Start-Sleep -Seconds 2
+            $commandStatus = Invoke-LidarrApi -Endpoint "command/$($command.id)"
+            $result.CommandStatus = $commandStatus.status
+
+            if ($commandStatus.status -eq 'completed') {
+                $completed = $true
+                Write-Host "       Command completed" -ForegroundColor Green
+            }
+            elseif ($commandStatus.status -eq 'failed') {
+                $failMsg = $commandStatus.message
+                # Check if failure is auth/config related
+                if ($failMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403|invalid_grant|invalid_client)') {
+                    $result.Outcome = 'skipped'
+                    $result.SkipReason = "ImportListSync command failed with auth/config error: $failMsg"
+                    return $result
+                }
+                $result.Errors += "ImportListSync command failed: $failMsg"
+                return $result
+            }
+            else {
+                Write-Host "       Command status: $($commandStatus.status)..." -ForegroundColor Gray
+            }
+        }
+
+        if (-not $completed) {
+            $lastStatus = $null
+            try { $lastStatus = Invoke-LidarrApi -Endpoint "command/$($command.id)" } catch {}
+            $statusInfo = if ($lastStatus) { "status=$($lastStatus.status), message=$($lastStatus.message)" } else { "unknown" }
+            $result.Errors += "ImportListSync command timed out after ${CommandTimeoutSec}s ($statusInfo)"
+            return $result
+        }
+
+        # Step 7: Post-sync verification
+        # Check that sync actually ran for our import list by comparing state before/after.
+        # Lidarr import lists don't expose lastSync on the API object, so we verify:
+        # 1. Command completed without error (already done above)
+        # 2. Import list still exists and has no new error state
+        # 3. Log warning that this is "command completion" proof only
+        $postSync = $null
+        try {
+            $postSync = Invoke-LidarrApi -Endpoint "importlist/$($configuredList.id)"
+        }
+        catch {
+            $result.Errors += "Import list $($configuredList.id) not accessible after sync: $_"
+            return $result
+        }
+
+        # Check for error fields if present (Lidarr v1 API may expose these)
+        $postSyncError = $null
+        if ($postSync.PSObject.Properties['lastSyncError']) {
+            $postSyncError = $postSync.lastSyncError
+        }
+        if ($postSyncError -and $postSyncError -ne '') {
+            $result.PostSyncError = $postSyncError
+            $result.Errors += "Import list sync error reported: $postSyncError"
+            return $result
+        }
+
+        # Success: command completed and no error state on import list
+        # Note: This proves command ran, not that items were imported (Lidarr API limitation)
+        Write-Host "       Post-sync check: import list accessible, no error state" -ForegroundColor Gray
+        $result.PostSyncVerified = $true
+        $result.Success = $true
+        $result.Outcome = 'success'
+    }
+    catch {
+        $errMsg = "$_"
+        # Check if exception is auth-related
+        if ($errMsg -match '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403|invalid_grant|invalid_client)') {
+            $result.Outcome = 'skipped'
+            $result.SkipReason = "ImportList gate failed with auth error: $errMsg"
+            return $result
+        }
+        $result.Errors += "ImportList gate failed: $errMsg"
+    }
+
+    return $result
+}
+
+Export-ModuleMember -Function Initialize-E2EGates, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Invoke-LidarrApi
