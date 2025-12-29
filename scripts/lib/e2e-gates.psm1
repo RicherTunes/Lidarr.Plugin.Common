@@ -32,7 +32,9 @@ function Invoke-LidarrApi {
 
         [string]$Method = 'GET',
 
-        [object]$Body = $null
+        [object]$Body = $null,
+
+        [int]$TimeoutSec = 30
     )
 
     $headers = @{
@@ -44,7 +46,7 @@ function Invoke-LidarrApi {
         Uri = "$script:LidarrApiUrl/api/v1/$Endpoint"
         Method = $Method
         Headers = $headers
-        TimeoutSec = 30
+        TimeoutSec = $TimeoutSec
     }
 
     if ($Body) {
@@ -1395,7 +1397,7 @@ function Test-AlbumSearchGate {
 
         # Step 5: Check releases for this album
         Write-Host "       Fetching releases for album $($album.id)..." -ForegroundColor Gray
-        $releases = Invoke-LidarrApi -Endpoint "release?albumId=$($album.id)"
+        $releases = Invoke-LidarrApi -Endpoint "release?albumId=$($album.id)" -TimeoutSec 120
 
         $result.ReleaseCount = ($releases | Measure-Object).Count
         Write-Host "       Total releases: $($result.ReleaseCount)" -ForegroundColor Gray

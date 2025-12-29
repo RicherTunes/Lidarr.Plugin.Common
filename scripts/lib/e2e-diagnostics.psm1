@@ -12,6 +12,7 @@ $script:SensitivePatterns = @(
     'bearer',
     'credential',
     'auth',
+    'redirect',
     'accesstoken',
     'access_token',
     'refreshtoken',

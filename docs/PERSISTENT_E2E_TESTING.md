@@ -105,6 +105,31 @@ pwsh scripts/e2e-runner.ps1 `
   -ExtractApiKeyFromContainer
 ```
 
+### Configure + Persistence
+
+To reduce “split-brain” config errors (e.g., OAuth configured on the indexer but
+missing on the download client), the runner includes two optional gates:
+
+| Gate | Purpose |
+|------|---------|
+| `configure` | Fixes known config drift that causes E2E failures (currently: sync Tidalarr `redirectUrl` + `configPath` from indexer → download client when missing). |
+| `persist` | Restarts the Lidarr Docker container and verifies configured components still exist after restart. |
+| `bootstrap` | Runs `configure` + `all` + `persist` in one command. |
+
+```powershell
+# Sync known configuration drift (no-op if already consistent)
+pwsh scripts/e2e-runner.ps1 -Plugins 'Tidalarr' -Gate configure `
+  -LidarrUrl 'http://localhost:8691' -ContainerName 'lidarr-multi-plugin-persist' -ExtractApiKeyFromContainer
+
+# Restart + verify config objects still exist
+pwsh scripts/e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr' -Gate persist `
+  -LidarrUrl 'http://localhost:8691' -ContainerName 'lidarr-multi-plugin-persist' -ExtractApiKeyFromContainer
+
+# Full: fix drift → run all gates → restart → verify persistence
+pwsh scripts/e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr' -Gate bootstrap `
+  -LidarrUrl 'http://localhost:8691' -ContainerName 'lidarr-multi-plugin-persist' -ExtractApiKeyFromContainer
+```
+
 ### Gate Cascade and SKIP Behavior
 
 When running `-Gate all`, gates execute in order: **Schema → Search → AlbumSearch → Grab**

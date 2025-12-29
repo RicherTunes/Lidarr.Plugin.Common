@@ -19,9 +19,14 @@
 
     Gates:
     1. Schema Gate (requires Lidarr API key): Verifies plugin schemas are registered
-    2. Search Gate (credentials required): Verifies indexer/test passes
-    3. AlbumSearch Gate (credentials required): Triggers AlbumSearch command, verifies releases from plugin
-    4. Grab Gate (credentials required): Verifies download works
+    2. Configure Gate (optional): Fixes known configuration drift (e.g., OAuth split-brain)
+    3. Search Gate (credentials required): Verifies indexer/test passes
+    4. AlbumSearch Gate (credentials required): Triggers AlbumSearch command, verifies releases from plugin
+    5. Grab Gate (credentials required): Verifies download works
+    6. Persist Gate (optional): Restarts container and verifies configured components persist
+
+    Combined:
+    - bootstrap: configure + all + persist
 
     On failure, creates a diagnostics bundle for AI-assisted triage.
 
@@ -33,7 +38,7 @@
     Comma-separated list of plugins to test (e.g., "Qobuzarr,Tidalarr")
 
 .PARAMETER Gate
-    Which gate to run: "schema", "search", "grab", or "all" (default: "schema")
+    Which gate to run: "schema", "configure", "search", "albumsearch", "grab", "all", "persist", or "bootstrap" (default: "schema")
 
 .PARAMETER LidarrUrl
     Lidarr API URL (default: http://localhost:8686)
@@ -65,7 +70,7 @@ param(
     [Parameter(Mandatory)]
     [string]$Plugins,
 
-    [ValidateSet("schema", "search", "albumsearch", "grab", "all")]
+    [ValidateSet("schema", "configure", "search", "albumsearch", "grab", "all", "persist", "bootstrap")]
     [string]$Gate = "schema",
 
     [string]$LidarrUrl = "http://localhost:8686",
@@ -146,6 +151,326 @@ function New-OutcomeResult {
         Errors = $Errors
         Details = $Details
     }
+}
+
+function Get-LidarrFieldValue {
+    param(
+        [AllowNull()]
+        $Fields,
+        [Parameter(Mandatory)]
+        [string]$Name
+    )
+
+    if ($null -eq $Fields) { return $null }
+    $arr = if ($Fields -is [array]) { $Fields } else { @($Fields) }
+    foreach ($f in $arr) {
+        $fname = if ($f -is [hashtable]) { $f['name'] } else { $f.name }
+        if ([string]::Equals("$fname", $Name, [StringComparison]::OrdinalIgnoreCase)) {
+            if ($f -is [hashtable]) { return $f['value'] }
+            return $f.value
+        }
+    }
+    return $null
+}
+
+function Set-LidarrFieldValue {
+    param(
+        [AllowNull()]
+        $Fields,
+        [Parameter(Mandatory)]
+        [string]$Name,
+        [AllowNull()]
+        $Value
+    )
+
+    if ($null -eq $Fields) { return @() }
+    $arr = if ($Fields -is [array]) { @($Fields) } else { @($Fields) }
+
+    $updated = $false
+    foreach ($f in $arr) {
+        $fname = if ($f -is [hashtable]) { $f['name'] } else { $f.name }
+        if ([string]::Equals("$fname", $Name, [StringComparison]::OrdinalIgnoreCase)) {
+            if ($f -is [hashtable]) { $f['value'] = $Value } else { $f.value = $Value }
+            $updated = $true
+            break
+        }
+    }
+
+    if (-not $updated) {
+        $arr += [PSCustomObject]@{ name = $Name; value = $Value }
+    }
+
+    return $arr
+}
+
+function Find-ConfiguredComponent {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("indexer", "downloadclient", "importlist")]
+        [string]$Type,
+
+        [Parameter(Mandatory)]
+        [string]$PluginName
+    )
+
+    $endpoint = switch ($Type) {
+        "indexer" { "indexer" }
+        "downloadclient" { "downloadclient" }
+        "importlist" { "importlist" }
+    }
+
+    $items = Invoke-LidarrApi -Endpoint $endpoint
+    if (-not $items) { return $null }
+
+    return $items | Where-Object {
+        $_.implementation -like "*$PluginName*" -or
+        $_.name -like "*$PluginName*"
+    } | Select-Object -First 1
+}
+
+function Test-ConfigureGateForPlugin {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PluginName,
+
+        [hashtable]$PluginConfig = @{}
+    )
+
+    $result = [PSCustomObject]@{
+        Gate = "Configure"
+        PluginName = $PluginName
+        Outcome = "skipped" # success|failed|skipped
+        Success = $false
+        Actions = @()
+        Errors = @()
+        SkipReason = $null
+    }
+
+    # Currently Configure gate is intentionally conservative: it only syncs known
+    # “split-brain” configuration that causes real E2E failures (e.g., OAuth configured
+    # on an indexer but missing on its paired download client).
+    if ($PluginName -ne "Tidalarr") {
+        $result.Outcome = "success"
+        $result.Success = $true
+        return $result
+    }
+
+    try {
+        $indexer = Find-ConfiguredComponent -Type "indexer" -PluginName $PluginName
+        $client = Find-ConfiguredComponent -Type "downloadclient" -PluginName $PluginName
+
+        if (-not $indexer) {
+            $result.SkipReason = "No configured indexer found"
+            return $result
+        }
+        if (-not $client) {
+            $result.SkipReason = "No configured download client found"
+            return $result
+        }
+
+        $indexerFull = Invoke-LidarrApi -Endpoint ("indexer/{0}" -f $indexer.id)
+        $clientFull = Invoke-LidarrApi -Endpoint ("downloadclient/{0}" -f $client.id)
+
+        $indexerConfigPath = Get-LidarrFieldValue -Fields $indexerFull.fields -Name "configPath"
+        $clientConfigPath = Get-LidarrFieldValue -Fields $clientFull.fields -Name "configPath"
+
+        $indexerRedirectUrl = Get-LidarrFieldValue -Fields $indexerFull.fields -Name "redirectUrl"
+        if ([string]::IsNullOrWhiteSpace("$indexerRedirectUrl")) {
+            $indexerRedirectUrl = Get-LidarrFieldValue -Fields $indexerFull.fields -Name "oauthRedirectUrl"
+        }
+
+        $clientRedirectUrl = Get-LidarrFieldValue -Fields $clientFull.fields -Name "redirectUrl"
+        if ([string]::IsNullOrWhiteSpace("$clientRedirectUrl")) {
+            $clientRedirectUrl = Get-LidarrFieldValue -Fields $clientFull.fields -Name "oauthRedirectUrl"
+        }
+
+        $needsUpdate = $false
+        $updatedFields = @($clientFull.fields)
+
+        if (-not [string]::IsNullOrWhiteSpace("$indexerConfigPath") -and [string]::IsNullOrWhiteSpace("$clientConfigPath")) {
+            $updatedFields = Set-LidarrFieldValue -Fields $updatedFields -Name "configPath" -Value $indexerConfigPath
+            $result.Actions += "Copied configPath from indexer to download client"
+            $needsUpdate = $true
+        }
+
+        if (-not [string]::IsNullOrWhiteSpace("$indexerRedirectUrl") -and [string]::IsNullOrWhiteSpace("$clientRedirectUrl")) {
+            # Do not log the URL content (contains auth codes).
+            $updatedFields = Set-LidarrFieldValue -Fields $updatedFields -Name "redirectUrl" -Value $indexerRedirectUrl
+            $result.Actions += "Copied redirectUrl from indexer to download client"
+            $needsUpdate = $true
+        }
+
+        if (-not $needsUpdate) {
+            $result.Outcome = "success"
+            $result.Success = $true
+            return $result
+        }
+
+        $clientFull.fields = $updatedFields
+
+        try {
+            Invoke-LidarrApi -Endpoint ("downloadclient/{0}" -f $clientFull.id) -Method PUT -Body $clientFull | Out-Null
+        }
+        catch {
+            # Fallback: some Lidarr versions accept PUT /downloadclient with body containing id.
+            Invoke-LidarrApi -Endpoint "downloadclient" -Method PUT -Body $clientFull | Out-Null
+        }
+
+        $result.Outcome = "success"
+        $result.Success = $true
+        return $result
+    }
+    catch {
+        $result.Outcome = "failed"
+        $result.Success = $false
+        $result.Errors += "Configure gate failed: $_"
+        return $result
+    }
+}
+
+function Wait-LidarrReady {
+    param(
+        [Parameter(Mandatory)]
+        [string]$BaseUrl,
+        [Parameter(Mandatory)]
+        [string]$ApiKey,
+        [int]$TimeoutSec = 120
+    )
+
+    $deadline = (Get-Date).AddSeconds([Math]::Max(5, $TimeoutSec))
+    while ((Get-Date) -lt $deadline) {
+        try {
+            $headers = @{ "X-Api-Key" = $ApiKey }
+            $status = Invoke-RestMethod -Uri ("{0}/api/v1/system/status" -f $BaseUrl.TrimEnd('/')) -Headers $headers -TimeoutSec 10
+            if ($status) { return $true }
+        }
+        catch { }
+        Start-Sleep -Milliseconds 750
+    }
+
+    return $false
+}
+
+function Test-PersistGate {
+    param(
+        [Parameter(Mandatory)]
+        [string[]]$PluginList,
+        [Parameter(Mandatory)]
+        [hashtable]$PluginConfigs,
+        [Parameter(Mandatory)]
+        [string]$LidarrUrl,
+        [Parameter(Mandatory)]
+        [string]$ApiKey,
+        [Parameter(Mandatory)]
+        [string]$ContainerName
+    )
+
+    $result = [PSCustomObject]@{
+        Gate = "Persist"
+        PluginName = "Ecosystem"
+        Outcome = "skipped"
+        Success = $false
+        Errors = @()
+        Details = @{}
+    }
+
+    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        $result.Outcome = "skipped"
+        $result.Details = @{ Reason = "docker not found" }
+        return $result
+    }
+
+    if ([string]::IsNullOrWhiteSpace($ContainerName)) {
+        $result.Outcome = "skipped"
+        $result.Details = @{ Reason = "ContainerName not provided" }
+        return $result
+    }
+
+    # Capture baseline configuration presence (by IDs) before restart.
+    $baseline = @{}
+    foreach ($plugin in $PluginList) {
+        $cfg = $PluginConfigs[$plugin]
+        if (-not $cfg) { continue }
+
+        $baseline[$plugin] = @{
+            IndexerId = $null
+            DownloadClientId = $null
+            ImportListId = $null
+        }
+
+        try {
+            if ($cfg.ExpectIndexer) {
+                $idx = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
+                if ($idx) { $baseline[$plugin].IndexerId = $idx.id }
+            }
+            if ($cfg.ExpectDownloadClient) {
+                $dc = Find-ConfiguredComponent -Type "downloadclient" -PluginName $plugin
+                if ($dc) { $baseline[$plugin].DownloadClientId = $dc.id }
+            }
+            if ($cfg.ExpectImportList) {
+                $il = Find-ConfiguredComponent -Type "importlist" -PluginName $plugin
+                if ($il) { $baseline[$plugin].ImportListId = $il.id }
+            }
+        }
+        catch { }
+    }
+
+    # Restart container.
+    try {
+        & docker restart $ContainerName | Out-Null
+    }
+    catch {
+        $result.Outcome = "failed"
+        $result.Errors += "Failed to restart container '$ContainerName': $_"
+        return $result
+    }
+
+    if (-not (Wait-LidarrReady -BaseUrl $LidarrUrl -ApiKey $ApiKey -TimeoutSec 180)) {
+        $result.Outcome = "failed"
+        $result.Errors += "Timed out waiting for Lidarr API after restart"
+        return $result
+    }
+
+    # Verify configuration still present.
+    $failures = @()
+    foreach ($plugin in $PluginList) {
+        if (-not $baseline.ContainsKey($plugin)) { continue }
+        $b = $baseline[$plugin]
+
+        if ($null -ne $b.IndexerId) {
+            try {
+                $idxAfter = Invoke-LidarrApi -Endpoint ("indexer/{0}" -f $b.IndexerId)
+                if (-not $idxAfter) { $failures += "$plugin indexer missing after restart (id=$($b.IndexerId))" }
+            }
+            catch { $failures += "$plugin indexer missing after restart (id=$($b.IndexerId))" }
+        }
+        if ($null -ne $b.DownloadClientId) {
+            try {
+                $dcAfter = Invoke-LidarrApi -Endpoint ("downloadclient/{0}" -f $b.DownloadClientId)
+                if (-not $dcAfter) { $failures += "$plugin download client missing after restart (id=$($b.DownloadClientId))" }
+            }
+            catch { $failures += "$plugin download client missing after restart (id=$($b.DownloadClientId))" }
+        }
+        if ($null -ne $b.ImportListId) {
+            try {
+                $ilAfter = Invoke-LidarrApi -Endpoint ("importlist/{0}" -f $b.ImportListId)
+                if (-not $ilAfter) { $failures += "$plugin import list missing after restart (id=$($b.ImportListId))" }
+            }
+            catch { $failures += "$plugin import list missing after restart (id=$($b.ImportListId))" }
+        }
+    }
+
+    $result.Details = @{ Baseline = $baseline }
+
+    if ($failures.Count -gt 0) {
+        $result.Outcome = "failed"
+        $result.Errors = $failures
+        return $result
+    }
+
+    $result.Outcome = "success"
+    $result.Success = $true
+    return $result
 }
 
 # Plugin configurations (including search gate settings)
@@ -239,9 +564,11 @@ $allResults = @()
 $overallSuccess = $true
 $stopNow = $false
 
-$runSearch = ($Gate -eq "search" -or $Gate -eq "all")
-$runAlbumSearch = ($Gate -eq "albumsearch" -or $Gate -eq "all")
-$runGrab = ($Gate -eq "grab" -or $Gate -eq "all")
+$runConfigure = ($Gate -eq "configure" -or $Gate -eq "bootstrap")
+$runSearch = ($Gate -eq "search" -or $Gate -eq "all" -or $Gate -eq "bootstrap")
+$runAlbumSearch = ($Gate -eq "albumsearch" -or $Gate -eq "all" -or $Gate -eq "bootstrap")
+$runGrab = ($Gate -eq "grab" -or $Gate -eq "all" -or $Gate -eq "bootstrap")
+$runPersist = ($Gate -eq "persist" -or $Gate -eq "bootstrap")
 
 foreach ($plugin in $pluginList) {
     if ($stopNow) { break }
@@ -292,6 +619,39 @@ foreach ($plugin in $pluginList) {
         $overallSuccess = $false
         $stopNow = $true
         break
+    }
+
+    if ($runConfigure) {
+        Write-Host "  Configure Gate..." -ForegroundColor Cyan
+
+        $configureResult = Test-ConfigureGateForPlugin -PluginName $plugin -PluginConfig $config
+        $allResults += New-OutcomeResult -Gate "Configure" -PluginName $plugin -Outcome $configureResult.Outcome -Errors $configureResult.Errors -Details @{
+            Actions = $configureResult.Actions
+            SkipReason = $configureResult.SkipReason
+        }
+
+        if ($configureResult.Outcome -eq "skipped") {
+            $reason = $configureResult.SkipReason
+            if (-not $reason) { $reason = "Skipped by gate policy" }
+            Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+        }
+        elseif ($configureResult.Success) {
+            if ($configureResult.Actions -and $configureResult.Actions.Count -gt 0) {
+                Write-Host "       PASS ($($configureResult.Actions.Count) action(s))" -ForegroundColor Green
+            }
+            else {
+                Write-Host "       PASS" -ForegroundColor Green
+            }
+        }
+        else {
+            Write-Host "       FAIL" -ForegroundColor Red
+            foreach ($err in $configureResult.Errors) {
+                Write-Host "       - $err" -ForegroundColor Red
+            }
+            $overallSuccess = $false
+            $stopNow = $true
+            break
+        }
     }
 
     # Gate 2: Search (credentials required) - quick indexer/test validation
@@ -653,6 +1013,28 @@ foreach ($plugin in $pluginList) {
         }
     }
 
+    Write-Host ""
+}
+
+# Persistency gate is ecosystem-scoped (restarts container once), so run after the main loop.
+if ($runPersist -and $overallSuccess) {
+    Write-Host "Persist Gate..." -ForegroundColor Cyan
+    $persistResult = Test-PersistGate -PluginList $pluginList -PluginConfigs $pluginConfigs -LidarrUrl $LidarrUrl -ApiKey $effectiveApiKey -ContainerName $ContainerName
+    $allResults += New-OutcomeResult -Gate "Persist" -PluginName "Ecosystem" -Outcome $persistResult.Outcome -Errors $persistResult.Errors -Details $persistResult.Details
+
+    if ($persistResult.Outcome -eq "success") {
+        Write-Host "  PASS" -ForegroundColor Green
+    }
+    elseif ($persistResult.Outcome -eq "skipped") {
+        Write-Host "  SKIP" -ForegroundColor DarkGray
+    }
+    else {
+        Write-Host "  FAIL" -ForegroundColor Red
+        foreach ($err in $persistResult.Errors) {
+            Write-Host "  - $err" -ForegroundColor Red
+        }
+        $overallSuccess = $false
+    }
     Write-Host ""
 }
 
