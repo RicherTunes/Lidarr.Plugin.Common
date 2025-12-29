@@ -19,7 +19,13 @@ $script:SensitivePatterns = @(
     'clientsecret',
     'client_secret',
     'privatekey',
-    'private_key'
+    'private_key',
+    # OAuth/PKCE specific
+    'code_verifier',
+    'codeverifier',
+    'authorization_code',
+    'authorizationcode',
+    'pkce'
 )
 
 function Invoke-SecretRedaction {
