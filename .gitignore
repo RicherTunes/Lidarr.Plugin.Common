@@ -64,6 +64,16 @@ _nupkg_extract/
 .docker-e2e-runner-*/
 diagnostics/
 
+# Local ad-hoc troubleshooting scripts (not part of repo tooling)
+scripts/check-clients-detail.ps1
+scripts/check-clients.ps1
+scripts/check-protocol.ps1
+scripts/compare-tidal-settings.ps1
+scripts/resave-client.ps1
+scripts/show-client-config.ps1
+scripts/sync-tidal-oauth.ps1
+scripts/test-client.ps1
+
 # Persistent local test state
 .persistent-*/
 
