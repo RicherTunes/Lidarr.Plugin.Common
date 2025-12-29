@@ -23,10 +23,12 @@
     3. Search Gate (credentials required): Verifies indexer/test passes
     4. AlbumSearch Gate (credentials required): Triggers AlbumSearch command, verifies releases from plugin
     5. Grab Gate (credentials required): Verifies download works
-    6. Persist Gate (optional): Restarts container and verifies configured components persist
+    6. ImportList Gate (credentials required): Triggers ImportListSync, verifies sync completes (Brainarr)
+    7. Persist Gate (optional): Restarts container and verifies configured components persist
 
     Combined:
     - bootstrap: configure + all + persist
+    - all: schema + search + albumsearch + grab + importlist
 
     On failure, creates a diagnostics bundle for AI-assisted triage.
 
@@ -38,7 +40,7 @@
     Comma-separated list of plugins to test (e.g., "Qobuzarr,Tidalarr")
 
 .PARAMETER Gate
-    Which gate to run: "schema", "configure", "search", "albumsearch", "grab", "all", "persist", or "bootstrap" (default: "schema")
+    Which gate to run: "schema", "configure", "search", "albumsearch", "grab", "importlist", "all", "persist", or "bootstrap" (default: "schema")
 
 .PARAMETER LidarrUrl
     Lidarr API URL (default: http://localhost:8686)
@@ -74,7 +76,7 @@ param(
     [Parameter(Mandatory)]
     [string]$Plugins,
 
-    [ValidateSet("schema", "configure", "search", "albumsearch", "grab", "all", "persist", "bootstrap")]
+    [ValidateSet("schema", "configure", "search", "albumsearch", "grab", "importlist", "all", "persist", "bootstrap")]
     [string]$Gate = "schema",
 
     [string]$LidarrUrl = "http://localhost:8686",
@@ -522,6 +524,10 @@ $pluginConfigs = @{
         CredentialAllOfFieldNames = @()
         CredentialAnyOfFieldNames = @()
         SkipIndexerTest = $true
+        # ImportList gate settings - Brainarr currently has no required credential fields
+        # (it syncs from MusicBrainz public data). Add fields here if auth is added later.
+        ImportListCredentialAllOfFieldNames = @()
+        ImportListCredentialAnyOfFieldNames = @()
     }
 }
 
@@ -574,6 +580,7 @@ $runConfigure = ($Gate -eq "configure" -or $Gate -eq "bootstrap")
 $runSearch = ($Gate -eq "search" -or $Gate -eq "all" -or $Gate -eq "bootstrap")
 $runAlbumSearch = ($Gate -eq "albumsearch" -or $Gate -eq "all" -or $Gate -eq "bootstrap")
 $runGrab = ($Gate -eq "grab" -or $Gate -eq "all" -or $Gate -eq "bootstrap")
+$runImportList = ($Gate -eq "importlist" -or $Gate -eq "all" -or $Gate -eq "bootstrap")
 $runPersist = ($Gate -eq "persist" -or $Gate -eq "bootstrap")
 
 foreach ($plugin in $pluginList) {
@@ -1012,6 +1019,71 @@ foreach ($plugin in $pluginList) {
             catch {
                 Write-Host "       ERROR: $_" -ForegroundColor Red
                 $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome "failed" -Errors @("Grab gate error: $_")
+                $overallSuccess = $false
+                $stopNow = $true
+                break
+            }
+        }
+    }
+
+    # Gate 5: ImportList (for import-list-only plugins like Brainarr)
+    if ($runImportList) {
+        Write-Host "  [5/5] ImportList Gate..." -ForegroundColor Cyan
+
+        if (-not $config.ExpectImportList) {
+            Write-Host "       SKIP (no import list expected)" -ForegroundColor DarkGray
+            $allResults += New-OutcomeResult -Gate "ImportList" -PluginName $plugin -Outcome "skipped" -Details @{
+                Reason = "No import list expected for plugin"
+            }
+        }
+        else {
+            try {
+                $importListCredAllOf = @()
+                $importListCredAnyOf = @()
+                if ($config.ContainsKey("ImportListCredentialAllOfFieldNames")) {
+                    $importListCredAllOf = @($config.ImportListCredentialAllOfFieldNames)
+                }
+                if ($config.ContainsKey("ImportListCredentialAnyOfFieldNames")) {
+                    $importListCredAnyOf = @($config.ImportListCredentialAnyOfFieldNames)
+                }
+
+                $importListResult = Test-ImportListGate -PluginName $plugin `
+                    -CredentialAllOfFieldNames $importListCredAllOf `
+                    -CredentialAnyOfFieldNames $importListCredAnyOf `
+                    -SkipIfNoCreds:$true
+
+                $outcome = if ($importListResult.Outcome) { $importListResult.Outcome } elseif ($importListResult.Success) { "success" } else { "failed" }
+                $allResults += New-OutcomeResult -Gate "ImportList" -PluginName $plugin -Outcome $outcome -Errors $importListResult.Errors -Details @{
+                    ImportListId = $importListResult.ImportListId
+                    ImportListName = $importListResult.ImportListName
+                    CommandId = $importListResult.CommandId
+                    CommandStatus = $importListResult.CommandStatus
+                    PostSyncVerified = $importListResult.PostSyncVerified
+                    PostSyncError = $importListResult.PostSyncError
+                    SkipReason = $importListResult.SkipReason
+                }
+
+                if ($outcome -eq "skipped") {
+                    $reason = $importListResult.SkipReason
+                    if (-not $reason) { $reason = "Skipped by gate policy" }
+                    Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+                }
+                elseif ($importListResult.Success) {
+                    Write-Host "       PASS (sync completed for $($importListResult.ImportListName))" -ForegroundColor Green
+                }
+                else {
+                    Write-Host "       FAIL" -ForegroundColor Red
+                    foreach ($err in $importListResult.Errors) {
+                        Write-Host "       - $err" -ForegroundColor Red
+                    }
+                    $overallSuccess = $false
+                    $stopNow = $true
+                    break
+                }
+            }
+            catch {
+                Write-Host "       ERROR: $_" -ForegroundColor Red
+                $allResults += New-OutcomeResult -Gate "ImportList" -PluginName $plugin -Outcome "failed" -Errors @("ImportList gate error: $_")
                 $overallSuccess = $false
                 $stopNow = $true
                 break
