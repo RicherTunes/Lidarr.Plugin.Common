@@ -7,7 +7,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
     /// Configuration options for <see cref="StreamingTokenManager{TSession,TCredentials}"/>.
     /// </summary>
     /// <typeparam name="TSession">Session representation type.</typeparam>
-public class StreamingTokenManagerOptions<TSession>
+    public class StreamingTokenManagerOptions<TSession>
         where TSession : class
     {
         /// <summary>
@@ -49,5 +49,24 @@ public class StreamingTokenManagerOptions<TSession>
         /// Optional callback producing metadata to persist alongside the session.
         /// </summary>
         public Func<TSession, IReadOnlyDictionary<string, string>?>? GetMetadata { get; set; }
+
+        /// <summary>
+        /// Optional callback to retrieve credentials for proactive (background) token refresh.
+        /// When set and <see cref="EnableProactiveRefresh"/> is enabled, the background timer will
+        /// automatically refresh tokens before they expire.
+        /// When null, refresh only happens on-demand via <see cref="StreamingTokenManager{TSession,TCredentials}.GetValidSessionAsync"/>.
+        /// </summary>
+        /// <remarks>
+        /// This returns <see cref="object"/> to keep options independent from any specific credentials type.
+        /// The token manager will attempt to cast the returned value to its configured <c>TCredentials</c>.
+        /// </remarks>
+        public Func<object?>? ProactiveRefreshCredentialsProvider { get; set; }
+
+        /// <summary>
+        /// Whether to enable proactive (background) token refresh.
+        /// Requires <see cref="ProactiveRefreshCredentialsProvider"/> to be set.
+        /// Defaults to true when a credentials provider is available.
+        /// </summary>
+        public bool EnableProactiveRefresh { get; set; } = true;
     }
 }
