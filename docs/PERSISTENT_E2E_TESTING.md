@@ -81,6 +81,71 @@ pwsh scripts/multi-plugin-docker-smoke-test.ps1 `
   -RunSearchGate -UseExistingConfigForSearchGate
 ```
 
+## E2E Runner (`e2e-runner.ps1`)
+
+The unified E2E runner provides gate-based testing with automatic credential detection.
+
+### Basic Usage
+
+```powershell
+# Schema gate only (no credentials needed)
+pwsh scripts/e2e-runner.ps1 `
+  -Plugins 'Qobuzarr,Tidalarr,Brainarr' `
+  -Gate schema `
+  -LidarrUrl 'http://localhost:8691' `
+  -ContainerName 'lidarr-multi-plugin-persist' `
+  -ExtractApiKeyFromContainer
+
+# All gates (will SKIP credential-gated tests if creds missing)
+pwsh scripts/e2e-runner.ps1 `
+  -Plugins 'Qobuzarr' `
+  -Gate all `
+  -LidarrUrl 'http://localhost:8691' `
+  -ContainerName 'lidarr-multi-plugin-persist' `
+  -ExtractApiKeyFromContainer
+```
+
+### Gate Cascade and SKIP Behavior
+
+When running `-Gate all`, gates execute in order: **Schema → Search → AlbumSearch → Grab**
+
+| Gate | Credential Required | SKIP Behavior |
+|------|---------------------|---------------|
+| Schema | No | Never skips |
+| Search | Yes (indexer creds) | SKIPs if credentials not configured |
+| AlbumSearch | Yes (indexer creds) | SKIPs if credentials not configured |
+| Grab | Yes (indexer + download client creds) | SKIPs if credentials not configured |
+
+**SKIP vs FAIL semantics:**
+- **SKIP (yellow)**: Credentials not configured or auth error detected (e.g., `invalid_grant`, `unauthorized`)
+- **FAIL (red)**: Real regression - API error, attribution bug, file validation failure
+
+### Credential Detection
+
+The runner checks indexer/download client field values:
+
+```powershell
+# All-of: ALL listed fields must have values
+CredentialFieldNames = @("configPath")
+
+# Any-of: AT LEAST ONE field must have a value
+CredentialAnyOfFieldNames = @("authToken", "password")  # Qobuzarr: token OR password auth
+CredentialAnyOfFieldNames = @("redirectUrl", "oauthRedirectUrl")  # Tidalarr: OAuth configured
+```
+
+### Diagnostics and Redaction
+
+The runner automatically redacts sensitive fields in output:
+- `password`, `secret`, `token`, `apikey`, `auth` patterns
+- OAuth tokens and refresh tokens
+- PKCE verifiers and authorization codes
+
+To collect diagnostics without exposing secrets:
+```powershell
+pwsh scripts/e2e-runner.ps1 -Plugins 'Qobuzarr' -Gate all ... 2>&1 | Tee-Object -FilePath e2e-output.log
+# Output is pre-redacted; safe to share
+```
+
 ## Notes
 
 - If you see `Bind for 0.0.0.0:<port> failed: port is already allocated`, change `-Port` and/or `-ContainerName`.
