@@ -137,9 +137,30 @@ pwsh scripts/e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr' -Gate bootstra
   -LidarrUrl 'http://localhost:8691' -ContainerName 'lidarr-multi-plugin-persist' -ExtractApiKeyFromContainer
 ```
 
+### ImportList Gate (Brainarr)
+
+For import-list-only plugins like Brainarr, the runner provides an `importlist` gate:
+
+```powershell
+# Run import list gate only
+pwsh scripts/e2e-runner.ps1 -Plugins 'Brainarr' -Gate importlist `
+  -LidarrUrl 'http://localhost:8691' -ContainerName 'lidarr-multi-plugin-persist' -ExtractApiKeyFromContainer
+```
+
+The ImportList gate:
+1. Detects schema presence via `/api/v1/importlist/schema`
+2. Finds a configured import list matching the plugin name
+3. Triggers `ImportListSync` command
+4. Waits for command completion
+5. Returns **PASS** if sync completes, **SKIP** if not configured, **FAIL** on error
+
+When running `-Gate all` or `-Gate bootstrap`:
+- Plugins with `ExpectImportList = $true` (e.g., Brainarr) will run the ImportList gate
+- Plugins without import lists (e.g., Qobuzarr, Tidalarr) will SKIP the ImportList gate
+
 ### Gate Cascade and SKIP Behavior
 
-When running `-Gate all`, gates execute in order: **Schema → Search → AlbumSearch → Grab**
+When running `-Gate all`, gates execute in order: **Schema → Search → AlbumSearch → Grab → ImportList**
 
 | Gate | Credential Required | SKIP Behavior |
 |------|---------------------|---------------|
@@ -147,6 +168,7 @@ When running `-Gate all`, gates execute in order: **Schema → Search → AlbumS
 | Search | Yes (indexer creds) | SKIPs if credentials not configured |
 | AlbumSearch | Yes (indexer creds) | SKIPs if credentials not configured |
 | Grab | Yes (indexer + download client creds) | SKIPs if credentials not configured |
+| ImportList | Yes (import list creds, if any) | SKIPs if no import list expected or not configured |
 
 **SKIP vs FAIL semantics:**
 - **SKIP (yellow)**: Credentials not configured or auth error detected (e.g., `invalid_grant`, `unauthorized`)
