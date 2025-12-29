@@ -29,6 +29,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private volatile bool _isRefreshing;
         private volatile int _refreshAttempts;
         private Task? _initialLoadTask;
+        private int _proactiveRefreshCredentialTypeMismatchWarningLogged;
 
         public event EventHandler<SessionRefreshEventArgs<TSession>>? SessionRefreshed;
         public event EventHandler<SessionRefreshFailedEventArgs>? SessionRefreshFailed;
@@ -257,6 +258,14 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 var credentialsObject = _options.ProactiveRefreshCredentialsProvider();
                 if (credentialsObject is not TCredentials credentials)
                 {
+                    if (Interlocked.Exchange(ref _proactiveRefreshCredentialTypeMismatchWarningLogged, 1) == 0)
+                    {
+                        _logger.LogWarning(
+                            "ProactiveRefreshCredentialsProvider returned {ActualType} but expected {ExpectedType}; proactive refresh will not run until this is fixed",
+                            credentialsObject?.GetType().FullName ?? "null",
+                            typeof(TCredentials).FullName);
+                    }
+
                     _logger.LogDebug("Session approaching expiry, but credentials provider did not return valid credentials");
                     return;
                 }
