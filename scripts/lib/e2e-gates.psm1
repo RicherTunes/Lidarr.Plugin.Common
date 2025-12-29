@@ -190,7 +190,7 @@ function Test-SearchGate {
 
         [string[]]$CredentialAllOfFieldNames = @(),
 
-        [string[]]$CredentialAnyOfFieldNames = @(),
+        [object[]]$CredentialAnyOfFieldNames = @(),
 
         [switch]$SkipIfNoCreds = $true
     )
@@ -260,7 +260,7 @@ function Test-SearchGate {
                 [AllowNull()]
                 $Indexer,
                 [string[]]$AllOfFields,
-                [string[]]$AnyOfFields,
+                [object[]]$AnyOfFields,
                 [ref]$MissingReason
             )
 
@@ -276,21 +276,52 @@ function Test-SearchGate {
             }
 
             if ($AnyOfFields -and $AnyOfFields.Count -gt 0) {
-                $anyApplicable = $false
-                $anyHasValue = $false
+                $groups = @()
+                foreach ($entry in $AnyOfFields) {
+                    if ($null -eq $entry) { continue }
+                    if ($entry -is [array]) {
+                        $groups += ,@($entry)
+                    }
+                    else {
+                        $groups += ,@(@("$entry"))
+                    }
+                }
 
-                foreach ($fieldName in $AnyOfFields) {
-                    if (-not (Has-Field -Fields $Indexer.fields -Name $fieldName)) { continue }
+                $anyApplicable = $false
+                $anySatisfied = $false
+
+                foreach ($group in $groups) {
+                    if (-not $group -or $group.Count -eq 0) { continue }
+
+                    $groupApplicable = $true
+                    foreach ($fieldName in $group) {
+                        if (-not (Has-Field -Fields $Indexer.fields -Name $fieldName)) {
+                            $groupApplicable = $false
+                            break
+                        }
+                    }
+
+                    if (-not $groupApplicable) { continue }
                     $anyApplicable = $true
-                    $value = Get-FieldValue -Fields $Indexer.fields -Name $fieldName
-                    if (-not [string]::IsNullOrWhiteSpace("$value")) {
-                        $anyHasValue = $true
+
+                    $groupSatisfied = $true
+                    foreach ($fieldName in $group) {
+                        $value = Get-FieldValue -Fields $Indexer.fields -Name $fieldName
+                        if ([string]::IsNullOrWhiteSpace("$value")) {
+                            $groupSatisfied = $false
+                            break
+                        }
+                    }
+
+                    if ($groupSatisfied) {
+                        $anySatisfied = $true
                         break
                     }
                 }
 
-                if ($anyApplicable -and -not $anyHasValue) {
-                    $missing.Add("any of: " + ($AnyOfFields -join ", "))
+                if ($anyApplicable -and -not $anySatisfied) {
+                    $groupDesc = $groups | ForEach-Object { "(" + ($_ -join " + ") + ")" }
+                    $missing.Add("any of: " + ($groupDesc -join " OR "))
                 }
             }
 
@@ -526,7 +557,7 @@ function Test-PluginGrabGate {
 
         [string[]]$CredentialAllOfFieldNames = @(),
 
-        [string[]]$CredentialAnyOfFieldNames = @(),
+        [object[]]$CredentialAnyOfFieldNames = @(),
 
         [int]$QueueTimeoutSec = 60,
 
@@ -626,21 +657,50 @@ function Test-PluginGrabGate {
             }
 
             if ($CredentialAnyOfFieldNames -and $CredentialAnyOfFieldNames.Count -gt 0) {
-                $anyApplicable = $false
-                $anyHasValue = $false
+                $groups = @()
+                foreach ($entry in $CredentialAnyOfFieldNames) {
+                    if ($null -eq $entry) { continue }
+                    if ($entry -is [array]) {
+                        $groups += ,@($entry)
+                    }
+                    else {
+                        $groups += ,@(@("$entry"))
+                    }
+                }
 
-                foreach ($fieldName in $CredentialAnyOfFieldNames) {
-                    if (-not (Has-Field -Fields $indexer.fields -Name $fieldName)) { continue }
+                $anyApplicable = $false
+                $anySatisfied = $false
+
+                foreach ($group in $groups) {
+                    if (-not $group -or $group.Count -eq 0) { continue }
+
+                    $groupApplicable = $true
+                    foreach ($fieldName in $group) {
+                        if (-not (Has-Field -Fields $indexer.fields -Name $fieldName)) {
+                            $groupApplicable = $false
+                            break
+                        }
+                    }
+                    if (-not $groupApplicable) { continue }
                     $anyApplicable = $true
-                    $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
-                    if (-not [string]::IsNullOrWhiteSpace("$value")) {
-                        $anyHasValue = $true
+
+                    $groupSatisfied = $true
+                    foreach ($fieldName in $group) {
+                        $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
+                        if ([string]::IsNullOrWhiteSpace("$value")) {
+                            $groupSatisfied = $false
+                            break
+                        }
+                    }
+                    if ($groupSatisfied) {
+                        $anySatisfied = $true
                         break
                     }
                 }
 
-                if ($anyApplicable -and -not $anyHasValue) {
-                    $missing.Add("any of: " + ($CredentialAnyOfFieldNames -join ", "))
+                if ($anyApplicable -and -not $anySatisfied) {
+                    $groupDesc = $groups | ForEach-Object { "(" + ($_ -join " + ") + ")" }
+                    $missing.Add("any of: " + ($groupDesc -join " OR "))
                 }
             }
 
@@ -765,10 +825,25 @@ function Test-PluginGrabGate {
         Write-Host "       Waiting for queue item..." -ForegroundColor Gray
         $deadline = (Get-Date).AddSeconds([Math]::Max(1, $QueueTimeoutSec))
         $queueItem = $null
+        $grabTime = Get-Date
 
         while ((Get-Date) -lt $deadline) {
             $queueRecords = Get-QueueRecords
-            $queueItem = $queueRecords | Where-Object { $_.downloadId -eq $grabResult.downloadId } | Select-Object -First 1
+
+            # Try matching by downloadId first (if available)
+            if ($grabResult.downloadId) {
+                $queueItem = $queueRecords | Where-Object { $_.downloadId -eq $grabResult.downloadId } | Select-Object -First 1
+            }
+
+            # Fallback: match by albumId + indexer + recent timestamp (within 2 min of grab)
+            if (-not $queueItem) {
+                $queueItem = $queueRecords | Where-Object {
+                    $_.albumId -eq $AlbumId -and
+                    $_.indexer -eq $result.IndexerName -and
+                    ([DateTime]::Parse($_.added) -gt $grabTime.AddMinutes(-2))
+                } | Sort-Object { [DateTime]::Parse($_.added) } -Descending | Select-Object -First 1
+            }
+
             if ($queueItem) { break }
             Start-Sleep -Milliseconds 500
         }
@@ -777,7 +852,7 @@ function Test-PluginGrabGate {
             $queueRecords = Get-QueueRecords
             $queueCount = ($queueRecords | Measure-Object).Count
             $result.Errors += "Grab succeeded but item not found in queue (waited ${QueueTimeoutSec}s; queue has $queueCount items)"
-            $result.Errors += "downloadId=$($grabResult.downloadId)"
+            $result.Errors += "downloadId=$($grabResult.downloadId), albumId=$AlbumId, indexer=$($result.IndexerName)"
             return $result
         }
 
@@ -850,11 +925,14 @@ function Test-PluginGrabGate {
                 }
 
                 $result.TotalFileCount = $allFiles.Count
-                Write-Host "       Files in outputPath: $($allFiles.Count)" -ForegroundColor Gray
+                Write-Host "       Files in outputPath: $($allFiles.Count) ($($allFiles.Count - ($allFiles | Where-Object { $_.Name.EndsWith('.partial') }).Count) completed)" -ForegroundColor Gray
 
-                # Check minimum file count
-                if ($allFiles.Count -lt $ExpectedMinFiles) {
-                    $result.Errors += "Expected at least $ExpectedMinFiles files, found $($allFiles.Count) under: $outPath"
+                # Filter out .partial files for minimum count check
+                $completedForCount = $allFiles | Where-Object { -not $_.Name.EndsWith('.partial') }
+
+                # Check minimum file count (only completed files)
+                if ($completedForCount.Count -lt $ExpectedMinFiles) {
+                    $result.Errors += "Expected at least $ExpectedMinFiles completed files, found $($completedForCount.Count) under: $outPath"
                     # Dump file list for diagnostics
                     $fileListDiag = $allFiles | Select-Object -First 20 | ForEach-Object { "$($_.Name) ($($_.Size) bytes)" }
                     if ($fileListDiag) {
@@ -904,8 +982,11 @@ function Test-PluginGrabGate {
                     return ($isFlac -or $isOgg -or $isRiff -or $isId3 -or $isFtyp -or $isMpeg)
                 }
 
+                # Filter out .partial files (in-progress downloads)
+                $completedFiles = $allFiles | Where-Object { -not $_.Name.EndsWith('.partial') }
+
                 # Select files to validate (first N for deterministic debugging)
-                $filesToValidate = $allFiles | Select-Object -First $MaxFilesToValidate
+                $filesToValidate = $completedFiles | Select-Object -First $MaxFilesToValidate
                 $validatedFiles = @()
                 $validationFailures = @()
 
@@ -1061,7 +1142,7 @@ function Test-AlbumSearchGate {
 
         [string[]]$CredentialAllOfFieldNames = @(),
 
-        [string[]]$CredentialAnyOfFieldNames = @(),
+        [object[]]$CredentialAnyOfFieldNames = @(),
 
         [switch]$SkipIfNoCreds = $true
     )
@@ -1140,21 +1221,50 @@ function Test-AlbumSearchGate {
             }
 
             if ($CredentialAnyOfFieldNames -and $CredentialAnyOfFieldNames.Count -gt 0) {
-                $anyApplicable = $false
-                $anyHasValue = $false
+                $groups = @()
+                foreach ($entry in $CredentialAnyOfFieldNames) {
+                    if ($null -eq $entry) { continue }
+                    if ($entry -is [array]) {
+                        $groups += ,@($entry)
+                    }
+                    else {
+                        $groups += ,@(@("$entry"))
+                    }
+                }
 
-                foreach ($fieldName in $CredentialAnyOfFieldNames) {
-                    if (-not (Has-Field -Fields $indexer.fields -Name $fieldName)) { continue }
+                $anyApplicable = $false
+                $anySatisfied = $false
+
+                foreach ($group in $groups) {
+                    if (-not $group -or $group.Count -eq 0) { continue }
+
+                    $groupApplicable = $true
+                    foreach ($fieldName in $group) {
+                        if (-not (Has-Field -Fields $indexer.fields -Name $fieldName)) {
+                            $groupApplicable = $false
+                            break
+                        }
+                    }
+                    if (-not $groupApplicable) { continue }
                     $anyApplicable = $true
-                    $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
-                    if (-not [string]::IsNullOrWhiteSpace("$value")) {
-                        $anyHasValue = $true
+
+                    $groupSatisfied = $true
+                    foreach ($fieldName in $group) {
+                        $value = Get-FieldValue -Fields $indexer.fields -Name $fieldName
+                        if ([string]::IsNullOrWhiteSpace("$value")) {
+                            $groupSatisfied = $false
+                            break
+                        }
+                    }
+                    if ($groupSatisfied) {
+                        $anySatisfied = $true
                         break
                     }
                 }
 
-                if ($anyApplicable -and -not $anyHasValue) {
-                    $missing.Add("any of: " + ($CredentialAnyOfFieldNames -join ", "))
+                if ($anyApplicable -and -not $anySatisfied) {
+                    $groupDesc = $groups | ForEach-Object { "(" + ($_ -join " + ") + ")" }
+                    $missing.Add("any of: " + ($groupDesc -join " OR "))
                 }
             }
 

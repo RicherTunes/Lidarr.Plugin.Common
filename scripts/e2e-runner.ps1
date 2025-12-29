@@ -157,8 +157,15 @@ $pluginConfigs = @{
         # Search gate settings
         SearchQuery = "Kind of Blue Miles Davis"
         ExpectedMinResults = 1
-        CredentialAllOfFieldNames = @("password")
-        CredentialAnyOfFieldNames = @("email", "username")
+        # Qobuzarr supports two auth modes:
+        # 1. Email/Password: (email OR username) + password
+        # 2. Token: userId + authToken
+        CredentialAllOfFieldNames = @()
+        CredentialAnyOfFieldNames = @(
+            @("password", "email"),
+            @("password", "username"),
+            @("authToken", "userId")
+        )
         SkipIndexerTest = $false
     }
     'Tidalarr' = @{
