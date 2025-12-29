@@ -116,6 +116,9 @@ missing on the download client), the runner includes two optional gates:
 | `persist` | Restarts the Lidarr Docker container and verifies configured components still exist after restart. |
 | `bootstrap` | Runs `configure` + `all` + `persist` in one command. |
 
+By default, `bootstrap` also performs a **post-restart Search revalidation** to prove auth still works after the container restart.
+You can enable the same post-restart revalidation for `persist` by passing `-PersistRerun`.
+
 ```powershell
 # Sync known configuration drift (no-op if already consistent)
 pwsh scripts/e2e-runner.ps1 -Plugins 'Tidalarr' -Gate configure `
@@ -123,6 +126,10 @@ pwsh scripts/e2e-runner.ps1 -Plugins 'Tidalarr' -Gate configure `
 
 # Restart + verify config objects still exist
 pwsh scripts/e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr' -Gate persist `
+  -LidarrUrl 'http://localhost:8691' -ContainerName 'lidarr-multi-plugin-persist' -ExtractApiKeyFromContainer
+
+# Restart + prove auth still works post-restart (re-runs Search gate after restart)
+pwsh scripts/e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr' -Gate persist -PersistRerun `
   -LidarrUrl 'http://localhost:8691' -ContainerName 'lidarr-multi-plugin-persist' -ExtractApiKeyFromContainer
 
 # Full: fix drift → run all gates → restart → verify persistence
