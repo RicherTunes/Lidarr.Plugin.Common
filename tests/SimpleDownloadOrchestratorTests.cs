@@ -10,6 +10,7 @@ using Lidarr.Plugin.Common.Base;
 using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Services.Download;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Lidarr.Plugin.Common.Tests
@@ -126,9 +127,220 @@ namespace Lidarr.Plugin.Common.Tests
             }
         }
 
+        [Fact]
+        public async Task DownloadTrackAsync_EmptyResponse_ReturnsFailureAndDoesNotLeaveFinalFile()
+        {
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 0, supportRange: false));
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin"))
+            );
+
+            var outputPath = Path.Combine(Path.GetTempPath(), $"orch_test_empty_{Guid.NewGuid():N}.bin");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("t1", outputPath, new StreamingQuality { Bitrate = 320 }, CancellationToken.None);
+
+                Assert.False(result.Success);
+                Assert.Contains("Downloaded file is empty", result.ErrorMessage ?? string.Empty);
+                Assert.False(File.Exists(outputPath), "Expected the final file to be removed on empty download");
+            }
+            finally
+            {
+                TryDelete(outputPath);
+                TryDelete(outputPath + ".partial");
+                TryDelete(outputPath + ".partial.resume.json");
+            }
+        }
+
+        [Fact]
+        public async Task DownloadAlbumAsync_NoTrackIds_ReturnsFailure()
+        {
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 1, supportRange: false));
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 10 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string>()),
+                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin"))
+            );
+
+            var dir = Path.Combine(Path.GetTempPath(), $"orch_test_album_empty_{Guid.NewGuid():N}");
+            try
+            {
+                var result = await orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 });
+                Assert.False(result.Success);
+                Assert.Contains("No track IDs returned", result.ErrorMessage ?? string.Empty);
+                Assert.Empty(result.FilePaths);
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task DownloadAlbumAsync_TrackFailures_ReturnsFailureWithFirstError()
+        {
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 1, supportRange: false));
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult((string.Empty, "bin"))
+            );
+
+            var dir = Path.Combine(Path.GetTempPath(), $"orch_test_album_fail_{Guid.NewGuid():N}");
+            try
+            {
+                var result = await orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 });
+                Assert.False(result.Success);
+                Assert.Contains("Failed to download", result.ErrorMessage ?? string.Empty);
+                Assert.Contains("Empty stream URL", result.ErrorMessage ?? string.Empty);
+                Assert.Empty(result.FilePaths);
+                Assert.Single(result.TrackResults);
+                Assert.False(result.TrackResults[0].Success);
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task DownloadTrackAsync_MetadataApplierThrows_StillReturnsSuccessAndKeepsFile()
+        {
+            var totalBytes = 1024;
+            var handler = new FakeRangeHandler(totalBytes, supportRange: false);
+            using var http = new HttpClient(handler);
+            var throwingApplier = new ThrowingMetadataApplier();
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin")),
+                metadataApplier: throwingApplier
+            );
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_test_meta_throw_{Guid.NewGuid():N}.bin");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 });
+
+                // Metadata failure should NOT fail the download
+                Assert.True(result.Success, $"Download should succeed even when metadata applier throws: {result.ErrorMessage}");
+                Assert.True(File.Exists(result.FilePath), "File should be kept even when metadata applier throws");
+                Assert.Equal(totalBytes, new FileInfo(result.FilePath).Length);
+                Assert.True(throwingApplier.WasCalled, "Metadata applier should have been called");
+            }
+            finally
+            {
+                TryDelete(temp);
+                TryDelete(temp + ".partial");
+                TryDelete(temp + ".partial.resume.json");
+            }
+        }
+
+        [Fact]
+        public async Task DownloadTrackAsync_MetadataApplier_InvokedOncePerTrack()
+        {
+            var totalBytes = 1024;
+            var handler = new FakeRangeHandler(totalBytes, supportRange: false);
+            using var http = new HttpClient(handler);
+            var countingApplier = new CountingMetadataApplier();
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin")),
+                metadataApplier: countingApplier
+            );
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_test_meta_count_{Guid.NewGuid():N}.bin");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 });
+
+                Assert.True(result.Success);
+                Assert.Equal(1, countingApplier.CallCount);
+            }
+            finally
+            {
+                TryDelete(temp);
+                TryDelete(temp + ".partial");
+                TryDelete(temp + ".partial.resume.json");
+            }
+        }
+
+        [Fact]
+        public async Task DownloadTrackAsync_MetadataApplierThrows_LogsWarningExactlyOnce()
+        {
+            var totalBytes = 1024;
+            var handler = new FakeRangeHandler(totalBytes, supportRange: false);
+            using var http = new HttpClient(handler);
+            var throwingApplier = new ThrowingMetadataApplier();
+            var capturingLogger = new CapturingLogger();
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "TestService",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = "track123", Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin")),
+                metadataApplier: throwingApplier,
+                logger: capturingLogger
+            );
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_test_meta_log_{Guid.NewGuid():N}.bin");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 });
+
+                Assert.True(result.Success);
+                Assert.Equal(1, capturingLogger.WarningCount);
+                Assert.Contains("TestService", capturingLogger.LastWarningMessage);
+                Assert.Contains("track123", capturingLogger.LastWarningMessage);
+            }
+            finally
+            {
+                TryDelete(temp);
+                TryDelete(temp + ".partial");
+                TryDelete(temp + ".partial.resume.json");
+            }
+        }
+
         private static void TryDelete(string path)
         {
             try { if (File.Exists(path)) File.Delete(path); } catch { }
+        }
+
+        private static void TryDeleteDir(string path)
+        {
+            try
+            {
+                if (Directory.Exists(path))
+                {
+                    Directory.Delete(path, recursive: true);
+                }
+            }
+            catch { }
         }
     }
 
@@ -355,5 +567,44 @@ namespace Lidarr.Plugin.Common.Tests
         }
     }
 
-}
+    internal sealed class ThrowingMetadataApplier : IAudioMetadataApplier
+    {
+        public bool WasCalled { get; private set; }
 
+        public Task ApplyAsync(string filePath, StreamingTrack metadata, CancellationToken cancellationToken = default)
+        {
+            WasCalled = true;
+            throw new InvalidOperationException("Simulated metadata tagging failure");
+        }
+    }
+
+    internal sealed class CountingMetadataApplier : IAudioMetadataApplier
+    {
+        public int CallCount { get; private set; }
+
+        public Task ApplyAsync(string filePath, StreamingTrack metadata, CancellationToken cancellationToken = default)
+        {
+            CallCount++;
+            return Task.CompletedTask;
+        }
+    }
+
+    internal sealed class CapturingLogger : ILogger
+    {
+        public int WarningCount { get; private set; }
+        public string? LastWarningMessage { get; private set; }
+
+        public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning)
+            {
+                WarningCount++;
+                LastWarningMessage = formatter(state, exception);
+            }
+        }
+    }
+
+}
