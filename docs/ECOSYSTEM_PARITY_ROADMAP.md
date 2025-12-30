@@ -202,6 +202,20 @@ Design:
 
 All three plugins can coexist in the same Lidarr instance and pass Schema gate simultaneously
 
+#### ⚠️ Multi-Plugin Stability Caveat
+
+**Port :8691 is "best-effort" until Lidarr AssemblyLoadContext fix.**
+
+Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit intermittent failures due to an upstream Lidarr ALC lifecycle bug. Known symptoms:
+- Plugin schemas occasionally missing after restart
+- Type identity errors when multiple plugins reference shared types
+- Non-deterministic test failures in CI
+
+**Recommendation**:
+- Use dedicated single-plugin instances (`:8690` Tidalarr, `:8692` Qobuzarr) for reliable E2E
+- Treat `:8691` multi-plugin results as informational, not blocking
+- Track upstream: [Lidarr ALC issue](https://github.com/Lidarr/Lidarr/issues) (pending link)
+
 ---
 
 ## Quick Reference: File Locations
@@ -228,6 +242,8 @@ All three plugins can coexist in the same Lidarr instance and pass Schema gate s
 
 | Date | Change |
 |------|--------|
+| 2025-12-30 | Added multi-plugin stability caveat (:8691 best-effort until Lidarr ALC fix) |
+| 2025-12-30 | PR #186: SimpleDownloadOrchestrator metadata tagging + ILogger + fail-fast |
 | 2025-12-27 | Brainarr PR #346: FluentValidation exclusion fix with guard test |
 | 2025-12-27 | Added Type-Identity Assembly Policy section with FluentValidation exception |
 | 2025-12-27 | E2E gates: credential skip semantics, indexer/test preference, URL redaction |
