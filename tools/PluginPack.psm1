@@ -184,37 +184,45 @@ function Invoke-PluginCleanup {
     Cleans up the publish output to match PluginPackaging.targets behavior.
 
     .DESCRIPTION
-    Removes assemblies that should not be in the final package:
-    - Host assemblies (Lidarr.Core, Lidarr.Common, etc.)
-    - Extra dependencies that were merged into the plugin DLL
-    - System.* and other runtime assemblies provided by the host
+    Implements the canonical plugin packaging policy (matches `build/PluginPackaging.targets`).
 
-    Keeps:
-    - Plugin assembly (merged)
-    - Lidarr.Plugin.Abstractions.dll (required for plugin discovery/loading)
-    - FluentValidation.dll (type-identity with host; required for DownloadClient.Test() signature)
-    - Microsoft.Extensions.*.Abstractions.dll (type-identity with host)
+    MUST SHIP:
+      - Lidarr.Plugin.<Name>.dll (merged assembly)
+      - plugin.json
+      - Lidarr.Plugin.Abstractions.dll (host does NOT provide this)
 
-    NOTE: This policy is based on empirical testing - Tidalarr and Qobuzarr both
-    ship these assemblies and work correctly in production.
+    TYPE-IDENTITY (kept as separate files; not merged):
+      - FluentValidation.dll
+      - Microsoft.Extensions.DependencyInjection.Abstractions.dll
+      - Microsoft.Extensions.Logging.Abstractions.dll
+
+    MUST NOT SHIP:
+      - System.Text.Json.dll (cross-boundary type identity risk)
+      - Host assemblies (Lidarr.*.dll, NzbDrone.*.dll, etc.)
     #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
         [string]$PublishPath,
         [Parameter(Mandatory = $true)]
-        [string]$AssemblyName
+        [string]$AssemblyName,
+        [string[]]$AdditionalKeep = @()
     )
 
-    # Assemblies to KEEP in the package (type-identity assemblies that working plugins ship).
-    # Based on empirical evidence from successful Tidalarr/Qobuzarr packages.
+    # Canonical keep list - these assemblies belong in the package.
+    # Everything else is either merged/internalized or host-provided.
     $keepAssemblies = @(
         "$AssemblyName.dll",                                    # Plugin itself (merged)
-        'Lidarr.Plugin.Abstractions.dll',                       # Required for plugin discovery/loading
-        'FluentValidation.dll',                                 # Type-identity with host for Test() method
+        'Lidarr.Plugin.Abstractions.dll',                       # Required - host does NOT provide this
+        'FluentValidation.dll',
         'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
         'Microsoft.Extensions.Logging.Abstractions.dll'
     )
+
+    # Add any plugin-specific additional assemblies (maps to PluginPackagingAdditionalKeep)
+    if ($AdditionalKeep.Count -gt 0) {
+        $keepAssemblies += $AdditionalKeep
+    }
 
     # Remove everything except kept assemblies
     $allDlls = Get-ChildItem -LiteralPath $PublishPath -Filter '*.dll'
