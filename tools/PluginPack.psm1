@@ -191,12 +191,10 @@ function Invoke-PluginCleanup {
       - plugin.json
       - Lidarr.Plugin.Abstractions.dll (host does NOT provide this)
 
-    TYPE-IDENTITY (kept as separate files; not merged):
-      - FluentValidation.dll
-      - Microsoft.Extensions.DependencyInjection.Abstractions.dll
-      - Microsoft.Extensions.Logging.Abstractions.dll
-
     MUST NOT SHIP:
+      - FluentValidation.dll (host provides; shipping causes type-identity conflicts)
+      - Microsoft.Extensions.DependencyInjection.Abstractions.dll (host provides; shipping breaks DI contracts)
+      - Microsoft.Extensions.Logging.Abstractions.dll (host provides; shipping breaks ILogger contracts)
       - System.Text.Json.dll (cross-boundary type identity risk)
       - Host assemblies (Lidarr.*.dll, NzbDrone.*.dll, etc.)
     #>
@@ -213,10 +211,7 @@ function Invoke-PluginCleanup {
     # Everything else is either merged/internalized or host-provided.
     $keepAssemblies = @(
         "$AssemblyName.dll",                                    # Plugin itself (merged)
-        'Lidarr.Plugin.Abstractions.dll',                       # Required - host does NOT provide this
-        'FluentValidation.dll',
-        'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
-        'Microsoft.Extensions.Logging.Abstractions.dll'
+        'Lidarr.Plugin.Abstractions.dll'                        # Required - host does NOT provide this
     )
 
     # Add any plugin-specific additional assemblies (maps to PluginPackagingAdditionalKeep)
