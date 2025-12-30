@@ -9,6 +9,9 @@ using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Utilities;
+using Lidarr.Plugin.Common.Services.Metadata;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Lidarr.Plugin.Common.Services.Download
 {
@@ -25,6 +28,8 @@ namespace Lidarr.Plugin.Common.Services.Download
         private readonly Func<string, Task<IReadOnlyList<string>>> _getAlbumTrackIdsAsync;
         private readonly Func<string, StreamingQuality?, Task<(string Url, string Extension)>> _getStreamAsync;
         private readonly IAudioStreamProvider? _streamProvider;
+        private readonly IAudioMetadataApplier? _metadataApplier;
+        private readonly ILogger _logger;
         private readonly int _maxConcurrentTracks;
 
         public string ServiceName { get; }
@@ -37,7 +42,9 @@ namespace Lidarr.Plugin.Common.Services.Download
             Func<string, Task<IReadOnlyList<string>>> getAlbumTrackIdsAsync,
             Func<string, StreamingQuality?, Task<(string Url, string Extension)>> getStreamAsync,
             int maxConcurrentTracks = 1,
-            IAudioStreamProvider? streamProvider = null)
+            IAudioStreamProvider? streamProvider = null,
+            IAudioMetadataApplier? metadataApplier = null,
+            ILogger? logger = null)
         {
             ServiceName = serviceName;
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -47,6 +54,8 @@ namespace Lidarr.Plugin.Common.Services.Download
             _getStreamAsync = getStreamAsync ?? throw new ArgumentNullException(nameof(getStreamAsync));
             _maxConcurrentTracks = Math.Max(1, maxConcurrentTracks);
             _streamProvider = streamProvider;
+            _metadataApplier = metadataApplier ?? new TagLibAudioMetadataApplier();
+            _logger = logger ?? NullLogger.Instance;
         }
 
         public Task<DownloadResult> DownloadAlbumAsync(string albumId, string outputDirectory, StreamingQuality quality = null, IProgress<DownloadProgress> progress = null)
@@ -68,6 +77,16 @@ namespace Lidarr.Plugin.Common.Services.Download
             Directory.CreateDirectory(outputDirectory);
             var trackIds = await _getAlbumTrackIdsAsync(albumId).ConfigureAwait(false);
             int total = trackIds?.Count ?? album.TrackCount;
+
+            if (trackIds == null || trackIds.Count == 0)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"No track IDs returned for album {albumId}";
+                result.FilePaths = files;
+                result.TotalSize = 0;
+                result.Duration = DateTime.UtcNow - started;
+                return result;
+            }
 
             if (_maxConcurrentTracks <= 1)
             {
@@ -146,6 +165,28 @@ namespace Lidarr.Plugin.Common.Services.Download
                 await Task.WhenAll(tasks).ConfigureAwait(false);
             }
 
+            var failures = result.TrackResults.Where(tr => !tr.Success).ToList();
+            if (failures.Count > 0)
+            {
+                result.Success = false;
+                var first = failures[0];
+                result.ErrorMessage = $"Failed to download {failures.Count}/{result.TrackResults.Count} tracks. First error: {first.ErrorMessage}";
+            }
+            else if (files.Count == 0)
+            {
+                result.Success = false;
+                result.ErrorMessage = "No files were downloaded.";
+            }
+            else if (files.Count != result.TrackResults.Count)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Downloaded {files.Count} files but have {result.TrackResults.Count} track results.";
+            }
+            else
+            {
+                result.Success = true;
+            }
+
             result.FilePaths = files;
             result.TotalSize = files.Where(File.Exists).Select(f => new FileInfo(f).Length).Sum();
             result.Duration = DateTime.UtcNow - started;
@@ -191,11 +232,21 @@ namespace Lidarr.Plugin.Common.Services.Download
                     try { FileSystemUtilities.MoveFile(tempPath, outputPath, true); }
                     catch { if (File.Exists(outputPath)) File.Delete(outputPath); File.Move(tempPath, outputPath); }
 
-                    return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = new FileInfo(outputPath).Length, ActualQuality = quality };
+                    var fileSize = new FileInfo(outputPath).Length;
+                    if (fileSize <= 0)
+                    {
+                        TryDelete(outputPath);
+                        return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Downloaded file is empty" };
+                    }
+
+                    // Apply metadata tags after successful download
+                    await ApplyMetadataAsync(outputPath, track, cancellationToken).ConfigureAwait(false);
+
+                    return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = fileSize, ActualQuality = quality };
                 }
                 catch (Exception ex)
                 {
-                    return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = ex.Message };
+                    return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {ex.Message}" };
                 }
             }
 
@@ -286,7 +337,18 @@ namespace Lidarr.Plugin.Common.Services.Download
                 catch { if (File.Exists(outputPath)) File.Delete(outputPath); File.Move(tempPath, outputPath); }
                 try { if (File.Exists(resumePath)) File.Delete(resumePath); } catch { }
 
-                return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = new FileInfo(outputPath).Length, ActualQuality = quality };
+                var fileSize = new FileInfo(outputPath).Length;
+                if (fileSize <= 0)
+                {
+                    TryDelete(outputPath);
+                    TryDelete(resumePath);
+                    return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Downloaded file is empty" };
+                }
+
+                // Apply metadata tags after successful download
+                await ApplyMetadataAsync(outputPath, track, cancellationToken).ConfigureAwait(false);
+
+                return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = fileSize, ActualQuality = quality };
             }
             catch (OperationCanceledException)
             {
@@ -294,8 +356,33 @@ namespace Lidarr.Plugin.Common.Services.Download
             }
             catch (Exception ex)
             {
-                return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = ex.Message };
+                return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {ex.Message}" };
             }
+        }
+
+        private async Task ApplyMetadataAsync(string filePath, StreamingTrack? track, CancellationToken cancellationToken)
+        {
+            if (_metadataApplier == null || track == null || string.IsNullOrWhiteSpace(filePath))
+            {
+                return;
+            }
+
+            try
+            {
+                await _metadataApplier.ApplyAsync(filePath, track, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Metadata application failure shouldn't fail the download
+                // The file is already successfully downloaded - log once per track
+                _logger.LogWarning(ex, "[{ServiceName}] Failed to apply metadata to '{FileName}' (track {TrackId})",
+                    ServiceName, Path.GetFileName(filePath), track.Id);
+            }
+        }
+
+        private static void TryDelete(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
         }
         private static async Task CopyWithProgressAsync(Stream input, Stream output, long totalExpected, CancellationToken cancellationToken, Action<double, long, TimeSpan?> onProgress)
         {
