@@ -1922,4 +1922,376 @@ function Test-ImportListGate {
     return $result
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Invoke-LidarrApi
+function Test-MetadataGate {
+    <#
+    .SYNOPSIS
+        Gate: Verify downloaded audio files have valid metadata tags.
+
+    .DESCRIPTION
+        Optional validation that checks first N audio files for required metadata:
+        - artist (non-empty)
+        - album (non-empty)
+        - title (non-empty)
+        - disc/track numbers if multi-disc album
+
+        Uses python3 + mutagen inside the container for tag reading.
+        SKIPS (not fails) if mutagen is not available.
+
+    .PARAMETER OutputPath
+        Container path to the downloaded files directory.
+
+    .PARAMETER ContainerName
+        Docker container name where files are located.
+
+    .PARAMETER MaxFilesToCheck
+        Maximum number of files to validate (default: 3).
+
+    .PARAMETER IsMultiDisc
+        If true, also validates disc/track metadata.
+
+    .OUTPUTS
+        PSCustomObject with Success, Outcome, ValidatedFiles, Errors, SkipReason
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$OutputPath,
+
+        [Parameter(Mandatory)]
+        [string]$ContainerName,
+
+        [int]$MaxFilesToCheck = 3,
+
+        [switch]$IsMultiDisc
+    )
+
+    $result = [PSCustomObject]@{
+        Gate = 'Metadata'
+        OutputPath = $OutputPath
+        ContainerName = $ContainerName
+        Outcome = 'failed'
+        Success = $false
+        ValidatedFiles = @()
+        TotalFilesChecked = 0
+        FilesWithTags = 0
+        MissingTags = @()
+        Errors = @()
+        SkipReason = $null
+    }
+
+    try {
+        # Check if docker is available
+        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            $result.Outcome = 'skipped'
+            $result.SkipReason = "Docker not available"
+            return $result
+        }
+
+        # Check if container exists and is accessible
+        docker inspect $ContainerName 1>$null 2>$null
+        if ($LASTEXITCODE -ne 0) {
+            $result.Outcome = 'skipped'
+            $result.SkipReason = "Container '$ContainerName' not found or not accessible"
+            return $result
+        }
+
+        # Check if python3 + mutagen are available in the container
+        $mutagenCheck = docker exec $ContainerName python3 -c "import mutagen; print('ok')" 2>$null
+        $mutagenOk = (@($mutagenCheck) -join '').Trim() -eq 'ok'
+
+        if (-not $mutagenOk) {
+            # Host-side fallback for local development (uses TagLibSharp via dotnet).
+            $dotnetAvailable = (Get-Command dotnet -ErrorAction SilentlyContinue) -ne $null
+            $probeProjectPath = Join-Path $PSScriptRoot "..\tools\MetadataProbe\MetadataProbe.csproj"
+            $probeProjectPath = [System.IO.Path]::GetFullPath($probeProjectPath)
+
+            if (-not $dotnetAvailable -or -not (Test-Path $probeProjectPath)) {
+                $result.Outcome = 'skipped'
+                $result.SkipReason = "python3 + mutagen not available in container. Host fallback requires dotnet + scripts/tools/MetadataProbe (install mutagen with: python3 -m pip install mutagen)."
+                return $result
+            }
+
+            Write-Host "       Mutagen not found in container; using host-side TagLibSharp fallback..." -ForegroundColor Yellow
+
+            $tempRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("lidarr-plugin-metadata-" + [Guid]::NewGuid().ToString("N"))
+            New-Item -ItemType Directory -Force -Path $tempRoot | Out-Null
+
+            try {
+                # Get audio files from output path (filter common audio extensions)
+                $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | sort | head -n $MaxFilesToCheck"
+                $audioFilesRaw = docker exec $ContainerName sh -c $findCmd 2>$null
+                $audioFiles = @($audioFilesRaw) -split "`n" | Where-Object { $_.Trim() }
+
+                if ($audioFiles.Count -eq 0) {
+                    $result.Errors += "No audio files found in output path: $OutputPath"
+                    return $result
+                }
+
+                $result.TotalFilesChecked = $audioFiles.Count
+                Write-Host "       Copying $($audioFiles.Count) files from container for metadata validation..." -ForegroundColor Gray
+
+                $localFiles = @()
+                $i = 0
+                foreach ($file in $audioFiles) {
+                    $i++
+                    $fileName = Split-Path -Leaf $file
+                    $localPath = Join-Path $tempRoot ("{0:D2}-{1}" -f $i, $fileName)
+                    docker cp "$ContainerName`:$file" "$localPath" 2>$null | Out-Null
+                    if (Test-Path $localPath) {
+                        $localFiles += $localPath
+                    }
+                    else {
+                        $result.Errors += "Failed to copy file from container: $file"
+                    }
+                }
+
+                if ($localFiles.Count -eq 0) {
+                    $result.Errors += "No files could be copied from container for metadata validation."
+                    return $result
+                }
+
+                $probeJson = dotnet run -c Release --project $probeProjectPath -- @($localFiles) 2>$null
+                $probeJsonText = (@($probeJson) -join '').Trim()
+                if (-not $probeJsonText) {
+                    $result.Errors += "Host metadata probe returned no output."
+                    return $result
+                }
+
+                $probeResults = $probeJsonText | ConvertFrom-Json
+                $validatedFiles = @()
+                $filesWithTags = 0
+                $missingTags = @()
+
+                foreach ($probe in $probeResults) {
+                    $fileName = [string]$probe.Name
+
+                    if ($probe.Error) {
+                        $missingTags += "${fileName}: Error reading tags: $($probe.Error)"
+                        continue
+                    }
+
+                    $missing = @()
+                    if ([string]::IsNullOrWhiteSpace($probe.Artist)) { $missing += "artist" }
+                    if ([string]::IsNullOrWhiteSpace($probe.Album)) { $missing += "album" }
+                    if ([string]::IsNullOrWhiteSpace($probe.Title)) { $missing += "title" }
+                    if ($null -eq $probe.Track -or $probe.Track -lt 1) { $missing += "track" }
+                    if ($IsMultiDisc -and ($null -eq $probe.Disc -or $probe.Disc -lt 1)) { $missing += "disc" }
+
+                    if ($missing.Count -gt 0) {
+                        $missingTags += "${fileName}: Missing tags: $($missing -join ', ')"
+                        continue
+                    }
+
+                    $filesWithTags++
+                    $validatedFiles += [PSCustomObject]@{
+                        Name = $fileName
+                        Artist = $probe.Artist
+                        Album = $probe.Album
+                        Title = $probe.Title
+                        Track = $probe.Track
+                        Disc = $probe.Disc
+                    }
+                    Write-Host "         OK: artist='$($probe.Artist)', album='$($probe.Album)', title='$($probe.Title)', track=$($probe.Track)" -ForegroundColor Green
+                }
+
+                $result.ValidatedFiles = $validatedFiles
+                $result.FilesWithTags = $filesWithTags
+                $result.MissingTags = $missingTags
+
+                if ($missingTags.Count -eq 0 -and $filesWithTags -gt 0) {
+                    $result.Success = $true
+                    $result.Outcome = 'success'
+                    Write-Host "       PASS: All $filesWithTags files have valid metadata tags" -ForegroundColor Green
+                }
+                elseif ($filesWithTags -gt 0 -and $missingTags.Count -gt 0) {
+                    $result.Errors += "Metadata validation failed for $($missingTags.Count) of $($result.TotalFilesChecked) files"
+                    foreach ($m in $missingTags) {
+                        $result.Errors += "  FAIL: $m"
+                        Write-Host "       FAIL: $m" -ForegroundColor Red
+                    }
+                }
+                else {
+                    $result.Errors += "No files passed metadata validation"
+                    foreach ($m in $missingTags) {
+                        $result.Errors += "  FAIL: $m"
+                        Write-Host "       FAIL: $m" -ForegroundColor Red
+                    }
+                }
+
+                return $result
+            }
+            finally {
+                try { Remove-Item -Recurse -Force -Path $tempRoot -ErrorAction SilentlyContinue } catch { }
+            }
+        }
+
+        # Get audio files from output path (filter common audio extensions)
+        $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | sort | head -n $MaxFilesToCheck"
+        $audioFilesRaw = docker exec $ContainerName sh -c $findCmd 2>$null
+        $audioFiles = @($audioFilesRaw) -split "`n" | Where-Object { $_.Trim() }
+
+        if ($audioFiles.Count -eq 0) {
+            $result.Errors += "No audio files found in output path: $OutputPath"
+            return $result
+        }
+
+        $result.TotalFilesChecked = $audioFiles.Count
+        Write-Host "       Checking metadata for $($audioFiles.Count) files..." -ForegroundColor Gray
+
+        # Python script to read metadata using mutagen
+        # Returns JSON: {"artist": "...", "album": "...", "title": "...", "track": N, "disc": N, "error": "..."}
+        $pythonScript = @'
+import sys
+import json
+import mutagen
+from mutagen.flac import FLAC
+from mutagen.mp4 import MP4
+from mutagen.mp3 import MP3
+from mutagen.oggvorbis import OggVorbis
+
+def get_tags(filepath):
+    result = {"artist": "", "album": "", "title": "", "track": None, "disc": None, "error": None}
+    try:
+        audio = mutagen.File(filepath, easy=True)
+        if audio is None:
+            result["error"] = "Cannot read file"
+            return result
+
+        # Easy tags use list values
+        def get_tag(keys):
+            for k in keys:
+                if k in audio:
+                    v = audio[k]
+                    if isinstance(v, list) and len(v) > 0:
+                        return str(v[0])
+                    elif v:
+                        return str(v)
+            return ""
+
+        result["artist"] = get_tag(["artist", "albumartist", "performer"])
+        result["album"] = get_tag(["album"])
+        result["title"] = get_tag(["title"])
+
+        # Track number (may be "N/M" format)
+        track_str = get_tag(["tracknumber", "track"])
+        if track_str:
+            try:
+                result["track"] = int(track_str.split("/")[0])
+            except:
+                pass
+
+        # Disc number (may be "N/M" format) - includes "disk" for MP4/M4A compatibility
+        disc_str = get_tag(["discnumber", "disc", "disk"])
+        if disc_str:
+            try:
+                result["disc"] = int(disc_str.split("/")[0])
+            except:
+                pass
+
+    except Exception as e:
+        result["error"] = str(e)
+    return result
+
+if __name__ == "__main__":
+    print(json.dumps(get_tags(sys.argv[1])))
+'@
+
+        # Escape for shell
+        $pythonScriptEscaped = $pythonScript -replace "'", "'\''"
+
+        $validatedFiles = @()
+        $filesWithTags = 0
+        $missingTags = @()
+
+        foreach ($file in $audioFiles) {
+            $fileName = Split-Path -Leaf $file
+            Write-Host "       Checking: $fileName" -ForegroundColor DarkGray
+
+            # Run python script in container
+            $jsonResult = docker exec $ContainerName python3 -c $pythonScriptEscaped "$file" 2>$null
+            $jsonStr = (@($jsonResult) -join '').Trim()
+
+            if (-not $jsonStr) {
+                $missingTags += "${fileName}: Failed to read tags (no output)"
+                continue
+            }
+
+            try {
+                $tags = $jsonStr | ConvertFrom-Json
+            }
+            catch {
+                $missingTags += "${fileName}: Failed to parse tag JSON: $jsonStr"
+                continue
+            }
+
+            if ($tags.error) {
+                $missingTags += "${fileName}: Error reading tags: $($tags.error)"
+                continue
+            }
+
+            # Validate required tags
+            $missing = @()
+            if ([string]::IsNullOrWhiteSpace($tags.artist)) { $missing += "artist" }
+            if ([string]::IsNullOrWhiteSpace($tags.album)) { $missing += "album" }
+            if ([string]::IsNullOrWhiteSpace($tags.title)) { $missing += "title" }
+
+            # Track number is expected for all files
+            if ($null -eq $tags.track -or $tags.track -lt 1) { $missing += "track" }
+
+            # Disc number only required for multi-disc
+            if ($IsMultiDisc -and ($null -eq $tags.disc -or $tags.disc -lt 1)) {
+                $missing += "disc"
+            }
+
+            if ($missing.Count -gt 0) {
+                $missingTags += "${fileName}: Missing tags: $($missing -join ', ')"
+            }
+            else {
+                $filesWithTags++
+                $validatedFiles += [PSCustomObject]@{
+                    Path = $file
+                    Name = $fileName
+                    Artist = $tags.artist
+                    Album = $tags.album
+                    Title = $tags.title
+                    Track = $tags.track
+                    Disc = $tags.disc
+                }
+                Write-Host "         OK: artist='$($tags.artist)', album='$($tags.album)', title='$($tags.title)', track=$($tags.track)" -ForegroundColor Green
+            }
+        }
+
+        $result.ValidatedFiles = $validatedFiles
+        $result.FilesWithTags = $filesWithTags
+        $result.MissingTags = $missingTags
+
+        # Success if all checked files have valid tags
+        if ($missingTags.Count -eq 0 -and $filesWithTags -gt 0) {
+            $result.Success = $true
+            $result.Outcome = 'success'
+            Write-Host "       PASS: All $filesWithTags files have valid metadata tags" -ForegroundColor Green
+        }
+        elseif ($filesWithTags -gt 0 -and $missingTags.Count -gt 0) {
+            # Partial success - some files ok, some missing
+            $result.Errors += "Metadata validation failed for $($missingTags.Count) of $($audioFiles.Count) files"
+            foreach ($m in $missingTags) {
+                $result.Errors += "  FAIL: $m"
+                Write-Host "       FAIL: $m" -ForegroundColor Red
+            }
+        }
+        else {
+            # All files failed
+            $result.Errors += "No files passed metadata validation"
+            foreach ($m in $missingTags) {
+                $result.Errors += "  FAIL: $m"
+                Write-Host "       FAIL: $m" -ForegroundColor Red
+            }
+        }
+    }
+    catch {
+        $result.Errors += "Metadata gate failed: $_"
+    }
+
+    return $result
+}
+
+Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Invoke-LidarrApi
