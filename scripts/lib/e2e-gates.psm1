@@ -67,7 +67,10 @@ function Test-PackagingPreflight {
         are provided by the Lidarr host. Shipping host-provided DLLs causes ALC/type-identity
         conflicts like "Method 'Test' does not have an implementation".
 
-        FORBIDDEN DLLs (host-provided / cross-boundary risk):
+        FORBIDDEN DLLs (host-provided / cross-boundary type identity risk):
+          - FluentValidation.dll
+          - Microsoft.Extensions.DependencyInjection.Abstractions.dll
+          - Microsoft.Extensions.Logging.Abstractions.dll
           - System.Text.Json.dll
           - NLog.dll
           - Lidarr.*.dll (host assemblies)
@@ -101,6 +104,9 @@ function Test-PackagingPreflight {
 
     # Canonical list of DLLs that MUST NOT be shipped
     $forbiddenExactDlls = @(
+        'FluentValidation.dll',
+        'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
+        'Microsoft.Extensions.Logging.Abstractions.dll',
         'NLog.dll',
         'System.Text.Json.dll'
     )
@@ -150,6 +156,13 @@ function Test-PackagingPreflight {
         # Check for forbidden DLLs
         foreach ($dll in $dlls) {
             $isForbidden = $false
+
+            # Plugin assemblies (Lidarr.Plugin.*.dll) are ALLOWED - skip forbidden check for these
+            if ($dll -like 'Lidarr.Plugin.*.dll') {
+                $result.AllowedDlls += $dll
+                continue
+            }
+
             if ($forbiddenExactDlls -contains $dll) {
                 $isForbidden = $true
             } else {
