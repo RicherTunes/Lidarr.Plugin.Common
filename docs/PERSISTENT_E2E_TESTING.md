@@ -200,6 +200,25 @@ pwsh scripts/e2e-runner.ps1 -Plugins 'Qobuzarr' -Gate all ... 2>&1 | Tee-Object 
 # Output is pre-redacted; safe to share
 ```
 
+### Packaging Preflight Validation
+
+The `multi-plugin-docker-smoke-test.ps1` script automatically validates plugin packages before deployment using `Test-PackagingPreflight`. This catches forbidden DLLs that would cause ALC/type-identity conflicts at runtime.
+
+**Forbidden DLLs** (host-provided / cross-boundary risk, MUST NOT ship):
+- `System.Text.Json.dll`
+- `NLog.dll`
+- `Lidarr.*.dll` (host assemblies)
+- `NzbDrone.*.dll` (host assemblies)
+
+**Required DLLs**:
+- `Lidarr.Plugin.<Name>.dll` (merged plugin assembly)
+- `Lidarr.Plugin.Abstractions.dll` (host does NOT provide this)
+
+If a package contains forbidden DLLs, the script will fail with a clear error message before deploying:
+```
+Packaging preflight failed for 'qobuzarr': Package contains forbidden DLLs: System.Text.Json.dll
+```
+
 ## Notes
 
 - If you see `Bind for 0.0.0.0:<port> failed: port is already allocated`, change `-Port` and/or `-ContainerName`.

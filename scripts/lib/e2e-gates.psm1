@@ -57,6 +57,141 @@ function Invoke-LidarrApi {
     return $response
 }
 
+function Test-PackagingPreflight {
+    <#
+    .SYNOPSIS
+        Preflight check: Validate plugin packages don't contain host-provided DLLs.
+
+    .DESCRIPTION
+        Validates that plugin ZIP files or directories do not contain assemblies that
+        are provided by the Lidarr host. Shipping host-provided DLLs causes ALC/type-identity
+        conflicts like "Method 'Test' does not have an implementation".
+
+        FORBIDDEN DLLs (host-provided / cross-boundary risk):
+          - System.Text.Json.dll
+          - NLog.dll
+          - Lidarr.*.dll (host assemblies)
+          - NzbDrone.*.dll (host assemblies)
+
+        REQUIRED DLLs:
+          - Lidarr.Plugin.<Name>.dll (merged plugin)
+          - Lidarr.Plugin.Abstractions.dll (host does NOT provide this)
+          - plugin.json
+          - Any plugin-specific additional assemblies
+
+    .PARAMETER PluginPath
+        Path to a plugin ZIP file or directory to validate.
+
+    .OUTPUTS
+        PSCustomObject with Success, ForbiddenDlls, AllowedDlls, Errors
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$PluginPath
+    )
+
+    $result = [PSCustomObject]@{
+        Gate = 'PackagingPreflight'
+        PluginPath = $PluginPath
+        Success = $false
+        ForbiddenDlls = @()
+        AllowedDlls = @()
+        Errors = @()
+    }
+
+    # Canonical list of DLLs that MUST NOT be shipped
+    $forbiddenExactDlls = @(
+        'NLog.dll',
+        'System.Text.Json.dll'
+    )
+
+    # Host assemblies that must never be shipped in plugin packages
+    $forbiddenDllWildcards = @(
+        'Lidarr.*.dll',
+        'NzbDrone.*.dll'
+    )
+
+    $requiredExactDlls = @(
+        'Lidarr.Plugin.Abstractions.dll'
+    )
+
+    try {
+        $dlls = @()
+
+        if (Test-Path -LiteralPath $PluginPath -PathType Container) {
+            # Directory - scan for DLLs
+            $dlls = Get-ChildItem -LiteralPath $PluginPath -Filter '*.dll' -Recurse | ForEach-Object { $_.Name }
+        } elseif ($PluginPath -match '\.zip$' -and (Test-Path -LiteralPath $PluginPath)) {
+            # ZIP file - list contents
+            Add-Type -AssemblyName System.IO.Compression.FileSystem
+            $zip = [System.IO.Compression.ZipFile]::OpenRead($PluginPath)
+            try {
+                $dlls = $zip.Entries | Where-Object { $_.Name -match '\.dll$' } | ForEach-Object { $_.Name }
+            } finally {
+                $zip.Dispose()
+            }
+        } else {
+            $result.Errors += "Plugin path not found or invalid: $PluginPath"
+            return $result
+        }
+
+        # Check required DLLs first (missing these is always a hard error)
+        foreach ($required in $requiredExactDlls) {
+            if ($dlls -notcontains $required) {
+                $result.Errors += "Missing required DLL: $required"
+            }
+        }
+
+        $hasPluginAssembly = $dlls | Where-Object { $_ -like 'Lidarr.Plugin.*.dll' -and $_ -ne 'Lidarr.Plugin.Abstractions.dll' } | Select-Object -First 1
+        if (-not $hasPluginAssembly) {
+            $result.Errors += "Missing plugin assembly (expected a Lidarr.Plugin.<Name>.dll)"
+        }
+
+        # Check for forbidden DLLs
+        foreach ($dll in $dlls) {
+            $isForbidden = $false
+            if ($forbiddenExactDlls -contains $dll) {
+                $isForbidden = $true
+            } else {
+                foreach ($pattern in $forbiddenDllWildcards) {
+                    if ($dll -like $pattern) {
+                        $isForbidden = $true
+                        break
+                    }
+                }
+            }
+
+            if ($isForbidden) { $result.ForbiddenDlls += $dll } else { $result.AllowedDlls += $dll }
+        }
+
+        if ($result.ForbiddenDlls.Count -gt 0) {
+            $result.Errors += "Package contains forbidden DLLs: $($result.ForbiddenDlls -join ', ')"
+        }
+
+        if ($result.Errors.Count -gt 0) {
+            Write-Host "[PackagingPreflight] FAIL" -ForegroundColor Red
+            foreach ($err in $result.Errors) {
+                Write-Host "  - $err" -ForegroundColor Red
+            }
+            if ($result.ForbiddenDlls.Count -gt 0) {
+                Write-Host "  Forbidden DLLs:" -ForegroundColor Red
+                foreach ($dll in $result.ForbiddenDlls) {
+                    Write-Host "    - $dll" -ForegroundColor Red
+                }
+            }
+        } else {
+            $result.Success = $true
+            Write-Host "[PackagingPreflight] PASS - No forbidden DLLs found" -ForegroundColor Green
+            Write-Host "  Allowed DLLs: $($result.AllowedDlls -join ', ')" -ForegroundColor DarkGray
+        }
+    } catch {
+        $result.Errors += "Preflight check failed: $($_.Exception.Message)"
+        Write-Host "[PackagingPreflight] ERROR - $($_.Exception.Message)" -ForegroundColor Red
+    }
+
+    return $result
+}
+
 function Test-SchemaGate {
     <#
     .SYNOPSIS
@@ -1774,4 +1909,4 @@ function Test-ImportListGate {
     return $result
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Invoke-LidarrApi
+Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Invoke-LidarrApi
