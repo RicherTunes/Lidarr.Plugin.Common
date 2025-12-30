@@ -326,6 +326,46 @@ namespace Lidarr.Plugin.Common.Tests
             }
         }
 
+        [Fact]
+        public async Task DownloadTrackAsync_ZeroByteDownload_ApplierNotInvoked()
+        {
+            // 0-byte response simulates failed/empty stream
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 0, supportRange: false));
+            var countingApplier = new CountingMetadataApplier();
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin")),
+                metadataApplier: countingApplier
+            );
+
+            var outputPath = Path.Combine(Path.GetTempPath(), $"orch_test_zero_{Guid.NewGuid():N}.bin");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("t1", outputPath, new StreamingQuality { Bitrate = 320 });
+
+                // Download should fail due to 0 bytes
+                Assert.False(result.Success);
+                Assert.Contains("empty", result.ErrorMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+
+                // Metadata applier should NOT be invoked for failed/0-byte downloads
+                Assert.Equal(0, countingApplier.CallCount);
+
+                // File should not exist
+                Assert.False(File.Exists(outputPath));
+            }
+            finally
+            {
+                TryDelete(outputPath);
+                TryDelete(outputPath + ".partial");
+                TryDelete(outputPath + ".partial.resume.json");
+            }
+        }
+
         private static void TryDelete(string path)
         {
             try { if (File.Exists(path)) File.Delete(path); } catch { }
