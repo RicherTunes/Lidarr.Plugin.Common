@@ -64,6 +64,19 @@
     When set, re-runs Search gates after Persist gate to prove functional auth post-restart.
     Automatically enabled in bootstrap mode.
 
+.PARAMETER ValidateMetadata
+    When set, runs optional metadata tag validation after successful Grab gate.
+    Checks that downloaded audio files have required tags (artist, album, title, track).
+    Requires python3 + mutagen in the container. SKIPS (not fails) if mutagen unavailable.
+    Can also be enabled via E2E_VALIDATE_METADATA=1 environment variable.
+
+.PARAMETER MetadataFilesToCheck
+    Maximum number of files to check for metadata validation (default: 3).
+
+.EXAMPLE
+    # Run all gates with metadata validation
+    ./e2e-runner.ps1 -Plugins "Tidalarr" -Gate all -ValidateMetadata
+
 .EXAMPLE
     # Run schema gate for all plugins (no credentials needed)
     ./e2e-runner.ps1 -Plugins "Qobuzarr,Tidalarr,Brainarr" -Gate schema
@@ -91,7 +104,11 @@ param(
 
     [switch]$SkipDiagnostics,
 
-    [switch]$PersistRerun
+    [switch]$PersistRerun,
+
+    [switch]$ValidateMetadata,
+
+    [int]$MetadataFilesToCheck = 3
 )
 
 $ErrorActionPreference = "Stop"
@@ -99,7 +116,12 @@ $scriptRoot = Split-Path -Parent $PSScriptRoot
 
 # Import modules
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-gates.psm1") -Force
-Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force   
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force
+
+# Environment variable overrides for opt-in features
+if (-not $ValidateMetadata -and $env:E2E_VALIDATE_METADATA -eq '1') {
+    $ValidateMetadata = $true
+}   
 
 function Get-DockerConfigApiKey {
     param(
@@ -1005,6 +1027,41 @@ foreach ($plugin in $pluginList) {
                 }
                 elseif ($grabResult.Success) {
                     Write-Host "       PASS (queued: $($grabResult.ReleaseTitle))" -ForegroundColor Green
+
+                    # Optional: Metadata validation after successful grab
+                    if ($ValidateMetadata -and $grabResult.OutputPath -and $ContainerName) {
+                        Write-Host "  [4b/4] Metadata Gate (opt-in)..." -ForegroundColor Cyan
+
+                        $metadataResult = Test-MetadataGate `
+                            -OutputPath $grabResult.OutputPath `
+                            -ContainerName $ContainerName `
+                            -MaxFilesToCheck $MetadataFilesToCheck
+
+                        $metaOutcome = if ($metadataResult.Outcome) { $metadataResult.Outcome } elseif ($metadataResult.Success) { "success" } else { "failed" }
+                        $allResults += New-OutcomeResult -Gate "Metadata" -PluginName $plugin -Outcome $metaOutcome -Errors $metadataResult.Errors -Details @{
+                            OutputPath = $metadataResult.OutputPath
+                            TotalFilesChecked = $metadataResult.TotalFilesChecked
+                            FilesWithTags = $metadataResult.FilesWithTags
+                            ValidatedFiles = $metadataResult.ValidatedFiles | ForEach-Object { $_.Name }
+                            MissingTags = $metadataResult.MissingTags
+                            SkipReason = $metadataResult.SkipReason
+                        }
+
+                        if ($metaOutcome -eq "skipped") {
+                            $reason = $metadataResult.SkipReason
+                            if (-not $reason) { $reason = "Metadata validation skipped" }
+                            Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+                        }
+                        elseif (-not $metadataResult.Success) {
+                            Write-Host "       FAIL (metadata validation)" -ForegroundColor Red
+                            foreach ($err in $metadataResult.Errors) {
+                                Write-Host "       - $err" -ForegroundColor Red
+                            }
+                            $overallSuccess = $false
+                            $stopNow = $true
+                            break
+                        }
+                    }
                 }
                 else {
                     Write-Host "       FAIL" -ForegroundColor Red

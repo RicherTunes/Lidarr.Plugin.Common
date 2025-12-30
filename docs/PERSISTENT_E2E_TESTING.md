@@ -219,6 +219,23 @@ If a package contains forbidden DLLs, the script will fail with a clear error me
 Packaging preflight failed for 'qobuzarr': Package contains forbidden DLLs: System.Text.Json.dll
 ```
 
+### Metadata Gate (Opt-In)
+
+After a successful Grab, you can opt-in to metadata validation:
+- CLI: `-ValidateMetadata`
+- Env: `E2E_VALIDATE_METADATA=1`
+
+The metadata check validates (for the first N files):
+- `artist`, `album`, `title` (non-empty)
+- `track` (>= 1)
+- `disc` (>= 1) when multi-disc is detected
+
+Implementation:
+- Primary: `python3 + mutagen` inside the container
+- Fallback (local dev): host-side TagLibSharp probe via `dotnet` + `scripts/tools/MetadataProbe`
+
+If neither mutagen nor the host fallback is available, metadata validation is skipped with a clear reason.
+
 ## Notes
 
 - If you see `Bind for 0.0.0.0:<port> failed: port is already allocated`, change `-Port` and/or `-ContainerName`.
