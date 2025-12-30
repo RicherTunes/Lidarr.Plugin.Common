@@ -68,9 +68,8 @@
       <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Options.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Options.dll')" />
       <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Primitives.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Primitives.dll')" />
       <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Http.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Http.dll')" />
-      <!-- NOTE: FluentValidation must NOT be merged (ILRepacked) - it breaks DownloadClient.Test(List<ValidationFailure>) -->
-      <!-- However, FluentValidation.dll MUST be shipped as a separate file in the package for type-identity. -->
-      <!-- <_PluginDeps Include="$(OutputPath)FluentValidation.dll" /> DO NOT ENABLE - breaks Test() signature -->
+      <!-- NOTE: FluentValidation must NOT be merged (ILRepacked) - it breaks DownloadClient.Test(List<ValidationFailure>).
+           If FluentValidation.dll should be shipped as a separate file, that is handled by the post-merge cleanup step below. -->
       <!-- NOTE: System.Text.Json must NOT be merged - its types cross the host/plugin boundary -->
       <!-- and can cause TypeLoadException or serialization issues -->
       <!-- <_PluginDeps Include="$(OutputPath)System.Text.Json.dll" /> DO NOT ENABLE - cross-boundary type issues -->
@@ -116,15 +115,27 @@
     <RemoveDir Directories="$(_ILRepackTempDir)" />
 
 
-    <!-- Type-identity assemblies to keep (NOT merged but required at runtime).
-         These must maintain identical type identity with the host for proper method signature matching.
-         Based on empirical testing of working Tidalarr/Qobuzarr packages.
+    <!-- PLUGIN PACKAGE CONTENTS POLICY
 
-         Notes:
-           - Lidarr.Plugin.Abstractions: Required for plugin discovery/loading
-           - FluentValidation: Required for DownloadClient.Test() method signature
-           - MS.Extensions.*.Abstractions: Required for DI/logging type identity -->
+         MUST SHIP:
+           - Lidarr.Plugin.<Name>.dll (merged assembly)
+           - plugin.json
+           - Lidarr.Plugin.Abstractions.dll (plugin discovery; host does NOT provide this)
+
+         TYPE-IDENTITY (kept as separate files; not merged):
+           - FluentValidation.dll
+           - Microsoft.Extensions.DependencyInjection.Abstractions.dll
+           - Microsoft.Extensions.Logging.Abstractions.dll
+
+         MUST NOT SHIP:
+           - System.Text.Json.dll (cross-boundary type identity risk)
+           - Host assemblies (Lidarr.Core.dll, Lidarr.Common.dll, Lidarr.Host.dll, NzbDrone.*.dll, etc.)
+
+         MERGED/INTERNALIZED:
+           - Lidarr.Plugin.Common.dll, Polly*, TagLibSharp*, etc. (via ILRepack above)
+    -->
     <ItemGroup>
+      <!-- Type-identity assemblies to keep (NOT merged) -->
       <_PluginRuntimeDeps Include="$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll"
                          Condition="Exists('$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll')" />
       <_PluginRuntimeDeps Include="$(_PluginOutputPath)FluentValidation.dll"
@@ -134,11 +145,14 @@
       <_PluginRuntimeDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Logging.Abstractions.dll"
                          Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Logging.Abstractions.dll')" />
       <_PluginRuntimeDeps Include="@(PluginPackagingAdditionalKeep)" />
+
+      <!-- Everything else gets deleted - either merged above or host-provided -->
       <_ExtraAssemblies Include="$(_PluginOutputPath)*.dll" Exclude="$(_PluginOutputPath)$(PluginAssemblyFileName);@(_PluginRuntimeDeps)" />
       <_ExtraSymbols Include="$(_PluginOutputPath)*.pdb" Exclude="$(_PluginOutputPath)$(PluginSymbolFileName)" />
     </ItemGroup>
 
     <Message Text="[ILRepack] Keeping runtime dependencies: @(_PluginRuntimeDeps->'%(Filename)')" Importance="high" Condition="'@(_PluginRuntimeDeps)' != ''" />
+    <Message Text="[ILRepack] Deleting extra assemblies: @(_ExtraAssemblies->'%(Filename)')" Importance="high" Condition="'@(_ExtraAssemblies)' != ''" />
     <Delete Files="@(_ExtraAssemblies)" />
     <Delete Files="@(_ExtraSymbols)" />
     <Delete Files="$(_PluginOutputPath)$(AssemblyName).deps.json" Condition="Exists('$(_PluginOutputPath)$(AssemblyName).deps.json')" />

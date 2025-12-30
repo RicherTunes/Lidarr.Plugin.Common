@@ -183,6 +183,9 @@ $ProgressPreference = "SilentlyContinue"
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
 
+# Import e2e-gates module for preflight packaging validation
+Import-Module (Join-Path $scriptDir "lib/e2e-gates.psm1") -Force
+
 $image = if ([string]::IsNullOrWhiteSpace($LidarrImage)) { "ghcr.io/hotio/lidarr:$LidarrTag" } else { $LidarrImage.Trim() }
 
 if ($RunSearchGate) {
@@ -639,11 +642,17 @@ try {
             throw "Plugin zip not found: $zipPath"
         }
 
+        # Preflight: Validate package doesn't contain host-provided DLLs
+        $preflightResult = Test-PackagingPreflight -PluginPath $zipPath
+        if (-not $preflightResult.Success) {
+            throw "Packaging preflight failed for '$name': $($preflightResult.Errors -join '; ')"
+        }
+
         $pluginZipPaths.Add((Resolve-Path -LiteralPath $zipPath).Path) | Out-Null
 
         $folderName = Get-PluginFolderName $name
-        $targetDir = Join-Path $pluginsRoot "$PluginsOwner/$folderName"   
-        New-Item -ItemType Directory -Force -Path $targetDir | Out-Null   
+        $targetDir = Join-Path $pluginsRoot "$PluginsOwner/$folderName"
+        New-Item -ItemType Directory -Force -Path $targetDir | Out-Null
 
         Expand-Archive -Path $zipPath -DestinationPath $targetDir -Force
 
@@ -695,12 +704,10 @@ try {
         }
     }
 
-    if ($RunSearchGate) {
-        $dockerArgs += @("-v", "${musicMount}:/music")
-    }
-    if ($RunDownloadClientGate) {
-        $dockerArgs += @("-v", "${downloadsMount}:/downloads")
-    }
+    # Always mount /music and /downloads - unconditional mounts prevent false negatives
+    # where tests pass because the container couldn't write to non-existent mount points
+    $dockerArgs += @("-v", "${musicMount}:/music")
+    $dockerArgs += @("-v", "${downloadsMount}:/downloads")
 
     $dockerArgs += @(
         "-e", "PUID=1000",

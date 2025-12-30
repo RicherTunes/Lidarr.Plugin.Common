@@ -81,16 +81,21 @@ namespace Lidarr.Plugin.Common.Tests
         public async Task ProactiveRefresh_RefreshesSession_WhenApproachingExpiryAndCredentialsAvailable()
         {
             var store = new MemoryTokenStore<TestSession>();
-            await store.SaveAsync(new TokenEnvelope<TestSession>(new TestSession("persisted"), DateTime.UtcNow.AddMilliseconds(250)));
+            // The proactive refresh logic only acts on an in-memory session.
+            // Load a persisted session that is initially valid, but will enter the refresh buffer shortly.
+            await store.SaveAsync(new TokenEnvelope<TestSession>(
+                new TestSession("persisted"),
+                DateTime.UtcNow.AddSeconds(1)));
 
             var authService = new FakeAuthService();
             using var manager = CreateManager(
                 authService,
                 store,
-                proactiveCredentialsProvider: () => new TestCredentials("proactive"));
+                proactiveCredentialsProvider: () => new TestCredentials("proactive"),
+                refreshBuffer: TimeSpan.FromMilliseconds(500));
 
-            // Loads persisted session into memory so the background timer can act.
-            _ = manager.GetSessionStatus();
+            // Ensure the persisted session is loaded into memory so the background timer can act.
+            _ = await manager.GetValidSessionAsync();
 
             var deadline = DateTime.UtcNow.AddSeconds(5);
             while (DateTime.UtcNow < deadline && authService.AuthenticateCalls < 1)
@@ -109,13 +114,15 @@ namespace Lidarr.Plugin.Common.Tests
         private static StreamingTokenManager<TestSession, TestCredentials> CreateManager(
             FakeAuthService authService,
             ITokenStore<TestSession> store,
-            Func<TestCredentials?>? proactiveCredentialsProvider = null)
+            Func<TestCredentials?>? proactiveCredentialsProvider = null,
+            TimeSpan? refreshBuffer = null,
+            TimeSpan? refreshCheckInterval = null)
         {
             var options = new StreamingTokenManagerOptions<TestSession>
             {
                 DefaultSessionLifetime = TimeSpan.FromMinutes(15),
-                RefreshBuffer = TimeSpan.FromMinutes(1),
-                RefreshCheckInterval = TimeSpan.FromMilliseconds(25),
+                RefreshBuffer = refreshBuffer ?? TimeSpan.FromMinutes(1),
+                RefreshCheckInterval = refreshCheckInterval ?? TimeSpan.FromMilliseconds(25),
                 ProactiveRefreshCredentialsProvider = proactiveCredentialsProvider == null
                     ? null
                     : () => proactiveCredentialsProvider()
