@@ -40,6 +40,11 @@ on:
         type: boolean
         required: true
         default: false
+      upload_diagnostics_on_success:
+        description: Upload diagnostics bundle even on success (for debugging)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -557,7 +562,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload diagnostics bundle
-        if: always()
+        if: failure() || inputs.upload_diagnostics_on_success
         uses: actions/upload-artifact@v4
         with:
           name: e2e-diagnostics-${{ github.run_id }}
