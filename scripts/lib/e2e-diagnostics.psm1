@@ -26,8 +26,106 @@ $script:SensitivePatterns = @(
     'codeverifier',
     'authorization_code',
     'authorizationcode',
-    'pkce'
+    'pkce',
+    # Brainarr LLM endpoint (may contain internal IPs)
+    'configurationurl',
+    'configuration_url'
 )
+
+# Private/internal endpoint patterns for value-based redaction
+# These are matched against STRING VALUES, not field names
+$script:PrivateEndpointPatterns = @{
+    # RFC1918 IPv4 ranges (private networks)
+    'RFC1918_10' = '(?<!\d)10\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})(?!\d)'
+    'RFC1918_172' = '(?<!\d)172\.(?:1[6-9]|2\d|3[01])\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})(?!\d)'
+    'RFC1918_192' = '(?<!\d)192\.168\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})(?!\d)'
+    # Link-local (APIPA)
+    'LinkLocal' = '(?<!\d)169\.254\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})(?!\d)'
+    # Loopback
+    'Loopback' = '(?<!\d)127\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.(?:25[0-5]|2[0-4]\d|1?\d{1,2})(?!\d)'
+    # Docker/internal hostnames
+    'DockerInternal' = '(?i)host\.docker\.internal'
+    'Localhost' = '(?i)(?<![a-z0-9])localhost(?![a-z0-9])'
+    # IPv6 private/internal addresses (RFC 3986: IPv6 in URLs must be bracketed)
+    # Only match bracketed form [::1] to avoid false positives on unrelated text
+    'IPv6_Loopback' = '\[::1\]'
+    'IPv6_LinkLocal' = '(?i)\[fe80:[0-9a-f:]+\]'
+    'IPv6_UniqueLocal' = '(?i)\[f[cd][0-9a-f]{2}:[0-9a-f:]+\]'
+}
+
+# Query parameters that commonly carry secrets (redact the value, keep the param name)
+$script:SecretQueryParams = @(
+    'code',
+    'code_verifier',
+    'refresh_token',
+    'access_token',
+    'token',
+    'apiKey',
+    'api_key',
+    'secret',
+    'password',
+    'client_secret'
+)
+
+<#
+.SYNOPSIS
+    Checks if a string value contains a private/internal endpoint.
+.DESCRIPTION
+    Returns $true if the value contains RFC1918 IPs, link-local, loopback,
+    or known internal hostnames like host.docker.internal.
+#>
+function Test-PrivateEndpoint {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $false }
+
+    foreach ($pattern in $script:PrivateEndpointPatterns.Values) {
+        if ($Value -match $pattern) {
+            return $true
+        }
+    }
+    return $false
+}
+
+<#
+.SYNOPSIS
+    Redacts private endpoints and secret query params from a string value.
+.DESCRIPTION
+    - Replaces private IPs (RFC1918, link-local, loopback) with [PRIVATE-IP]
+    - Replaces internal hostnames with [INTERNAL-HOST]
+    - Redacts values of known secret query parameters
+    - Preserves public URLs
+#>
+function Invoke-ValueRedaction {
+    param([string]$Value)
+
+    if ([string]::IsNullOrWhiteSpace($Value)) { return $Value }
+
+    $result = $Value
+
+    # Redact RFC1918 and other private IPs
+    foreach ($key in $script:PrivateEndpointPatterns.Keys) {
+        $pattern = $script:PrivateEndpointPatterns[$key]
+        if ($key -match '^IPv6_') {
+            # IPv6 patterns - check first to avoid conflict with 'Loopback' match
+            $result = $result -replace $pattern, '[PRIVATE-IPv6]'
+        } elseif ($key -match 'RFC1918|LinkLocal|Loopback') {
+            $result = $result -replace $pattern, '[PRIVATE-IP]'
+        } elseif ($key -eq 'DockerInternal') {
+            $result = $result -replace $pattern, '[INTERNAL-HOST]'
+        } elseif ($key -eq 'Localhost') {
+            $result = $result -replace $pattern, '[LOCALHOST]'
+        }
+    }
+
+    # Redact secret query parameters (keep param name, redact value)
+    foreach ($param in $script:SecretQueryParams) {
+        # Match: param=value (value is anything until & or end of string)
+        $result = $result -replace "(?i)([?&])($param)=([^&]*)", '$1$2=[REDACTED]'
+    }
+
+    return $result
+}
 
 function Invoke-SecretRedaction {
     <#
@@ -87,7 +185,12 @@ function Invoke-SecretRedaction {
                 continue
             }
 
-            $result[$prop] = $value
+            # Apply value-based redaction (private IPs, secret query params) to strings
+            if ($value -is [string]) {
+                $result[$prop] = Invoke-ValueRedaction -Value $value
+            } else {
+                $result[$prop] = $value
+            }
         }
 
         # Special handling for Lidarr 'fields' array pattern
@@ -130,7 +233,12 @@ function Invoke-SecretRedaction {
         return [PSCustomObject]$result
     }
 
-    # Return primitives as-is
+    # Handle string primitives - check for private endpoints and secret query params
+    if ($Object -is [string]) {
+        return Invoke-ValueRedaction -Value $Object
+    }
+
+    # Return other primitives as-is
     return $Object
 }
 
@@ -165,6 +273,122 @@ function Test-SecretRedaction {
             }
             Field = 'lidarrSchema.fields[0].value'
         }
+        # Brainarr configurationUrl test - verifies LLM endpoint URLs are redacted
+        @{ Input = @{ configurationUrl = 'http://192.168.1.100:11434' }; Field = 'configurationUrl' }
+        @{
+            Input = @{
+                implementation = 'BrainarrImportList'
+                name = 'Brainarr Test'
+                fields = @(
+                    @{ name = 'configurationUrl'; value = 'http://10.0.0.5:11434' }
+                    @{ name = 'manualModelId'; value = 'llama3' }
+                )
+            }
+            Field = 'brainarrSchema'
+        }
+        # =====================================================================
+        # RFC1918 / Private Endpoint Redaction Tests
+        # =====================================================================
+        # Test: Private IPs in URL values should be redacted
+        @{
+            Input = @{ endpoint = 'http://192.168.1.100:11434/api' }
+            Field = 'privateIP_192'
+            Expected = 'http://[PRIVATE-IP]:11434/api'
+        }
+        @{
+            Input = @{ url = 'http://10.0.0.5:1234/test' }
+            Field = 'privateIP_10'
+            Expected = 'http://[PRIVATE-IP]:1234/test'
+        }
+        @{
+            Input = @{ server = 'http://172.20.10.2:8080/health' }
+            Field = 'privateIP_172'
+            Expected = 'http://[PRIVATE-IP]:8080/health'
+        }
+        @{
+            Input = @{ llmUrl = 'http://host.docker.internal:11434' }
+            Field = 'dockerInternal'
+            Expected = 'http://[INTERNAL-HOST]:11434'
+        }
+        @{
+            Input = @{ localApi = 'http://localhost:8686/api' }
+            Field = 'localhost'
+            Expected = 'http://[LOCALHOST]:8686/api'
+        }
+        @{
+            Input = @{ loopback = 'http://127.0.0.1:3000/test' }
+            Field = 'loopback'
+            Expected = 'http://[PRIVATE-IP]:3000/test'
+        }
+        # Test: Public URLs should NOT be redacted
+        @{
+            Input = @{ publicApi = 'https://api.tidal.com/v1/search' }
+            Field = 'publicUrl_tidal'
+            Expected = 'https://api.tidal.com/v1/search'
+        }
+        @{
+            Input = @{ externalUrl = 'https://api.qobuz.com/0.2/album/get' }
+            Field = 'publicUrl_qobuz'
+            Expected = 'https://api.qobuz.com/0.2/album/get'
+        }
+        # Test: Query param secrets should be redacted
+        @{
+            Input = @{ callbackUrl = 'https://example.com/callback?code=abc123&state=xyz' }
+            Field = 'queryParam_code'
+            Expected = 'https://example.com/callback?code=[REDACTED]&state=xyz'
+        }
+        @{
+            Input = @{ serviceUrl1 = 'https://auth.example.com?access_token=secret123&type=bearer' }
+            Field = 'queryParam_token'
+            Expected = 'https://auth.example.com?access_token=[REDACTED]&type=bearer'
+        }
+        @{
+            Input = @{ serviceUrl2 = 'https://api.test.com?refresh_token=xyz789&client_id=app' }
+            Field = 'queryParam_refresh'
+            Expected = 'https://api.test.com?refresh_token=[REDACTED]&client_id=app'
+        }
+        # Test: Nested fields with private IPs
+        @{
+            Input = @{
+                implementation = 'TestPlugin'
+                fields = @(
+                    @{ name = 'baseUrl'; value = 'http://192.168.1.50:8080' }
+                    @{ name = 'publicUrl'; value = 'https://api.public.com' }
+                )
+            }
+            Field = 'nestedPrivateIP'
+        }
+        # =====================================================================
+        # IPv6 Private Address Tests
+        # =====================================================================
+        @{
+            Input = @{ ipv6Loopback = 'http://[::1]:1234/api' }
+            Field = 'ipv6_loopback'
+            Expected = 'http://[PRIVATE-IPv6]:1234/api'
+        }
+        @{
+            Input = @{ ipv6LinkLocal = 'http://[fe80::1]:11434/test' }
+            Field = 'ipv6_linklocal'
+            Expected = 'http://[PRIVATE-IPv6]:11434/test'
+        }
+        @{
+            Input = @{ ipv6UniqueLocal = 'http://[fd00::1]:8080/health' }
+            Field = 'ipv6_uniquelocal'
+            Expected = 'http://[PRIVATE-IPv6]:8080/health'
+        }
+        # =====================================================================
+        # Multi-param Query String Tests
+        # =====================================================================
+        @{
+            Input = @{ multiParam = 'https://auth.com?code=abc123&refresh_token=xyz789&client_id=app' }
+            Field = 'multiParam'
+            Expected = 'https://auth.com?code=[REDACTED]&refresh_token=[REDACTED]&client_id=app'
+        }
+        @{
+            Input = @{ mixedCase = 'https://api.com?Access_Token=secret&TYPE=bearer' }
+            Field = 'mixedCase'
+            Expected = 'https://api.com?Access_Token=[REDACTED]&TYPE=bearer'
+        }
     )
 
     foreach ($case in $testCases) {
@@ -185,6 +409,70 @@ function Test-SecretRedaction {
             }
             if ($result.fields[2].value -eq '[REDACTED]') {
                 throw "Redaction incorrectly redacted non-sensitive field value"
+            }
+        }
+        elseif ($case.Field -eq 'brainarrSchema') {
+            # Verify configurationUrl (LLM endpoint) is redacted
+            if ($result.fields[0].value -ne '[REDACTED]') {
+                throw "Redaction failed for Brainarr configurationUrl field"
+            }
+            # Verify manualModelId is NOT redacted (not sensitive)
+            if ($result.fields[1].value -eq '[REDACTED]') {
+                throw "Redaction incorrectly redacted Brainarr manualModelId field"
+            }
+        }
+        elseif ($case.Field -match '^ipv6_') {
+            # Verify IPv6 addresses are redacted
+            $fieldName = ($case.Input.Keys | Select-Object -First 1)
+            $actualValue = $result.$fieldName
+            $expectedValue = $case.Expected
+            if ($actualValue -ne $expectedValue) {
+                throw "IPv6 redaction failed for $($case.Field): expected '$expectedValue', got '$actualValue'"
+            }
+        }
+        elseif ($case.Field -eq 'multiParam' -or $case.Field -eq 'mixedCase') {
+            # Verify multi-param and mixed case query strings
+            $fieldName = ($case.Input.Keys | Select-Object -First 1)
+            $actualValue = $result.$fieldName
+            $expectedValue = $case.Expected
+            if ($actualValue -ne $expectedValue) {
+                throw "Multi-param/mixed case redaction failed for $($case.Field): expected '$expectedValue', got '$actualValue'"
+            }
+        }
+        elseif ($case.Field -match '^privateIP_|^dockerInternal$|^localhost$|^loopback$') {
+            # Verify private IPs/hosts are redacted in the value
+            $fieldName = ($case.Input.Keys | Select-Object -First 1)
+            $actualValue = $result.$fieldName
+            $expectedValue = $case.Expected
+            if ($actualValue -ne $expectedValue) {
+                throw "Private endpoint redaction failed for $($case.Field): expected '$expectedValue', got '$actualValue'"
+            }
+        }
+        elseif ($case.Field -match '^publicUrl_') {
+            # Verify public URLs are NOT redacted
+            $fieldName = ($case.Input.Keys | Select-Object -First 1)
+            $actualValue = $result.$fieldName
+            $expectedValue = $case.Expected
+            if ($actualValue -ne $expectedValue) {
+                throw "Public URL was incorrectly modified for $($case.Field): expected '$expectedValue', got '$actualValue'"
+            }
+        }
+        elseif ($case.Field -match '^queryParam_') {
+            # Verify query params with secrets are redacted
+            $fieldName = ($case.Input.Keys | Select-Object -First 1)
+            $actualValue = $result.$fieldName
+            $expectedValue = $case.Expected
+            if ($actualValue -ne $expectedValue) {
+                throw "Query param redaction failed for $($case.Field): expected '$expectedValue', got '$actualValue'"
+            }
+        }
+        elseif ($case.Field -eq 'nestedPrivateIP') {
+            # Verify nested fields with private IPs are redacted
+            if ($result.fields[0].value -notmatch '\[PRIVATE-IP\]') {
+                throw "Nested private IP redaction failed: $($result.fields[0].value)"
+            }
+            if ($result.fields[1].value -ne 'https://api.public.com') {
+                throw "Nested public URL was incorrectly modified: $($result.fields[1].value)"
             }
         }
         else {
@@ -440,4 +728,4 @@ function Get-FailureSummary {
     return $summary -join "`n"
 }
 
-Export-ModuleMember -Function New-DiagnosticsBundle, Get-FailureSummary, Invoke-SecretRedaction, Test-SecretRedaction
+Export-ModuleMember -Function New-DiagnosticsBundle, Get-FailureSummary, Invoke-SecretRedaction, Test-SecretRedaction, Test-PrivateEndpoint, Invoke-ValueRedaction

@@ -73,6 +73,31 @@
 .PARAMETER MetadataFilesToCheck
     Maximum number of files to check for metadata validation (default: 3).
 
+.PARAMETER ForceConfigUpdate
+    When set, the Configure gate will update ALL fields from env vars (blast and converge mode).
+    By default, only auth-related fields are updated to preserve user-configured settings like
+    priority, tags, and quality preferences. Can also be enabled via E2E_FORCE_CONFIG_UPDATE=1.
+
+.NOTES
+    Configure Gate Environment Variables:
+
+    Qobuzarr (indexer + download client):
+      - QOBUZARR_AUTH_TOKEN (required) - Qobuz session token
+      - QOBUZARR_USER_ID (optional) - Qobuz user ID
+      - QOBUZARR_COUNTRY_CODE (optional, default: US)
+
+    Tidalarr (indexer + download client):
+      - TIDALARR_CONFIG_PATH (required*) - OAuth state persistence path
+      - TIDALARR_REDIRECT_URL (required*) - OAuth callback URL
+      - TIDALARR_MARKET (optional, default: US)
+      * At least one of CONFIG_PATH or REDIRECT_URL required
+
+    Brainarr (import list only):
+      - BRAINARR_LLM_BASE_URL (required) - LM Studio endpoint URL
+      - BRAINARR_MODEL (optional) - Model name
+
+    If required env vars are missing, Configure gate returns SKIP (not FAIL).
+
 .EXAMPLE
     # Run all gates with metadata validation
     ./e2e-runner.ps1 -Plugins "Tidalarr" -Gate all -ValidateMetadata
@@ -84,6 +109,17 @@
 .EXAMPLE
     # Run all gates for Qobuzarr
     ./e2e-runner.ps1 -Plugins "Qobuzarr" -Gate all -ApiKey "your-api-key"
+
+.EXAMPLE
+    # Bootstrap with env var credentials (no UI needed)
+    $env:QOBUZARR_AUTH_TOKEN = "your-token"
+    $env:QOBUZARR_USER_ID = "12345"
+    ./e2e-runner.ps1 -Plugins "Qobuzarr" -Gate bootstrap -LidarrUrl "http://localhost:8696"
+
+.EXAMPLE
+    # Force update all fields (overwrite user settings)
+    $env:E2E_FORCE_CONFIG_UPDATE = "1"
+    ./e2e-runner.ps1 -Plugins "Tidalarr" -Gate configure
 #>
 param(
     [Parameter(Mandatory)]
@@ -108,8 +144,15 @@ param(
 
     [switch]$ValidateMetadata,
 
-    [int]$MetadataFilesToCheck = 3
+    [int]$MetadataFilesToCheck = 3,
+
+    [switch]$ForceConfigUpdate
 )
+
+# Environment variable override for ForceConfigUpdate
+if (-not $ForceConfigUpdate -and $env:E2E_FORCE_CONFIG_UPDATE -eq '1') {
+    $ForceConfigUpdate = $true
+}
 
 $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $PSScriptRoot
@@ -258,12 +301,364 @@ function Find-ConfiguredComponent {
     } | Select-Object -First 1
 }
 
+# =============================================================================
+# Configure Gate: Env-Var-Driven Component Management
+# =============================================================================
+
+<#
+.SYNOPSIS
+    Returns plugin-specific env var configuration for component creation.
+.DESCRIPTION
+    Reads environment variables for a given plugin and returns a hashtable
+    with auth fields and their values. Returns $null for missing required vars.
+.OUTPUTS
+    Hashtable with keys: AuthFields (for indexer/client), ImportListFields (for Brainarr),
+    MissingRequired (array of missing required env var names), PluginName.
+#>
+function Get-PluginEnvConfig {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("Qobuzarr", "Tidalarr", "Brainarr")]
+        [string]$PluginName
+    )
+
+    $config = @{
+        PluginName = $PluginName
+        IndexerFields = @{}
+        DownloadClientFields = @{}
+        ImportListFields = @{}
+        MissingRequired = @()
+        HasRequiredEnvVars = $false
+    }
+
+    switch ($PluginName) {
+        "Qobuzarr" {
+            # Required: QOBUZARR_AUTH_TOKEN
+            # Optional: QOBUZARR_USER_ID, QOBUZARR_COUNTRY_CODE
+            $authToken = $env:QOBUZARR_AUTH_TOKEN
+            if ([string]::IsNullOrWhiteSpace($authToken)) {
+                $authToken = $env:QOBUZ_AUTH_TOKEN
+            }
+
+            if ([string]::IsNullOrWhiteSpace($authToken)) {
+                $config.MissingRequired += "QOBUZARR_AUTH_TOKEN"
+            } else {
+                $config.HasRequiredEnvVars = $true
+                $config.IndexerFields["authMethod"] = 1  # Token auth
+                $config.IndexerFields["authToken"] = $authToken
+
+                # Optional fields
+                $userId = $env:QOBUZARR_USER_ID
+                if ([string]::IsNullOrWhiteSpace($userId)) { $userId = $env:QOBUZ_USER_ID }
+                if (-not [string]::IsNullOrWhiteSpace($userId)) {
+                    $config.IndexerFields["userId"] = $userId
+                }
+
+                $countryCode = $env:QOBUZARR_COUNTRY_CODE
+                if ([string]::IsNullOrWhiteSpace($countryCode)) { $countryCode = $env:QOBUZ_COUNTRY_CODE }
+                if ([string]::IsNullOrWhiteSpace($countryCode)) { $countryCode = "US" }
+                $config.IndexerFields["countryCode"] = $countryCode
+
+                # Download client uses same auth (shared session)
+                # Download client has no auth fields - just storage/quality settings
+                $downloadPath = $env:QOBUZARR_DOWNLOAD_PATH
+                if ([string]::IsNullOrWhiteSpace($downloadPath)) { $downloadPath = "/downloads/qobuzarr" }
+                $config.DownloadClientFields["downloadPath"] = $downloadPath
+                $config.DownloadClientFields["createAlbumFolders"] = $true
+                $config.DownloadClientFields["preferredQuality"] = 6  # FLAC CD
+            }
+        }
+
+        "Tidalarr" {
+            # Tidalarr uses OAuth - needs configPath for token persistence
+            # Mode 1: Tokens already exist in configPath (just set configPath)
+            # Mode 2: Fresh OAuth setup (set redirectUrl + configPath for token storage)
+            #
+            # Env vars:
+            #   TIDALARR_CONFIG_PATH - Where tokens are stored (default: /config/plugins/RicherTunes/Tidalarr)
+            #   TIDALARR_REDIRECT_URL - OAuth callback URL (only needed for initial setup)
+            #   TIDALARR_MARKET - Market/region (default: US)
+            #   TIDALARR_DOWNLOAD_PATH - Download location (default: /downloads/tidalarr)
+
+            $configPath = $env:TIDALARR_CONFIG_PATH
+            $redirectUrl = $env:TIDALARR_REDIRECT_URL
+
+            # Require at least one of configPath or redirectUrl to proceed
+            if ([string]::IsNullOrWhiteSpace($configPath) -and [string]::IsNullOrWhiteSpace($redirectUrl)) {
+                $config.MissingRequired += "TIDALARR_CONFIG_PATH or TIDALARR_REDIRECT_URL"
+            } else {
+                $config.HasRequiredEnvVars = $true
+
+                # If redirectUrl is set but configPath isn't, use safe default for token storage
+                if ([string]::IsNullOrWhiteSpace($configPath)) {
+                    $configPath = "/config/plugins/RicherTunes/Tidalarr"
+                }
+                $config.IndexerFields["configPath"] = $configPath
+                $config.DownloadClientFields["configPath"] = $configPath
+
+                # Only set redirectUrl if explicitly provided (don't overwrite with empty)
+                if (-not [string]::IsNullOrWhiteSpace($redirectUrl)) {
+                    $config.IndexerFields["redirectUrl"] = $redirectUrl
+                    $config.DownloadClientFields["redirectUrl"] = $redirectUrl
+                }
+
+                $market = $env:TIDALARR_MARKET
+                if ([string]::IsNullOrWhiteSpace($market)) { $market = "US" }
+                $config.IndexerFields["tidalMarket"] = $market
+                $config.DownloadClientFields["tidalMarket"] = $market
+
+                # Download path for download client
+                $downloadPath = $env:TIDALARR_DOWNLOAD_PATH
+                if ([string]::IsNullOrWhiteSpace($downloadPath)) { $downloadPath = "/downloads/tidalarr" }
+                $config.DownloadClientFields["downloadPath"] = $downloadPath
+            }
+        }
+
+        "Brainarr" {
+            # Brainarr import list uses AI for music discovery
+            # Env vars:
+            #   BRAINARR_LLM_BASE_URL  - Local provider URL (Ollama/LM Studio) - REQUIRED
+            #   BRAINARR_MODEL         - Override model ID (optional)
+            #   BRAINARR_PROVIDER      - Provider enum value (optional, let Lidarr default if unset)
+
+            $llmBaseUrl = $env:BRAINARR_LLM_BASE_URL
+
+            if ([string]::IsNullOrWhiteSpace($llmBaseUrl)) {
+                $config.MissingRequired += "BRAINARR_LLM_BASE_URL"
+            } else {
+                $config.HasRequiredEnvVars = $true
+
+                # configurationUrl is the schema field for LLM endpoint
+                $config.ImportListFields["configurationUrl"] = $llmBaseUrl
+
+                # Provider - only set if explicitly specified (let Lidarr default otherwise)
+                $provider = $env:BRAINARR_PROVIDER
+                if (-not [string]::IsNullOrWhiteSpace($provider)) {
+                    $config.ImportListFields["provider"] = [int]$provider
+                }
+
+                # Model selection logic:
+                # - If BRAINARR_MODEL set: use manualModelId + autoDetectModel=false
+                # - If not set: autoDetectModel=true (let Brainarr pick best model)
+                $model = $env:BRAINARR_MODEL
+                if (-not [string]::IsNullOrWhiteSpace($model)) {
+                    $config.ImportListFields["manualModelId"] = $model
+                    $config.ImportListFields["autoDetectModel"] = $false
+                } else {
+                    $config.ImportListFields["autoDetectModel"] = $true
+                }
+            }
+        }
+    }
+
+    return $config
+}
+
+<#
+.SYNOPSIS
+    Fetches the schema for a specific component type and implementation.
+.OUTPUTS
+    The schema object from /api/v1/{type}/schema matching the implementation.
+#>
+function Get-ComponentSchema {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("indexer", "downloadclient", "importlist")]
+        [string]$Type,
+
+        [Parameter(Mandatory)]
+        [string]$ImplementationMatch
+    )
+
+    $schemas = Invoke-LidarrApi -Endpoint "$Type/schema"
+    if (-not $schemas) { return $null }
+
+    return $schemas | Where-Object {
+        $_.implementationName -like "*$ImplementationMatch*" -or
+        $_.implementation -like "*$ImplementationMatch*"
+    } | Select-Object -First 1
+}
+
+<#
+.SYNOPSIS
+    Creates a new component from schema and env var config.
+.DESCRIPTION
+    Uses the schema as a template, populates fields from envConfig,
+    and POSTs to create the component. Returns the created component or $null.
+#>
+function New-ComponentFromEnv {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("indexer", "downloadclient", "importlist")]
+        [string]$Type,
+
+        [Parameter(Mandatory)]
+        [string]$PluginName,
+
+        [Parameter(Mandatory)]
+        $Schema,
+
+        [Parameter(Mandatory)]
+        [hashtable]$FieldValues
+    )
+
+    # Clone schema to avoid mutation
+    $payload = $Schema | ConvertTo-Json -Depth 10 | ConvertFrom-Json
+
+    # Set name and enable
+    $payload.name = $PluginName
+    if ($null -ne $payload.enable) { $payload.enable = $true }
+    if ($null -ne $payload.enableRss) { $payload.enableRss = $false }
+    if ($null -ne $payload.enableAutomaticSearch) { $payload.enableAutomaticSearch = $true }
+    if ($null -ne $payload.enableInteractiveSearch) { $payload.enableInteractiveSearch = $true }
+
+    # Populate fields from env config
+    foreach ($fieldName in $FieldValues.Keys) {
+        $value = $FieldValues[$fieldName]
+        $payload.fields = Set-LidarrFieldValue -Fields $payload.fields -Name $fieldName -Value $value
+    }
+
+    # Remove id if present (for creation)
+    if ($payload.PSObject.Properties['id']) {
+        $payload.PSObject.Properties.Remove('id')
+    }
+
+    try {
+        $created = Invoke-LidarrApi -Endpoint $Type -Method POST -Body $payload
+        return $created
+    }
+    catch {
+        Write-Warning "Failed to create $Type for $PluginName : $_"
+        return $null
+    }
+}
+
+<#
+.SYNOPSIS
+    Updates only auth-related fields on an existing component.
+.DESCRIPTION
+    Fetches the full component, updates only the specified auth fields,
+    and PUTs the update. Does NOT touch user-configured fields like priority, tags, etc.
+.PARAMETER ForceUpdate
+    When true, updates all fields from envConfig (blast and converge mode).
+    When false (default), only updates auth fields if they differ.
+#>
+function Update-ComponentAuthFields {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("indexer", "downloadclient", "importlist")]
+        [string]$Type,
+
+        [Parameter(Mandatory)]
+        $ExistingComponent,
+
+        [Parameter(Mandatory)]
+        [hashtable]$FieldValues,
+
+        [switch]$ForceUpdate
+    )
+
+    # Define which fields are "auth fields" per plugin - these are safe to update
+    $authFieldNames = @(
+        # Qobuzarr auth
+        "authMethod", "authToken", "userId", "countryCode",
+        # Tidalarr auth
+        "configPath", "redirectUrl", "tidalMarket",
+        # Brainarr
+        "configurationUrl", "manualModelId", "autoDetectModel", "provider",
+        # Common safe fields (not user-tuned)
+        "downloadPath"
+    )
+
+    $fullComponent = Invoke-LidarrApi -Endpoint "$Type/$($ExistingComponent.id)"
+    $needsUpdate = $false
+    $updatedFields = @($fullComponent.fields)
+    $changedFieldNames = @()
+
+    foreach ($fieldName in $FieldValues.Keys) {
+        # Skip non-auth fields unless ForceUpdate
+        if (-not $ForceUpdate -and $fieldName -notin $authFieldNames) {
+            continue
+        }
+
+        $currentValue = Get-LidarrFieldValue -Fields $fullComponent.fields -Name $fieldName
+        $newValue = $FieldValues[$fieldName]
+
+        # Sensitive fields that Lidarr masks with ******** (comprehensive list)
+        # Also includes PII fields (userId, email) that should not appear in logs
+        $sensitiveFields = @(
+            # Auth secrets (Lidarr masks these)
+            "authToken", "password", "redirectUrl", "appSecret",
+            "refreshToken", "accessToken", "clientSecret",
+            "apiKey", "secret", "token",
+            # PII (not masked by Lidarr but should be redacted in logs)
+            "userId", "email", "username",
+            # Internal URLs (may reveal infrastructure)
+            "configurationUrl"
+        )
+
+        # Only update if value differs (idempotency)
+        $isDifferent = $false
+        $skippedMasked = $false
+
+        # Handle masked sensitive fields: if current value is masked (********) and we have a value,
+        # assume it's already configured correctly unless ForceUpdate is set
+        if ($fieldName -in $sensitiveFields -and "$currentValue" -eq "********" -and -not [string]::IsNullOrWhiteSpace("$newValue")) {
+            if ($ForceUpdate) {
+                $isDifferent = $true  # Force update even if masked
+            } else {
+                $skippedMasked = $true  # Track for logging
+            }
+        }
+        elseif ($null -eq $currentValue -and $null -ne $newValue) {
+            $isDifferent = $true
+        } elseif ($null -ne $currentValue -and $null -eq $newValue) {
+            $isDifferent = $true
+        } elseif ("$currentValue" -ne "$newValue") {
+            $isDifferent = $true
+        }
+
+        if ($isDifferent) {
+            $updatedFields = Set-LidarrFieldValue -Fields $updatedFields -Name $fieldName -Value $newValue
+            $needsUpdate = $true
+            # Never log sensitive values - use the same sensitiveFields list for consistency
+            if ($fieldName -in $sensitiveFields) {
+                $changedFieldNames += "$fieldName=[REDACTED]"
+            } else {
+                $changedFieldNames += "$fieldName=$newValue"
+            }
+        } elseif ($skippedMasked) {
+            # Log that we skipped a masked field (drift warning)
+            $changedFieldNames += "$fieldName=[MASKED; skipping compare - use -ForceConfigUpdate to overwrite]"
+        }
+    }
+
+    if (-not $needsUpdate) {
+        # Include any masked field notes in the result even if no update needed
+        return @{ Updated = $false; Component = $fullComponent; ChangedFields = $changedFieldNames }
+    }
+
+    $fullComponent.fields = $updatedFields
+
+    try {
+        $updated = Invoke-LidarrApi -Endpoint "$Type/$($fullComponent.id)" -Method PUT -Body $fullComponent
+        return @{ Updated = $true; Component = $updated; ChangedFields = $changedFieldNames }
+    }
+    catch {
+        # Fallback for some Lidarr versions
+        $updated = Invoke-LidarrApi -Endpoint $Type -Method PUT -Body $fullComponent
+        return @{ Updated = $true; Component = $updated; ChangedFields = $changedFieldNames }
+    }
+}
+
 function Test-ConfigureGateForPlugin {
     param(
         [Parameter(Mandatory)]
         [string]$PluginName,
 
-        [hashtable]$PluginConfig = @{}
+        [hashtable]$PluginConfig = @{},
+
+        [switch]$ForceUpdate
     )
 
     $result = [PSCustomObject]@{
@@ -276,74 +671,187 @@ function Test-ConfigureGateForPlugin {
         SkipReason = $null
     }
 
-    # Currently Configure gate is intentionally conservative: it only syncs known
-    # “split-brain” configuration that causes real E2E failures (e.g., OAuth configured
-    # on an indexer but missing on its paired download client).
-    if ($PluginName -ne "Tidalarr") {
+    # ==========================================================================
+    # Step 1: Check if plugin is supported for env-var configuration
+    # ==========================================================================
+    $supportedPlugins = @("Qobuzarr", "Tidalarr", "Brainarr")
+    if ($PluginName -notin $supportedPlugins) {
         $result.Outcome = "success"
         $result.Success = $true
+        $result.Actions += "Plugin '$PluginName' not in supported list; no configuration needed"
         return $result
     }
 
     try {
-        $indexer = Find-ConfiguredComponent -Type "indexer" -PluginName $PluginName
-        $client = Find-ConfiguredComponent -Type "downloadclient" -PluginName $PluginName
+        # ==========================================================================
+        # Step 2: Get env var configuration for this plugin
+        # ==========================================================================
+        $envConfig = Get-PluginEnvConfig -PluginName $PluginName
 
-        if (-not $indexer) {
-            $result.SkipReason = "No configured indexer found"
-            return $result
-        }
-        if (-not $client) {
-            $result.SkipReason = "No configured download client found"
-            return $result
-        }
-
-        $indexerFull = Invoke-LidarrApi -Endpoint ("indexer/{0}" -f $indexer.id)
-        $clientFull = Invoke-LidarrApi -Endpoint ("downloadclient/{0}" -f $client.id)
-
-        $indexerConfigPath = Get-LidarrFieldValue -Fields $indexerFull.fields -Name "configPath"
-        $clientConfigPath = Get-LidarrFieldValue -Fields $clientFull.fields -Name "configPath"
-
-        $indexerRedirectUrl = Get-LidarrFieldValue -Fields $indexerFull.fields -Name "redirectUrl"
-        if ([string]::IsNullOrWhiteSpace("$indexerRedirectUrl")) {
-            $indexerRedirectUrl = Get-LidarrFieldValue -Fields $indexerFull.fields -Name "oauthRedirectUrl"
-        }
-
-        $clientRedirectUrl = Get-LidarrFieldValue -Fields $clientFull.fields -Name "redirectUrl"
-        if ([string]::IsNullOrWhiteSpace("$clientRedirectUrl")) {
-            $clientRedirectUrl = Get-LidarrFieldValue -Fields $clientFull.fields -Name "oauthRedirectUrl"
-        }
-
-        $needsUpdate = $false
-        $updatedFields = @($clientFull.fields)
-
-        if (-not [string]::IsNullOrWhiteSpace("$indexerConfigPath") -and [string]::IsNullOrWhiteSpace("$clientConfigPath")) {
-            $updatedFields = Set-LidarrFieldValue -Fields $updatedFields -Name "configPath" -Value $indexerConfigPath
-            $result.Actions += "Copied configPath from indexer to download client"
-            $needsUpdate = $true
-        }
-
-        if (-not [string]::IsNullOrWhiteSpace("$indexerRedirectUrl") -and [string]::IsNullOrWhiteSpace("$clientRedirectUrl")) {
-            # Do not log the URL content (contains auth codes).
-            $updatedFields = Set-LidarrFieldValue -Fields $updatedFields -Name "redirectUrl" -Value $indexerRedirectUrl
-            $result.Actions += "Copied redirectUrl from indexer to download client"
-            $needsUpdate = $true
-        }
-
-        if (-not $needsUpdate) {
-            $result.Outcome = "success"
-            $result.Success = $true
+        if (-not $envConfig.HasRequiredEnvVars) {
+            # Missing required env vars → SKIP (not FAIL)
+            $missingList = $envConfig.MissingRequired -join ", "
+            $result.SkipReason = "Missing env vars: $missingList"
             return $result
         }
 
-        $clientFull.fields = $updatedFields
+        # ==========================================================================
+        # Step 3: Configure Indexer (Qobuzarr, Tidalarr)
+        # ==========================================================================
+        if ($PluginName -in @("Qobuzarr", "Tidalarr")) {
+            $indexer = Find-ConfiguredComponent -Type "indexer" -PluginName $PluginName
 
-        try {
-            Invoke-LidarrApi -Endpoint ("downloadclient/{0}" -f $clientFull.id) -Method PUT -Body $clientFull | Out-Null
+            if (-not $indexer) {
+                # Create new indexer from schema
+                $schema = Get-ComponentSchema -Type "indexer" -ImplementationMatch $PluginName
+                if (-not $schema) {
+                    $result.Errors += "Indexer schema not found for $PluginName"
+                    $result.Outcome = "failed"
+                    return $result
+                }
+
+                $created = New-ComponentFromEnv -Type "indexer" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.IndexerFields
+                if ($created) {
+                    $result.Actions += "Created indexer '$PluginName' (id=$($created.id))"
+                } else {
+                    $result.Errors += "Failed to create indexer for $PluginName"
+                    $result.Outcome = "failed"
+                    return $result
+                }
+            } else {
+                # Update existing indexer (auth fields only, unless ForceUpdate)
+                $updateResult = Update-ComponentAuthFields -Type "indexer" -ExistingComponent $indexer -FieldValues $envConfig.IndexerFields -ForceUpdate:$ForceUpdate
+                if ($updateResult.Updated) {
+                    $result.Actions += "Updated indexer auth fields: $($updateResult.ChangedFields -join ', ')"
+                } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
+                    $result.Actions += "Indexer '$PluginName' already configured: $($updateResult.ChangedFields -join ', ')"
+                } else {
+                    $result.Actions += "Indexer '$PluginName' already configured (no changes)"
+                }
+            }
         }
-        catch {
-            # Fallback: some Lidarr versions accept PUT /downloadclient with body containing id.
-            Invoke-LidarrApi -Endpoint "downloadclient" -Method PUT -Body $clientFull | Out-Null
+
+        # ==========================================================================
+        # Step 4: Configure Download Client (Qobuzarr, Tidalarr)
+        # ==========================================================================
+        if ($PluginName -in @("Qobuzarr", "Tidalarr")) {
+            $client = Find-ConfiguredComponent -Type "downloadclient" -PluginName $PluginName
+
+            if (-not $client) {
+                # Create new download client from schema
+                $schema = Get-ComponentSchema -Type "downloadclient" -ImplementationMatch $PluginName
+                if (-not $schema) {
+                    $result.Errors += "Download client schema not found for $PluginName"
+                    $result.Outcome = "failed"
+                    return $result
+                }
+
+                $created = New-ComponentFromEnv -Type "downloadclient" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.DownloadClientFields
+                if ($created) {
+                    $result.Actions += "Created download client '$PluginName' (id=$($created.id))"
+                } else {
+                    $result.Errors += "Failed to create download client for $PluginName"
+                    $result.Outcome = "failed"
+                    return $result
+                }
+            } else {
+                # Update existing download client (auth fields only, unless ForceUpdate)
+                $updateResult = Update-ComponentAuthFields -Type "downloadclient" -ExistingComponent $client -FieldValues $envConfig.DownloadClientFields -ForceUpdate:$ForceUpdate
+                if ($updateResult.Updated) {
+                    $result.Actions += "Updated download client auth fields: $($updateResult.ChangedFields -join ', ')"
+                } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
+                    $result.Actions += "Download client '$PluginName' already configured: $($updateResult.ChangedFields -join ', ')"
+                } else {
+                    $result.Actions += "Download client '$PluginName' already configured (no changes)"
+                }
+            }
+        }
+
+        # ==========================================================================
+        # Step 5: Configure Import List (Brainarr only)
+        # ==========================================================================
+        if ($PluginName -eq "Brainarr") {
+            $importList = Find-ConfiguredComponent -Type "importlist" -PluginName $PluginName
+
+            if (-not $importList) {
+                # Create new import list from schema
+                $schema = Get-ComponentSchema -Type "importlist" -ImplementationMatch $PluginName
+                if (-not $schema) {
+                    $result.Errors += "Import list schema not found for $PluginName"
+                    $result.Outcome = "failed"
+                    return $result
+                }
+
+                $created = New-ComponentFromEnv -Type "importlist" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.ImportListFields
+                if ($created) {
+                    $result.Actions += "Created import list '$PluginName' (id=$($created.id))"
+                } else {
+                    $result.Errors += "Failed to create import list for $PluginName"
+                    $result.Outcome = "failed"
+                    return $result
+                }
+            } else {
+                # Update existing import list
+                $updateResult = Update-ComponentAuthFields -Type "importlist" -ExistingComponent $importList -FieldValues $envConfig.ImportListFields -ForceUpdate:$ForceUpdate
+                if ($updateResult.Updated) {
+                    $result.Actions += "Updated import list fields: $($updateResult.ChangedFields -join ', ')"
+                } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
+                    $result.Actions += "Import list '$PluginName' already configured: $($updateResult.ChangedFields -join ', ')"
+                } else {
+                    $result.Actions += "Import list '$PluginName' already configured (no changes)"
+                }
+            }
+        }
+
+        # ==========================================================================
+        # Step 6: Legacy Tidalarr split-brain fix (copy from indexer to client)
+        # ==========================================================================
+        if ($PluginName -eq "Tidalarr") {
+            $indexer = Find-ConfiguredComponent -Type "indexer" -PluginName $PluginName
+            $client = Find-ConfiguredComponent -Type "downloadclient" -PluginName $PluginName
+
+            if ($indexer -and $client) {
+                $indexerFull = Invoke-LidarrApi -Endpoint ("indexer/{0}" -f $indexer.id)
+                $clientFull = Invoke-LidarrApi -Endpoint ("downloadclient/{0}" -f $client.id)
+
+                $indexerConfigPath = Get-LidarrFieldValue -Fields $indexerFull.fields -Name "configPath"
+                $clientConfigPath = Get-LidarrFieldValue -Fields $clientFull.fields -Name "configPath"
+
+                $indexerRedirectUrl = Get-LidarrFieldValue -Fields $indexerFull.fields -Name "redirectUrl"
+                if ([string]::IsNullOrWhiteSpace("$indexerRedirectUrl")) {
+                    $indexerRedirectUrl = Get-LidarrFieldValue -Fields $indexerFull.fields -Name "oauthRedirectUrl"
+                }
+
+                $clientRedirectUrl = Get-LidarrFieldValue -Fields $clientFull.fields -Name "redirectUrl"
+                if ([string]::IsNullOrWhiteSpace("$clientRedirectUrl")) {
+                    $clientRedirectUrl = Get-LidarrFieldValue -Fields $clientFull.fields -Name "oauthRedirectUrl"
+                }
+
+                $needsUpdate = $false
+                $updatedFields = @($clientFull.fields)
+
+                if (-not [string]::IsNullOrWhiteSpace("$indexerConfigPath") -and [string]::IsNullOrWhiteSpace("$clientConfigPath")) {
+                    $updatedFields = Set-LidarrFieldValue -Fields $updatedFields -Name "configPath" -Value $indexerConfigPath
+                    $result.Actions += "Copied configPath from indexer to download client (split-brain fix)"
+                    $needsUpdate = $true
+                }
+
+                if (-not [string]::IsNullOrWhiteSpace("$indexerRedirectUrl") -and [string]::IsNullOrWhiteSpace("$clientRedirectUrl")) {
+                    $updatedFields = Set-LidarrFieldValue -Fields $updatedFields -Name "redirectUrl" -Value $indexerRedirectUrl
+                    $result.Actions += "Copied redirectUrl from indexer to download client (split-brain fix)"
+                    $needsUpdate = $true
+                }
+
+                if ($needsUpdate) {
+                    $clientFull.fields = $updatedFields
+                    try {
+                        Invoke-LidarrApi -Endpoint ("downloadclient/{0}" -f $clientFull.id) -Method PUT -Body $clientFull | Out-Null
+                    }
+                    catch {
+                        Invoke-LidarrApi -Endpoint "downloadclient" -Method PUT -Body $clientFull | Out-Null
+                    }
+                }
+            }
         }
 
         $result.Outcome = "success"
@@ -546,9 +1054,12 @@ $pluginConfigs = @{
         CredentialAllOfFieldNames = @()
         CredentialAnyOfFieldNames = @()
         SkipIndexerTest = $true
-        # ImportList gate settings - Brainarr currently has no required credential fields
-        # (it syncs from MusicBrainz public data). Add fields here if auth is added later.
-        ImportListCredentialAllOfFieldNames = @()
+        # ImportList gate settings for Brainarr:
+        # - configurationUrl is the LLM endpoint (Ollama/LM Studio URL) - treated as a prereq, not a secret
+        # - It's "sensitive-ish" (may contain internal IPs) so it's redacted in logs/bundles
+        # - Gate SKIPs if configurationUrl is empty (no LLM = can't sync recommendations)
+        # - This is Brainarr-specific; other import list plugins may have different credential fields
+        ImportListCredentialAllOfFieldNames = @("configurationUrl")
         ImportListCredentialAnyOfFieldNames = @()
     }
 }
@@ -659,7 +1170,7 @@ foreach ($plugin in $pluginList) {
     if ($runConfigure) {
         Write-Host "  Configure Gate..." -ForegroundColor Cyan
 
-        $configureResult = Test-ConfigureGateForPlugin -PluginName $plugin -PluginConfig $config
+        $configureResult = Test-ConfigureGateForPlugin -PluginName $plugin -PluginConfig $config -ForceUpdate:$ForceConfigUpdate
         $allResults += New-OutcomeResult -Gate "Configure" -PluginName $plugin -Outcome $configureResult.Outcome -Errors $configureResult.Errors -Details @{
             Actions = $configureResult.Actions
             SkipReason = $configureResult.SkipReason
@@ -673,6 +1184,9 @@ foreach ($plugin in $pluginList) {
         elseif ($configureResult.Success) {
             if ($configureResult.Actions -and $configureResult.Actions.Count -gt 0) {
                 Write-Host "       PASS ($($configureResult.Actions.Count) action(s))" -ForegroundColor Green
+                foreach ($action in $configureResult.Actions) {
+                    Write-Host "       - $action" -ForegroundColor DarkGreen
+                }
             }
             else {
                 Write-Host "       PASS" -ForegroundColor Green
