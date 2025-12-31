@@ -146,12 +146,27 @@ param(
 
     [int]$MetadataFilesToCheck = 3,
 
-    [switch]$ForceConfigUpdate
+    [switch]$ForceConfigUpdate,
+
+    # JSON output path for machine-readable manifest (default: diagnostics/run-manifest.json)
+    [string]$JsonOutputPath,
+
+    # Emit JSON manifest (auto-enabled if JsonOutputPath specified)
+    [switch]$EmitJson
 )
 
 # Environment variable override for ForceConfigUpdate
 if (-not $ForceConfigUpdate -and $env:E2E_FORCE_CONFIG_UPDATE -eq '1') {
     $ForceConfigUpdate = $true
+}
+
+# Default JSON output path if EmitJson requested
+if ($EmitJson -and -not $JsonOutputPath) {
+    $JsonOutputPath = Join-Path $DiagnosticsPath "run-manifest.json"
+}
+# If JsonOutputPath specified, enable EmitJson
+if ($JsonOutputPath) {
+    $EmitJson = $true
 }
 
 $ErrorActionPreference = "Stop"
@@ -160,6 +175,7 @@ $scriptRoot = Split-Path -Parent $PSScriptRoot
 # Import modules
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-gates.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-json-output.psm1") -Force
 
 # Environment variable overrides for opt-in features
 if (-not $ValidateMetadata -and $env:E2E_VALIDATE_METADATA -eq '1') {
@@ -1854,6 +1870,65 @@ if (-not $overallSuccess -and -not $SkipDiagnostics) {
     }
     catch {
         Write-Host "ERROR: Failed to create diagnostics bundle: $_" -ForegroundColor Red
+    }
+}
+
+# Write JSON manifest if requested
+if ($EmitJson) {
+    try {
+        # Determine effective gates based on what was requested
+        $effectiveGates = @()
+        if ($Gate -eq 'all' -or $Gate -eq 'bootstrap') {
+            $effectiveGates = @('Schema', 'Configure', 'Search', 'AlbumSearch', 'Grab', 'ImportList', 'Persist')
+            if ($PersistRerun -or $Gate -eq 'bootstrap') {
+                $effectiveGates += 'Revalidation'
+            }
+        } else {
+            $effectiveGates = @($Gate)
+        }
+
+        # Try to get Lidarr version
+        $lidarrVersion = $null
+        $lidarrBranch = $null
+        try {
+            $statusResponse = Invoke-RestMethod -Uri "$LidarrUrl/api/v1/system/status" -Headers @{ 'X-Api-Key' = $effectiveApiKey } -TimeoutSec 5
+            $lidarrVersion = $statusResponse.version
+            $lidarrBranch = $statusResponse.branch
+        } catch { }
+
+        # Try to get image tag and digest
+        $imageTag = $null
+        $imageDigest = $null
+        try {
+            $inspectJson = docker inspect $ContainerName 2>$null | ConvertFrom-Json
+            if ($inspectJson) {
+                $imageTag = ($inspectJson.Config.Image -split ':')[-1]
+                $imageDigest = $inspectJson.Image
+            }
+        } catch { }
+
+        $jsonContext = @{
+            LidarrUrl = $LidarrUrl
+            ContainerName = $ContainerName
+            ImageTag = $imageTag
+            ImageDigest = $imageDigest
+            RequestedGate = $Gate
+            Plugins = $pluginList
+            EffectiveGates = $effectiveGates
+            EffectivePlugins = $pluginList
+            RedactionSelfTestExecuted = $true
+            RedactionSelfTestPassed = $redactionSelfTestPassed
+            RunnerArgs = @($MyInvocation.Line -split '\s+')
+            DiagnosticsBundlePath = if ($bundlePath) { $bundlePath } else { $null }
+            LidarrVersion = $lidarrVersion
+            LidarrBranch = $lidarrBranch
+        }
+
+        New-Item -ItemType Directory -Path (Split-Path $JsonOutputPath -Parent) -Force -ErrorAction SilentlyContinue | Out-Null
+        Write-E2ERunManifest -Results $allResults -Context $jsonContext -OutputPath $JsonOutputPath
+    }
+    catch {
+        Write-Host "WARNING: Failed to write JSON manifest: $_" -ForegroundColor Yellow
     }
 }
 
