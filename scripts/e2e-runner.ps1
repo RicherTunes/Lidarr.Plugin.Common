@@ -78,6 +78,39 @@
     By default, only auth-related fields are updated to preserve user-configured settings like
     priority, tags, and quality preferences. Can also be enabled via E2E_FORCE_CONFIG_UPDATE=1.
 
+.PARAMETER PostRestartGrab
+    When set (with -Gate bootstrap), runs a full Grab gate after restart to prove tokens survive
+    and downloads still work. More expensive than Revalidation (which only tests search).
+    Can also be enabled via E2E_POST_RESTART_GRAB=1 environment variable.
+
+.PARAMETER PostRestartGrabTimeoutMin
+    Timeout in minutes to wait for post-restart grab to complete (default: 12).
+
+.PARAMETER CleanupAfterPostRestartGrab
+    When set, deletes downloaded files after PostRestartGrab validation passes.
+    By default, files are kept for debugging.
+
+.PARAMETER RunBrainarrLLMGate
+    When set, runs the Brainarr LLM functional gate (proof-of-life + sync test).
+    Requires BRAINARR_LLM_BASE_URL environment variable to be set.
+    Can also be enabled via E2E_RUN_BRAINARR_LLM=1 environment variable.
+
+.PARAMETER BrainarrLLMBaseUrl
+    Base URL of the LLM endpoint (e.g., http://localhost:1234).
+    Can also be set via BRAINARR_LLM_BASE_URL environment variable.
+
+.PARAMETER BrainarrModelId
+    Specific model ID to use (optional - auto-detects if not specified).
+    Can also be set via BRAINARR_MODEL_ID environment variable.
+
+.PARAMETER StrictBrainarr
+    When set, FAIL instead of SKIP if LLM endpoint is unreachable.
+    Can also be enabled via E2E_STRICT_BRAINARR=1 environment variable.
+
+.PARAMETER BrainarrSyncTimeoutSec
+    Timeout in seconds for Brainarr LLM sync command (default: 120).
+    Increase for slow LLM endpoints. Can also be set via BRAINARR_SYNC_TIMEOUT_SEC.
+
 .NOTES
     Configure Gate Environment Variables:
 
@@ -148,6 +181,22 @@ param(
 
     [switch]$ForceConfigUpdate,
 
+    [switch]$PostRestartGrab,
+
+    [int]$PostRestartGrabTimeoutMin = 12,
+
+    [switch]$CleanupAfterPostRestartGrab,
+
+    [switch]$RunBrainarrLLMGate,
+
+    [string]$BrainarrLLMBaseUrl,
+
+    [string]$BrainarrModelId,
+
+    [switch]$StrictBrainarr,
+
+    [int]$BrainarrSyncTimeoutSec = 120,
+
     # JSON output path for machine-readable manifest (default: diagnostics/run-manifest.json)
     [string]$JsonOutputPath,
 
@@ -158,6 +207,36 @@ param(
 # Environment variable override for ForceConfigUpdate
 if (-not $ForceConfigUpdate -and $env:E2E_FORCE_CONFIG_UPDATE -eq '1') {
     $ForceConfigUpdate = $true
+}
+
+# Environment variable override for PostRestartGrab
+if (-not $PostRestartGrab -and $env:E2E_POST_RESTART_GRAB -eq '1') {
+    $PostRestartGrab = $true
+}
+
+# Environment variable overrides for BrainarrLLM gate
+if (-not $RunBrainarrLLMGate -and $env:E2E_RUN_BRAINARR_LLM -eq '1') {
+    $RunBrainarrLLMGate = $true
+}
+if (-not $BrainarrLLMBaseUrl -and $env:BRAINARR_LLM_BASE_URL) {
+    $BrainarrLLMBaseUrl = $env:BRAINARR_LLM_BASE_URL
+}
+if (-not $BrainarrModelId) {
+    # Support both BRAINARR_MODEL_ID and BRAINARR_MODEL (fallback)
+    if ($env:BRAINARR_MODEL_ID) {
+        $BrainarrModelId = $env:BRAINARR_MODEL_ID
+    } elseif ($env:BRAINARR_MODEL) {
+        $BrainarrModelId = $env:BRAINARR_MODEL
+    }
+}
+if (-not $StrictBrainarr -and $env:E2E_STRICT_BRAINARR -eq '1') {
+    $StrictBrainarr = $true
+}
+if ($env:BRAINARR_SYNC_TIMEOUT_SEC) {
+    $parsed = 0
+    if ([int]::TryParse($env:BRAINARR_SYNC_TIMEOUT_SEC, [ref]$parsed) -and $parsed -gt 0) {
+        $BrainarrSyncTimeoutSec = $parsed
+    }
 }
 
 # Default JSON output path if EmitJson requested
@@ -229,7 +308,11 @@ function New-OutcomeResult {
 
         [string[]]$Errors = @(),
 
-        [hashtable]$Details = @{}
+        [hashtable]$Details = @{},
+
+        [DateTime]$StartTime = [DateTime]::MinValue,
+
+        [DateTime]$EndTime = [DateTime]::MinValue
     )
 
     return [PSCustomObject]@{
@@ -239,7 +322,46 @@ function New-OutcomeResult {
         Success = ($Outcome -eq "success")
         Errors = $Errors
         Details = $Details
+        StartTime = if ($StartTime -ne [DateTime]::MinValue) { $StartTime } else { $null }
+        EndTime = if ($EndTime -ne [DateTime]::MinValue) { $EndTime } else { $null }
     }
+}
+
+<#
+.SYNOPSIS
+    Normalizes nested credential arrays to plain string arrays for JSON serialization.
+    Converts PowerShell Object[] arrays to simple string[] to avoid CLR metadata bloat.
+    Returns a List of string arrays for proper JSON serialization.
+#>
+function ConvertTo-PlainStringArray {
+    param($InputArray)
+    if ($null -eq $InputArray) { return @() }
+    if (-not ($InputArray -is [System.Collections.IEnumerable]) -or $InputArray -is [string]) {
+        return @([string]$InputArray)
+    }
+    if (@($InputArray).Count -eq 0) { return @() }
+
+    # Convert to a proper array first
+    $arr = @($InputArray)
+
+    # Check if it's an array of arrays (credential groups)
+    # Use List<string[]> for clean JSON serialization
+    $result = [System.Collections.Generic.List[string[]]]::new()
+    foreach ($item in $arr) {
+        if ($null -eq $item) { continue }
+        if ($item -is [System.Collections.IEnumerable] -and $item -isnot [string]) {
+            # It's a nested array/group - convert each element to string
+            $group = [System.Collections.Generic.List[string]]::new()
+            foreach ($subItem in $item) {
+                $group.Add([string]$subItem)
+            }
+            $result.Add([string[]]$group.ToArray())
+        } else {
+            # Single value - wrap in array
+            $result.Add([string[]]@([string]$item))
+        }
+    }
+    return $result
 }
 
 function Get-LidarrFieldValue {
@@ -1154,13 +1276,15 @@ foreach ($plugin in $pluginList) {
     # Gate 1: Schema (always run)
     Write-Host "  [1/4] Schema Gate..." -ForegroundColor Cyan
 
+    $gateStart = Get-Date
     $schemaResult = Test-SchemaGate -PluginName $plugin `
         -ExpectIndexer:$config.ExpectIndexer `
         -ExpectDownloadClient:$config.ExpectDownloadClient `
         -ExpectImportList:$config.ExpectImportList
+    $gateEnd = Get-Date
 
     $schemaOutcome = if ($schemaResult.Success) { "success" } else { "failed" }
-    $schemaRecord = New-OutcomeResult -Gate "Schema" -PluginName $plugin -Outcome $schemaOutcome -Errors $schemaResult.Errors -Details @{
+    $schemaRecord = New-OutcomeResult -Gate "Schema" -PluginName $plugin -Outcome $schemaOutcome -Errors $schemaResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details @{
         IndexerFound = $schemaResult.IndexerFound
         DownloadClientFound = $schemaResult.DownloadClientFound
         ImportListFound = $schemaResult.ImportListFound
@@ -1186,8 +1310,10 @@ foreach ($plugin in $pluginList) {
     if ($runConfigure) {
         Write-Host "  Configure Gate..." -ForegroundColor Cyan
 
+        $gateStart = Get-Date
         $configureResult = Test-ConfigureGateForPlugin -PluginName $plugin -PluginConfig $config -ForceUpdate:$ForceConfigUpdate
-        $allResults += New-OutcomeResult -Gate "Configure" -PluginName $plugin -Outcome $configureResult.Outcome -Errors $configureResult.Errors -Details @{
+        $gateEnd = Get-Date
+        $allResults += New-OutcomeResult -Gate "Configure" -PluginName $plugin -Outcome $configureResult.Outcome -Errors $configureResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details @{
             Actions = $configureResult.Actions
             SkipReason = $configureResult.SkipReason
         }
@@ -1320,22 +1446,21 @@ foreach ($plugin in $pluginList) {
                         $skipIndexerTest = [bool]$config.SkipIndexerTest
                     }
 
+                    $gateStart = Get-Date
                     $searchResult = Test-SearchGate -IndexerId $pluginIndexer.id `
                         -SearchQuery $searchQuery `
                         -ExpectedMinResults $expectedMin `
                         -CredentialAllOfFieldNames $credAllOf `
                         -CredentialAnyOfFieldNames $credAnyOf `
                         -SkipIndexerTest:$skipIndexerTest
+                    $gateEnd = Get-Date
 
                     $searchOutcome = if ($searchResult.Outcome) { $searchResult.Outcome } elseif ($searchResult.Success) { "success" } else { "failed" }
-                    $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome $searchOutcome -Errors $searchResult.Errors -Details @{
+                    $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome $searchOutcome -Errors $searchResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details @{
                         IndexerId = $pluginIndexer.id
                         ResultCount = $searchResult.ResultCount
                         SearchQuery = $searchQuery
                         SkipIndexerTest = $skipIndexerTest
-                        CredentialAllOf = $credAllOf
-                        CredentialAnyOf = $credAnyOf
-                        RawResponse = $searchResult.RawResponse
                         SkipReason = $searchResult.SkipReason
                     }
 
@@ -1428,6 +1553,7 @@ foreach ($plugin in $pluginList) {
                     $testArtist = if ($config.ContainsKey("TestArtistName")) { $config.TestArtistName } else { "Miles Davis" }
                     $testAlbum = if ($config.ContainsKey("TestAlbumName")) { $config.TestAlbumName } else { "Kind of Blue" }
 
+                    $gateStart = Get-Date
                     $albumSearchResult = Test-AlbumSearchGate -IndexerId $pluginIndexer.id `
                         -PluginName $plugin `
                         -TestArtistName $testArtist `
@@ -1435,22 +1561,21 @@ foreach ($plugin in $pluginList) {
                         -CredentialAllOfFieldNames $credAllOf `
                         -CredentialAnyOfFieldNames $credAnyOf `
                         -SkipIfNoCreds:$true
+                    $gateEnd = Get-Date
 
                     # Store for Grab gate
                     $lastAlbumSearchResult = $albumSearchResult
                     $lastPluginIndexer = $pluginIndexer
 
                     $outcome = if ($albumSearchResult.Outcome) { $albumSearchResult.Outcome } elseif ($albumSearchResult.Success) { "success" } else { "failed" }
-                    $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome $outcome -Errors $albumSearchResult.Errors -Details @{
+                    $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome $outcome -Errors $albumSearchResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details @{
                         IndexerId = $pluginIndexer.id
                         ArtistId = $albumSearchResult.ArtistId
                         AlbumId = $albumSearchResult.AlbumId
                         CommandId = $albumSearchResult.CommandId
-                        ReleaseCount = $albumSearchResult.ReleaseCount    
+                        ReleaseCount = $albumSearchResult.ReleaseCount
                         PluginReleaseCount = $albumSearchResult.PluginReleaseCount
-                        CredentialAllOf = $credAllOf
-                        CredentialAnyOf = $credAnyOf
-                        SkipReason = $albumSearchResult.SkipReason        
+                        SkipReason = $albumSearchResult.SkipReason
                     }
 
                     if ($outcome -eq "skipped") {
@@ -1525,6 +1650,7 @@ foreach ($plugin in $pluginList) {
                     $credAllOf = @($config.CredentialFieldNames)
                 }
 
+                $gateStart = Get-Date
                 $grabResult = Test-PluginGrabGate -IndexerId $lastPluginIndexer.id `
                     -PluginName $plugin `
                     -AlbumId $lastAlbumSearchResult.AlbumId `
@@ -1532,9 +1658,10 @@ foreach ($plugin in $pluginList) {
                     -CredentialAnyOfFieldNames $credAnyOf `
                     -ContainerName $ContainerName `
                     -SkipIfNoCreds:$true
+                $gateEnd = Get-Date
 
                 $outcome = if ($grabResult.Outcome) { $grabResult.Outcome } elseif ($grabResult.Success) { "success" } else { "failed" }
-                $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome $outcome -Errors $grabResult.Errors -Details @{
+                $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome $outcome -Errors $grabResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details @{
                     IndexerId = $lastPluginIndexer.id
                     AlbumId = $lastAlbumSearchResult.AlbumId
                     ReleaseTitle = $grabResult.ReleaseTitle
@@ -1545,8 +1672,8 @@ foreach ($plugin in $pluginList) {
                     TrackedDownloadStatus = $grabResult.TrackedDownloadStatus
                     TrackedDownloadState = $grabResult.TrackedDownloadState
                     SampleFile = $grabResult.SampleFile
-                    CredentialAllOf = $credAllOf
-                    CredentialAnyOf = $credAnyOf
+                    TotalFilesFound = $grabResult.TotalFilesFound
+                    ValidatedFiles = $grabResult.ValidatedFiles
                     SkipReason = $grabResult.SkipReason
                 }
 
@@ -1681,11 +1808,84 @@ foreach ($plugin in $pluginList) {
     Write-Host ""
 }
 
+# =============================================================================
+# Brainarr LLM Gate: Opt-in functional test for LLM integration
+# Runs only if BRAINARR_LLM_BASE_URL is set or -RunBrainarrLLMGate is specified
+# =============================================================================
+$runBrainarrLLM = $RunBrainarrLLMGate -and $BrainarrLLMBaseUrl -and ($pluginList -contains 'Brainarr') -and $overallSuccess
+if ($runBrainarrLLM) {
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Brainarr LLM Gate (opt-in)" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Testing LLM integration with proof-of-life..." -ForegroundColor White
+    Write-Host ""
+
+    Write-Host "  Brainarr LLM..." -ForegroundColor Cyan
+
+    try {
+        $brainarrLLMResult = Test-BrainarrLLMGate `
+            -LlmBaseUrl $BrainarrLLMBaseUrl `
+            -ModelId $BrainarrModelId `
+            -StrictMode:$StrictBrainarr `
+            -CommandTimeoutSec $BrainarrSyncTimeoutSec
+
+        $brainarrLLMOutcome = $brainarrLLMResult.Outcome
+        $allResults += New-OutcomeResult -Gate "BrainarrLLM" -PluginName "Brainarr" `
+            -Outcome $brainarrLLMOutcome `
+            -Errors $brainarrLLMResult.Errors `
+            -Details ([ordered]@{
+                llmKind = $brainarrLLMResult.Details.llmKind
+                modelsCount = $brainarrLLMResult.Details.modelsCount
+                firstModelId = $brainarrLLMResult.Details.firstModelId
+                modelIdHash = $brainarrLLMResult.Details.modelIdHash
+                endpointRedacted = $brainarrLLMResult.Details.endpointRedacted
+                importListId = $brainarrLLMResult.Details.importListId
+                commandId = $brainarrLLMResult.Details.commandId
+                syncCompleted = $brainarrLLMResult.Details.syncCompleted
+                lastSyncError = $brainarrLLMResult.Details.lastSyncError
+            })
+
+        if ($brainarrLLMOutcome -eq "skipped") {
+            $reason = $brainarrLLMResult.SkipReason
+            if (-not $reason) { $reason = "Skipped by gate policy" }
+            Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+        }
+        elseif ($brainarrLLMResult.Success) {
+            Write-Host "       PASS (LLM: $($brainarrLLMResult.Details.llmKind), $($brainarrLLMResult.Details.modelsCount) model(s))" -ForegroundColor Green
+        }
+        else {
+            Write-Host "       FAIL" -ForegroundColor Red
+            foreach ($err in $brainarrLLMResult.Errors) {
+                Write-Host "       - $err" -ForegroundColor Red
+            }
+            $overallSuccess = $false
+        }
+    }
+    catch {
+        Write-Host "       ERROR: $_" -ForegroundColor Red
+        $allResults += New-OutcomeResult -Gate "BrainarrLLM" -PluginName "Brainarr" -Outcome "failed" -Errors @("BrainarrLLM gate error: $_")
+        $overallSuccess = $false
+    }
+
+    Write-Host ""
+}
+elseif ($RunBrainarrLLMGate -and -not $BrainarrLLMBaseUrl) {
+    # Gate was requested but no URL provided
+    Write-Host ""
+    Write-Host "Brainarr LLM Gate... SKIP (BRAINARR_LLM_BASE_URL not set)" -ForegroundColor DarkGray
+    $allResults += New-OutcomeResult -Gate "BrainarrLLM" -PluginName "Brainarr" -Outcome "skipped" -Details @{
+        Reason = "BRAINARR_LLM_BASE_URL environment variable not set"
+    }
+    Write-Host ""
+}
+
 # Persistency gate is ecosystem-scoped (restarts container once), so run after the main loop.
 if ($runPersist -and $overallSuccess) {
     Write-Host "Persist Gate..." -ForegroundColor Cyan
+    $gateStart = Get-Date
     $persistResult = Test-PersistGate -PluginList $pluginList -PluginConfigs $pluginConfigs -LidarrUrl $LidarrUrl -ApiKey $effectiveApiKey -ContainerName $ContainerName
-    $allResults += New-OutcomeResult -Gate "Persist" -PluginName "Ecosystem" -Outcome $persistResult.Outcome -Errors $persistResult.Errors -Details $persistResult.Details
+    $gateEnd = Get-Date
+    $allResults += New-OutcomeResult -Gate "Persist" -PluginName "Ecosystem" -Outcome $persistResult.Outcome -Errors $persistResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details $persistResult.Details
 
     if ($persistResult.Outcome -eq "success") {
         Write-Host "  PASS" -ForegroundColor Green
@@ -1786,15 +1986,17 @@ if ($runPersistRerun) {
                 $skipIndexerTest = [bool]$config.SkipIndexerTest
             }
 
+            $gateStart = Get-Date
             $revalResult = Test-SearchGate -IndexerId $pluginIndexer.id `
                 -SearchQuery $searchQuery `
                 -ExpectedMinResults $expectedMin `
                 -CredentialAllOfFieldNames $credAllOf `
                 -CredentialAnyOfFieldNames $credAnyOf `
                 -SkipIndexerTest:$skipIndexerTest
+            $gateEnd = Get-Date
 
             $revalOutcome = if ($revalResult.Outcome) { $revalResult.Outcome } elseif ($revalResult.Success) { "success" } else { "failed" }
-            $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome $revalOutcome -Errors $revalResult.Errors -Details @{
+            $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome $revalOutcome -Errors $revalResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details @{
                 IndexerId = $pluginIndexer.id
                 ResultCount = $revalResult.ResultCount
                 SearchQuery = $searchQuery
@@ -1829,6 +2031,312 @@ if ($runPersistRerun) {
             $overallSuccess = $false
         }
     }
+    Write-Host ""
+}
+
+# =============================================================================
+# Post-Restart Grab Gate: Full grab cycle after restart to prove tokens survive
+# Opt-in via -PostRestartGrab or E2E_POST_RESTART_GRAB=1
+# =============================================================================
+$runPostRestartGrab = $PostRestartGrab -and $Gate -eq "bootstrap" -and $runPersist -and $overallSuccess
+if ($runPostRestartGrab) {
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Post-Restart Grab Gate (opt-in)" -ForegroundColor Cyan
+    Write-Host "========================================" -ForegroundColor Cyan
+    Write-Host "Testing full grab cycle after restart to prove tokens survive..." -ForegroundColor White
+    Write-Host ""
+
+    $postRestartGrabTimeoutMs = $PostRestartGrabTimeoutMin * 60 * 1000
+    $postRestartGrabResults = @{}  # Track output paths for cleanup
+
+    foreach ($plugin in $pluginList) {
+        $config = $pluginConfigs[$plugin]
+        if (-not $config) { continue }
+
+        # Skip plugins without download clients (e.g., Brainarr)
+        if (-not $config.ExpectDownloadClient) {
+            Write-Host "  $plugin PostRestartGrab... SKIP (no download client)" -ForegroundColor DarkGray
+            $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "skipped" -Details @{
+                Reason = "No download client expected for plugin"
+            }
+            continue
+        }
+
+        Write-Host "  $plugin PostRestartGrab..." -ForegroundColor Cyan
+
+        try {
+            # Step 1: Find the indexer
+            $indexers = Invoke-LidarrApi -Endpoint "indexer"
+            $pluginIndexer = $indexers | Where-Object {
+                $_.implementation -like "*$plugin*" -or
+                $_.name -like "*$plugin*"
+            } | Select-Object -First 1
+
+            if (-not $pluginIndexer) {
+                Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
+                $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "skipped" -Details @{
+                    Reason = "No configured indexer found post-restart"
+                }
+                continue
+            }
+
+            # Step 2: Check credentials (same logic as other gates)
+            $credAllOf = @()
+            $credAnyOf = @()
+            if ($config.ContainsKey("CredentialAllOfFieldNames")) { $credAllOf = @($config.CredentialAllOfFieldNames) }
+            if ($config.ContainsKey("CredentialAnyOfFieldNames")) { $credAnyOf = @($config.CredentialAnyOfFieldNames) }
+            if ($config.ContainsKey("CredentialFieldNames")) { $credAllOf = @($config.CredentialFieldNames) }
+
+            # Check for credential file if applicable
+            if ($config.ContainsKey("CredentialFileRelative") -and $config.ContainsKey("CredentialPathField") -and $ContainerName) {
+                try {
+                    $probePathField = "$($config.CredentialPathField)"
+                    $probeConfigPath = Get-LidarrFieldValue -Fields $pluginIndexer.fields -Name $probePathField
+                    if (-not [string]::IsNullOrWhiteSpace("$probeConfigPath")) {
+                        $relative = "$($config.CredentialFileRelative)"
+                        $probeFilePath = "$($probeConfigPath.TrimEnd('/'))/$relative"
+                        $probeOk = docker exec $ContainerName sh -c "test -s '$probeFilePath' && echo ok" 2>$null
+                        if (-not $probeOk) {
+                            Write-Host "       SKIP (credentials file missing post-restart)" -ForegroundColor DarkGray
+                            $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "skipped" -Details @{
+                                Reason = "Credentials file missing post-restart"
+                                CredentialFile = $probeFilePath
+                            }
+                            continue
+                        }
+                    }
+                }
+                catch { }
+            }
+
+            # Step 3: Re-run AlbumSearch for the same test album
+            $testArtist = if ($config.ContainsKey("TestArtistName")) { $config.TestArtistName } else { "Miles Davis" }
+            $testAlbum = if ($config.ContainsKey("TestAlbumName")) { $config.TestAlbumName } else { "Kind of Blue" }
+
+            Write-Host "       Searching for releases (post-restart)..." -ForegroundColor Gray
+
+            $albumSearchResult = Test-AlbumSearchGate -IndexerId $pluginIndexer.id `
+                -PluginName $plugin `
+                -TestArtistName $testArtist `
+                -TestAlbumName $testAlbum `
+                -CredentialAllOfFieldNames $credAllOf `
+                -CredentialAnyOfFieldNames $credAnyOf `
+                -SkipIfNoCreds:$true
+
+            if ($albumSearchResult.Outcome -eq "skipped" -or -not $albumSearchResult.Success) {
+                $reason = if ($albumSearchResult.SkipReason) { $albumSearchResult.SkipReason } else { "AlbumSearch failed post-restart" }
+                Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+                $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "skipped" -Details @{
+                    Reason = $reason
+                    AlbumSearchOutcome = $albumSearchResult.Outcome
+                }
+                continue
+            }
+
+            Write-Host "       Found $($albumSearchResult.PluginReleaseCount) releases, selecting one..." -ForegroundColor Gray
+
+            # Step 4: Get releases and select deterministically (first by title asc)
+            $releases = Invoke-LidarrApi -Endpoint "release?albumId=$($albumSearchResult.AlbumId)"
+            $pluginReleases = $releases | Where-Object {
+                $_.indexerId -eq $pluginIndexer.id -or
+                $_.indexer -like "*$plugin*"
+            } | Sort-Object title | Select-Object -First 1
+
+            if (-not $pluginReleases) {
+                Write-Host "       FAIL (no releases from $plugin post-restart)" -ForegroundColor Red
+                $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors @("No releases from $plugin after AlbumSearch post-restart")
+                $overallSuccess = $false
+                continue
+            }
+
+            $selectedRelease = $pluginReleases
+            $releaseTitle = if ($selectedRelease.title.Length -gt 50) { $selectedRelease.title.Substring(0,50) + "..." } else { $selectedRelease.title }
+
+            Write-Host "       Selected: $releaseTitle" -ForegroundColor Gray
+            Write-Host "       Triggering grab..." -ForegroundColor Gray
+
+            # Step 5: Grab the release
+            $grabBody = @{
+                guid = $selectedRelease.guid
+                indexerId = $selectedRelease.indexerId
+            }
+
+            $grabResult = $null
+            try {
+                $grabResult = Invoke-LidarrApi -Endpoint "release" -Method POST -Body $grabBody
+            }
+            catch {
+                $grabErr = "$_"
+                $authPattern = '(?i)(not authenticated|oauth|authorize|token|credential|login|password|api.?key|forbidden|unauthorized|401|403|invalid_grant|invalid_client)'
+                if ($grabErr -match $authPattern) {
+                    Write-Host "       SKIP (auth error: $grabErr)" -ForegroundColor DarkGray
+                    $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "skipped" -Details @{
+                        Reason = "Grab failed with auth error post-restart"
+                        Error = $grabErr
+                    }
+                    continue
+                }
+                Write-Host "       FAIL (grab error: $grabErr)" -ForegroundColor Red
+                $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors @("Grab request failed: $grabErr")
+                $overallSuccess = $false
+                continue
+            }
+
+            if (-not $grabResult -or -not $grabResult.downloadId) {
+                Write-Host "       FAIL (grab returned no downloadId)" -ForegroundColor Red
+                $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors @("Grab returned null/empty response or no downloadId")
+                $overallSuccess = $false
+                continue
+            }
+
+            Write-Host "       Grab initiated, downloadId: $($grabResult.downloadId)" -ForegroundColor Green
+
+            # Step 6: Poll queue until completed/failed with timeout
+            Write-Host "       Waiting for download to complete (timeout: $PostRestartGrabTimeoutMin min)..." -ForegroundColor Gray
+            $deadline = (Get-Date).AddMilliseconds($postRestartGrabTimeoutMs)
+            $queueItem = $null
+            $downloadCompleted = $false
+            $downloadFailed = $false
+            $outputPath = $null
+
+            function Get-QueueRecords {
+                $queue = Invoke-LidarrApi -Endpoint "queue"
+                if ($queue.records) { return $queue.records }
+                return @($queue)
+            }
+
+            while ((Get-Date) -lt $deadline) {
+                $queueRecords = Get-QueueRecords
+                $queueItem = $queueRecords | Where-Object { $_.downloadId -eq $grabResult.downloadId } | Select-Object -First 1
+
+                if ($queueItem) {
+                    $status = $queueItem.status
+                    $trackedState = $queueItem.trackedDownloadState
+
+                    if ($trackedState -eq "importPending" -or $trackedState -eq "imported" -or $status -eq "completed") {
+                        $downloadCompleted = $true
+                        $outputPath = $queueItem.outputPath
+                        Write-Host "       Download completed: $status / $trackedState" -ForegroundColor Green
+                        break
+                    }
+                    elseif ($status -eq "failed" -or $trackedState -eq "downloadFailed" -or $trackedState -eq "importFailed") {
+                        $downloadFailed = $true
+                        Write-Host "       Download failed: $status / $trackedState" -ForegroundColor Red
+                        break
+                    }
+                    else {
+                        # Still in progress
+                        $elapsed = [int]((Get-Date) - $deadline.AddMilliseconds(-$postRestartGrabTimeoutMs)).TotalMinutes
+                        if ($elapsed % 2 -eq 0) {
+                            Write-Host "       Status: $status / $trackedState (${elapsed}m elapsed)..." -ForegroundColor Gray
+                        }
+                    }
+                }
+
+                Start-Sleep -Seconds 5
+            }
+
+            if ($downloadFailed) {
+                $errorMsg = if ($queueItem.errorMessage) { $queueItem.errorMessage } else { "Download failed" }
+                $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors @($errorMsg) -Details @{
+                    SelectedReleaseTitle = $releaseTitle
+                    DownloadId = $grabResult.downloadId
+                    QueueStatus = $queueItem.status
+                    TrackedDownloadState = $queueItem.trackedDownloadState
+                }
+                $overallSuccess = $false
+                continue
+            }
+
+            if (-not $downloadCompleted) {
+                Write-Host "       FAIL (timeout waiting for download)" -ForegroundColor Red
+                $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors @("Timeout waiting for download to complete") -Details @{
+                    SelectedReleaseTitle = $releaseTitle
+                    DownloadId = $grabResult.downloadId
+                    TimeoutMin = $PostRestartGrabTimeoutMin
+                }
+                $overallSuccess = $false
+                continue
+            }
+
+            # Step 7: Validate downloaded files
+            Write-Host "       Validating downloaded files..." -ForegroundColor Gray
+
+            if (-not $outputPath) {
+                # Try to find outputPath from download client
+                $outputPath = "/downloads/$($plugin.ToLower())"
+            }
+
+            $fileValidation = Test-AudioFileValidation -OutputPath $outputPath -ContainerName $ContainerName -MaxFilesToCheck 3
+
+            $validatedFileNames = @()
+            if ($fileValidation.ValidatedFiles) {
+                $validatedFileNames = $fileValidation.ValidatedFiles | ForEach-Object { $_.Name }
+            }
+
+            if (-not $fileValidation.Success) {
+                $fileErrors = $fileValidation.Errors
+                if ($fileValidation.TotalFilesFound -eq 0) {
+                    $fileErrors = @("E2E_ZERO_AUDIO_FILES: No audio files found in $outputPath")
+                }
+                Write-Host "       FAIL (file validation)" -ForegroundColor Red
+                foreach ($err in $fileErrors) {
+                    Write-Host "       - $err" -ForegroundColor Red
+                }
+                $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors $fileErrors -Details @{
+                    SelectedReleaseTitle = $releaseTitle
+                    DownloadId = $grabResult.downloadId
+                    OutputPath = $outputPath
+                    ValidatedFiles = $validatedFileNames
+                    TotalFilesFound = $fileValidation.TotalFilesFound
+                }
+                $overallSuccess = $false
+                continue
+            }
+
+            Write-Host "       PASS ($($fileValidation.ValidatedFiles.Count) files validated)" -ForegroundColor Green
+
+            # Track output path for optional cleanup
+            $postRestartGrabResults[$plugin] = @{
+                OutputPath = $outputPath
+                DownloadId = $grabResult.downloadId
+            }
+
+            $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "success" -Details @{
+                SelectedReleaseTitle = $releaseTitle
+                DownloadId = $grabResult.downloadId
+                OutputPath = $outputPath
+                ValidatedFiles = $validatedFileNames
+                TotalFilesFound = $fileValidation.TotalFilesFound
+                QueueStatus = $queueItem.status
+                TrackedDownloadState = $queueItem.trackedDownloadState
+            }
+        }
+        catch {
+            Write-Host "       ERROR: $_" -ForegroundColor Red
+            $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors @("PostRestartGrab error: $_")
+            $overallSuccess = $false
+        }
+    }
+
+    # Optional cleanup
+    if ($CleanupAfterPostRestartGrab -and $postRestartGrabResults.Count -gt 0) {
+        Write-Host ""
+        Write-Host "Cleaning up post-restart grab downloads..." -ForegroundColor Gray
+        foreach ($plugin in $postRestartGrabResults.Keys) {
+            $info = $postRestartGrabResults[$plugin]
+            if ($info.OutputPath -and $ContainerName) {
+                try {
+                    docker exec $ContainerName rm -rf "$($info.OutputPath)" 2>$null
+                    Write-Host "  Removed: $($info.OutputPath)" -ForegroundColor Gray
+                }
+                catch {
+                    Write-Host "  Warning: Failed to remove $($info.OutputPath): $_" -ForegroundColor Yellow
+                }
+            }
+        }
+    }
+
     Write-Host ""
 }
 
@@ -1896,21 +2404,49 @@ if ($EmitJson) {
             $lidarrBranch = $statusResponse.branch
         } catch { }
 
-        # Try to get image tag and digest
+        # Try to get container fingerprinting from docker inspect
         $imageTag = $null
         $imageDigest = $null
+        $containerId = $null
+        $imageId = $null
+        $containerStartedAt = $null
         try {
             $inspectJson = docker inspect $ContainerName 2>$null | ConvertFrom-Json
             if ($inspectJson) {
                 $imageTag = ($inspectJson.Config.Image -split ':')[-1]
                 $imageDigest = $inspectJson.Image
+                # Container fingerprinting
+                $containerId = if ($inspectJson.Id) { $inspectJson.Id.Substring(0, 12) } else { $null }
+                $imageId = $inspectJson.Image
+                if ($inspectJson.State -and $inspectJson.State.StartedAt) {
+                    try {
+                        $containerStartedAt = [DateTime]::Parse($inspectJson.State.StartedAt).ToUniversalTime()
+                    } catch { }
+                }
             }
         } catch { }
+
+        # Build clean args array (fix #4: avoid backtick pollution from multiline)
+        $cleanArgs = @()
+        foreach ($key in $PSBoundParameters.Keys) {
+            $val = $PSBoundParameters[$key]
+            if ($val -is [switch]) {
+                if ($val.IsPresent) { $cleanArgs += "-$key" }
+            } elseif ($val -is [bool]) {
+                if ($val) { $cleanArgs += "-$key" }
+            } else {
+                $cleanArgs += "-$key"
+                $cleanArgs += "$val"
+            }
+        }
 
         $jsonContext = @{
             LidarrUrl = $LidarrUrl
             ContainerName = $ContainerName
+            ContainerId = $containerId
+            ContainerStartedAt = $containerStartedAt
             ImageTag = $imageTag
+            ImageId = $imageId
             ImageDigest = $imageDigest
             RequestedGate = $Gate
             Plugins = $pluginList
@@ -1918,7 +2454,7 @@ if ($EmitJson) {
             EffectivePlugins = $pluginList
             RedactionSelfTestExecuted = $true
             RedactionSelfTestPassed = $redactionSelfTestPassed
-            RunnerArgs = @($MyInvocation.Line -split '\s+')
+            RunnerArgs = $cleanArgs
             DiagnosticsBundlePath = if ($bundlePath) { $bundlePath } else { $null }
             LidarrVersion = $lidarrVersion
             LidarrBranch = $lidarrBranch

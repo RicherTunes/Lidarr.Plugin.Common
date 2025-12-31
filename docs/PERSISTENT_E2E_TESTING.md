@@ -265,3 +265,43 @@ If neither mutagen nor the host fallback is available, metadata validation is sk
 
 - If you see `Bind for 0.0.0.0:<port> failed: port is already allocated`, change `-Port` and/or `-ContainerName`.
 - Multi-plugin loading across independent plugin load contexts may still depend on upstream Lidarr fixes; `-HostOverrideAssembly` is intended for validating those before a new Docker tag exists.
+## JSON Manifest Schema
+
+The E2E runner outputs a machine-readable JSON manifest (`run-manifest.json`) for CI/CD integration.
+
+### Schema Reference
+
+- **Schema file**: [`docs/reference/e2e-run-manifest.schema.json`](reference/e2e-run-manifest.schema.json)
+- **Schema ID**: `richer-tunes.lidarr.e2e-run-manifest`
+- **Current version**: `1.2`
+
+### Manifest Self-Description
+
+Each manifest includes a `$schema` field pointing to the schema:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/<sha>/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  ...
+}
+```
+
+### Strictness Rules
+
+| Component | Strictness | Meaning |
+|-----------|------------|---------|
+| Top-level | Extensible | New fields won't break validation |
+| `runner`, `lidarr`, `summary`, `redaction` | **Strict** | Schema update required for new fields |
+| `sources`, `diagnostics`, `results[].details` | Extensible | Grow without schema changes |
+
+### Adding Fields to Strict Objects
+
+If you add a new field to `runner`, `lidarr`, `summary`, or `redaction`:
+
+1. Update `docs/reference/e2e-run-manifest.schema.json`
+2. Update `scripts/tests/Test-ManifestSchema.ps1` if needed
+3. Bump `schemaVersion` for breaking changes (removing fields, changing types)
+4. Run tests: `pwsh scripts/tests/Test-ManifestSchema.ps1`
+
+See [`docs/reference/README.md`](reference/README.md) for full schema governance details.

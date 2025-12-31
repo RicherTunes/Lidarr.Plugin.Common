@@ -2294,4 +2294,655 @@ if __name__ == "__main__":
     return $result
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Invoke-LidarrApi
+function Test-AudioFileValidation {
+    <#
+    .SYNOPSIS
+        Validates downloaded audio files have non-zero size and valid magic bytes.
+
+    .DESCRIPTION
+        Checks up to N audio files in a container path for:
+        1. Non-zero file size
+        2. Valid audio magic bytes (FLAC: fLaC, MP3: ID3/0xFFxFB, M4A: ftyp, OGG: OggS)
+
+        Returns file validation details for manifest output.
+
+    .PARAMETER OutputPath
+        Container path to the downloaded files directory.
+
+    .PARAMETER ContainerName
+        Docker container name where files are located.
+
+    .PARAMETER MaxFilesToCheck
+        Maximum number of files to validate (default: 3).
+
+    .OUTPUTS
+        PSCustomObject with Success, ValidatedFiles, Errors, etc.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$OutputPath,
+
+        [Parameter(Mandatory)]
+        [string]$ContainerName,
+
+        [int]$MaxFilesToCheck = 3
+    )
+
+    $result = [PSCustomObject]@{
+        Success = $false
+        TotalFilesFound = 0
+        ValidatedFiles = @()
+        FailedFiles = @()
+        Errors = @()
+    }
+
+    try {
+        # Find audio files in output path
+        $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | sort | head -n $MaxFilesToCheck"
+        $audioFilesRaw = docker exec $ContainerName sh -c $findCmd 2>$null
+        $audioFiles = @($audioFilesRaw) -split "`n" | Where-Object { $_.Trim() }
+
+        if ($audioFiles.Count -eq 0) {
+            $result.Errors += "No audio files found in: $OutputPath"
+            return $result
+        }
+
+        $result.TotalFilesFound = $audioFiles.Count
+
+        # Audio magic byte signatures
+        # FLAC: 66 4C 61 43 (fLaC)
+        # MP3 ID3: 49 44 33 (ID3)
+        # MP3 sync: FF FB or FF FA or FF F3 or FF F2
+        # M4A/MP4: 'ftyp' at offset 4 (xx xx xx xx 66 74 79 70)
+        # OGG: 4F 67 67 53 (OggS)
+        # WAV: 52 49 46 46 (RIFF)
+
+        foreach ($filePath in $audioFiles) {
+            $fileName = Split-Path $filePath -Leaf
+            $fileValid = $false
+            $failReason = $null
+
+            # Get file size
+            $sizeCmd = "stat -c %s '$filePath' 2>/dev/null || stat -f %z '$filePath' 2>/dev/null"
+            $sizeRaw = docker exec $ContainerName sh -c $sizeCmd 2>$null
+            $fileSize = [int64]0
+            [int64]::TryParse($sizeRaw.Trim(), [ref]$fileSize) | Out-Null
+
+            if ($fileSize -le 0) {
+                $failReason = "Zero or invalid file size"
+                $result.FailedFiles += [PSCustomObject]@{
+                    Name = $fileName
+                    Path = $filePath
+                    Size = $fileSize
+                    Reason = $failReason
+                }
+                continue
+            }
+
+            # Get first 12 bytes as hex for magic byte check
+            $hexCmd = "od -A n -t x1 -N 12 '$filePath' 2>/dev/null | tr -d ' \n'"
+            $magicHex = docker exec $ContainerName sh -c $hexCmd 2>$null
+            $magicHex = $magicHex.Trim().ToLower()
+
+            # Check magic bytes
+            $ext = [System.IO.Path]::GetExtension($filePath).ToLower()
+            switch ($ext) {
+                '.flac' {
+                    # FLAC: starts with 'fLaC' (66 4c 61 43)
+                    if ($magicHex.StartsWith('664c6143')) {
+                        $fileValid = $true
+                    } else {
+                        $failReason = "Invalid FLAC magic bytes (expected 664c6143, got $($magicHex.Substring(0,8)))"
+                    }
+                }
+                '.mp3' {
+                    # MP3: ID3 tag (49 44 33) or sync word (ff fb, ff fa, ff f3, ff f2)
+                    if ($magicHex.StartsWith('494433') -or
+                        $magicHex.StartsWith('fffb') -or
+                        $magicHex.StartsWith('fffa') -or
+                        $magicHex.StartsWith('fff3') -or
+                        $magicHex.StartsWith('fff2')) {
+                        $fileValid = $true
+                    } else {
+                        $failReason = "Invalid MP3 magic bytes (expected ID3/sync, got $($magicHex.Substring(0,6)))"
+                    }
+                }
+                '.m4a' {
+                    # M4A: 'ftyp' at offset 4 (xx xx xx xx 66 74 79 70)
+                    if ($magicHex.Length -ge 16 -and $magicHex.Substring(8,8) -eq '66747970') {
+                        $fileValid = $true
+                    } else {
+                        $failReason = "Invalid M4A magic bytes (expected ftyp at offset 4)"
+                    }
+                }
+                '.ogg' {
+                    # OGG: starts with 'OggS' (4f 67 67 53)
+                    if ($magicHex.StartsWith('4f676753')) {
+                        $fileValid = $true
+                    } else {
+                        $failReason = "Invalid OGG magic bytes (expected 4f676753, got $($magicHex.Substring(0,8)))"
+                    }
+                }
+                '.wav' {
+                    # WAV: starts with 'RIFF' (52 49 46 46)
+                    if ($magicHex.StartsWith('52494646')) {
+                        $fileValid = $true
+                    } else {
+                        $failReason = "Invalid WAV magic bytes (expected 52494646, got $($magicHex.Substring(0,8)))"
+                    }
+                }
+                default {
+                    # Unknown extension - just check non-zero size
+                    $fileValid = $true
+                }
+            }
+
+            if ($fileValid) {
+                $result.ValidatedFiles += [PSCustomObject]@{
+                    Name = $fileName
+                    Path = $filePath
+                    Size = $fileSize
+                    Extension = $ext
+                    MagicValid = $true
+                }
+            } else {
+                $result.FailedFiles += [PSCustomObject]@{
+                    Name = $fileName
+                    Path = $filePath
+                    Size = $fileSize
+                    Reason = $failReason
+                    MagicHex = $magicHex
+                }
+            }
+        }
+
+        if ($result.ValidatedFiles.Count -gt 0 -and $result.FailedFiles.Count -eq 0) {
+            $result.Success = $true
+        } elseif ($result.FailedFiles.Count -gt 0) {
+            foreach ($f in $result.FailedFiles) {
+                $result.Errors += "$($f.Name): $($f.Reason)"
+            }
+        }
+    }
+    catch {
+        $result.Errors += "File validation failed: $_"
+    }
+
+    return $result
+}
+
+function Test-LLMEndpoint {
+    <#
+    .SYNOPSIS
+        Probes an LLM endpoint to detect type (OpenAI/LM Studio vs Ollama) and verify connectivity.
+
+    .DESCRIPTION
+        Attempts to detect the LLM API type by probing known endpoints:
+        - OpenAI/LM Studio: GET /v1/models
+        - Ollama: GET /api/tags
+
+        Returns endpoint info including kind, model count, and first model ID.
+
+    .PARAMETER BaseUrl
+        The base URL of the LLM endpoint (e.g., http://localhost:1234)
+
+    .PARAMETER TimeoutSec
+        Request timeout in seconds (default: 10)
+
+    .OUTPUTS
+        PSCustomObject with: Success, Kind, ModelsCount, FirstModelId, Error
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$BaseUrl,
+
+        [int]$TimeoutSec = 10
+    )
+
+    $result = [PSCustomObject]@{
+        Success = $false
+        Kind = $null
+        ModelsCount = 0
+        FirstModelId = $null
+        Models = @()
+        Error = $null
+    }
+
+    $BaseUrl = $BaseUrl.TrimEnd('/')
+
+    # Helper to validate JSON response (catches HTML from reverse proxies)
+    function Test-JsonResponse {
+        param([Microsoft.PowerShell.Commands.WebResponseObject]$Response)
+
+        # Check Content-Type header
+        $contentType = $Response.Headers['Content-Type']
+        if ($contentType) {
+            $ct = if ($contentType -is [array]) { $contentType[0] } else { "$contentType" }
+            if ($ct -notmatch 'application/json' -and $ct -notmatch 'text/json') {
+                return $null  # Not JSON
+            }
+        }
+
+        # Try parsing as JSON
+        try {
+            $json = $Response.Content | ConvertFrom-Json
+            return $json
+        }
+        catch {
+            return $null  # Invalid JSON
+        }
+    }
+
+    # Try OpenAI-compatible endpoint first (LM Studio, OpenAI, vLLM, etc.)
+    try {
+        $openaiUrl = "$BaseUrl/v1/models"
+        $webResponse = Invoke-WebRequest -Uri $openaiUrl -Method GET -TimeoutSec $TimeoutSec -ErrorAction Stop
+        $response = Test-JsonResponse -Response $webResponse
+
+        if ($response -and ($response.data -or $response.object -eq 'list')) {
+            $models = @()
+            if ($response.data) {
+                $models = @($response.data)
+            }
+
+            $result.Success = $true
+            $result.Kind = 'openai-compatible'
+            $result.ModelsCount = $models.Count
+            $result.Models = $models | ForEach-Object { $_.id }
+
+            if ($models.Count -gt 0) {
+                $result.FirstModelId = $models[0].id
+                # Detect LM Studio specifically by model ID pattern or owned_by
+                if ($models[0].owned_by -eq 'lmstudio' -or $models[0].id -match 'lmstudio') {
+                    $result.Kind = 'lmstudio'
+                }
+            }
+
+            return $result
+        }
+    }
+    catch {
+        # OpenAI endpoint failed, try Ollama
+    }
+
+    # Try Ollama endpoint
+    try {
+        $ollamaUrl = "$BaseUrl/api/tags"
+        $webResponse = Invoke-WebRequest -Uri $ollamaUrl -Method GET -TimeoutSec $TimeoutSec -ErrorAction Stop
+        $response = Test-JsonResponse -Response $webResponse
+
+        if ($response -and ($response.models -or $response -is [array])) {
+            $models = @()
+            if ($response.models) {
+                $models = @($response.models)
+            } elseif ($response -is [array]) {
+                $models = @($response)
+            }
+
+            $result.Success = $true
+            $result.Kind = 'ollama'
+            $result.ModelsCount = $models.Count
+            $result.Models = $models | ForEach-Object { $_.name ?? $_.model ?? $_ }
+
+            if ($models.Count -gt 0) {
+                $result.FirstModelId = $models[0].name ?? $models[0].model ?? "$($models[0])"
+            }
+
+            return $result
+        }
+    }
+    catch {
+        # Ollama endpoint also failed
+    }
+
+    # Both failed - try a simple connectivity check
+    try {
+        $null = Invoke-WebRequest -Uri $BaseUrl -Method GET -TimeoutSec $TimeoutSec -ErrorAction Stop
+        $result.Error = "Endpoint reachable but not OpenAI or Ollama compatible"
+    }
+    catch {
+        $result.Error = "Endpoint unreachable: $_"
+    }
+
+    return $result
+}
+
+function Test-BrainarrLLMGate {
+    <#
+    .SYNOPSIS
+        Gate: Brainarr LLM functional test - proof-of-life and sync verification.
+
+    .DESCRIPTION
+        Opt-in gate that validates Brainarr LLM integration:
+        1. Probes LLM endpoint (OpenAI/LM Studio or Ollama) for proof-of-life
+        2. Creates/updates Brainarr import list with LLM configuration
+        3. Triggers ImportListSync command
+        4. Verifies sync completed without errors
+
+        SKIPs (not FAILs) if LLM endpoint unreachable, unless StrictMode is enabled.
+
+    .PARAMETER LlmBaseUrl
+        Base URL of the LLM endpoint (e.g., http://localhost:1234)
+
+    .PARAMETER ModelId
+        Specific model ID to configure (optional - uses auto-detect if not specified)
+
+    .PARAMETER StrictMode
+        When true, FAIL instead of SKIP if LLM endpoint is unreachable
+
+    .PARAMETER CommandTimeoutSec
+        Timeout for ImportListSync command (default: 120)
+
+    .OUTPUTS
+        PSCustomObject with gate result including LLM details
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$LlmBaseUrl,
+
+        [string]$ModelId = $null,
+
+        [switch]$StrictMode,
+
+        [int]$CommandTimeoutSec = 120
+    )
+
+    $result = [PSCustomObject]@{
+        Gate = 'BrainarrLLM'
+        PluginName = 'Brainarr'
+        Outcome = 'failed'
+        Success = $false
+        SkipReason = $null
+        Errors = @()
+        Details = [ordered]@{
+            llmKind = $null
+            modelsCount = 0
+            firstModelId = $null
+            endpointRedacted = $null
+            importListId = $null
+            commandId = $null
+            syncCompleted = $false
+            lastSyncError = $null
+        }
+    }
+
+    # Redact the endpoint URL for manifest
+    $redactedUrl = $LlmBaseUrl -replace '(?i)(https?://)[^:/]+', '$1[REDACTED-HOST]'
+    # Preserve port if present
+    if ($LlmBaseUrl -match ':(\d+)') {
+        $port = $Matches[1]
+        $redactedUrl = $redactedUrl -replace '\[REDACTED-HOST\]', "[REDACTED-HOST]:$port"
+    }
+    $result.Details.endpointRedacted = $redactedUrl
+
+    try {
+        # Step 1: Probe LLM endpoint for proof-of-life
+        Write-Host "       Probing LLM endpoint..." -ForegroundColor Gray
+        $llmProbe = Test-LLMEndpoint -BaseUrl $LlmBaseUrl -TimeoutSec 10
+
+        if (-not $llmProbe.Success) {
+            $reason = "LLM endpoint unreachable: $($llmProbe.Error)"
+            if ($StrictMode) {
+                $result.Errors += $reason
+                $result.Details.llmKind = 'unknown'
+                return $result
+            }
+            $result.Outcome = 'skipped'
+            $result.SkipReason = $reason
+            $result.Details.llmKind = 'unknown'
+            return $result
+        }
+
+        $result.Details.llmKind = $llmProbe.Kind
+        $result.Details.modelsCount = $llmProbe.ModelsCount
+
+        # Redact model ID if it looks like it contains sensitive info (long alphanumeric)
+        # Also compute SHA256 prefix hash for correlation without leaking full string
+        $firstModel = $llmProbe.FirstModelId
+        $modelIdHash = $null
+        if ($firstModel) {
+            # Compute SHA256 hash prefix (first 12 chars) for correlation
+            $sha256 = [System.Security.Cryptography.SHA256]::Create()
+            $hashBytes = $sha256.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($firstModel))
+            $modelIdHash = [BitConverter]::ToString($hashBytes).Replace('-', '').ToLower().Substring(0, 12)
+
+            if ($firstModel.Length -gt 50) {
+                $firstModel = $firstModel.Substring(0, 30) + "...[TRUNCATED]"
+            }
+        }
+        $result.Details.firstModelId = $firstModel
+        $result.Details.modelIdHash = $modelIdHash
+
+        Write-Host "       LLM endpoint: $($llmProbe.Kind), $($llmProbe.ModelsCount) model(s)" -ForegroundColor Green
+        if ($llmProbe.FirstModelId) {
+            Write-Host "       First model: $firstModel (hash: $modelIdHash)" -ForegroundColor Gray
+        }
+
+        # Determine which model to use
+        $effectiveModelId = $ModelId
+        if (-not $effectiveModelId -and $llmProbe.FirstModelId) {
+            $effectiveModelId = $llmProbe.FirstModelId
+        }
+
+        if (-not $effectiveModelId) {
+            if ($StrictMode) {
+                $result.Errors += "No model available on LLM endpoint"
+                return $result
+            }
+            $result.Outcome = 'skipped'
+            $result.SkipReason = "No model available on LLM endpoint (use -ModelId to specify)"
+            return $result
+        }
+
+        # Step 2: Find or create Brainarr import list
+        Write-Host "       Configuring Brainarr import list..." -ForegroundColor Gray
+
+        $importLists = Invoke-LidarrApi -Endpoint "importlist"
+        $brainarrList = $importLists | Where-Object {
+            $_.implementation -like '*Brainarr*' -or
+            $_.name -like '*Brainarr*'
+        } | Select-Object -First 1
+
+        if (-not $brainarrList) {
+            # Need to create import list - get schema first
+            $schemas = Invoke-LidarrApi -Endpoint "importlist/schema"
+            $brainarrSchema = $schemas | Where-Object { $_.implementation -like '*Brainarr*' } | Select-Object -First 1
+
+            if (-not $brainarrSchema) {
+                $result.Errors += "Brainarr import list schema not found - plugin may not be installed"
+                return $result
+            }
+
+            # Build new import list from schema
+            $newList = @{
+                name = "Brainarr LLM"
+                implementation = $brainarrSchema.implementation
+                implementationName = $brainarrSchema.implementationName
+                configContract = $brainarrSchema.configContract
+                enableAutomaticAdd = $true
+                shouldMonitor = 'entireArtist'
+                shouldMonitorExisting = $false
+                shouldSearch = $false
+                rootFolderPath = "/downloads"
+                monitorNewItems = 'none'
+                qualityProfileId = 1
+                metadataProfileId = 1
+                fields = @()
+            }
+
+            # Copy fields from schema and update LLM config
+            foreach ($field in $brainarrSchema.fields) {
+                $fieldCopy = @{
+                    name = $field.name
+                    value = $field.value
+                }
+
+                # Set LLM configuration fields
+                switch ($field.name) {
+                    'configurationUrl' { $fieldCopy.value = $LlmBaseUrl }
+                    'manualModelId' { $fieldCopy.value = $effectiveModelId }
+                    'autoDetectModel' { $fieldCopy.value = [string]::IsNullOrEmpty($ModelId) }
+                    'provider' {
+                        $fieldCopy.value = switch ($llmProbe.Kind) {
+                            'ollama' { 'Ollama' }
+                            'lmstudio' { 'LMStudio' }
+                            default { 'OpenAI' }
+                        }
+                    }
+                }
+
+                $newList.fields += $fieldCopy
+            }
+
+            $brainarrList = Invoke-LidarrApi -Endpoint "importlist" -Method POST -Body $newList
+            Write-Host "       Created Brainarr import list (id=$($brainarrList.id))" -ForegroundColor Green
+        }
+        else {
+            # Update existing import list with LLM config
+            $updateBody = @{
+                id = $brainarrList.id
+                name = $brainarrList.name
+                implementation = $brainarrList.implementation
+                implementationName = $brainarrList.implementationName
+                configContract = $brainarrList.configContract
+                enableAutomaticAdd = $brainarrList.enableAutomaticAdd
+                shouldMonitor = $brainarrList.shouldMonitor
+                shouldMonitorExisting = $brainarrList.shouldMonitorExisting
+                shouldSearch = $brainarrList.shouldSearch
+                rootFolderPath = $brainarrList.rootFolderPath
+                monitorNewItems = $brainarrList.monitorNewItems
+                qualityProfileId = $brainarrList.qualityProfileId
+                metadataProfileId = $brainarrList.metadataProfileId
+                fields = @()
+            }
+
+            foreach ($field in $brainarrList.fields) {
+                $fieldCopy = @{
+                    name = $field.name
+                    value = $field.value
+                }
+
+                # Only update LLM-related fields, preserve user tuning
+                switch ($field.name) {
+                    'configurationUrl' { $fieldCopy.value = $LlmBaseUrl }
+                    'manualModelId' { $fieldCopy.value = $effectiveModelId }
+                    'autoDetectModel' { $fieldCopy.value = [string]::IsNullOrEmpty($ModelId) }
+                    'provider' {
+                        $fieldCopy.value = switch ($llmProbe.Kind) {
+                            'ollama' { 'Ollama' }
+                            'lmstudio' { 'LMStudio' }
+                            default { 'OpenAI' }
+                        }
+                    }
+                }
+
+                $updateBody.fields += $fieldCopy
+            }
+
+            $brainarrList = Invoke-LidarrApi -Endpoint "importlist/$($brainarrList.id)" -Method PUT -Body $updateBody
+            Write-Host "       Updated Brainarr import list (id=$($brainarrList.id))" -ForegroundColor Green
+        }
+
+        $result.Details.importListId = $brainarrList.id
+
+        # Step 3: Trigger ImportListSync command
+        Write-Host "       Triggering ImportListSync..." -ForegroundColor Gray
+
+        $command = Invoke-LidarrApi -Endpoint "command" -Method POST -Body @{
+            name = "ImportListSync"
+            importListId = $brainarrList.id
+        }
+
+        if (-not $command -or -not $command.id) {
+            $result.Errors += "Failed to trigger ImportListSync command"
+            return $result
+        }
+
+        $result.Details.commandId = $command.id
+        Write-Host "       Command started (id=$($command.id))" -ForegroundColor Gray
+
+        # Step 4: Wait for command completion
+        $deadline = (Get-Date).AddSeconds($CommandTimeoutSec)
+        $completed = $false
+        $commandStatus = $null
+
+        while ((Get-Date) -lt $deadline) {
+            Start-Sleep -Seconds 2
+            $commandStatus = Invoke-LidarrApi -Endpoint "command/$($command.id)"
+
+            if ($commandStatus.status -eq 'completed') {
+                $completed = $true
+                Write-Host "       Command completed" -ForegroundColor Green
+                break
+            }
+            elseif ($commandStatus.status -eq 'failed') {
+                $failMsg = $commandStatus.message ?? "Unknown error"
+                $result.Errors += "ImportListSync command failed: $failMsg"
+                return $result
+            }
+            else {
+                Write-Host "       Status: $($commandStatus.status)..." -ForegroundColor Gray
+            }
+        }
+
+        if (-not $completed) {
+            $lastStatus = "unknown"
+            try { $lastStatus = (Invoke-LidarrApi -Endpoint "command/$($command.id)").status } catch {}
+            $result.Errors += "ImportListSync command timed out (last status: $lastStatus)"
+            return $result
+        }
+
+        $result.Details.syncCompleted = $true
+
+        # Step 5: Verify import list is still accessible and has no error
+        Write-Host "       Verifying import list post-sync..." -ForegroundColor Gray
+
+        $postSync = $null
+        try {
+            $postSync = Invoke-LidarrApi -Endpoint "importlist/$($brainarrList.id)"
+        }
+        catch {
+            $result.Errors += "Import list not accessible after sync: $_"
+            return $result
+        }
+
+        # Check for lastSyncError if exposed by API
+        $syncError = $null
+        if ($postSync.PSObject.Properties['lastSyncError']) {
+            $syncError = $postSync.lastSyncError
+        }
+        if ($syncError -and $syncError -ne '') {
+            $result.Details.lastSyncError = $syncError
+            $result.Errors += "Import list sync error: $syncError"
+            return $result
+        }
+
+        # Record lastSync timestamp if available
+        if ($postSync.PSObject.Properties['lastSync']) {
+            $result.Details.lastSync = $postSync.lastSync
+        }
+
+        Write-Host "       Import list verified - no sync errors" -ForegroundColor Green
+
+        $result.Success = $true
+        $result.Outcome = 'success'
+    }
+    catch {
+        $errMsg = "$_"
+        # Check if exception is LLM/network related
+        if ($errMsg -match '(?i)(connection refused|timeout|unreachable|network)') {
+            if ($StrictMode) {
+                $result.Errors += "LLM endpoint error: $errMsg"
+            } else {
+                $result.Outcome = 'skipped'
+                $result.SkipReason = "LLM endpoint error: $errMsg"
+            }
+            return $result
+        }
+        $result.Errors += "BrainarrLLM gate failed: $errMsg"
+    }
+
+    return $result
+}
+
+Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-BrainarrLLMGate, Invoke-LidarrApi

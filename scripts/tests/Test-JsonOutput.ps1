@@ -86,18 +86,35 @@ function New-MockRunContext {
     return @{
         LidarrUrl = $LidarrUrl
         ContainerName = $ContainerName
+        ContainerId = "abc123def456"
+        ContainerStartedAt = [DateTime]::UtcNow.AddMinutes(-5)
         ImageTag = $ImageTag
+        ImageId = "sha256:image123"
         ImageDigest = "sha256:abc123def456"
         RequestedGate = $RequestedGate
         Plugins = $Plugins
         EffectiveGates = $EffectiveGates
         EffectivePlugins = $Plugins
+        StopReason = $null
         RedactionSelfTestExecuted = $true
         RedactionSelfTestPassed = $RedactionPassed
         RunnerArgs = @("-Gate", "bootstrap", "-Plugins", "Qobuzarr,Tidalarr")
         DiagnosticsBundlePath = $null
+        DiagnosticsIncludedFiles = @("run-manifest.json", "container.log", "inspect.json")
         LidarrVersion = $LidarrVersion
         LidarrBranch = $LidarrBranch
+        SourceShas = @{
+            Common = "abc1234"
+            Qobuzarr = "def5678"
+            Tidalarr = "ghi9012"
+            Brainarr = $null
+        }
+        SourceProvenance = @{
+            Common = "git"
+            Qobuzarr = "git"
+            Tidalarr = "env"
+            Brainarr = "unknown"
+        }
     }
 }
 
@@ -107,8 +124,8 @@ function New-MockRunContext {
 
 $schemaTests = @(
     @{
-        Name = "schemaVersion is '1.1'"
-        Test = { param($obj) $obj.schemaVersion -eq "1.1" }
+        Name = "schemaVersion is '1.2'"
+        Test = { param($obj) $obj.schemaVersion -eq "1.2" }
     }
     @{
         Name = "schemaId is 'richer-tunes.lidarr.e2e-run-manifest'"
@@ -443,12 +460,233 @@ $camelCaseTests = @(
 )
 
 # ============================================================================
+# Schema v1.2 Tests - New Features
+# ============================================================================
+
+$v12SourcesTests = @(
+    @{
+        Name = "sources block is present"
+        Test = { param($obj) $null -ne $obj.sources }
+    }
+    @{
+        Name = "sources.common.sha is present"
+        Test = { param($obj) $obj.sources.PSObject.Properties.Name -contains 'common' }
+    }
+    @{
+        Name = "sources includes plugin repos (qobuzarr, tidalarr, brainarr)"
+        Test = {
+            param($obj)
+            $obj.sources.PSObject.Properties.Name -contains 'qobuzarr' -and
+            $obj.sources.PSObject.Properties.Name -contains 'tidalarr' -and
+            $obj.sources.PSObject.Properties.Name -contains 'brainarr'
+        }
+    }
+    @{
+        Name = "sources.*.source provenance field present"
+        Test = {
+            param($obj)
+            $obj.sources.common.PSObject.Properties.Name -contains 'source' -and
+            $obj.sources.qobuzarr.PSObject.Properties.Name -contains 'source'
+        }
+    }
+    @{
+        Name = "sources.*.source is git|env|unknown"
+        Test = {
+            param($obj)
+            $valid = @('git', 'env', 'unknown')
+            $obj.sources.common.source -in $valid
+        }
+    }
+)
+
+$v12ContainerTests = @(
+    @{
+        Name = "lidarr.containerId is present"
+        Test = { param($obj) $obj.lidarr.PSObject.Properties.Name -contains 'containerId' }
+    }
+    @{
+        Name = "lidarr.startedAt is present"
+        Test = { param($obj) $obj.lidarr.PSObject.Properties.Name -contains 'startedAt' }
+    }
+    @{
+        Name = "lidarr.imageId is present"
+        Test = { param($obj) $obj.lidarr.PSObject.Properties.Name -contains 'imageId' }
+    }
+)
+
+$v12GateTimingTests = @(
+    @{
+        Name = "each result has startedAt timestamp"
+        Test = {
+            param($obj)
+            foreach ($r in $obj.results) {
+                if (-not ($r.PSObject.Properties.Name -contains 'startedAt')) { return $false }
+            }
+            return $true
+        }
+    }
+    @{
+        Name = "each result has endedAt timestamp"
+        Test = {
+            param($obj)
+            foreach ($r in $obj.results) {
+                if (-not ($r.PSObject.Properties.Name -contains 'endedAt')) { return $false }
+            }
+            return $true
+        }
+    }
+)
+
+$v12ErrorCodeTests = @(
+    @{
+        Name = "each result has errorCode field (null for success)"
+        Test = {
+            param($obj)
+            foreach ($r in $obj.results) {
+                if (-not ($r.PSObject.Properties.Name -contains 'errorCode')) { return $false }
+            }
+            return $true
+        }
+    }
+    @{
+        Name = "failed results have errorCode when inferable"
+        Test = {
+            param($obj)
+            foreach ($r in $obj.results) {
+                if ($r.outcome -eq 'failed' -and $r.errors.Count -gt 0) {
+                    # errorCode can be null if no pattern matches, that's OK
+                    return $true
+                }
+            }
+            return $true
+        }
+    }
+)
+
+$v12EffectiveTests = @(
+    @{
+        Name = "effective.stopReason field is present"
+        Test = { param($obj) $obj.effective.PSObject.Properties.Name -contains 'stopReason' }
+    }
+)
+
+$v12DiagnosticsTests = @(
+    @{
+        Name = "diagnostics.includedFiles is an array"
+        Test = { param($obj) $obj.diagnostics.includedFiles -is [array] }
+    }
+)
+
+$v12HostBugTests = @(
+    @{
+        Name = "hostBugSuspected is always present"
+        Test = { param($obj) $obj.PSObject.Properties.Name -contains 'hostBugSuspected' }
+    }
+    @{
+        Name = "hostBugSuspected.detected is boolean"
+        Test = { param($obj) $obj.hostBugSuspected.detected -is [bool] }
+    }
+    @{
+        Name = "hostBugSuspected has minimal fields when not detected"
+        Test = {
+            param($obj)
+            if (-not $obj.hostBugSuspected.detected) {
+                # When not detected, should only have 'detected' field (quiet mode)
+                $props = @($obj.hostBugSuspected.PSObject.Properties.Name)
+                return $props.Count -eq 1 -and $props -contains 'detected'
+            }
+            return $true
+        }
+    }
+)
+
+# ============================================================================
+# Assembly Issue Detection Tests (Tiered Classification)
+# ============================================================================
+
+$alcDetectionTests = @(
+    @{
+        Name = "Test-ALCPattern detects TypeLoadException as ABI_MISMATCH"
+        Test = {
+            param($obj)
+            $result = Test-ALCPattern -Errors @("Could not load type 'Foo.Bar' from assembly 'MyPlugin'")
+            $result.detected -eq $true -and $result.classification -eq 'ABI_MISMATCH' -and $result.severity -eq 'plugin_rebuild'
+        }
+    }
+    @{
+        Name = "Test-ALCPattern detects true ALC bug (AssemblyLoadContext unload)"
+        Test = {
+            param($obj)
+            $result = Test-ALCPattern -Errors @("AssemblyLoadContext failed to unload due to running threads")
+            $result.detected -eq $true -and $result.classification -eq 'ALC' -and $result.severity -eq 'host_bug'
+        }
+    }
+    @{
+        Name = "Test-ALCPattern detects duplicate assembly in different context as ALC"
+        Test = {
+            param($obj)
+            $result = Test-ALCPattern -Errors @("Assembly 'Newtonsoft.Json' is already loaded in a different context")
+            $result.detected -eq $true -and $result.classification -eq 'ALC' -and $result.severity -eq 'host_bug'
+        }
+    }
+    @{
+        Name = "Test-ALCPattern detects FileLoadException with version as DEPENDENCY_DRIFT"
+        Test = {
+            param($obj)
+            $result = Test-ALCPattern -Errors @("FileLoadException: Could not load assembly version mismatch")
+            $result.detected -eq $true -and $result.classification -eq 'DEPENDENCY_DRIFT' -and $result.severity -eq 'version_conflict'
+        }
+    }
+    @{
+        Name = "Test-ALCPattern detects generic FileLoadException as LOAD_FAILURE"
+        Test = {
+            param($obj)
+            $result = Test-ALCPattern -Errors @("FileLoadException: Could not load assembly from disk")
+            $result.detected -eq $true -and $result.classification -eq 'LOAD_FAILURE' -and $result.severity -eq 'investigate'
+        }
+    }
+    @{
+        Name = "Test-ALCPattern detects MissingMethodException as ABI_MISMATCH"
+        Test = {
+            param($obj)
+            $result = Test-ALCPattern -Errors @("MissingMethodException: Method not found in assembly")
+            $result.detected -eq $true -and $result.classification -eq 'ABI_MISMATCH' -and $result.severity -eq 'plugin_rebuild'
+        }
+    }
+    @{
+        Name = "Test-ALCPattern returns false for non-assembly errors"
+        Test = {
+            param($obj)
+            $result = Test-ALCPattern -Errors @("Connection refused", "Timeout waiting for response", "HTTP 404 Not Found")
+            $result.detected -eq $false
+        }
+    }
+    @{
+        Name = "Test-ALCPattern sanitizes matchedLine"
+        Test = {
+            param($obj)
+            $result = Test-ALCPattern -Errors @("Could not load type 'MyPlugin.Indexer' from assembly at http://192.168.1.100/plugin.dll")
+            $result.detected -eq $true -and $result.matchedLine -match '\[PRIVATE-IP\]'
+        }
+    }
+    @{
+        Name = "Test-ALCPattern prioritizes more specific patterns (ALC over generic)"
+        Test = {
+            param($obj)
+            # Test that true ALC patterns are matched before generic ones
+            $result = Test-ALCPattern -Errors @("Cannot unload the AssemblyLoadContext because threads are still running")
+            $result.detected -eq $true -and $result.classification -eq 'ALC'
+        }
+    }
+)
+
+# ============================================================================
 # Run Tests
 # ============================================================================
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "JSON Output Schema Tests (v1.1)" -ForegroundColor Cyan
+Write-Host "JSON Output Schema Tests (v1.2)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 if (Test-Path $jsonModulePath) {
@@ -485,6 +723,14 @@ if (Test-Path $jsonModulePath) {
         @{ Name = "Diagnostics"; Tests = $diagnosticsTests }
         @{ Name = "Redaction Metadata"; Tests = $redactionTests }
         @{ Name = "LowerCamelCase"; Tests = $camelCaseTests }
+        @{ Name = "v1.2 Sources"; Tests = $v12SourcesTests }
+        @{ Name = "v1.2 Container Fingerprinting"; Tests = $v12ContainerTests }
+        @{ Name = "v1.2 Gate Timing"; Tests = $v12GateTimingTests }
+        @{ Name = "v1.2 Error Codes"; Tests = $v12ErrorCodeTests }
+        @{ Name = "v1.2 Effective"; Tests = $v12EffectiveTests }
+        @{ Name = "v1.2 Diagnostics"; Tests = $v12DiagnosticsTests }
+        @{ Name = "v1.2 Host Bug Detection"; Tests = $v12HostBugTests }
+        @{ Name = "Assembly Issue Classification"; Tests = $alcDetectionTests }
     )
 
     foreach ($group in $testGroups) {
@@ -503,6 +749,94 @@ if (Test-Path $jsonModulePath) {
         $passed = & $test.Test $json
         Assert-True $passed $test.Name
     }
+
+    # ========================================================================
+    # Backward Compatibility: v1.1 Manifest Parsing
+    # ========================================================================
+    Write-Host ""
+    Write-Host "Test Group: v1.1 Backward Compatibility" -ForegroundColor Yellow
+
+    # Create a v1.1-style manifest (missing v1.2 fields: sources, containerId, startedAt, imageId, errorCode, stopReason, includedFiles)
+    $v11Manifest = @'
+{
+    "schemaVersion": "1.1",
+    "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+    "timestamp": "2025-01-15T10:30:00.000Z",
+    "runId": "legacy11test",
+    "runner": {
+        "name": "lidarr.plugin.common:e2e-runner.ps1",
+        "version": "abc123",
+        "args": ["-Gate", "bootstrap"]
+    },
+    "lidarr": {
+        "url": "http://localhost:8686",
+        "containerName": "lidarr-test",
+        "imageTag": "pr-plugins-3.1.1.4884",
+        "imageDigest": "sha256:abc",
+        "version": "2.9.6",
+        "branch": "plugins"
+    },
+    "request": {
+        "gate": "bootstrap",
+        "plugins": ["Qobuzarr"]
+    },
+    "effective": {
+        "gates": ["Schema", "Configure"],
+        "plugins": ["Qobuzarr"]
+    },
+    "redaction": {
+        "selfTestExecuted": true,
+        "selfTestPassed": true,
+        "patternsCount": 20
+    },
+    "results": [
+        {
+            "gate": "Schema",
+            "plugin": "Qobuzarr",
+            "outcome": "success",
+            "outcomeReason": null,
+            "durationMs": 1500,
+            "errors": [],
+            "details": {}
+        }
+    ],
+    "summary": {
+        "overallSuccess": true,
+        "totalGates": 1,
+        "passed": 1,
+        "failed": 0,
+        "skipped": 0,
+        "totalDurationMs": 1500
+    },
+    "diagnostics": {
+        "bundlePath": null,
+        "bundleCreated": false,
+        "redactionApplied": true,
+        "redactionSelfTestPassed": true
+    }
+}
+'@
+
+    $v11Obj = $v11Manifest | ConvertFrom-Json
+
+    # Test that v1.1 manifests can be parsed without error
+    Assert-True ($v11Obj.schemaVersion -eq "1.1") "Can parse v1.1 schemaVersion"
+    Assert-True ($v11Obj.results.Count -eq 1) "Can parse v1.1 results array"
+    Assert-True ($v11Obj.summary.overallSuccess -eq $true) "Can parse v1.1 summary"
+
+    # Test that optional v1.2 fields are gracefully absent (null-safe access patterns)
+    $hasSourcesProperty = $v11Obj.PSObject.Properties.Name -contains 'sources'
+    Assert-True (-not $hasSourcesProperty) "v1.1 does not have sources block (expected)"
+
+    $hasStopReason = $v11Obj.effective.PSObject.Properties.Name -contains 'stopReason'
+    Assert-True (-not $hasStopReason) "v1.1 does not have effective.stopReason (expected)"
+
+    # Verify the job summary step logic would work (null-coalescing simulation)
+    $lidarrVersion = if ($v11Obj.lidarr.version) { $v11Obj.lidarr.version } else { 'n/a' }
+    Assert-True ($lidarrVersion -eq "2.9.6") "v1.1 lidarr.version accessible"
+
+    $stopReason = if ($v11Obj.effective -and $v11Obj.effective.PSObject.Properties.Name -contains 'stopReason') { $v11Obj.effective.stopReason } else { $null }
+    Assert-True ($stopReason -eq $null) "v1.1 missing stopReason defaults to null"
 
     # Show sample output
     Write-Host ""

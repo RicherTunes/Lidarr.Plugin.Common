@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/richer-tunes/lidarr.plugin.common/docs/reference/e2e-run-manifest.schema.json",
+  "title": "E2E Run Manifest",
+  "description": "Schema for e2e-runner.ps1 JSON output. Validates test run results for CI/CD integration.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion",
+    "schemaId",
+    "timestamp",
+    "runId",
+    "runner",
+    "lidarr",
+    "request",
+    "effective",
+    "redaction",
+    "results",
+    "summary",
+    "diagnostics",
+    "hostBugSuspected"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "const": "1.2",
+      "description": "Schema version. Breaking changes require major bump."
+    },
+    "schemaId": {
+      "const": "richer-tunes.lidarr.e2e-run-manifest",
+      "description": "Stable schema identifier for cross-system recognition."
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when manifest was generated."
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Unique run identifier (typically 12-char hex)."
+    },
+    "runner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "args"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "e2e-runner",
+          "description": "Runner script name."
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Git short SHA or version."
+        },
+        "args": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Command-line arguments (redacted)."
+        }
+      }
+    },
+    "sources": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Source provenance for repos (common, qobuzarr, tidalarr, brainarr, etc.).",
+      "patternProperties": {
+        "^[a-z]+$": {
+          "type": "object",
+          "additionalProperties": true,
+          "required": ["sha", "source"],
+          "properties": {
+            "sha": {
+              "type": ["string", "null"],
+              "description": "Git short SHA or null if unknown."
+            },
+            "source": {
+              "type": "string",
+              "description": "Provenance: git, env, or unknown."
+            }
+          }
+        }
+      }
+    },
+    "lidarr": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["url", "containerName"],
+      "properties": {
+        "url": {
+          "type": "string",
+          "description": "Lidarr API URL (IPs redacted)."
+        },
+        "containerName": {
+          "type": "string",
+          "description": "Docker container name."
+        },
+        "containerId": {
+          "type": ["string", "null"],
+          "description": "Docker container ID (12-char truncated)."
+        },
+        "startedAt": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Container start time."
+        },
+        "imageTag": {
+          "type": ["string", "null"],
+          "description": "Docker image tag."
+        },
+        "imageId": {
+          "type": ["string", "null"],
+          "description": "Docker image SHA."
+        },
+        "imageDigest": {
+          "type": ["string", "null"],
+          "description": "Docker image digest."
+        },
+        "version": {
+          "type": ["string", "null"],
+          "description": "Lidarr version if queryable."
+        },
+        "branch": {
+          "type": ["string", "null"],
+          "description": "Lidarr branch if queryable."
+        }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "plugins"],
+      "properties": {
+        "gate": {
+          "type": "string",
+          "description": "Requested gate (e.g., bootstrap, search)."
+        },
+        "plugins": {
+          "type": ["string", "array"],
+          "description": "Requested plugins (string or array)."
+        }
+      }
+    },
+    "effective": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gates", "plugins"],
+      "properties": {
+        "gates": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Expanded gates to execute."
+        },
+        "plugins": {
+          "type": ["string", "array"],
+          "description": "Effective plugins."
+        },
+        "stopReason": {
+          "type": ["string", "null"],
+          "description": "Reason execution stopped early (null if completed)."
+        }
+      }
+    },
+    "redaction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["selfTestExecuted", "selfTestPassed", "patternsCount"],
+      "properties": {
+        "selfTestExecuted": {
+          "type": "boolean",
+          "description": "Whether redaction self-test ran."
+        },
+        "selfTestPassed": {
+          "type": "boolean",
+          "description": "Whether redaction self-test passed."
+        },
+        "patternsCount": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of redaction patterns loaded."
+        }
+      }
+    },
+    "results": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/gateResult"
+      },
+      "description": "Per-gate test results."
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["overallSuccess", "totalGates", "passed", "failed", "skipped", "totalDurationMs"],
+      "properties": {
+        "overallSuccess": {
+          "type": "boolean",
+          "description": "True if all non-skipped gates passed."
+        },
+        "totalGates": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total number of gate results."
+        },
+        "passed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Gates with outcome=success."
+        },
+        "failed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Gates with outcome=failed."
+        },
+        "skipped": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Gates with outcome=skipped."
+        },
+        "totalDurationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Sum of all gate durations."
+        }
+      }
+    },
+    "diagnostics": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["bundleCreated", "redactionApplied"],
+      "properties": {
+        "bundlePath": {
+          "type": ["string", "null"],
+          "description": "Path to diagnostics bundle if created."
+        },
+        "bundleCreated": {
+          "type": "boolean",
+          "description": "Whether diagnostics bundle was created."
+        },
+        "includedFiles": {
+          "type": ["array", "null"],
+          "items": { "type": "string" },
+          "description": "Files included in diagnostics bundle."
+        },
+        "redactionApplied": {
+          "type": "boolean",
+          "description": "Whether redaction was applied to bundle."
+        },
+        "redactionSelfTestPassed": {
+          "type": "boolean",
+          "description": "Whether redaction self-test passed."
+        }
+      }
+    },
+    "hostBugSuspected": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["detected"],
+      "properties": {
+        "detected": {
+          "type": "boolean",
+          "description": "Whether a host bug pattern was detected."
+        },
+        "classification": {
+          "type": "string",
+          "description": "Bug classification (ALC, ABI_MISMATCH, DEPENDENCY_DRIFT, LOAD_FAILURE)."
+        },
+        "severity": {
+          "type": "string",
+          "description": "Severity level (host_bug, plugin_rebuild, version_conflict, investigate)."
+        },
+        "matchedLine": {
+          "type": "string",
+          "description": "Sanitized error line that matched."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "gateResult": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "plugin", "outcome", "errors", "details"],
+      "properties": {
+        "gate": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Gate name (Schema, Configure, Search, etc.)."
+        },
+        "plugin": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Plugin name being tested."
+        },
+        "outcome": {
+          "type": "string",
+          "enum": ["success", "failed", "skipped"],
+          "description": "Gate execution outcome."
+        },
+        "errorCode": {
+          "oneOf": [
+            { "type": "null" },
+            {
+              "type": "string",
+              "pattern": "^E2E_[A-Z0-9_]+$"
+            }
+          ],
+          "description": "Structured error code (null for success/skipped)."
+        },
+        "outcomeReason": {
+          "type": ["string", "null"],
+          "description": "Human-readable reason for outcome."
+        },
+        "startedAt": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Gate execution start time."
+        },
+        "endedAt": {
+          "type": ["string", "null"],
+          "format": "date-time",
+          "description": "Gate execution end time."
+        },
+        "durationMs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Gate execution duration in milliseconds."
+        },
+        "errors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Error messages (empty for success)."
+        },
+        "details": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Gate-specific details (extensible)."
+        }
+      }
+    }
+  }
+}
