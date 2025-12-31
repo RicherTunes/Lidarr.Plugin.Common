@@ -63,6 +63,8 @@ _nupkg_extract/
 .docker-multi-smoke-test/
 .docker-e2e-runner-*/
 diagnostics/
+.e2e-test-output/
+.e2e-test-run.ps1
 
 # Local ad-hoc troubleshooting scripts (not part of repo tooling)
 scripts/check-clients-detail.ps1
