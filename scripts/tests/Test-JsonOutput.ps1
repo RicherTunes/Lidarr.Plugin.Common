@@ -726,6 +726,22 @@ $componentResolutionTests = @(
             return $true
         }
     }
+    @{
+        Name = "strategy=updated never yields safeToPersist=true (regression)"
+        Test = {
+            param($obj)
+            # Find the Revalidation result for Brainarr which has strategy='updated'
+            $r = $obj.results | Where-Object { $_.gate -eq 'Revalidation' -and $_.plugin -eq 'Brainarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if (-not ($r.details.PSObject.Properties.Name -contains 'componentResolution')) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr) { return $false }
+            if (-not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            # 'updated' is an action outcome, NOT a selection strategy - must not be safe
+            if ($cr.indexer.strategy -ne 'updated') { return $false }
+            return ($cr.indexer.safeToPersist -eq $false)
+        }
+    }
 )
 
 # ============================================================================  
@@ -1035,6 +1051,15 @@ if (Test-Path $jsonModulePath) {
                     2,
                     3
                 )
+            }
+        })
+        # Regression: 'updated' is an action outcome, NOT a selection strategy (must not be safeToPersist=true)
+        (New-MockGateResult -Gate "Revalidation" -PluginName "Brainarr" -Outcome "success" -Details @{
+            resolution = @{
+                indexer = "updated"
+            }
+            componentIds = @{
+                indexerId = 555
             }
         })
     )
