@@ -115,6 +115,16 @@ function New-MockRunContext {
             Tidalarr = "env"
             Brainarr = "unknown"
         }
+        ComponentIds = @{
+            InstanceKey = "i-abc123def456"
+            InstanceKeySource = "computed"
+            LockPolicy = @{
+                TimeoutMs = 750
+                RetryDelayMs = 50
+                StaleSeconds = 120
+            }
+            LockPolicySource = "default"
+        }
     }
 }
 
@@ -601,6 +611,45 @@ $v12HostBugTests = @(
 )
 
 # ============================================================================
+# Schema Tests - Component IDs Provenance
+# ============================================================================
+
+$componentIdsTests = @(
+    @{
+        Name = "componentIds block is present when context provided"
+        Test = { param($obj) $obj.PSObject.Properties.Name -contains 'componentIds' }
+    }
+    @{
+        Name = "componentIds.instanceKey is present"
+        Test = { param($obj) -not [string]::IsNullOrWhiteSpace($obj.componentIds.instanceKey) }
+    }
+    @{
+        Name = "componentIds.instanceKeySource is explicit or computed"
+        Test = { param($obj) $obj.componentIds.instanceKeySource -in @('explicit', 'computed') }
+    }
+    @{
+        Name = "componentIds.lockPolicy is present"
+        Test = { param($obj) $null -ne $obj.componentIds.lockPolicy }
+    }
+    @{
+        Name = "componentIds.lockPolicy.timeoutMs is integer >= 0"
+        Test = { param($obj) $obj.componentIds.lockPolicy.timeoutMs -is [int] -or $obj.componentIds.lockPolicy.timeoutMs -is [long] }
+    }
+    @{
+        Name = "componentIds.lockPolicy.retryDelayMs is integer >= 1"
+        Test = { param($obj) $obj.componentIds.lockPolicy.retryDelayMs -ge 1 }
+    }
+    @{
+        Name = "componentIds.lockPolicy.staleSeconds is integer >= 0"
+        Test = { param($obj) $obj.componentIds.lockPolicy.staleSeconds -ge 0 }
+    }
+    @{
+        Name = "componentIds.lockPolicySource is default or env"
+        Test = { param($obj) $obj.componentIds.lockPolicySource -in @('default', 'env') }
+    }
+)
+
+# ============================================================================
 # Assembly Issue Detection Tests (Tiered Classification)
 # ============================================================================
 
@@ -730,6 +779,7 @@ if (Test-Path $jsonModulePath) {
         @{ Name = "v1.2 Effective"; Tests = $v12EffectiveTests }
         @{ Name = "v1.2 Diagnostics"; Tests = $v12DiagnosticsTests }
         @{ Name = "v1.2 Host Bug Detection"; Tests = $v12HostBugTests }
+        @{ Name = "Component IDs Provenance"; Tests = $componentIdsTests }
         @{ Name = "Assembly Issue Classification"; Tests = $alcDetectionTests }
     )
 

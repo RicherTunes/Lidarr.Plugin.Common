@@ -334,6 +334,35 @@ $script:E2EComponentIdsState = Read-E2EComponentIdsState -Path $script:E2ECompon
 $script:E2EComponentResolution = @{}
 $script:E2EComponentResolutionCandidates = @{}
 
+# Track instance key provenance for manifest
+$script:E2EInstanceKeySource = if (-not [string]::IsNullOrWhiteSpace($ComponentIdsInstanceKey) -and $script:E2EComponentIdsInstanceKey -eq $ComponentIdsInstanceKey.Trim()) {
+    "explicit"
+} else {
+    "computed"
+}
+
+# Track lock policy settings and source for manifest
+$script:E2ELockPolicy = @{
+    TimeoutMs = 750
+    RetryDelayMs = 50
+    StaleSeconds = 120
+}
+$script:E2ELockPolicySource = "default"
+
+# Check if any lock policy env vars are set
+if ($env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -and $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -match '^\d+$') {
+    $script:E2ELockPolicy.TimeoutMs = [int]$env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+    $script:E2ELockPolicySource = "env"
+}
+if ($env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS -and $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS -match '^\d+$') {
+    $script:E2ELockPolicy.RetryDelayMs = [int]$env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
+    $script:E2ELockPolicySource = "env"
+}
+if ($env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -and $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -match '^\d+$') {
+    $script:E2ELockPolicy.StaleSeconds = [int]$env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
+    $script:E2ELockPolicySource = "env"
+}
+
 function Save-E2EComponentIdsIfEnabled {
     param(
         [Parameter(Mandatory)]
@@ -2980,6 +3009,12 @@ if ($EmitJson) {
             DiagnosticsBundlePath = if ($bundlePath) { $bundlePath } else { $null }
             LidarrVersion = $lidarrVersion
             LidarrBranch = $lidarrBranch
+            ComponentIds = @{
+                InstanceKey = $script:E2EComponentIdsInstanceKey
+                InstanceKeySource = $script:E2EInstanceKeySource
+                LockPolicy = $script:E2ELockPolicy
+                LockPolicySource = $script:E2ELockPolicySource
+            }
         }
 
         New-Item -ItemType Directory -Path (Split-Path $JsonOutputPath -Parent) -Force -ErrorAction SilentlyContinue | Out-Null
