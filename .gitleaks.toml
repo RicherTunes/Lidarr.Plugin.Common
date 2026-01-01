@@ -1,0 +1,10 @@
+# Gitleaks configuration
+# See: https://github.com/gitleaks/gitleaks#configuration
+
+title = "Lidarr.Plugin.Common gitleaks config"
+
+[allowlist]
+  description = "Allowlist for test fixtures with intentional fake secrets"
+  paths = [
+    '''scripts/tests/Test-SecretRedaction\.ps1''',
+  ]
