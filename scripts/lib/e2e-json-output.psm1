@@ -509,11 +509,11 @@ function Get-SafeProperty {
     selectedId, strategy, candidateIds, and safeToPersist for each component type.
 
     safeToPersist rules:
-    - true: preferredId, created, updated, implementationName, implementation
-    - false: fuzzy, ambiguous*, none
+    - true: preferredId, created, implementationName, implementation
+    - false: fuzzy, ambiguous*, none, updated (action outcome, not selection strategy)
 #>
 function Get-ComponentResolution {
-    param([hashtable]$Details)
+    param([System.Collections.IDictionary]$Details)
 
     if (-not $Details) { return $null }
 
@@ -523,7 +523,8 @@ function Get-ComponentResolution {
     if (-not $resolution -and -not $componentIds) { return $null }
 
     # Strategies that are safe to persist (deterministic, unambiguous)
-    $safeStrategies = @('preferredId', 'created', 'updated', 'implementationName', 'implementation')
+    # Note: 'updated' is an action outcome, not a selection strategy - excluded intentionally
+    $safeStrategies = @('preferredId', 'created', 'implementationName', 'implementation')
 
     $result = [ordered]@{}
 
@@ -570,6 +571,11 @@ function Get-ComponentResolution {
         if ($null -ne $strategy -or $null -ne $selectedId -or $candidateIds.Count -gt 0) {
             $isSafe = $strategy -and ($safeStrategies -contains $strategy)
             $isAmbiguous = $strategy -and ($strategy -match '^ambiguous')
+
+            # Default candidateIds to [selectedId] when known (improves forensic value)
+            if ($candidateIds.Count -eq 0 -and $null -ne $selectedId) {
+                $candidateIds = @($selectedId)
+            }
 
             $result[$outputKey] = [ordered]@{
                 selectedId = $selectedId

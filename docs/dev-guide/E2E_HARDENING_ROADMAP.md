@@ -34,7 +34,7 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 - [ ] Consider tightening “safe persistence” further: drop `implementation` if it proves unnecessary in practice (keep `created` + `preferredId` + `implementationName`).
 
 ### P0.1 (manifest provenance)
-- [ ] Emit `results[].details.componentResolution` in the JSON manifest (v1.2+) so failures are diagnosable without reading runner logs.
+- [x] Emit `results[].details.componentResolution` in the JSON manifest (v1.2+) so failures are diagnosable without reading runner logs.
 
 #### Contract: `results[].details.componentResolution`
 This is **additive**. Keep existing booleans like `details.indexerFound` / `details.downloadClientFound` for backward compatibility.
@@ -48,21 +48,18 @@ When a gate resolves components (Configure/Search/AlbumSearch/Grab/Revalidation/
       "indexer": {
         "selectedId": 101,
         "strategy": "preferredId",
-        "matchedOn": "id",
         "candidateIds": [101],
         "safeToPersist": true
       },
       "downloadClient": {
         "selectedId": 201,
         "strategy": "implementationName",
-        "matchedOn": "implementationName",
         "candidateIds": [201],
         "safeToPersist": true
       },
       "importList": {
         "selectedId": 301,
         "strategy": "created",
-        "matchedOn": "created",
         "candidateIds": [301],
         "safeToPersist": true
       }
@@ -72,14 +69,14 @@ When a gate resolves components (Configure/Search/AlbumSearch/Grab/Revalidation/
 ```
 
 Invariants:
-- `candidateIds` is always an array (can be empty, but prefer `[selectedId]` when known).
+- `candidateIds` is always an array; defaults to `[selectedId]` when known.
 - `safeToPersist` MUST be `false` for ambiguous/fuzzy/no-match strategies.
 - Ambiguity is a **failure**: outcome MUST be `failed` with `errorCode=E2E_COMPONENT_AMBIGUOUS` and `candidateIds` populated for triage.
 
 Mapping rules (minimal):
 - `strategy` comes from runner resolution (`preferredId`, `created`, `implementationName`, `implementation`, `fuzzy`, `none`, `ambiguous*`).
-- `matchedOn` is one of: `id`, `implementationName`, `implementation`, `created`, `fuzzy`, `none`.
 - `safeToPersist` is true only for: `preferredId`, `created`, `implementationName`, `implementation`.
+- Note: `updated` is an action outcome, not a selection strategy — excluded from safe strategies.
 
 ### P1 (correctness hardening)
 - [x] Record Lidarr host fingerprint (`lidarrVersion`, `branch`, `imageTag`, `imageDigest`, `containerId`, `containerStartedAt`) into the preferred-ID state entries (diagnostics only; no effect on selection).
