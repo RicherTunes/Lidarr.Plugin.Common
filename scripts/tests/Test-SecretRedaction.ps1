@@ -113,7 +113,7 @@ $sanitized = Invoke-ErrorSanitization -ErrorString $urlWithApiKey
 Test-Assertion ($sanitized -notmatch 'secretkey12345678901234') "URL api_key param redacted"
 
 # Test Authorization header in error message
-$authHeaderError = "Request failed: Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U"
+$authHeaderError = "Request failed: Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.dozjgNryP4J3jVmNHl0w5N_XgL0n3I9PlFUP0THsR8U" # gitleaks:allow
 $sanitized = Invoke-ErrorSanitization -ErrorString $authHeaderError
 Test-Assertion ($sanitized -match '\[REDACTED\]' -or $sanitized -match '\[JWT-REDACTED\]') "JWT token in Authorization header redacted"
 Test-Assertion ($sanitized -notmatch 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9') "JWT payload not present in output"
@@ -124,7 +124,7 @@ $sanitized = Invoke-ErrorSanitization -ErrorString $privateIpError
 Test-Assertion ($sanitized -match '\[PRIVATE-IP\]') "Private IP in error URL redacted"
 
 # Test hex API key in error message
-$hexKeyError = "API call failed with key=abcdef1234567890abcdef1234567890 in header"
+$hexKeyError = "API call failed with key=abcdef1234567890abcdef1234567890 in header" # gitleaks:allow
 $sanitized = Invoke-ErrorSanitization -ErrorString $hexKeyError
 Test-Assertion ($sanitized -notmatch 'abcdef1234567890abcdef1234567890') "32-char hex key redacted from error"
 
@@ -193,7 +193,7 @@ $errorTestResults = @(
         Success = $false
         Errors = @(
             "API request failed: https://api.qobuz.com/v1/search?access_token=mysecrettoken123&query=test",
-            "Authorization header: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ0ZXN0IjoidmFsdWUifQ.test123signature",
+            "Authorization header: Bearer eyJhbGciOiJIUzI1NiJ9.eyJ0ZXN0IjoidmFsdWUifQ.test123signature", # gitleaks:allow
             "Connection to http://192.168.1.100:8686 refused"
         )
         Details = @{ Query = 'test artist' }
