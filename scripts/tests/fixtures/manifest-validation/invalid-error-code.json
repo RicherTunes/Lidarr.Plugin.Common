@@ -1,0 +1,61 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/main/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2024-01-15T10:30:00Z",
+  "runId": "abc123def456",
+  "runner": {
+    "name": "lidarr.plugin.common:e2e-runner.ps1",
+    "version": "abc1234",
+    "args": []
+  },
+  "lidarr": {
+    "url": "http://localhost:8686",
+    "containerName": "lidarr-e2e-test"
+  },
+  "request": {
+    "gate": "schema",
+    "plugins": ["Qobuzarr"]
+  },
+  "effective": {
+    "gates": ["Schema"],
+    "plugins": ["Qobuzarr"]
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 22
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Qobuzarr",
+      "outcome": "failed",
+      "errorCode": "INVALID_FORMAT",
+      "outcomeReason": "Some error occurred",
+      "startedAt": "2024-01-15T10:30:00Z",
+      "endedAt": "2024-01-15T10:30:01Z",
+      "durationMs": 1000,
+      "errors": ["Error message"],
+      "details": {}
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 1,
+    "passed": 0,
+    "failed": 1,
+    "skipped": 0,
+    "totalDurationMs": 1000
+  },
+  "diagnostics": {
+    "bundlePath": null,
+    "bundleCreated": false,
+    "includedFiles": [],
+    "redactionApplied": true,
+    "redactionSelfTestPassed": true
+  },
+  "hostBugSuspected": {
+    "detected": false
+  }
+}
