@@ -747,6 +747,7 @@ function ConvertTo-E2ERunManifest {
         $instanceKeySource = Get-SafeProperty -Object $componentIdsContext -PropertyName 'InstanceKeySource'
         $lockPolicy = Get-SafeProperty -Object $componentIdsContext -PropertyName 'LockPolicy'
         $lockPolicySource = Get-SafeProperty -Object $componentIdsContext -PropertyName 'LockPolicySource'
+        $persistenceEnabled = Get-SafeProperty -Object $componentIdsContext -PropertyName 'PersistenceEnabled'
 
         $componentIdsBlock = [ordered]@{}
 
@@ -765,6 +766,9 @@ function ConvertTo-E2ERunManifest {
         }
         if ($lockPolicySource) {
             $componentIdsBlock['lockPolicySource'] = $lockPolicySource
+        }
+        if ($null -ne $persistenceEnabled) {
+            $componentIdsBlock['persistenceEnabled'] = [bool]$persistenceEnabled
         }
 
         if ($componentIdsBlock.Count -gt 0) {

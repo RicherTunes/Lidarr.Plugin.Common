@@ -15,6 +15,12 @@ Set-StrictMode -Version Latest
 $scriptRoot = $PSScriptRoot
 $libPath = Join-Path (Join-Path $scriptRoot "..") "lib"
 $jsonModulePath = Join-Path $libPath "e2e-json-output.psm1"
+$componentIdsModulePath = Join-Path $libPath "e2e-component-ids.psm1"
+
+# Import component-ids module for edge case tests
+if (Test-Path $componentIdsModulePath) {
+    Import-Module $componentIdsModulePath -Force
+}
 
 # Test results tracking
 $script:testsPassed = 0
@@ -124,6 +130,7 @@ function New-MockRunContext {
                 StaleSeconds = 120
             }
             LockPolicySource = "default"
+            PersistenceEnabled = $true
         }
     }
 }
@@ -647,6 +654,192 @@ $componentIdsTests = @(
         Name = "componentIds.lockPolicySource is default or env"
         Test = { param($obj) $obj.componentIds.lockPolicySource -in @('default', 'env') }
     }
+    @{
+        Name = "componentIds.persistenceEnabled is boolean"
+        Test = { param($obj) $obj.componentIds.persistenceEnabled -is [bool] }
+    }
+)
+
+# ============================================================================
+# Edge Case Tests - Lock Policy Clamping and Source Classification
+# ============================================================================
+
+$lockPolicyClampingTests = @(
+    @{
+        Name = "Get-E2EComponentIdsEffectiveLockPolicy returns defaults when no env vars set"
+        Test = {
+            param($obj)
+            # Clear env vars
+            $savedTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            $savedRetry = $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
+            $savedStale = $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $null
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = $null
+                $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = $null
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.TimeoutMs -eq 750 -and $result.RetryDelayMs -eq 50 -and $result.StaleSeconds -eq 120 -and $result.Source -eq "default"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $savedTimeout
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = $savedRetry
+                $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = $savedStale
+            }
+        }
+    }
+    @{
+        Name = "Empty string env vars are ignored (source=default)"
+        Test = {
+            param($obj)
+            $savedTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = ""
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.TimeoutMs -eq 750 -and $result.Source -eq "default"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $savedTimeout
+            }
+        }
+    }
+    @{
+        Name = "Whitespace-only env vars are ignored (source=default)"
+        Test = {
+            param($obj)
+            $savedTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = "   "
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.TimeoutMs -eq 750 -and $result.Source -eq "default"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $savedTimeout
+            }
+        }
+    }
+    @{
+        Name = "Non-numeric env vars are ignored (source=default)"
+        Test = {
+            param($obj)
+            $savedTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = "abc"
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.TimeoutMs -eq 750 -and $result.Source -eq "default"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $savedTimeout
+            }
+        }
+    }
+    @{
+        Name = "Out-of-range timeout is clamped to 5000, source=env"
+        Test = {
+            param($obj)
+            $savedTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = "60000"
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.TimeoutMs -eq 5000 -and $result.Source -eq "env"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $savedTimeout
+            }
+        }
+    }
+    @{
+        Name = "Out-of-range retryDelay is clamped to 250, source=env"
+        Test = {
+            param($obj)
+            $savedRetry = $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = "1000"
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.RetryDelayMs -eq 250 -and $result.Source -eq "env"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = $savedRetry
+            }
+        }
+    }
+    @{
+        Name = "Zero retryDelay is clamped to 1, source=env"
+        Test = {
+            param($obj)
+            $savedRetry = $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = "0"
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.RetryDelayMs -eq 1 -and $result.Source -eq "env"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = $savedRetry
+            }
+        }
+    }
+    @{
+        Name = "Out-of-range staleSeconds is clamped to 3600, source=env"
+        Test = {
+            param($obj)
+            $savedStale = $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = "9999"
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.StaleSeconds -eq 3600 -and $result.Source -eq "env"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = $savedStale
+            }
+        }
+    }
+)
+
+# ============================================================================
+# Edge Case Tests - Instance Key Source Classification
+# ============================================================================
+
+$instanceKeySourceTests = @(
+    @{
+        Name = "Resolve-E2EComponentIdsInstanceKey returns computed hash when no explicit key"
+        Test = {
+            param($obj)
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey ""
+            return $result -match '^i-[a-f0-9]{12}$'
+        }
+    }
+    @{
+        Name = "Resolve-E2EComponentIdsInstanceKey accepts valid explicit key"
+        Test = {
+            param($obj)
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey "my-custom-key"
+            return $result -eq "my-custom-key"
+        }
+    }
+    @{
+        Name = "Invalid explicit key (too long) falls back to computed"
+        Test = {
+            param($obj)
+            $longKey = "a" * 100  # Over 64 char limit
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey $longKey
+            return $result -match '^i-[a-f0-9]{12}$'  # Should be computed hash, not the long key
+        }
+    }
+    @{
+        Name = "Invalid explicit key (unsafe chars) falls back to computed"
+        Test = {
+            param($obj)
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey "key with spaces!"
+            return $result -match '^i-[a-f0-9]{12}$'  # Should be computed hash
+        }
+    }
+    @{
+        Name = "Empty explicit key uses computed"
+        Test = {
+            param($obj)
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey ""
+            return $result -match '^i-[a-f0-9]{12}$'
+        }
+    }
+    @{
+        Name = "Whitespace-only explicit key uses computed"
+        Test = {
+            param($obj)
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey "   "
+            return $result -match '^i-[a-f0-9]{12}$'
+        }
+    }
 )
 
 # ============================================================================
@@ -780,6 +973,8 @@ if (Test-Path $jsonModulePath) {
         @{ Name = "v1.2 Diagnostics"; Tests = $v12DiagnosticsTests }
         @{ Name = "v1.2 Host Bug Detection"; Tests = $v12HostBugTests }
         @{ Name = "Component IDs Provenance"; Tests = $componentIdsTests }
+        @{ Name = "Lock Policy Clamping"; Tests = $lockPolicyClampingTests }
+        @{ Name = "Instance Key Source"; Tests = $instanceKeySourceTests }
         @{ Name = "Assembly Issue Classification"; Tests = $alcDetectionTests }
     )
 

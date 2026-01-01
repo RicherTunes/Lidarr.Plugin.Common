@@ -341,27 +341,18 @@ $script:E2EInstanceKeySource = if (-not [string]::IsNullOrWhiteSpace($ComponentI
     "computed"
 }
 
-# Track lock policy settings and source for manifest
+# Get effective lock policy from shared function (single source of truth)
+# This returns clamped values and the source (default|env)
+$script:E2ELockPolicyResult = Get-E2EComponentIdsEffectiveLockPolicy
 $script:E2ELockPolicy = @{
-    TimeoutMs = 750
-    RetryDelayMs = 50
-    StaleSeconds = 120
+    TimeoutMs = $script:E2ELockPolicyResult.TimeoutMs
+    RetryDelayMs = $script:E2ELockPolicyResult.RetryDelayMs
+    StaleSeconds = $script:E2ELockPolicyResult.StaleSeconds
 }
-$script:E2ELockPolicySource = "default"
+$script:E2ELockPolicySource = $script:E2ELockPolicyResult.Source
 
-# Check if any lock policy env vars are set
-if ($env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -and $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -match '^\d+$') {
-    $script:E2ELockPolicy.TimeoutMs = [int]$env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
-    $script:E2ELockPolicySource = "env"
-}
-if ($env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS -and $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS -match '^\d+$') {
-    $script:E2ELockPolicy.RetryDelayMs = [int]$env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
-    $script:E2ELockPolicySource = "env"
-}
-if ($env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -and $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -match '^\d+$') {
-    $script:E2ELockPolicy.StaleSeconds = [int]$env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
-    $script:E2ELockPolicySource = "env"
-}
+# Track whether persistence is enabled for manifest
+$script:E2EPersistenceEnabled = -not $DisableComponentIdPersistence
 
 function Save-E2EComponentIdsIfEnabled {
     param(
@@ -3014,6 +3005,7 @@ if ($EmitJson) {
                 InstanceKeySource = $script:E2EInstanceKeySource
                 LockPolicy = $script:E2ELockPolicy
                 LockPolicySource = $script:E2ELockPolicySource
+                PersistenceEnabled = $script:E2EPersistenceEnabled
             }
         }
 

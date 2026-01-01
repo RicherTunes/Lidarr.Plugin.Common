@@ -317,6 +317,10 @@
           "type": "string",
           "enum": ["default", "env"],
           "description": "How lock policy was determined: default (hardcoded values) or env (from E2E_COMPONENT_IDS_LOCK_* env vars)."
+        },
+        "persistenceEnabled": {
+          "type": "boolean",
+          "description": "Whether component ID state persistence is enabled for this run."
         }
       }
     }
