@@ -251,6 +251,392 @@ foreach ($testField in @("authToken", "password", "redirectUrl", "refreshToken",
 Write-Host ""
 
 # =============================================================================
+# Test 6: PassIfAlreadyConfigured - Components exist -> success
+# =============================================================================
+Write-Host "Test Group: PassIfAlreadyConfigured with Existing Components" -ForegroundColor Yellow
+
+# Extract Find-ConfiguredComponent function
+$findFunctionMatch = [regex]::Match($scriptContent, '(?s)function Find-ConfiguredComponent \{.*?^\}', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+
+# Extract Test-ConfigureGateForPlugin function
+$testConfigureFunctionMatch = [regex]::Match($scriptContent, '(?s)function Test-ConfigureGateForPlugin \{.*?^\}(?=\s*\n\s*function|\s*\n\s*#|\s*$)', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+
+# Create mock functions for hermetic testing
+$mockFunctions = @'
+# Mock Invoke-LidarrApi to return fake components
+$script:mockComponents = @{
+    indexer = @(
+        [PSCustomObject]@{ id = 101; implementation = "Qobuzarr"; name = "Qobuzarr" }
+    )
+    downloadclient = @(
+        [PSCustomObject]@{ id = 201; implementation = "Qobuzarr"; name = "Qobuzarr Download" }
+    )
+    importlist = @(
+        [PSCustomObject]@{ id = 301; implementation = "Brainarr"; name = "Brainarr Import List" }
+    )
+}
+
+ # Minimal stubs for new preferred-ID infrastructure (keep tests hermetic) 
+ $script:E2EComponentIdsState = @{}
+ $script:E2EComponentResolution = @{}
+ $script:E2EComponentResolutionCandidates = @{}
+ $DisableStoredComponentIds = $true
+ $DisableComponentIdPersistence = $true
+
+function Get-E2EPreferredComponentId {
+    param([hashtable]$State, [string]$PluginName, [string]$Type)
+    return $null
+}
+
+ function Select-ConfiguredComponent {
+     param($Items, [string]$PluginName, [int]$PreferredId, [switch]$DisableFuzzyMatch)
+     $arr = if ($Items -is [array]) { @($Items) } elseif ($null -ne $Items) { @($Items) } else { @() }
+     # Simulate ambiguity detection (matches runner/module behavior): do not guess.
+     $nameMatches = @($arr | Where-Object { $_.implementationName -eq $PluginName })
+     if ($nameMatches.Count -gt 1) {
+         $candidateIds = @($nameMatches | ForEach-Object { $_.id } | Where-Object { $null -ne $_ })
+         return [PSCustomObject]@{ Component = $null; Resolution = "ambiguousImplementationName"; CandidateIds = $candidateIds }
+     }
+     $match = $arr | Where-Object { $_.implementationName -eq $PluginName } | Select-Object -First 1
+     if (-not $match) { $match = $arr | Where-Object { $_.implementation -eq $PluginName } | Select-Object -First 1 }
+     if (-not $match) { $match = $arr | Where-Object { $_.name -like "*$PluginName*" } | Select-Object -First 1 }
+     return [PSCustomObject]@{ Component = $match; Resolution = if ($match) { "test" } else { "none" }; CandidateIds = @() }
+ }
+
+ function Get-ComponentAmbiguityDetails {
+     param([string]$Type, [string]$PluginName)
+     $key = "$Type|$PluginName"
+     $resolution = if ($script:E2EComponentResolution.ContainsKey($key)) { "$($script:E2EComponentResolution[$key])" } else { "none" }
+     $candidateIds = @()
+     if ($script:E2EComponentResolutionCandidates.ContainsKey($key)) { $candidateIds = @($script:E2EComponentResolutionCandidates[$key]) }
+
+     return @{
+         IsAmbiguous = ($resolution -like "ambiguous*")
+         Resolution = $resolution
+         CandidateIds = $candidateIds
+     }
+ }
+
+function Save-E2EComponentIdsIfEnabled { param([string]$PluginName, [hashtable]$ComponentIds) return }
+function Get-HashtableStringOrDefault { param([hashtable]$Table, [string]$Key, [string]$DefaultValue) return $DefaultValue }
+
+function Invoke-LidarrApi {
+    param([string]$Endpoint, [string]$Method = "GET", $Body = $null)
+    if ($Endpoint -in @("indexer", "downloadclient", "importlist")) {
+        return $script:mockComponents[$Endpoint]
+    }
+    return $null
+}
+
+function Get-ComponentSchema { param($Type, $ImplementationMatch) return $null }
+function New-ComponentFromEnv { param($Type, $PluginName, $Schema, $FieldValues) return $null }
+function Update-ComponentAuthFields { param($Type, $ExistingComponent, $FieldValues, [switch]$ForceUpdate) return @{ Updated = $false; ChangedFields = @() } }
+'@
+
+try {
+    # Save original functions if they exist
+    $originalInvokeLidarrApi = if (Get-Command Invoke-LidarrApi -ErrorAction SilentlyContinue) { ${function:Invoke-LidarrApi} } else { $null }
+
+    # Load mock functions
+    Invoke-Expression $mockFunctions
+
+    # Load Find-ConfiguredComponent
+    if ($findFunctionMatch.Success) {
+        Invoke-Expression $findFunctionMatch.Value
+    }
+
+    # Load Get-PluginEnvConfig (already loaded from earlier test)
+    # Load Test-ConfigureGateForPlugin
+    if ($testConfigureFunctionMatch.Success) {
+        Invoke-Expression $testConfigureFunctionMatch.Value
+    }
+
+    # Clear env vars to trigger "missing env vars" path
+    $env:QOBUZARR_AUTH_TOKEN = $null
+    $env:QOBUZ_AUTH_TOKEN = $null
+
+    # Test: Qobuzarr with PassIfAlreadyConfigured and components exist
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Qobuzarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: Outcome=success" `
+            -Passed ($result.Outcome -eq "success")
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: Success=true" `
+            -Passed ($result.Success -eq $true)
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: alreadyConfigured=true" `
+            -Passed ($result.Details.alreadyConfigured -eq $true)
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: indexerId populated" `
+            -Passed ($result.Details.componentIds["indexerId"] -eq 101)
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: downloadClientId populated" `
+            -Passed ($result.Details.componentIds["downloadClientId"] -eq 201)
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: Action message correct" `
+            -Passed ($result.Actions -contains "Env vars missing; existing component(s) present -> no-op")
+    } else {
+        Write-TestResult -TestName "Parse Test-ConfigureGateForPlugin function" -Passed $false -Message "Could not find function"
+    }
+} catch {
+    Write-TestResult -TestName "PassIfAlreadyConfigured test execution" -Passed $false -Message $_.Exception.Message
+}
+
+Write-Host ""
+
+# =============================================================================
+# Test 7: PassIfAlreadyConfigured - Components missing -> skip
+# =============================================================================
+Write-Host "Test Group: PassIfAlreadyConfigured with Missing Components" -ForegroundColor Yellow
+
+try {
+    # Update mock to return empty components
+    $script:mockComponents = @{
+        indexer = @()
+        downloadclient = @()
+        importlist = @()
+    }
+
+    # Clear env vars
+    $env:QOBUZARR_AUTH_TOKEN = $null
+    $env:QOBUZ_AUTH_TOKEN = $null
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Qobuzarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + no components: Outcome=skipped" `
+            -Passed ($result.Outcome -eq "skipped")
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + no components: Success=false" `
+            -Passed ($result.Success -eq $false)
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + no components: SkipReason contains 'Missing env vars'" `
+            -Passed ($result.SkipReason -like "*Missing env vars*")
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + no components: alreadyConfigured=false" `
+            -Passed ($result.Details.alreadyConfigured -eq $false)
+    }
+} catch {
+    Write-TestResult -TestName "PassIfAlreadyConfigured missing components test" -Passed $false -Message $_.Exception.Message
+}
+
+# Restore env vars
+$env:QOBUZARR_AUTH_TOKEN = $originalToken
+$env:QOBUZ_AUTH_TOKEN = $originalQobuzToken
+
+Write-Host ""
+
+# =============================================================================
+# Test 8: PassIfAlreadyConfigured with Ambiguous Components
+# =============================================================================
+Write-Host "Test Group: PassIfAlreadyConfigured with Ambiguous Components" -ForegroundColor Yellow
+
+try {
+    # Duplicate indexers simulate ambiguous selection
+    $script:mockComponents = @{
+        indexer = @(
+            [PSCustomObject]@{ id = 101; implementationName = "Qobuzarr"; implementation = "Qobuzarr"; name = "Qobuzarr A" },
+            [PSCustomObject]@{ id = 102; implementationName = "Qobuzarr"; implementation = "Qobuzarr"; name = "Qobuzarr B" }
+        )
+        downloadclient = @(
+            [PSCustomObject]@{ id = 201; implementationName = "Qobuzarr"; implementation = "Qobuzarr"; name = "Qobuzarr Download" }
+        )
+        importlist = @()
+    }
+
+    # Clear env vars to trigger missing-env path
+    $env:QOBUZARR_AUTH_TOKEN = $null
+    $env:QOBUZ_AUTH_TOKEN = $null
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Qobuzarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "Ambiguous configured components -> Outcome=failed" `
+            -Passed ($result.Outcome -eq "failed")
+
+        Write-TestResult -TestName "Ambiguous configured components -> Success=false" `
+            -Passed ($result.Success -eq $false)
+
+        $hasAmbiguityError = ($result.Errors | Where-Object { $_ -like "*Ambiguous configured indexer selection*" } | Select-Object -First 1)
+        Write-TestResult -TestName "Ambiguous configured components -> Error mentions ambiguity" `
+            -Passed ([bool]$hasAmbiguityError)
+
+        Write-TestResult -TestName "Ambiguous configured components -> ErrorCode=E2E_COMPONENT_AMBIGUOUS" `
+            -Passed ($result.Details.ErrorCode -eq "E2E_COMPONENT_AMBIGUOUS")
+
+        Write-TestResult -TestName "Ambiguous configured components -> ComponentType=indexer" `
+            -Passed ($result.Details.ComponentType -eq "indexer")
+    }
+}
+catch {
+    Write-TestResult -TestName "Ambiguous configured components test" -Passed $false -Message $_.Exception.Message
+}
+
+Write-Host ""
+
+# =============================================================================
+# Test 9: Brainarr PassIfAlreadyConfigured
+# =============================================================================
+Write-Host "Test Group: Brainarr PassIfAlreadyConfigured" -ForegroundColor Yellow
+
+try {
+    # Update mock to return Brainarr import list
+    $script:mockComponents = @{
+        indexer = @()
+        downloadclient = @()
+        importlist = @(
+            [PSCustomObject]@{ id = 301; implementation = "Brainarr"; name = "Brainarr" }
+        )
+    }
+
+    # Clear env vars
+    $env:BRAINARR_LLM_BASE_URL = $null
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Brainarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "Brainarr + PassIfAlreadyConfigured + import list exists: Outcome=success" `
+            -Passed ($result.Outcome -eq "success")
+
+        Write-TestResult -TestName "Brainarr + PassIfAlreadyConfigured: importListId populated" `
+            -Passed ($result.Details.componentIds["importListId"] -eq 301)
+
+        Write-TestResult -TestName "Brainarr + PassIfAlreadyConfigured: alreadyConfigured=true" `
+            -Passed ($result.Details.alreadyConfigured -eq $true)
+    }
+
+    # Test with missing import list
+    $script:mockComponents.importlist = @()
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Brainarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "Brainarr + no import list: Outcome=skipped" `
+            -Passed ($result.Outcome -eq "skipped")
+    }
+} catch {
+    Write-TestResult -TestName "Brainarr PassIfAlreadyConfigured test" -Passed $false -Message $_.Exception.Message
+}
+
+Write-Host ""
+
+# =============================================================================
+# Test 10: Configure gate must FAIL (not create) on ambiguous component selection
+# =============================================================================
+Write-Host "Test Group: Configure Gate Fail-Fast on Ambiguity (Env Vars Present)" -ForegroundColor Yellow
+
+try {
+    # -----------------------------
+    # Case 10a: Qobuzarr indexer ambiguous
+    # -----------------------------
+    $originalQobuzToken = $env:QOBUZARR_AUTH_TOKEN
+    $originalQobuzTokenAlt = $env:QOBUZ_AUTH_TOKEN
+    $env:QOBUZARR_AUTH_TOKEN = "token-placeholder"
+    $env:QOBUZ_AUTH_TOKEN = $null
+
+    $script:mockComponents = @{
+        indexer = @(
+            [PSCustomObject]@{ id = 101; implementationName = "Qobuzarr"; implementation = "QobuzIndexer"; name = "Qobuzarr A" },
+            [PSCustomObject]@{ id = 102; implementationName = "Qobuzarr"; implementation = "QobuzIndexer"; name = "Qobuzarr B" }
+        )
+        downloadclient = @(
+            [PSCustomObject]@{ id = 201; implementationName = "Qobuzarr"; implementation = "QobuzDownloadClient"; name = "Qobuzarr Download" }
+        )
+        importlist = @()
+    }
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Qobuzarr"
+
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> Outcome=failed" `
+            -Passed ($result.Outcome -eq "failed")
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ErrorCode=E2E_COMPONENT_AMBIGUOUS" `
+            -Passed ($result.Details.ErrorCode -eq "E2E_COMPONENT_AMBIGUOUS")
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ComponentType=indexer" `
+            -Passed ($result.Details.ComponentType -eq "indexer")
+    }
+}
+catch {
+    Write-TestResult -TestName "Configure gate ambiguity (env vars present) - Qobuzarr indexer" -Passed $false -Message $_.Exception.Message
+}
+finally {
+    $env:QOBUZARR_AUTH_TOKEN = $originalQobuzToken
+    $env:QOBUZ_AUTH_TOKEN = $originalQobuzTokenAlt
+}
+
+try {
+    # -----------------------------
+    # Case 10b: Qobuzarr download client ambiguous (indexer unique)
+    # -----------------------------
+    $originalQobuzToken = $env:QOBUZARR_AUTH_TOKEN
+    $originalQobuzTokenAlt = $env:QOBUZ_AUTH_TOKEN
+    $env:QOBUZARR_AUTH_TOKEN = "token-placeholder"
+    $env:QOBUZ_AUTH_TOKEN = $null
+
+    $script:mockComponents = @{
+        indexer = @(
+            [PSCustomObject]@{ id = 101; implementationName = "Qobuzarr"; implementation = "QobuzIndexer"; name = "Qobuzarr" }
+        )
+        downloadclient = @(
+            [PSCustomObject]@{ id = 201; implementationName = "Qobuzarr"; implementation = "QobuzDownloadClient"; name = "Qobuzarr Download A" },
+            [PSCustomObject]@{ id = 202; implementationName = "Qobuzarr"; implementation = "QobuzDownloadClient"; name = "Qobuzarr Download B" }
+        )
+        importlist = @()
+    }
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Qobuzarr"
+
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ComponentType=downloadclient" `
+            -Passed ($result.Details.ComponentType -eq "downloadclient")
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ErrorCode=E2E_COMPONENT_AMBIGUOUS (downloadclient)" `
+            -Passed ($result.Details.ErrorCode -eq "E2E_COMPONENT_AMBIGUOUS")
+    }
+}
+catch {
+    Write-TestResult -TestName "Configure gate ambiguity (env vars present) - Qobuzarr download client" -Passed $false -Message $_.Exception.Message
+}
+finally {
+    $env:QOBUZARR_AUTH_TOKEN = $originalQobuzToken
+    $env:QOBUZ_AUTH_TOKEN = $originalQobuzTokenAlt
+}
+
+try {
+    # -----------------------------
+    # Case 10c: Brainarr import list ambiguous
+    # -----------------------------
+    $originalBrainarrUrl = $env:BRAINARR_LLM_BASE_URL
+    $env:BRAINARR_LLM_BASE_URL = "http://localhost:1234"
+
+    $script:mockComponents = @{
+        indexer = @()
+        downloadclient = @()
+        importlist = @(
+            [PSCustomObject]@{ id = 301; implementationName = "Brainarr"; implementation = "Brainarr"; name = "Brainarr A" },
+            [PSCustomObject]@{ id = 302; implementationName = "Brainarr"; implementation = "Brainarr"; name = "Brainarr B" }
+        )
+    }
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Brainarr"
+
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ComponentType=importlist" `
+            -Passed ($result.Details.ComponentType -eq "importlist")
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ErrorCode=E2E_COMPONENT_AMBIGUOUS (importlist)" `
+            -Passed ($result.Details.ErrorCode -eq "E2E_COMPONENT_AMBIGUOUS")
+    }
+}
+catch {
+    Write-TestResult -TestName "Configure gate ambiguity (env vars present) - Brainarr importlist" -Passed $false -Message $_.Exception.Message
+}
+finally {
+    $env:BRAINARR_LLM_BASE_URL = $originalBrainarrUrl
+}
+
+Write-Host ""
+
+# =============================================================================
 # Summary
 # =============================================================================
 Write-Host "========================================" -ForegroundColor Cyan

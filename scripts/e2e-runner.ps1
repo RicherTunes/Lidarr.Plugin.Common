@@ -111,6 +111,12 @@
     Timeout in seconds for Brainarr LLM sync command (default: 120).
     Increase for slow LLM endpoints. Can also be set via BRAINARR_SYNC_TIMEOUT_SEC.
 
+.PARAMETER ConfigurePassIfAlreadyConfigured
+    When set and env vars are missing, but plugin components already exist in Lidarr,
+    the Configure gate returns SUCCESS (not SKIP). This enables idempotent runs where
+    the gate passes once components have been configured (manually or in a prior run).
+    Can also be enabled via E2E_CONFIGURE_PASS_IF_CONFIGURED=1 environment variable.
+
 .NOTES
     Configure Gate Environment Variables:
 
@@ -201,7 +207,30 @@ param(
     [string]$JsonOutputPath,
 
     # Emit JSON manifest (auto-enabled if JsonOutputPath specified)
-    [switch]$EmitJson
+    [switch]$EmitJson,
+
+    # When env vars are missing but components already exist, return success (not skip)
+    # This enables idempotent runs where Configure gate passes once components are configured
+    [switch]$ConfigurePassIfAlreadyConfigured,
+
+    # Preferred component IDs state file (used to make persistent runs deterministic)
+    # If not specified, defaults to .e2e-bootstrap/e2e-component-ids.json       
+    [string]$ComponentIdsPath,
+
+    # Optional salt to avoid preferred-ID collisions when reusing the same
+    # (LidarrUrl + ContainerName) against different config dirs/instances.
+    # Can also be set via E2E_COMPONENT_IDS_INSTANCE_SALT.
+    [string]$ComponentIdsInstanceSalt,
+
+    # Disable reading preferred IDs (always use discovery). Writing may still occur if enabled.
+    [switch]$DisableStoredComponentIds,
+
+    # Disable fuzzy (substring) matching when resolving configured components.
+    # Recommended for CI hardening; avoids selecting the wrong component when multiple exist.
+    [switch]$DisableFuzzyComponentMatch,
+
+    # Disable writing/updating the component IDs state file.
+    [switch]$DisableComponentIdPersistence
 )
 
 # Environment variable override for ForceConfigUpdate
@@ -239,6 +268,23 @@ if ($env:BRAINARR_SYNC_TIMEOUT_SEC) {
     }
 }
 
+# Environment variable override for ConfigurePassIfAlreadyConfigured     
+if (-not $ConfigurePassIfAlreadyConfigured -and $env:E2E_CONFIGURE_PASS_IF_CONFIGURED -eq '1') {
+    $ConfigurePassIfAlreadyConfigured = $true
+}
+
+# Environment variable + CI defaults for disabling fuzzy matching
+if (-not $DisableFuzzyComponentMatch) {
+    $disableFuzzyRaw = "$($env:E2E_DISABLE_FUZZY_COMPONENT_MATCH)".Trim().ToLowerInvariant()
+    if ($disableFuzzyRaw -in @("1", "true", "yes")) {
+        $DisableFuzzyComponentMatch = $true
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace("$($env:CI)")) {
+        # CI default: reduce ambiguity by avoiding substring matching
+        $DisableFuzzyComponentMatch = $true
+    }
+}
+
 # Default JSON output path if EmitJson requested
 if ($EmitJson -and -not $JsonOutputPath) {
     $JsonOutputPath = Join-Path $DiagnosticsPath "run-manifest.json"
@@ -252,9 +298,169 @@ $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $PSScriptRoot
 
 # Import modules
-Import-Module (Join-Path $PSScriptRoot "lib/e2e-gates.psm1") -Force
-Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force
-Import-Module (Join-Path $PSScriptRoot "lib/e2e-json-output.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-gates.psm1") -Force       
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force 
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-json-output.psm1") -Force 
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-component-ids.psm1") -Force
+
+# Preferred component IDs state (best-effort; never blocks runs)
+if (-not $ComponentIdsPath) {
+    $ComponentIdsPath = $env:E2E_COMPONENT_IDS_PATH
+}
+if (-not $ComponentIdsPath) {
+    $ComponentIdsPath = Get-E2EComponentIdsDefaultPath -RepoRoot $scriptRoot
+}
+$script:E2EComponentIdsPath = $ComponentIdsPath
+if (-not $ComponentIdsInstanceSalt) {
+    $ComponentIdsInstanceSalt = $env:E2E_COMPONENT_IDS_INSTANCE_SALT
+}
+$script:E2EComponentIdsInstanceKey = Get-E2EComponentIdsInstanceKey -LidarrUrl $LidarrUrl -ContainerName $ContainerName -InstanceSalt ($ComponentIdsInstanceSalt ?? "")
+$script:E2EComponentIdsState = Read-E2EComponentIdsState -Path $script:E2EComponentIdsPath
+$script:E2EComponentResolution = @{}
+$script:E2EComponentResolutionCandidates = @{}
+
+function Save-E2EComponentIdsIfEnabled {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PluginName,
+
+        [AllowNull()]
+        [hashtable]$ComponentIds
+    )
+
+    if ($DisableComponentIdPersistence) { return }
+    if ($null -eq $ComponentIds) { return }
+
+    # Persist host fingerprint into the preferred-ID state (diagnostics only; never used for selection).
+    # Best-effort: failures must not break runs.
+    if (-not $script:E2EComponentIdsHostFingerprint) {
+        $fp = @{
+            lidarrVersion = $null
+            lidarrBranch = $null
+            imageTag = $null
+            imageDigest = $null
+            imageId = $null
+            containerId = $null
+            containerStartedAt = $null
+        }
+
+        try {
+            $apiKeyVar = Get-Variable -Name effectiveApiKey -Scope Script -ErrorAction SilentlyContinue
+            $apiKey = if ($apiKeyVar) { $apiKeyVar.Value } else { $null }
+            if (-not [string]::IsNullOrWhiteSpace($apiKey)) {
+                $status = Invoke-RestMethod -Uri "$LidarrUrl/api/v1/system/status" -Headers @{ 'X-Api-Key' = $apiKey } -TimeoutSec 5
+                if ($status) {
+                    $fp.lidarrVersion = $status.version
+                    $fp.lidarrBranch = $status.branch
+                }
+            }
+        } catch { }
+
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($ContainerName)) {
+                $inspectArr = docker inspect $ContainerName 2>$null | ConvertFrom-Json
+                $inspect = if ($inspectArr -is [array]) { $inspectArr | Select-Object -First 1 } else { $inspectArr }
+                if ($inspect) {
+                    $fp.imageTag = $inspect.Config.Image
+                    $fp.imageDigest = $inspect.Image
+                    $fp.imageId = $inspect.Image
+                    if ($inspect.Id) { $fp.containerId = $inspect.Id.Substring(0, [Math]::Min(12, $inspect.Id.Length)) }
+                    if ($inspect.State -and $inspect.State.StartedAt) {
+                        try { $fp.containerStartedAt = [DateTime]::Parse($inspect.State.StartedAt).ToUniversalTime().ToString("o") } catch { }
+                    }
+                }
+            }
+        } catch { }
+
+        $script:E2EComponentIdsHostFingerprint = $fp
+    }
+
+    try {
+        $fp = $script:E2EComponentIdsHostFingerprint
+        Set-E2EComponentIdsInstanceHostFingerprint -State $script:E2EComponentIdsState -InstanceKey $script:E2EComponentIdsInstanceKey -LidarrUrl $LidarrUrl -ContainerName $ContainerName `
+            -LidarrVersion $fp.lidarrVersion -LidarrBranch $fp.lidarrBranch -ImageTag $fp.imageTag -ImageDigest $fp.imageDigest -ImageId $fp.imageId -ContainerId $fp.containerId -ContainerStartedAt $fp.containerStartedAt
+    } catch { }
+
+    $safeResolutions = @("preferredId", "implementationName", "implementation", "created")
+    $resolvedIndexer = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "indexer|$PluginName" -DefaultValue "none"
+    $resolvedClient = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "downloadclient|$PluginName" -DefaultValue "none"
+    $resolvedImportList = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "importlist|$PluginName" -DefaultValue "none"
+
+    if ($ComponentIds.ContainsKey("indexerId") -and ($ComponentIds["indexerId"] -as [int]) -gt 0 -and ($safeResolutions -contains $resolvedIndexer)) {
+        Set-E2EPreferredComponentId -State $script:E2EComponentIdsState -InstanceKey $script:E2EComponentIdsInstanceKey -LidarrUrl $LidarrUrl -ContainerName $ContainerName -PluginName $PluginName -Type "indexer" -Id ([int]$ComponentIds["indexerId"])
+    }
+    if ($ComponentIds.ContainsKey("downloadClientId") -and ($ComponentIds["downloadClientId"] -as [int]) -gt 0 -and ($safeResolutions -contains $resolvedClient)) {
+        Set-E2EPreferredComponentId -State $script:E2EComponentIdsState -InstanceKey $script:E2EComponentIdsInstanceKey -LidarrUrl $LidarrUrl -ContainerName $ContainerName -PluginName $PluginName -Type "downloadclient" -Id ([int]$ComponentIds["downloadClientId"])
+    }
+    if ($ComponentIds.ContainsKey("importListId") -and ($ComponentIds["importListId"] -as [int]) -gt 0 -and ($safeResolutions -contains $resolvedImportList)) {
+        Set-E2EPreferredComponentId -State $script:E2EComponentIdsState -InstanceKey $script:E2EComponentIdsInstanceKey -LidarrUrl $LidarrUrl -ContainerName $ContainerName -PluginName $PluginName -Type "importlist" -Id ([int]$ComponentIds["importListId"])
+    }
+
+    try {
+        $ok = Write-E2EComponentIdsState -Path $script:E2EComponentIdsPath -State $script:E2EComponentIdsState
+        if (-not $ok) {
+            Write-Warning "Preferred component IDs could not be persisted to '$($script:E2EComponentIdsPath)'. Continuing (best-effort)."
+        }
+    }
+    catch {
+        Write-Warning "Preferred component IDs could not be persisted to '$($script:E2EComponentIdsPath)'. Continuing (best-effort). Error: $($_.Exception.Message)"
+    }
+}
+
+function Get-HashtableStringOrDefault {
+    param(
+        [AllowNull()]
+        [hashtable]$Table,
+
+        [Parameter(Mandatory)]
+        [string]$Key,
+
+        [Parameter(Mandatory)]
+        [string]$DefaultValue
+    )
+
+    if ($null -eq $Table) { return $DefaultValue }
+    if (-not $Table.ContainsKey($Key)) { return $DefaultValue }
+
+    $value = $Table[$Key]
+    if ($null -eq $value) { return $DefaultValue }
+
+    $text = "$value"
+    if ([string]::IsNullOrWhiteSpace($text)) { return $DefaultValue }
+    return $text
+}
+
+function Get-ComponentAmbiguityDetails {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("indexer", "downloadclient", "importlist")]
+        [string]$Type,
+
+        [Parameter(Mandatory)]
+        [string]$PluginName
+    )
+
+    $key = "$Type|$PluginName"
+    $resolution = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key $key -DefaultValue "none"
+    $candidateIds = @()
+    if ($script:E2EComponentResolutionCandidates -and $script:E2EComponentResolutionCandidates.ContainsKey($key)) {
+        $candidateIds = @($script:E2EComponentResolutionCandidates[$key])
+    }
+
+    if ($resolution -like "ambiguous*") {
+        return @{
+            IsAmbiguous = $true
+            Resolution = $resolution
+            CandidateIds = $candidateIds
+        }
+    }
+
+    return @{
+        IsAmbiguous = $false
+        Resolution = $resolution
+        CandidateIds = $candidateIds
+    }
+}
 
 # Environment variable overrides for opt-in features
 if (-not $ValidateMetadata -and $env:E2E_VALIDATE_METADATA -eq '1') {
@@ -433,10 +639,21 @@ function Find-ConfiguredComponent {
     $items = Invoke-LidarrApi -Endpoint $endpoint
     if (-not $items) { return $null }
 
-    return $items | Where-Object {
-        $_.implementation -like "*$PluginName*" -or
-        $_.name -like "*$PluginName*"
-    } | Select-Object -First 1
+    $preferredId = $null
+    if (-not $DisableStoredComponentIds) {
+        $preferredId = Get-E2EPreferredComponentId -State $script:E2EComponentIdsState -InstanceKey $script:E2EComponentIdsInstanceKey -PluginName $PluginName -Type $Type
+    }
+
+    $preferredIdValue = if ($null -ne $preferredId) { [int]$preferredId } else { 0 }
+    $selection = Select-ConfiguredComponent -Items $items -PluginName $PluginName -PreferredId $preferredIdValue -DisableFuzzyMatch:$DisableFuzzyComponentMatch
+    $script:E2EComponentResolution["$Type|$PluginName"] = $selection.Resolution
+    if ($selection.PSObject.Properties["CandidateIds"] -and $selection.CandidateIds) {
+        $script:E2EComponentResolutionCandidates["$Type|$PluginName"] = @($selection.CandidateIds)
+    }
+    else {
+        $script:E2EComponentResolutionCandidates.Remove("$Type|$PluginName") | Out-Null
+    }
+    return $selection.Component
 }
 
 # =============================================================================
@@ -796,7 +1013,9 @@ function Test-ConfigureGateForPlugin {
 
         [hashtable]$PluginConfig = @{},
 
-        [switch]$ForceUpdate
+        [switch]$ForceUpdate,
+
+        [switch]$PassIfAlreadyConfigured
     )
 
     $result = [PSCustomObject]@{
@@ -807,6 +1026,15 @@ function Test-ConfigureGateForPlugin {
         Actions = @()
         Errors = @()
         SkipReason = $null
+        Details = @{
+            componentIds = @{}
+            alreadyConfigured = $false
+            created = $false
+            updated = $false
+            forceUpdateUsed = $ForceUpdate.IsPresent
+            resolution = @{}
+            preferredIdUsed = $false
+        }
     }
 
     # ==========================================================================
@@ -827,8 +1055,94 @@ function Test-ConfigureGateForPlugin {
         $envConfig = Get-PluginEnvConfig -PluginName $PluginName
 
         if (-not $envConfig.HasRequiredEnvVars) {
-            # Missing required env vars → SKIP (not FAIL)
+            # Missing required env vars - check if components already exist
             $missingList = $envConfig.MissingRequired -join ", "
+
+            if ($PassIfAlreadyConfigured) {
+                # Check if required components already exist
+                $existingComponents = @{}
+                $allRequiredExist = $true
+
+                if ($PluginName -in @("Qobuzarr", "Tidalarr")) {
+                    $indexer = Find-ConfiguredComponent -Type "indexer" -PluginName $PluginName
+                    $client = Find-ConfiguredComponent -Type "downloadclient" -PluginName $PluginName
+
+                    if (-not $indexer) {
+                        $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $PluginName
+                        if ($amb.IsAmbiguous) {
+                            $result.Outcome = "failed"
+                            $result.Success = $false
+                            $result.Errors += "Ambiguous configured indexer selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                            $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            $result.Details.ComponentType = "indexer"
+                            $result.Details.resolution["indexer"] = $amb.Resolution
+                            $result.Details.componentIds["indexerCandidateIds"] = $amb.CandidateIds
+                            return $result
+                        }
+                    }
+                    if (-not $client) {
+                        $amb = Get-ComponentAmbiguityDetails -Type "downloadclient" -PluginName $PluginName
+                        if ($amb.IsAmbiguous) {
+                            $result.Outcome = "failed"
+                            $result.Success = $false
+                            $result.Errors += "Ambiguous configured download client selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                            $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            $result.Details.ComponentType = "downloadclient"
+                            $result.Details.resolution["downloadclient"] = $amb.Resolution
+                            $result.Details.componentIds["downloadClientCandidateIds"] = $amb.CandidateIds
+                            return $result
+                        }
+                    }
+
+                    if ($indexer) { $existingComponents["indexerId"] = $indexer.id }
+                    if ($client) { $existingComponents["downloadClientId"] = $client.id }
+
+                    if (-not $indexer -or -not $client) {
+                        $allRequiredExist = $false
+                    }
+                }
+                elseif ($PluginName -eq "Brainarr") {
+                    $importList = Find-ConfiguredComponent -Type "importlist" -PluginName $PluginName
+
+                    if (-not $importList) {
+                        $amb = Get-ComponentAmbiguityDetails -Type "importlist" -PluginName $PluginName
+                        if ($amb.IsAmbiguous) {
+                            $result.Outcome = "failed"
+                            $result.Success = $false
+                            $result.Errors += "Ambiguous configured import list selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                            $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            $result.Details.ComponentType = "importlist"
+                            $result.Details.resolution["importlist"] = $amb.Resolution
+                            $result.Details.componentIds["importListCandidateIds"] = $amb.CandidateIds
+                            return $result
+                        }
+                    }
+
+                    if ($importList) { $existingComponents["importListId"] = $importList.id }
+                    else { $allRequiredExist = $false }
+                }
+
+                if ($allRequiredExist -and $existingComponents.Count -gt 0) {
+                    # Components exist - return success (idempotent)
+                    $result.Outcome = "success"
+                    $result.Success = $true
+                    $result.Details.componentIds = $existingComponents
+                    $result.Details.alreadyConfigured = $true
+                    if ($PluginName -in @("Qobuzarr", "Tidalarr")) {
+                        $result.Details.resolution["indexer"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "indexer|$PluginName" -DefaultValue "unknown"
+                        $result.Details.resolution["downloadclient"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "downloadclient|$PluginName" -DefaultValue "unknown"
+                    }
+                    elseif ($PluginName -eq "Brainarr") {
+                        $result.Details.resolution["importlist"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "importlist|$PluginName" -DefaultValue "unknown"
+                    }
+                    $result.Details.preferredIdUsed = ($result.Details.resolution.Values -contains "preferredId")
+                    Save-E2EComponentIdsIfEnabled -PluginName $PluginName -ComponentIds $existingComponents
+                    $result.Actions += "Env vars missing; existing component(s) present -> no-op"
+                    return $result
+                }
+            }
+
+            # Components missing or PassIfAlreadyConfigured not set -> SKIP
             $result.SkipReason = "Missing env vars: $missingList"
             return $result
         }
@@ -840,6 +1154,18 @@ function Test-ConfigureGateForPlugin {
             $indexer = Find-ConfiguredComponent -Type "indexer" -PluginName $PluginName
 
             if (-not $indexer) {
+                $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $PluginName
+                if ($amb.IsAmbiguous) {
+                    $result.Outcome = "failed"
+                    $result.Success = $false
+                    $result.Errors += "Ambiguous configured indexer selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                    $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                    $result.Details.ComponentType = "indexer"
+                    $result.Details.resolution["indexer"] = $amb.Resolution
+                    $result.Details.componentIds["indexerCandidateIds"] = $amb.CandidateIds
+                    return $result
+                }
+
                 # Create new indexer from schema
                 $schema = Get-ComponentSchema -Type "indexer" -ImplementationMatch $PluginName
                 if (-not $schema) {
@@ -851,6 +1177,9 @@ function Test-ConfigureGateForPlugin {
                 $created = New-ComponentFromEnv -Type "indexer" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.IndexerFields
                 if ($created) {
                     $result.Actions += "Created indexer '$PluginName' (id=$($created.id))"
+                    $result.Details.componentIds["indexerId"] = $created.id     
+                    $result.Details.created = $true
+                    $result.Details.resolution["indexer"] = "created"
                 } else {
                     $result.Errors += "Failed to create indexer for $PluginName"
                     $result.Outcome = "failed"
@@ -858,9 +1187,12 @@ function Test-ConfigureGateForPlugin {
                 }
             } else {
                 # Update existing indexer (auth fields only, unless ForceUpdate)
+                $result.Details.componentIds["indexerId"] = $indexer.id   
+                $result.Details.resolution["indexer"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "indexer|$PluginName" -DefaultValue "implementationName"
                 $updateResult = Update-ComponentAuthFields -Type "indexer" -ExistingComponent $indexer -FieldValues $envConfig.IndexerFields -ForceUpdate:$ForceUpdate
                 if ($updateResult.Updated) {
                     $result.Actions += "Updated indexer auth fields: $($updateResult.ChangedFields -join ', ')"
+                    $result.Details.updated = $true
                 } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
                     $result.Actions += "Indexer '$PluginName' already configured: $($updateResult.ChangedFields -join ', ')"
                 } else {
@@ -876,6 +1208,18 @@ function Test-ConfigureGateForPlugin {
             $client = Find-ConfiguredComponent -Type "downloadclient" -PluginName $PluginName
 
             if (-not $client) {
+                $amb = Get-ComponentAmbiguityDetails -Type "downloadclient" -PluginName $PluginName
+                if ($amb.IsAmbiguous) {
+                    $result.Outcome = "failed"
+                    $result.Success = $false
+                    $result.Errors += "Ambiguous configured download client selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                    $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                    $result.Details.ComponentType = "downloadclient"
+                    $result.Details.resolution["downloadclient"] = $amb.Resolution
+                    $result.Details.componentIds["downloadClientCandidateIds"] = $amb.CandidateIds
+                    return $result
+                }
+
                 # Create new download client from schema
                 $schema = Get-ComponentSchema -Type "downloadclient" -ImplementationMatch $PluginName
                 if (-not $schema) {
@@ -887,6 +1231,9 @@ function Test-ConfigureGateForPlugin {
                 $created = New-ComponentFromEnv -Type "downloadclient" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.DownloadClientFields
                 if ($created) {
                     $result.Actions += "Created download client '$PluginName' (id=$($created.id))"
+                    $result.Details.componentIds["downloadClientId"] = $created.id
+                    $result.Details.created = $true
+                    $result.Details.resolution["downloadclient"] = "created"
                 } else {
                     $result.Errors += "Failed to create download client for $PluginName"
                     $result.Outcome = "failed"
@@ -894,9 +1241,12 @@ function Test-ConfigureGateForPlugin {
                 }
             } else {
                 # Update existing download client (auth fields only, unless ForceUpdate)
+                $result.Details.componentIds["downloadClientId"] = $client.id
+                $result.Details.resolution["downloadclient"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "downloadclient|$PluginName" -DefaultValue "implementationName"
                 $updateResult = Update-ComponentAuthFields -Type "downloadclient" -ExistingComponent $client -FieldValues $envConfig.DownloadClientFields -ForceUpdate:$ForceUpdate
                 if ($updateResult.Updated) {
                     $result.Actions += "Updated download client auth fields: $($updateResult.ChangedFields -join ', ')"
+                    $result.Details.updated = $true
                 } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
                     $result.Actions += "Download client '$PluginName' already configured: $($updateResult.ChangedFields -join ', ')"
                 } else {
@@ -912,6 +1262,18 @@ function Test-ConfigureGateForPlugin {
             $importList = Find-ConfiguredComponent -Type "importlist" -PluginName $PluginName
 
             if (-not $importList) {
+                $amb = Get-ComponentAmbiguityDetails -Type "importlist" -PluginName $PluginName
+                if ($amb.IsAmbiguous) {
+                    $result.Outcome = "failed"
+                    $result.Success = $false
+                    $result.Errors += "Ambiguous configured import list selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                    $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                    $result.Details.ComponentType = "importlist"
+                    $result.Details.resolution["importlist"] = $amb.Resolution
+                    $result.Details.componentIds["importListCandidateIds"] = $amb.CandidateIds
+                    return $result
+                }
+
                 # Create new import list from schema
                 $schema = Get-ComponentSchema -Type "importlist" -ImplementationMatch $PluginName
                 if (-not $schema) {
@@ -923,6 +1285,9 @@ function Test-ConfigureGateForPlugin {
                 $created = New-ComponentFromEnv -Type "importlist" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.ImportListFields
                 if ($created) {
                     $result.Actions += "Created import list '$PluginName' (id=$($created.id))"
+                    $result.Details.componentIds["importListId"] = $created.id
+                    $result.Details.created = $true
+                    $result.Details.resolution["importlist"] = "created"
                 } else {
                     $result.Errors += "Failed to create import list for $PluginName"
                     $result.Outcome = "failed"
@@ -930,9 +1295,12 @@ function Test-ConfigureGateForPlugin {
                 }
             } else {
                 # Update existing import list
+                $result.Details.componentIds["importListId"] = $importList.id
+                $result.Details.resolution["importlist"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "importlist|$PluginName" -DefaultValue "implementationName"
                 $updateResult = Update-ComponentAuthFields -Type "importlist" -ExistingComponent $importList -FieldValues $envConfig.ImportListFields -ForceUpdate:$ForceUpdate
                 if ($updateResult.Updated) {
                     $result.Actions += "Updated import list fields: $($updateResult.ChangedFields -join ', ')"
+                    $result.Details.updated = $true
                 } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
                     $result.Actions += "Import list '$PluginName' already configured: $($updateResult.ChangedFields -join ', ')"
                 } else {
@@ -991,6 +1359,9 @@ function Test-ConfigureGateForPlugin {
                 }
             }
         }
+
+        $result.Details.preferredIdUsed = ($result.Details.resolution.Values -contains "preferredId")
+        Save-E2EComponentIdsIfEnabled -PluginName $PluginName -ComponentIds $result.Details.componentIds
 
         $result.Outcome = "success"
         $result.Success = $true
@@ -1077,18 +1448,83 @@ function Test-PersistGate {
         try {
             if ($cfg.ExpectIndexer) {
                 $idx = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
+                if (-not $idx) {
+                    $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
+                    if ($amb.IsAmbiguous) {
+                        $result.Outcome = "failed"
+                        $result.Success = $false
+                        $result.Errors += "Ambiguous configured indexer selection during Persist baseline capture for $plugin ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                        $result.Details = @{
+                            Reason = "Ambiguous configured indexer selection"
+                            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            ComponentType = "indexer"
+                            Plugin = $plugin
+                            Phase = "baselineCapture"
+                            Resolution = $amb.Resolution
+                            CandidateIds = $amb.CandidateIds
+                        }
+                        return $result
+                    }
+                }
                 if ($idx) { $baseline[$plugin].IndexerId = $idx.id }
             }
+
             if ($cfg.ExpectDownloadClient) {
                 $dc = Find-ConfiguredComponent -Type "downloadclient" -PluginName $plugin
+                if (-not $dc) {
+                    $amb = Get-ComponentAmbiguityDetails -Type "downloadclient" -PluginName $plugin
+                    if ($amb.IsAmbiguous) {
+                        $result.Outcome = "failed"
+                        $result.Success = $false
+                        $result.Errors += "Ambiguous configured download client selection during Persist baseline capture for $plugin ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                        $result.Details = @{
+                            Reason = "Ambiguous configured download client selection"
+                            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            ComponentType = "downloadclient"
+                            Plugin = $plugin
+                            Phase = "baselineCapture"
+                            Resolution = $amb.Resolution
+                            CandidateIds = $amb.CandidateIds
+                        }
+                        return $result
+                    }
+                }
                 if ($dc) { $baseline[$plugin].DownloadClientId = $dc.id }
             }
+
             if ($cfg.ExpectImportList) {
                 $il = Find-ConfiguredComponent -Type "importlist" -PluginName $plugin
+                if (-not $il) {
+                    $amb = Get-ComponentAmbiguityDetails -Type "importlist" -PluginName $plugin
+                    if ($amb.IsAmbiguous) {
+                        $result.Outcome = "failed"
+                        $result.Success = $false
+                        $result.Errors += "Ambiguous configured import list selection during Persist baseline capture for $plugin ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                        $result.Details = @{
+                            Reason = "Ambiguous configured import list selection"
+                            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            ComponentType = "importlist"
+                            Plugin = $plugin
+                            Phase = "baselineCapture"
+                            Resolution = $amb.Resolution
+                            CandidateIds = $amb.CandidateIds
+                        }
+                        return $result
+                    }
+                }
                 if ($il) { $baseline[$plugin].ImportListId = $il.id }
             }
         }
-        catch { }
+        catch {
+            $result.Outcome = "failed"
+            $result.Success = $false
+            $result.Errors += "Persist baseline capture error for $plugin: $_"
+            $result.Details = @{
+                Reason = "Persist baseline capture error"
+                Plugin = $plugin
+            }
+            return $result
+        }
     }
 
     # Restart container.
@@ -1311,11 +1747,18 @@ foreach ($plugin in $pluginList) {
         Write-Host "  Configure Gate..." -ForegroundColor Cyan
 
         $gateStart = Get-Date
-        $configureResult = Test-ConfigureGateForPlugin -PluginName $plugin -PluginConfig $config -ForceUpdate:$ForceConfigUpdate
+        $configureResult = Test-ConfigureGateForPlugin -PluginName $plugin -PluginConfig $config -ForceUpdate:$ForceConfigUpdate -PassIfAlreadyConfigured:$ConfigurePassIfAlreadyConfigured
         $gateEnd = Get-Date
         $allResults += New-OutcomeResult -Gate "Configure" -PluginName $plugin -Outcome $configureResult.Outcome -Errors $configureResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details @{
             Actions = $configureResult.Actions
             SkipReason = $configureResult.SkipReason
+            componentIds = $configureResult.Details.componentIds
+            alreadyConfigured = $configureResult.Details.alreadyConfigured      
+            created = $configureResult.Details.created
+            updated = $configureResult.Details.updated
+            forceUpdateUsed = $configureResult.Details.forceUpdateUsed
+            resolution = $configureResult.Details.resolution
+            preferredIdUsed = $configureResult.Details.preferredIdUsed
         }
 
         if ($configureResult.Outcome -eq "skipped") {
@@ -1363,19 +1806,33 @@ foreach ($plugin in $pluginList) {
         else {
             # Find configured indexer for this plugin
             try {
-                $indexers = Invoke-LidarrApi -Endpoint "indexer"
-                $pluginIndexer = $indexers | Where-Object {
-                    $_.implementation -like "*$plugin*" -or
-                    $_.name -like "*$plugin*"
-                } | Select-Object -First 1
+                $pluginIndexer = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
 
                 if (-not $pluginIndexer) {
+                    $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
+                    if ($amb.IsAmbiguous) {
+                        Write-Host "       FAIL (ambiguous configured indexer selection)" -ForegroundColor Red
+                        $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{   
+                            Reason = "Ambiguous configured indexer selection"
+                            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            ComponentType = "indexer"
+                            Resolution = $amb.Resolution
+                            CandidateIds = $amb.CandidateIds
+                        }
+                        $overallSuccess = $false
+                        $stopNow = $true
+                        break
+                    }
+
                     Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
                     $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome "skipped" -Errors @("No configured indexer found for $plugin") -Details @{
                         Reason = "No configured indexer found"
                     }
                 }
                 else {
+                    # Best-effort: persist component IDs discovered outside Configure gate, but only when resolution is safe.
+                    Save-E2EComponentIdsIfEnabled -PluginName $plugin -ComponentIds @{ indexerId = $pluginIndexer.id }
+
                     function Get-IndexerFieldValue {
                         param(
                             [AllowNull()]
@@ -1525,17 +1982,33 @@ foreach ($plugin in $pluginList) {
         else {
             try {
                 # Find configured indexer for this plugin
-                $indexers = Invoke-LidarrApi -Endpoint "indexer"
-                $pluginIndexer = $indexers | Where-Object {
-                    $_.implementation -like "*$plugin*" -or
-                    $_.name -like "*$plugin*"
-                } | Select-Object -First 1
+                $pluginIndexer = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
 
                 if (-not $pluginIndexer) {
+                    $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
+                    if ($amb.IsAmbiguous) {
+                        Write-Host "       FAIL (ambiguous configured indexer selection)" -ForegroundColor Red
+                        $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{
+                            Reason = "Ambiguous configured indexer selection"
+                            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            ComponentType = "indexer"
+                            Resolution = $amb.Resolution
+                            CandidateIds = $amb.CandidateIds
+                        }
+                        $overallSuccess = $false
+                        $stopNow = $true
+                        break
+                    }
+
                     Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
-                    $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "skipped" -Errors @("No configured indexer found for $plugin")
+                    $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "skipped" -Errors @("No configured indexer found for $plugin") -Details @{
+                        Reason = "No configured indexer found"
+                    }
                 }
                 else {
+                    # Best-effort: persist component IDs discovered outside Configure gate, but only when resolution is safe.
+                    Save-E2EComponentIdsIfEnabled -PluginName $plugin -ComponentIds @{ indexerId = $pluginIndexer.id }
+
                     $credAllOf = @()
                     $credAnyOf = @()
                     if ($config.ContainsKey("CredentialAllOfFieldNames")) {
@@ -1761,7 +2234,13 @@ foreach ($plugin in $pluginList) {
                     $importListCredAnyOf = @($config.ImportListCredentialAnyOfFieldNames)
                 }
 
-                $importListResult = Test-ImportListGate -PluginName $plugin `
+                $importList = Find-ConfiguredComponent -Type "importlist" -PluginName $plugin
+                if ($importList) {
+                    Save-E2EComponentIdsIfEnabled -PluginName $plugin -ComponentIds @{ importListId = $importList.id }
+                }
+                $importListId = if ($importList) { [int]$importList.id } else { 0 }
+
+                $importListResult = Test-ImportListGate -PluginName $plugin -ImportListId $importListId `
                     -CredentialAllOfFieldNames $importListCredAllOf `
                     -CredentialAnyOfFieldNames $importListCredAnyOf `
                     -SkipIfNoCreds:$true
@@ -1929,19 +2408,33 @@ if ($runPersistRerun) {
         Write-Host "  $plugin Revalidation..." -ForegroundColor Cyan
 
         try {
-            $indexers = Invoke-LidarrApi -Endpoint "indexer"
-            $pluginIndexer = $indexers | Where-Object {
-                $_.implementation -like "*$plugin*" -or
-                $_.name -like "*$plugin*"
-            } | Select-Object -First 1
+            $pluginIndexer = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
 
             if (-not $pluginIndexer) {
+                $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
+                if ($amb.IsAmbiguous) {
+                    Write-Host "       FAIL (ambiguous configured indexer selection)" -ForegroundColor Red
+                    $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{
+                        Reason = "Ambiguous configured indexer selection"
+                        ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                        ComponentType = "indexer"
+                        Resolution = $amb.Resolution
+                        CandidateIds = $amb.CandidateIds
+                    }
+                    $overallSuccess = $false
+                    $stopNow = $true
+                    break
+                }
+
                 Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
                 $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome "skipped" -Details @{
                     Reason = "No configured indexer found post-restart"
                 }
                 continue
             }
+
+            # Best-effort: persist component IDs discovered outside Configure gate, but only when resolution is safe.
+            Save-E2EComponentIdsIfEnabled -PluginName $plugin -ComponentIds @{ indexerId = $pluginIndexer.id }
 
             # Check for credential file if applicable (same logic as Search gate)
             if ($config.ContainsKey("CredentialFileRelative") -and $config.ContainsKey("CredentialPathField") -and $ContainerName) {
@@ -2066,19 +2559,33 @@ if ($runPostRestartGrab) {
 
         try {
             # Step 1: Find the indexer
-            $indexers = Invoke-LidarrApi -Endpoint "indexer"
-            $pluginIndexer = $indexers | Where-Object {
-                $_.implementation -like "*$plugin*" -or
-                $_.name -like "*$plugin*"
-            } | Select-Object -First 1
+            $pluginIndexer = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
 
             if (-not $pluginIndexer) {
+                $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
+                if ($amb.IsAmbiguous) {
+                    Write-Host "       FAIL (ambiguous configured indexer selection)" -ForegroundColor Red
+                    $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{
+                        Reason = "Ambiguous configured indexer selection"
+                        ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                        ComponentType = "indexer"
+                        Resolution = $amb.Resolution
+                        CandidateIds = $amb.CandidateIds
+                    }
+                    $overallSuccess = $false
+                    $stopNow = $true
+                    break
+                }
+
                 Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
                 $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "skipped" -Details @{
                     Reason = "No configured indexer found post-restart"
                 }
                 continue
             }
+
+            # Best-effort: persist component IDs discovered outside Configure gate, but only when resolution is safe.
+            Save-E2EComponentIdsIfEnabled -PluginName $plugin -ComponentIds @{ indexerId = $pluginIndexer.id }
 
             # Step 2: Check credentials (same logic as other gates)
             $credAllOf = @()
@@ -2139,7 +2646,7 @@ if ($runPostRestartGrab) {
             $releases = Invoke-LidarrApi -Endpoint "release?albumId=$($albumSearchResult.AlbumId)"
             $pluginReleases = $releases | Where-Object {
                 $_.indexerId -eq $pluginIndexer.id -or
-                $_.indexer -like "*$plugin*"
+                [string]::Equals([string]$_.indexer, $plugin, [StringComparison]::OrdinalIgnoreCase)
             } | Sort-Object title | Select-Object -First 1
 
             if (-not $pluginReleases) {
