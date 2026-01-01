@@ -1,7 +1,7 @@
 #!/usr/bin/env pwsh
 <#
 .SYNOPSIS
-    Persistent local Lidarr Docker runner for Qobuzarr + Tidalarr.
+    Persistent local Lidarr Docker runner for Qobuzarr + Tidalarr (+ optional Brainarr).
 
 .DESCRIPTION
     Builds (optional), stages, and runs Lidarr with both Qobuzarr and Tidalarr plugins
@@ -18,6 +18,12 @@
 
 .PARAMETER RebuildTidalarr
     Rebuild Tidalarr before starting.
+
+.PARAMETER IncludeBrainarr
+    Also stage Brainarr (Import List) into the container.
+
+.PARAMETER RebuildBrainarr
+    Rebuild Brainarr package before starting (implies IncludeBrainarr).
 
 .PARAMETER Clean
     Delete persistent state (config, plugins, downloads) and start fresh.
@@ -42,6 +48,8 @@ param(
     [switch]$Rebuild,
     [switch]$RebuildQobuzarr,
     [switch]$RebuildTidalarr,
+    [switch]$IncludeBrainarr,
+    [switch]$RebuildBrainarr,
     [switch]$Clean,
     [string]$LidarrTag = "pr-plugins-3.1.1.4884",
     [int]$Port = 8691,
@@ -62,6 +70,7 @@ $repoRoot = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $commonRoot = Join-Path $repoRoot "lidarr.plugin.common"
 $qobuzarrRoot = Join-Path $repoRoot "qobuzarr"
 $tidalarrRoot = Join-Path $repoRoot "tidalarr"
+$brainarrRoot = Join-Path $repoRoot "brainarr"
 
 if (-not (Test-Path (Join-Path $qobuzarrRoot "Qobuzarr.csproj"))) {
     throw "Qobuzarr repo not found at '$qobuzarrRoot'."
@@ -71,10 +80,13 @@ if (-not (Test-Path (Join-Path $tidalarrRoot "Tidalarr.sln"))) {
 }
 
 function Find-LatestZip {
-    param([Parameter(Mandatory = $true)][string]$Directory)
+    param(
+        [Parameter(Mandatory = $true)][string]$Directory,
+        [string]$Filter = "*.zip"
+    )
 
     if (-not (Test-Path $Directory)) { return $null }
-    return (Get-ChildItem -LiteralPath $Directory -Filter *.zip -File -ErrorAction SilentlyContinue |
+    return (Get-ChildItem -LiteralPath $Directory -Filter $Filter -File -ErrorAction SilentlyContinue |
             Sort-Object LastWriteTimeUtc -Descending |
             Select-Object -First 1)
 }
@@ -82,6 +94,12 @@ function Find-LatestZip {
 if ($Rebuild) {
     $RebuildQobuzarr = $true
     $RebuildTidalarr = $true
+    $RebuildBrainarr = $true
+    $IncludeBrainarr = $true
+}
+
+if ($RebuildBrainarr) {
+    $IncludeBrainarr = $true
 }
 
 if ($RebuildQobuzarr) {
@@ -114,6 +132,30 @@ if (-not $qZip) { throw "No Qobuzarr package zip found under 'qobuzarr/artifacts
 $tZip = Find-LatestZip -Directory (Join-Path $tidalarrRoot "src/Tidalarr/artifacts/packages")
 if (-not $tZip) { throw "No Tidalarr package zip found under 'tidalarr/src/Tidalarr/artifacts/packages'." }
 
+$bZip = $null
+if ($IncludeBrainarr) {
+    if (-not (Test-Path (Join-Path $brainarrRoot "Brainarr.sln"))) {
+        throw "Brainarr repo not found at '$brainarrRoot'."
+    }
+
+    if ($RebuildBrainarr) {
+        Write-Host "Building Brainarr package..." -ForegroundColor Cyan
+        Push-Location $brainarrRoot
+        try {
+            & pwsh -File ".\\build.ps1" -Package -Configuration Release | Out-Host
+            if ($LASTEXITCODE -ne 0) { throw "Brainarr build.ps1 -Package failed." }
+        }
+        finally {
+            Pop-Location
+        }
+    }
+
+    $bZip = Find-LatestZip -Directory $brainarrRoot -Filter "Brainarr-*.zip"
+    if (-not $bZip) {
+        throw "No Brainarr package zip found under 'brainarr/' (expected Brainarr-*.zip). Run with -RebuildBrainarr."
+    }
+}
+
 $hostOverride = $null
 $upstreamHost = Join-Path $repoRoot "_upstream/Lidarr/_output/net8.0/Lidarr.Common.dll"
 if (Test-Path $upstreamHost) {
@@ -122,6 +164,9 @@ if (Test-Path $upstreamHost) {
 
 Write-Host "Qobuzarr zip: $($qZip.FullName)" -ForegroundColor Gray
 Write-Host "Tidalarr zip: $($tZip.FullName)" -ForegroundColor Gray
+if ($bZip) {
+    Write-Host "Brainarr zip: $($bZip.FullName)" -ForegroundColor Gray
+}
 if ($hostOverride) {
     Write-Host "Host override: $hostOverride" -ForegroundColor Yellow
 }
@@ -131,13 +176,14 @@ else {
 
 $smokeScript = Join-Path $commonRoot "scripts/multi-plugin-docker-smoke-test.ps1"
 $params = @{
-    PluginZip = @("qobuzarr=$($qZip.FullName)", "tidalarr=$($tZip.FullName)")
+    PluginZip = @("qobuzarr=$($qZip.FullName)", "tidalarr=$($tZip.FullName)")   
     LidarrTag = $LidarrTag
     ContainerName = $ContainerName
     Port = $Port
     WorkRoot = $WorkRoot
     PreserveState = $true
 }
+if ($bZip) { $params.PluginZip += "brainarr=$($bZip.FullName)" }
 if ($Clean) { $params.CleanState = $true }
 if ($KeepRunning) { $params.KeepRunning = $true }
 if ($hostOverride) { $params.HostOverrideAssembly = @($hostOverride) }
