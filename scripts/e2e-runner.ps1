@@ -301,6 +301,7 @@ if (-not $ComponentIdsInstanceSalt) {
 $script:E2EComponentIdsInstanceKey = Get-E2EComponentIdsInstanceKey -LidarrUrl $LidarrUrl -ContainerName $ContainerName -InstanceSalt ($ComponentIdsInstanceSalt ?? "")
 $script:E2EComponentIdsState = Read-E2EComponentIdsState -Path $script:E2EComponentIdsPath
 $script:E2EComponentResolution = @{}
+$script:E2EComponentResolutionCandidates = @{}
 
 function Save-E2EComponentIdsIfEnabled {
     param(
@@ -361,6 +362,38 @@ function Get-HashtableStringOrDefault {
     $text = "$value"
     if ([string]::IsNullOrWhiteSpace($text)) { return $DefaultValue }
     return $text
+}
+
+function Get-ComponentAmbiguityDetails {
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet("indexer", "downloadclient", "importlist")]
+        [string]$Type,
+
+        [Parameter(Mandatory)]
+        [string]$PluginName
+    )
+
+    $key = "$Type|$PluginName"
+    $resolution = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key $key -DefaultValue "none"
+    $candidateIds = @()
+    if ($script:E2EComponentResolutionCandidates -and $script:E2EComponentResolutionCandidates.ContainsKey($key)) {
+        $candidateIds = @($script:E2EComponentResolutionCandidates[$key])
+    }
+
+    if ($resolution -like "ambiguous*") {
+        return @{
+            IsAmbiguous = $true
+            Resolution = $resolution
+            CandidateIds = $candidateIds
+        }
+    }
+
+    return @{
+        IsAmbiguous = $false
+        Resolution = $resolution
+        CandidateIds = $candidateIds
+    }
 }
 
 # Environment variable overrides for opt-in features
@@ -548,6 +581,12 @@ function Find-ConfiguredComponent {
     $preferredIdValue = if ($null -ne $preferredId) { [int]$preferredId } else { 0 }
     $selection = Select-ConfiguredComponent -Items $items -PluginName $PluginName -PreferredId $preferredIdValue
     $script:E2EComponentResolution["$Type|$PluginName"] = $selection.Resolution
+    if ($selection.PSObject.Properties["CandidateIds"] -and $selection.CandidateIds) {
+        $script:E2EComponentResolutionCandidates["$Type|$PluginName"] = @($selection.CandidateIds)
+    }
+    else {
+        $script:E2EComponentResolutionCandidates.Remove("$Type|$PluginName") | Out-Null
+    }
     return $selection.Component
 }
 
@@ -962,6 +1001,29 @@ function Test-ConfigureGateForPlugin {
                     $indexer = Find-ConfiguredComponent -Type "indexer" -PluginName $PluginName
                     $client = Find-ConfiguredComponent -Type "downloadclient" -PluginName $PluginName
 
+                    if (-not $indexer) {
+                        $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $PluginName
+                        if ($amb.IsAmbiguous) {
+                            $result.Outcome = "failed"
+                            $result.Success = $false
+                            $result.Errors += "Ambiguous configured indexer selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                            $result.Details.resolution["indexer"] = $amb.Resolution
+                            $result.Details.componentIds["indexerCandidateIds"] = $amb.CandidateIds
+                            return $result
+                        }
+                    }
+                    if (-not $client) {
+                        $amb = Get-ComponentAmbiguityDetails -Type "downloadclient" -PluginName $PluginName
+                        if ($amb.IsAmbiguous) {
+                            $result.Outcome = "failed"
+                            $result.Success = $false
+                            $result.Errors += "Ambiguous configured download client selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                            $result.Details.resolution["downloadclient"] = $amb.Resolution
+                            $result.Details.componentIds["downloadClientCandidateIds"] = $amb.CandidateIds
+                            return $result
+                        }
+                    }
+
                     if ($indexer) { $existingComponents["indexerId"] = $indexer.id }
                     if ($client) { $existingComponents["downloadClientId"] = $client.id }
 
@@ -971,6 +1033,18 @@ function Test-ConfigureGateForPlugin {
                 }
                 elseif ($PluginName -eq "Brainarr") {
                     $importList = Find-ConfiguredComponent -Type "importlist" -PluginName $PluginName
+
+                    if (-not $importList) {
+                        $amb = Get-ComponentAmbiguityDetails -Type "importlist" -PluginName $PluginName
+                        if ($amb.IsAmbiguous) {
+                            $result.Outcome = "failed"
+                            $result.Success = $false
+                            $result.Errors += "Ambiguous configured import list selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                            $result.Details.resolution["importlist"] = $amb.Resolution
+                            $result.Details.componentIds["importListCandidateIds"] = $amb.CandidateIds
+                            return $result
+                        }
+                    }
 
                     if ($importList) { $existingComponents["importListId"] = $importList.id }
                     else { $allRequiredExist = $false }
@@ -1562,6 +1636,19 @@ foreach ($plugin in $pluginList) {
                 $pluginIndexer = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
 
                 if (-not $pluginIndexer) {
+                    $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
+                    if ($amb.IsAmbiguous) {
+                        Write-Host "       FAIL (ambiguous configured indexer selection)" -ForegroundColor Red
+                        $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{
+                            Reason = "Ambiguous configured indexer selection"
+                            Resolution = $amb.Resolution
+                            CandidateIds = $amb.CandidateIds
+                        }
+                        $overallSuccess = $false
+                        $stopNow = $true
+                        break
+                    }
+
                     Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
                     $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome "skipped" -Errors @("No configured indexer found for $plugin") -Details @{
                         Reason = "No configured indexer found"
@@ -1723,8 +1810,23 @@ foreach ($plugin in $pluginList) {
                 $pluginIndexer = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
 
                 if (-not $pluginIndexer) {
+                    $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
+                    if ($amb.IsAmbiguous) {
+                        Write-Host "       FAIL (ambiguous configured indexer selection)" -ForegroundColor Red
+                        $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{
+                            Reason = "Ambiguous configured indexer selection"
+                            Resolution = $amb.Resolution
+                            CandidateIds = $amb.CandidateIds
+                        }
+                        $overallSuccess = $false
+                        $stopNow = $true
+                        break
+                    }
+
                     Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
-                    $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "skipped" -Errors @("No configured indexer found for $plugin")
+                    $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "skipped" -Errors @("No configured indexer found for $plugin") -Details @{
+                        Reason = "No configured indexer found"
+                    }
                 }
                 else {
                     # Best-effort: persist component IDs discovered outside Configure gate, but only when resolution is safe.

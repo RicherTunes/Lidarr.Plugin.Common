@@ -276,25 +276,46 @@ $script:mockComponents = @{
     )
 }
 
-# Minimal stubs for new preferred-ID infrastructure (keep tests hermetic)
-$script:E2EComponentIdsState = @{}
-$script:E2EComponentResolution = @{}
-$DisableStoredComponentIds = $true
-$DisableComponentIdPersistence = $true
+ # Minimal stubs for new preferred-ID infrastructure (keep tests hermetic) 
+ $script:E2EComponentIdsState = @{}
+ $script:E2EComponentResolution = @{}
+ $script:E2EComponentResolutionCandidates = @{}
+ $DisableStoredComponentIds = $true
+ $DisableComponentIdPersistence = $true
 
 function Get-E2EPreferredComponentId {
     param([hashtable]$State, [string]$PluginName, [string]$Type)
     return $null
 }
 
-function Select-ConfiguredComponent {
-    param($Items, [string]$PluginName, [int]$PreferredId)
-    $arr = if ($Items -is [array]) { @($Items) } elseif ($null -ne $Items) { @($Items) } else { @() }
-    $match = $arr | Where-Object { $_.implementationName -eq $PluginName } | Select-Object -First 1
-    if (-not $match) { $match = $arr | Where-Object { $_.implementation -eq $PluginName } | Select-Object -First 1 }
-    if (-not $match) { $match = $arr | Where-Object { $_.name -like "*$PluginName*" } | Select-Object -First 1 }
-    return [PSCustomObject]@{ Component = $match; Resolution = if ($match) { "test" } else { "none" } }
-}
+ function Select-ConfiguredComponent {
+     param($Items, [string]$PluginName, [int]$PreferredId)
+     $arr = if ($Items -is [array]) { @($Items) } elseif ($null -ne $Items) { @($Items) } else { @() }
+     # Simulate ambiguity detection (matches runner/module behavior): do not guess.
+     $nameMatches = @($arr | Where-Object { $_.implementationName -eq $PluginName })
+     if ($nameMatches.Count -gt 1) {
+         $candidateIds = @($nameMatches | ForEach-Object { $_.id } | Where-Object { $null -ne $_ })
+         return [PSCustomObject]@{ Component = $null; Resolution = "ambiguousImplementationName"; CandidateIds = $candidateIds }
+     }
+     $match = $arr | Where-Object { $_.implementationName -eq $PluginName } | Select-Object -First 1
+     if (-not $match) { $match = $arr | Where-Object { $_.implementation -eq $PluginName } | Select-Object -First 1 }
+     if (-not $match) { $match = $arr | Where-Object { $_.name -like "*$PluginName*" } | Select-Object -First 1 }
+     return [PSCustomObject]@{ Component = $match; Resolution = if ($match) { "test" } else { "none" }; CandidateIds = @() }
+ }
+
+ function Get-ComponentAmbiguityDetails {
+     param([string]$Type, [string]$PluginName)
+     $key = "$Type|$PluginName"
+     $resolution = if ($script:E2EComponentResolution.ContainsKey($key)) { "$($script:E2EComponentResolution[$key])" } else { "none" }
+     $candidateIds = @()
+     if ($script:E2EComponentResolutionCandidates.ContainsKey($key)) { $candidateIds = @($script:E2EComponentResolutionCandidates[$key]) }
+
+     return @{
+         IsAmbiguous = ($resolution -like "ambiguous*")
+         Resolution = $resolution
+         CandidateIds = $candidateIds
+     }
+ }
 
 function Save-E2EComponentIdsIfEnabled { param([string]$PluginName, [hashtable]$ComponentIds) return }
 function Get-HashtableStringOrDefault { param([hashtable]$Table, [string]$Key, [string]$DefaultValue) return $DefaultValue }
@@ -407,7 +428,49 @@ $env:QOBUZ_AUTH_TOKEN = $originalQobuzToken
 Write-Host ""
 
 # =============================================================================
-# Test 8: Brainarr PassIfAlreadyConfigured
+# Test 8: PassIfAlreadyConfigured with Ambiguous Components
+# =============================================================================
+Write-Host "Test Group: PassIfAlreadyConfigured with Ambiguous Components" -ForegroundColor Yellow
+
+try {
+    # Duplicate indexers simulate ambiguous selection
+    $script:mockComponents = @{
+        indexer = @(
+            [PSCustomObject]@{ id = 101; implementationName = "Qobuzarr"; implementation = "Qobuzarr"; name = "Qobuzarr A" },
+            [PSCustomObject]@{ id = 102; implementationName = "Qobuzarr"; implementation = "Qobuzarr"; name = "Qobuzarr B" }
+        )
+        downloadclient = @(
+            [PSCustomObject]@{ id = 201; implementationName = "Qobuzarr"; implementation = "Qobuzarr"; name = "Qobuzarr Download" }
+        )
+        importlist = @()
+    }
+
+    # Clear env vars to trigger missing-env path
+    $env:QOBUZARR_AUTH_TOKEN = $null
+    $env:QOBUZ_AUTH_TOKEN = $null
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Qobuzarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "Ambiguous configured components -> Outcome=failed" `
+            -Passed ($result.Outcome -eq "failed")
+
+        Write-TestResult -TestName "Ambiguous configured components -> Success=false" `
+            -Passed ($result.Success -eq $false)
+
+        $hasAmbiguityError = ($result.Errors | Where-Object { $_ -like "*Ambiguous configured indexer selection*" } | Select-Object -First 1)
+        Write-TestResult -TestName "Ambiguous configured components -> Error mentions ambiguity" `
+            -Passed ([bool]$hasAmbiguityError)
+    }
+}
+catch {
+    Write-TestResult -TestName "Ambiguous configured components test" -Passed $false -Message $_.Exception.Message
+}
+
+Write-Host ""
+
+# =============================================================================
+# Test 9: Brainarr PassIfAlreadyConfigured
 # =============================================================================
 Write-Host "Test Group: Brainarr PassIfAlreadyConfigured" -ForegroundColor Yellow
 

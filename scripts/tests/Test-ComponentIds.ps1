@@ -150,6 +150,7 @@ try {
     )
     $sel = Select-ConfiguredComponent -Items $items -PluginName "Qobuzarr" -PreferredId 0
     Write-TestResult -TestName "Ambiguous implementationName returns none" -Passed ($null -eq $sel.Component -and $sel.Resolution -eq "ambiguousImplementationName")
+    Write-TestResult -TestName "Ambiguous implementationName includes candidate IDs" -Passed (($sel.CandidateIds | Sort-Object) -join ',' -eq '31,32')
 
     $items = @(
         [PSCustomObject]@{ id = 41; name = "A"; implementationName = "Other"; implementation = "QobuzarrDownloadClient" },
@@ -157,6 +158,7 @@ try {
     )
     $sel = Select-ConfiguredComponent -Items $items -PluginName "Qobuzarr" -PreferredId 0
     Write-TestResult -TestName "Ambiguous fuzzy returns none" -Passed ($null -eq $sel.Component -and $sel.Resolution -eq "ambiguousFuzzy")
+    Write-TestResult -TestName "Ambiguous fuzzy includes candidate IDs" -Passed (($sel.CandidateIds | Sort-Object) -join ',' -eq '41,42')
 }
 finally {
     Remove-Item -LiteralPath $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

@@ -11,11 +11,13 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 - Preferred IDs are strict: a stored ID is only accepted if it resolves to the expected plugin (`implementationName == PluginName`).
 - No secrets in state: preferred-ID state stores **IDs only** (no tokens, no URLs, no credentials).
 - Safe persistence: only persist IDs when resolution is known-safe (`preferredId`, `created`, `implementationName`, `implementation`).
+- Ambiguity is a failure: if multiple configured components match a plugin, gates must **FAIL** (do not guess).
 
 ## Implemented (current state)
 
 - Preferred component IDs stored in `.e2e-bootstrap/e2e-component-ids.json` (schema v2, instance-namespaced).
 - Gates resolve components via `Find-ConfiguredComponent` (no more `name -like "*$plugin*"` discovery).
+- Component selection reports resolution strategy and candidate IDs (for triage), and gates fail loudly on ambiguous matches.
 - ImportList gate supports `-ImportListId` and does not wildcard-match by name.
 - CI cold-start assertions:
   - Case A (no secrets): Configure should SKIP and **not create plugin-specific components**.
@@ -27,6 +29,7 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 ### P0 (high value)
 - [x] Add `-ComponentIdsInstanceSalt` / `E2E_COMPONENT_IDS_INSTANCE_SALT` so users can avoid collisions when reusing the same `(LidarrUrl + ContainerName)` against different config directories/instances.
 - [x] Prevent unsafe persistence: only persist IDs when resolution is known-safe (`preferredId`, `created`, `implementationName`, `implementation`).
+- [x] Make ambiguity loud: if multiple configured components match a plugin, fail the gate and include candidate IDs for debugging.
 - [ ] Consider tightening “safe persistence” further: drop `implementation` if it proves unnecessary in practice (keep `created` + `preferredId` + `implementationName`).
 
 ### P1 (correctness hardening)

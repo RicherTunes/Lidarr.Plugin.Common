@@ -384,33 +384,53 @@ function Select-ConfiguredComponent {
         return $null
     }
 
+    function Get-ItemId {
+        param(
+            [Parameter(Mandatory)]
+            $Item
+        )
+
+        $id = Get-ItemValue -Item $Item -Name "id"
+        if ($null -ne $id -and "$id" -match '^\d+$') { return [int]$id }
+        return $null
+    }
+
     # Resolution by preferred ID is strict: only accept exact implementationName match.
     if ($PreferredId -gt 0) {
         $idMatch = $arr | Where-Object { (Get-ItemValue -Item $_ -Name "id") -eq $PreferredId } | Select-Object -First 1
         if ($idMatch -and (Get-ItemValue -Item $idMatch -Name "implementationName") -eq $PluginName) {
-            return [PSCustomObject]@{ Component = $idMatch; Resolution = "preferredId" }
+            return [PSCustomObject]@{ Component = $idMatch; Resolution = "preferredId"; CandidateIds = @() }
         }
     }
 
     # Priority 1: Exact implementationName match (most reliable). Require uniqueness.
     $matches = @($arr | Where-Object { (Get-ItemValue -Item $_ -Name "implementationName") -eq $PluginName })
-    if ($matches.Count -gt 1) { return [PSCustomObject]@{ Component = $null; Resolution = "ambiguousImplementationName" } }
+    if ($matches.Count -gt 1) {
+        $candidateIds = @($matches | ForEach-Object { Get-ItemId -Item $_ } | Where-Object { $null -ne $_ })
+        return [PSCustomObject]@{ Component = $null; Resolution = "ambiguousImplementationName"; CandidateIds = $candidateIds }
+    }
     $match = $matches | Select-Object -First 1
-    if ($match) { return [PSCustomObject]@{ Component = $match; Resolution = "implementationName" } }
+    if ($match) { return [PSCustomObject]@{ Component = $match; Resolution = "implementationName"; CandidateIds = @() } }
 
     # Priority 2: Exact implementation match. Require uniqueness.
     $matches = @($arr | Where-Object { (Get-ItemValue -Item $_ -Name "implementation") -eq $PluginName })
-    if ($matches.Count -gt 1) { return [PSCustomObject]@{ Component = $null; Resolution = "ambiguousImplementation" } }
+    if ($matches.Count -gt 1) {
+        $candidateIds = @($matches | ForEach-Object { Get-ItemId -Item $_ } | Where-Object { $null -ne $_ })
+        return [PSCustomObject]@{ Component = $null; Resolution = "ambiguousImplementation"; CandidateIds = $candidateIds }
+    }
     $match = $matches | Select-Object -First 1
-    if ($match) { return [PSCustomObject]@{ Component = $match; Resolution = "implementation" } }
+    if ($match) { return [PSCustomObject]@{ Component = $match; Resolution = "implementation"; CandidateIds = @() } }
 
     # Priority 3: Fuzzy match on implementation only (backward compatibility). Require uniqueness.
     $matches = @($arr | Where-Object { (Get-ItemValue -Item $_ -Name "implementation") -like "*$PluginName*" })
-    if ($matches.Count -gt 1) { return [PSCustomObject]@{ Component = $null; Resolution = "ambiguousFuzzy" } }
+    if ($matches.Count -gt 1) {
+        $candidateIds = @($matches | ForEach-Object { Get-ItemId -Item $_ } | Where-Object { $null -ne $_ })
+        return [PSCustomObject]@{ Component = $null; Resolution = "ambiguousFuzzy"; CandidateIds = $candidateIds }
+    }
     $match = $matches | Select-Object -First 1
-    if ($match) { return [PSCustomObject]@{ Component = $match; Resolution = "fuzzy" } }
+    if ($match) { return [PSCustomObject]@{ Component = $match; Resolution = "fuzzy"; CandidateIds = @() } }
 
-    return [PSCustomObject]@{ Component = $null; Resolution = "none" }
+    return [PSCustomObject]@{ Component = $null; Resolution = "none"; CandidateIds = @() }
 }
 
 Export-ModuleMember -Function `
