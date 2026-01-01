@@ -576,7 +576,7 @@ function New-DiagnosticsBundle {
     # System status
     try {
         $status = Invoke-RestMethod -Uri "$apiUrl/api/v1/system/status" -Headers $headers -TimeoutSec 10
-        $status | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "system-status.json") -Encoding UTF8
+        $status | ConvertTo-Json -Depth 12 | Out-File -FilePath (Join-Path $bundleDir "system-status.json") -Encoding UTF8
         Write-Host "  - System status collected" -ForegroundColor Green
     }
     catch {
@@ -586,7 +586,7 @@ function New-DiagnosticsBundle {
     # Indexer schemas
     try {
         $indexerSchemas = Invoke-RestMethod -Uri "$apiUrl/api/v1/indexer/schema" -Headers $headers -TimeoutSec 10
-        $indexerSchemas | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "indexer-schemas.json") -Encoding UTF8
+        $indexerSchemas | ConvertTo-Json -Depth 12 | Out-File -FilePath (Join-Path $bundleDir "indexer-schemas.json") -Encoding UTF8
         Write-Host "  - Indexer schemas collected" -ForegroundColor Green
     }
     catch {
@@ -596,7 +596,7 @@ function New-DiagnosticsBundle {
     # Download client schemas
     try {
         $clientSchemas = Invoke-RestMethod -Uri "$apiUrl/api/v1/downloadclient/schema" -Headers $headers -TimeoutSec 10
-        $clientSchemas | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "downloadclient-schemas.json") -Encoding UTF8
+        $clientSchemas | ConvertTo-Json -Depth 12 | Out-File -FilePath (Join-Path $bundleDir "downloadclient-schemas.json") -Encoding UTF8
         Write-Host "  - Download client schemas collected" -ForegroundColor Green
     }
     catch {
@@ -606,7 +606,7 @@ function New-DiagnosticsBundle {
     # Import list schemas
     try {
         $importListSchemas = Invoke-RestMethod -Uri "$apiUrl/api/v1/importlist/schema" -Headers $headers -TimeoutSec 10
-        $importListSchemas | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "importlist-schemas.json") -Encoding UTF8
+        $importListSchemas | ConvertTo-Json -Depth 12 | Out-File -FilePath (Join-Path $bundleDir "importlist-schemas.json") -Encoding UTF8
         Write-Host "  - Import list schemas collected" -ForegroundColor Green
     }
     catch {
@@ -617,7 +617,7 @@ function New-DiagnosticsBundle {
     try {
         $indexers = Invoke-RestMethod -Uri "$apiUrl/api/v1/indexer" -Headers $headers -TimeoutSec 10
         $indexers = Invoke-SecretRedaction -Object $indexers
-        $indexers | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "configured-indexers.json") -Encoding UTF8
+        $indexers | ConvertTo-Json -Depth 12 | Out-File -FilePath (Join-Path $bundleDir "configured-indexers.json") -Encoding UTF8
         Write-Host "  - Configured indexers collected (secrets redacted)" -ForegroundColor Green
     }
     catch {
@@ -628,7 +628,7 @@ function New-DiagnosticsBundle {
     try {
         $clients = Invoke-RestMethod -Uri "$apiUrl/api/v1/downloadclient" -Headers $headers -TimeoutSec 10
         $clients = Invoke-SecretRedaction -Object $clients
-        $clients | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "configured-downloadclients.json") -Encoding UTF8
+        $clients | ConvertTo-Json -Depth 12 | Out-File -FilePath (Join-Path $bundleDir "configured-downloadclients.json") -Encoding UTF8
         Write-Host "  - Configured download clients collected (secrets redacted)" -ForegroundColor Green
     }
     catch {
@@ -638,7 +638,7 @@ function New-DiagnosticsBundle {
     # Queue state
     try {
         $queue = Invoke-RestMethod -Uri "$apiUrl/api/v1/queue" -Headers $headers -TimeoutSec 10
-        $queue | ConvertTo-Json -Depth 5 | Out-File -FilePath (Join-Path $bundleDir "queue-state.json") -Encoding UTF8
+        $queue | ConvertTo-Json -Depth 12 | Out-File -FilePath (Join-Path $bundleDir "queue-state.json") -Encoding UTF8
         Write-Host "  - Queue state collected" -ForegroundColor Green
     }
     catch {
