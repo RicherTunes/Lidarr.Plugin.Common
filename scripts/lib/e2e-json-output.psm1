@@ -487,9 +487,9 @@ function Get-OutcomeReason {
 function Get-SafeProperty {
     param($Object, [string]$PropertyName)
     if ($null -eq $Object) { return $null }
-    # Handle hashtables
+    # Handle dictionaries (hashtables, OrderedDictionary, etc.)
     if ($Object -is [System.Collections.IDictionary]) {
-        if ($Object.ContainsKey($PropertyName)) {
+        if ($Object.Contains($PropertyName)) {
             return $Object[$PropertyName]
         }
         return $null
@@ -499,6 +499,121 @@ function Get-SafeProperty {
         return $Object.$PropertyName
     }
     return $null
+}
+
+<#
+.SYNOPSIS
+    Transforms details.resolution + details.componentIds into details.componentResolution.
+.DESCRIPTION
+    Produces a structured componentResolution block with proper camelCase keys,
+    selectedId, strategy, candidateIds, and safeToPersist for each component type.
+
+    safeToPersist rules:
+    - true: preferredId, created, implementationName, implementation
+    - false: fuzzy, ambiguous*, none, updated (action outcome, not selection strategy)
+#>
+function Get-ComponentResolution {
+    param([System.Collections.IDictionary]$Details)
+
+    if (-not $Details) { return $null }
+
+    $resolution = Get-SafeProperty -Object $Details -PropertyName 'resolution'
+    $componentIds = Get-SafeProperty -Object $Details -PropertyName 'componentIds'
+
+    if (-not $resolution -and -not $componentIds) { return $null }
+
+    # Canonical strategies (lowercase for case-insensitive matching)
+    # Safe to persist: deterministic, unambiguous selection
+    # Note: 'updated' is an action outcome, not a selection strategy - excluded intentionally
+    $safeStrategies = @('preferredid', 'created', 'implementationname', 'implementation')
+
+    # Helper: coerce value to integer if possible (type stability)
+    function CoerceToInt($value) {
+        if ($null -eq $value) { return $null }
+        try { return [int]$value } catch { return $value }
+    }
+
+    # Helper: normalize strategy to canonical form
+    function NormalizeStrategy($raw) {
+        if ([string]::IsNullOrWhiteSpace($raw)) { return 'none' }
+        return $raw.ToString().Trim()
+    }
+
+    $result = [ordered]@{}
+
+    # Component types to process (output key names in camelCase)
+    $componentTypes = @('indexer', 'downloadClient', 'importList')
+
+    # Process each component type
+    foreach ($outputKey in $componentTypes) {
+        # Determine lowercase variant
+        $lowercaseKey = switch ($outputKey) {
+            'downloadClient' { 'downloadclient' }
+            'importList' { 'importlist' }
+            default { $null }
+        }
+
+        # Try both camelCase and lowercase variants when looking up strategy
+        $rawStrategy = $null
+        if ($resolution) {
+            $rawStrategy = Get-SafeProperty -Object $resolution -PropertyName $outputKey
+            # Try lowercase variant if not found
+            if (-not $rawStrategy -and $lowercaseKey) {
+                $rawStrategy = Get-SafeProperty -Object $resolution -PropertyName $lowercaseKey
+            }
+        }
+        $strategy = NormalizeStrategy $rawStrategy
+
+        # Get selectedId and candidateIds from componentIds
+        $selectedId = $null
+        $candidateIds = @()
+
+        if ($componentIds) {
+            # Try camelCase ID key first (e.g., indexerId, downloadClientId)
+            $idKey = "${outputKey}Id"
+            $rawId = Get-SafeProperty -Object $componentIds -PropertyName $idKey
+            $selectedId = CoerceToInt $rawId
+
+            # Try candidate IDs with camelCase
+            $candidateKey = "${outputKey}CandidateIds"
+            $candidates = Get-SafeProperty -Object $componentIds -PropertyName $candidateKey
+            if ($candidates) {
+                $candidateIds = @($candidates | ForEach-Object { CoerceToInt $_ })
+            }
+        }
+
+        # Only emit if we have at least a strategy or selectedId or candidates
+        if ($strategy -ne 'none' -or $null -ne $selectedId -or $candidateIds.Count -gt 0) {
+            # Case-insensitive check against canonical safe strategies
+            $strategyLower = $strategy.ToLowerInvariant()
+            $isSafe = $safeStrategies -contains $strategyLower
+            $isAmbiguous = $strategy -match '(?i)^ambiguous'
+
+              # Default candidateIds to [selectedId] when known (improves forensic value)
+              if ($candidateIds.Count -eq 0 -and $null -ne $selectedId) {
+                  $candidateIds = @($selectedId)
+              }
+
+              # safeToPersist must be conservative:
+              # - requires a selectedId
+              # - requires at most 1 candidate (otherwise ambiguity leaked through)
+              # - if a candidate exists, it must match selectedId
+              $hasSelectedId = ($null -ne $selectedId)
+              $hasAtMostOneCandidate = ($candidateIds.Count -le 1)
+              $candidateMatchesSelected = ($candidateIds.Count -eq 0) -or
+                  ($hasSelectedId -and $candidateIds.Count -eq 1 -and $candidateIds[0] -eq $selectedId)
+
+              $result[$outputKey] = [ordered]@{
+                  selectedId = $selectedId
+                  strategy = $strategy
+                  candidateIds = $candidateIds
+                  safeToPersist = ($isSafe -and -not $isAmbiguous -and $hasSelectedId -and $hasAtMostOneCandidate -and $candidateMatchesSelected)
+              }
+          }
+      }
+
+    if ($result.Count -eq 0) { return $null }
+    return $result
 }
 
 <#
@@ -578,6 +693,13 @@ function ConvertTo-E2ERunManifest {
         # Remove errorCode from details (it is a top-level field now)
         if ($details.Contains('errorCode')) {
             $details.Remove('errorCode')
+        }
+
+        # Add componentResolution from resolution + componentIds
+        # Pass the converted details since we need the camelCase keys
+        $componentResolution = Get-ComponentResolution -Details $details
+        if ($componentResolution) {
+            $details['componentResolution'] = $componentResolution
         }
 
         $jsonResults += [ordered]@{
@@ -737,6 +859,42 @@ function ConvertTo-E2ERunManifest {
         # Include quiet stub when no issues detected (schema consistency, no summary noise)
         $manifest['hostBugSuspected'] = [ordered]@{
             detected = $false
+        }
+    }
+
+    # Component IDs provenance tracking (optional - only if context provides it)
+    $componentIdsContext = Get-SafeProperty -Object $Context -PropertyName 'ComponentIds'
+    if ($componentIdsContext) {
+        $instanceKey = Get-SafeProperty -Object $componentIdsContext -PropertyName 'InstanceKey'
+        $instanceKeySource = Get-SafeProperty -Object $componentIdsContext -PropertyName 'InstanceKeySource'
+        $lockPolicy = Get-SafeProperty -Object $componentIdsContext -PropertyName 'LockPolicy'
+        $lockPolicySource = Get-SafeProperty -Object $componentIdsContext -PropertyName 'LockPolicySource'
+        $persistenceEnabled = Get-SafeProperty -Object $componentIdsContext -PropertyName 'PersistenceEnabled'
+
+        $componentIdsBlock = [ordered]@{}
+
+        if ($instanceKey) {
+            $componentIdsBlock['instanceKey'] = $instanceKey
+        }
+        if ($instanceKeySource) {
+            $componentIdsBlock['instanceKeySource'] = $instanceKeySource
+        }
+        if ($lockPolicy) {
+            $componentIdsBlock['lockPolicy'] = [ordered]@{
+                timeoutMs = Get-SafeProperty -Object $lockPolicy -PropertyName 'TimeoutMs'
+                retryDelayMs = Get-SafeProperty -Object $lockPolicy -PropertyName 'RetryDelayMs'
+                staleSeconds = Get-SafeProperty -Object $lockPolicy -PropertyName 'StaleSeconds'
+            }
+        }
+        if ($lockPolicySource) {
+            $componentIdsBlock['lockPolicySource'] = $lockPolicySource
+        }
+        if ($null -ne $persistenceEnabled) {
+            $componentIdsBlock['persistenceEnabled'] = [bool]$persistenceEnabled
+        }
+
+        if ($componentIdsBlock.Count -gt 0) {
+            $manifest['componentIds'] = $componentIdsBlock
         }
     }
 
