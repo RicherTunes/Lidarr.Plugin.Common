@@ -25,8 +25,9 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 ## Next steps (TDD-first)
 
 ### P0 (high value)
-- [ ] Add `-ComponentIdsInstanceSalt` / `E2E_COMPONENT_IDS_INSTANCE_SALT` so users can avoid collisions when reusing the same container name against different config dirs.
-- [ ] Consider tightening “safe persistence” (keep `created` + `preferredId` + `implementationName`; only keep `implementation` if it’s actually reachable in practice).
+- [x] Add `-ComponentIdsInstanceSalt` / `E2E_COMPONENT_IDS_INSTANCE_SALT` so users can avoid collisions when reusing the same `(LidarrUrl + ContainerName)` against different config directories/instances.
+- [x] Prevent unsafe persistence: only persist IDs when resolution is known-safe (`preferredId`, `created`, `implementationName`, `implementation`).
+- [ ] Consider tightening “safe persistence” further: drop `implementation` if it proves unnecessary in practice (keep `created` + `preferredId` + `implementationName`).
 
 ### P1 (correctness hardening)
 - [ ] Record Lidarr host fingerprint (`lidarrVersion`, `branch`, `imageDigest`) into the preferred-ID state entries (diagnostics only; no effect on selection).
@@ -43,4 +44,3 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 - Runner: `scripts/e2e-runner.ps1`
 - Gates: `scripts/lib/e2e-gates.psm1`
 - CI workflow: `.github/workflows/e2e-bootstrap.yml`
-

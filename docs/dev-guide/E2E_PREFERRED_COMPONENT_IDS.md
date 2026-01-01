@@ -42,6 +42,8 @@ Schema (v2, instance-namespaced):
 
 The `instances` key prevents stale IDs from one Lidarr container being reused against another. The runner computes a stable `instanceKey` from `(lidarrUrl + containerName)` and uses that for lookups.
 
+Note: `lidarrVersion` is best-effort metadata for diagnostics; it may be `null` when the runner cannot query `/api/v1/system/status` (for example, schema-only runs without an API key).
+
 ## Resolution Algorithm (per plugin + type)
 1. If stored preferred ID exists:
    - pick `item.id == preferredId` **only if** `item.implementationName == PluginName`
@@ -83,6 +85,6 @@ Workflow: `.github/workflows/e2e-bootstrap.yml`
   - `preferredIdUsed == true` where IDs exist
 
 ## Roadmap (next hardening increments)
-- Add `.e2e-bootstrap/` (or at least `e2e-component-ids.json`) to `.gitignore`.
+- Done: `.e2e-bootstrap/` is ignored via `.gitignore`.
 - Remove/limit fuzzy matching to avoid selecting user-named unrelated components.
 - Prefer stored IDs in gates beyond Configure (Search/Grab) to self-heal state.
