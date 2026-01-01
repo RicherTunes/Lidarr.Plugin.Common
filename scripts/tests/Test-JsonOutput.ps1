@@ -742,6 +742,34 @@ $componentResolutionTests = @(
             return ($cr.indexer.safeToPersist -eq $false)
         }
     }
+    @{
+        Name = "selectedId is coerced to integer when possible (type stability)"
+        Test = {
+            param($obj)
+            # PostRestartGrab has downloadClientId = "789" (string)
+            $r = $obj.results | Where-Object { $_.gate -eq 'PostRestartGrab' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'downloadClient')) { return $false }
+            # Should be numeric (int or int64 after JSON round-trip), not string "789"
+            $id = $cr.downloadClient.selectedId
+            $isNumeric = ($id -is [int]) -or ($id -is [int64])
+            return $isNumeric -and ($id -eq 789)
+        }
+    }
+    @{
+        Name = "strategy matching is case-insensitive (ImplementationName → safeToPersist=true)"
+        Test = {
+            param($obj)
+            # ImportList gate has strategy = "ImplementationName" (mixed case)
+            $r = $obj.results | Where-Object { $_.gate -eq 'ImportList' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'importList')) { return $false }
+            # Mixed-case should still be recognized as safe
+            return ($cr.importList.strategy -eq 'ImplementationName') -and ($cr.importList.safeToPersist -eq $true)
+        }
+    }
 )
 
 # ============================================================================  
@@ -1060,6 +1088,24 @@ if (Test-Path $jsonModulePath) {
             }
             componentIds = @{
                 indexerId = 555
+            }
+        })
+        # Type coercion test: string ID should be coerced to integer
+        (New-MockGateResult -Gate "PostRestartGrab" -PluginName "Qobuzarr" -Outcome "success" -Details @{
+            resolution = @{
+                downloadClient = "preferredId"
+            }
+            componentIds = @{
+                downloadClientId = "789"  # String, should become int
+            }
+        })
+        # Case normalization test: mixed-case strategy should still match safe strategies
+        (New-MockGateResult -Gate "ImportList" -PluginName "Tidalarr" -Outcome "success" -Details @{
+            resolution = @{
+                importList = "ImplementationName"  # Mixed case
+            }
+            componentIds = @{
+                importListId = 321
             }
         })
     )
