@@ -150,9 +150,12 @@ pwsh scripts/e2e-runner.ps1 -Plugins 'Brainarr' -Gate importlist `
 The ImportList gate:
 1. Detects schema presence via `/api/v1/importlist/schema`
 2. Finds a configured import list matching the plugin name
-3. Triggers `ImportListSync` command
-4. Waits for command completion
-5. Returns **PASS** if sync completes, **SKIP** if not configured, **FAIL** on error
+3. Validates required credentials (e.g., `configurationUrl` for Brainarr)
+4. Triggers `ImportListSync` command
+5. Waits for command completion
+6. Returns **PASS** if sync completes, **SKIP** if not configured or missing credentials, **FAIL** on error
+
+**Brainarr credentials**: The ImportList gate validates that `configurationUrl` (LLM base URL) is configured before attempting sync. Set via `BRAINARR_LLM_BASE_URL` env var.
 
 When running `-Gate all` or `-Gate bootstrap`:
 - Plugins with `ExpectImportList = $true` (e.g., Brainarr) will run the ImportList gate
@@ -185,14 +188,36 @@ CredentialFieldNames = @("configPath")
 # Any-of: AT LEAST ONE field must have a value
 CredentialAnyOfFieldNames = @("authToken", "password")  # Qobuzarr: token OR password auth
 CredentialAnyOfFieldNames = @("redirectUrl", "oauthRedirectUrl")  # Tidalarr: OAuth configured
+
+# ImportList credential fields (used for import-list-only plugins)
+ImportListCredentialAllOfFieldNames = @("configurationUrl")  # Brainarr: LLM endpoint required
 ```
 
 ### Diagnostics and Redaction
 
-The runner automatically redacts sensitive fields in output:
-- `password`, `secret`, `token`, `apikey`, `auth` patterns
-- OAuth tokens and refresh tokens
-- PKCE verifiers and authorization codes
+The runner automatically redacts sensitive data in diagnostics bundles:
+
+**Field Name Patterns** (redacted to `[REDACTED]`):
+- `password`, `secret`, `token`, `apikey`, `auth`, `credential`
+- OAuth: `refreshtoken`, `accesstoken`, `clientsecret`
+- PKCE: `code_verifier`, `authorization_code`
+- Internal: `configurationUrl` (LLM endpoints)
+
+**Value-Based Redaction** (private endpoints):
+| Pattern | Placeholder | Example |
+|---------|-------------|---------|
+| RFC1918 IPv4 (10.x, 172.16-31.x, 192.168.x) | `[PRIVATE-IP]` | `http://192.168.1.100:8080` |
+| Link-local (169.254.x) | `[PRIVATE-IP]` | `http://169.254.1.1:80` |
+| Loopback (127.x) | `[PRIVATE-IP]` | `http://127.0.0.1:3000` |
+| IPv6 private (::1, fe80::, fc/fd00::) | `[PRIVATE-IPv6]` | `http://[::1]:1234` |
+| Docker internal | `[INTERNAL-HOST]` | `http://host.docker.internal:11434` |
+| Localhost | `[LOCALHOST]` | `http://localhost:8686` |
+
+**Query Parameter Secrets** (value redacted, param name preserved):
+- `?code=`, `?token=`, `?access_token=`, `?refresh_token=`, `?apiKey=`, `?secret=`
+- Example: `?code=abc123&state=xyz` → `?code=[REDACTED]&state=xyz`
+
+**Note**: Public URLs (e.g., `https://api.tidal.com`) are NOT redacted.
 
 To collect diagnostics without exposing secrets:
 ```powershell
@@ -240,3 +265,43 @@ If neither mutagen nor the host fallback is available, metadata validation is sk
 
 - If you see `Bind for 0.0.0.0:<port> failed: port is already allocated`, change `-Port` and/or `-ContainerName`.
 - Multi-plugin loading across independent plugin load contexts may still depend on upstream Lidarr fixes; `-HostOverrideAssembly` is intended for validating those before a new Docker tag exists.
+## JSON Manifest Schema
+
+The E2E runner outputs a machine-readable JSON manifest (`run-manifest.json`) for CI/CD integration.
+
+### Schema Reference
+
+- **Schema file**: [`docs/reference/e2e-run-manifest.schema.json`](reference/e2e-run-manifest.schema.json)
+- **Schema ID**: `richer-tunes.lidarr.e2e-run-manifest`
+- **Current version**: `1.2`
+
+### Manifest Self-Description
+
+Each manifest includes a `$schema` field pointing to the schema:
+
+```json
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/<sha>/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  ...
+}
+```
+
+### Strictness Rules
+
+| Component | Strictness | Meaning |
+|-----------|------------|---------|
+| Top-level | Extensible | New fields won't break validation |
+| `runner`, `lidarr`, `summary`, `redaction` | **Strict** | Schema update required for new fields |
+| `sources`, `diagnostics`, `results[].details` | Extensible | Grow without schema changes |
+
+### Adding Fields to Strict Objects
+
+If you add a new field to `runner`, `lidarr`, `summary`, or `redaction`:
+
+1. Update `docs/reference/e2e-run-manifest.schema.json`
+2. Update `scripts/tests/Test-ManifestSchema.ps1` if needed
+3. Bump `schemaVersion` for breaking changes (removing fields, changing types)
+4. Run tests: `pwsh scripts/tests/Test-ManifestSchema.ps1`
+
+See [`docs/reference/README.md`](reference/README.md) for full schema governance details.

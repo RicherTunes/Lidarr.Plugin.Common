@@ -1,0 +1,1252 @@
+name: E2E Bootstrap (Headless)
+
+# Headless bootstrap CI for E2E testing with credential injection
+# Runs gates against a real Lidarr instance with plugin credentials
+# Always uploads diagnostics on failure for AI-assisted triage
+
+on:
+  workflow_dispatch:
+    inputs:
+      lidarr_tag:
+        description: Lidarr Docker tag (plugins branch)
+        required: true
+        default: pr-plugins-3.1.1.4884
+      plugins:
+        description: Comma-separated plugins to test
+        required: true
+        default: Qobuzarr,Tidalarr,Brainarr
+      run_search_gate:
+        description: Run Search + AlbumSearch gates (requires indexer credentials)
+        type: boolean
+        required: true
+        default: false
+      run_grab_gate:
+        description: Run Grab gate (requires indexer + download client credentials)
+        type: boolean
+        required: true
+        default: false
+      run_importlist_gate:
+        description: Run ImportList gate (Brainarr LLM sync)
+        type: boolean
+        required: true
+        default: false
+      run_brainarr_llm_gate:
+        description: Run Brainarr LLM functional gate (proof-of-life + sync test)
+        type: boolean
+        required: false
+        default: false
+      strict_brainarr:
+        description: Fail (not skip) if LLM endpoint unreachable
+        type: boolean
+        required: false
+        default: false
+      brainarr_sync_timeout_sec:
+        description: Timeout in seconds for Brainarr LLM sync (default 120, increase for slow endpoints)
+        type: number
+        required: false
+        default: 120
+      validate_metadata:
+        description: Validate audio file metadata after grab (requires python3 + mutagen)
+        type: boolean
+        required: true
+        default: false
+      force_config_update:
+        description: Force update all fields (blast and converge mode)
+        type: boolean
+        required: true
+        default: false
+      upload_diagnostics_on_success:
+        description: Upload diagnostics bundle even on success (for debugging)
+        type: boolean
+        required: false
+        default: false
+      cold_start:
+        description: Cold-start mode - fresh config dir, proves Configure gate works from scratch
+        type: boolean
+        required: false
+        default: false
+      post_restart_grab:
+        description: Run full grab cycle after restart to prove tokens survive and downloads work
+        type: boolean
+        required: false
+        default: false
+      post_restart_grab_timeout_min:
+        description: Timeout in minutes for post-restart grab (default 12)
+        type: number
+        required: false
+        default: 12
+      run_canary:
+        description: Run canary job against latest pr-plugins tag (non-blocking, catches host regressions)
+        type: boolean
+        required: false
+        default: false
+      canary_level:
+        description: Canary test depth (configure=fast smoke test, search=includes Search/AlbumSearch gates)
+        type: choice
+        required: false
+        default: configure
+        options:
+          - configure
+          - search
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+  # Workflow inputs as env vars (safe pattern for shell usage)
+  INPUT_LIDARR_TAG: ${{ inputs.lidarr_tag }}
+  INPUT_PLUGINS: ${{ inputs.plugins }}
+  INPUT_RUN_SEARCH_GATE: ${{ inputs.run_search_gate }}
+  INPUT_RUN_GRAB_GATE: ${{ inputs.run_grab_gate }}
+  INPUT_RUN_IMPORTLIST_GATE: ${{ inputs.run_importlist_gate }}
+  INPUT_RUN_BRAINARR_LLM_GATE: ${{ inputs.run_brainarr_llm_gate }}
+  INPUT_STRICT_BRAINARR: ${{ inputs.strict_brainarr }}
+  INPUT_BRAINARR_SYNC_TIMEOUT_SEC: ${{ inputs.brainarr_sync_timeout_sec }}
+  INPUT_VALIDATE_METADATA: ${{ inputs.validate_metadata }}
+  INPUT_FORCE_CONFIG_UPDATE: ${{ inputs.force_config_update }}
+  INPUT_COLD_START: ${{ inputs.cold_start }}
+  INPUT_POST_RESTART_GRAB: ${{ inputs.post_restart_grab }}
+  INPUT_POST_RESTART_GRAB_TIMEOUT_MIN: ${{ inputs.post_restart_grab_timeout_min }}
+  INPUT_CANARY_LEVEL: ${{ inputs.canary_level }}
+
+jobs:
+  bootstrap:
+    name: Bootstrap
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "PowerShell already installed"
+            exit 0
+          fi
+          . /etc/os-release || true
+          CODENAME=${VERSION_CODENAME:-"jammy"}
+          curl -fsSL "https://packages.microsoft.com/config/ubuntu/$CODENAME/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb \
+            || curl -fsSL "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb
+          sudo dpkg -i packages-microsoft-prod.deb
+          sudo apt-get update
+          sudo apt-get install -y powershell
+
+      # =========================================================================
+      # PRE-FLIGHT: Redaction Self-Test
+      # Ensures secrets won't leak in diagnostics bundles before we proceed
+      # =========================================================================
+      - name: Redaction self-test
+        shell: pwsh
+        run: |
+          Import-Module "$env:GITHUB_WORKSPACE/scripts/lib/e2e-diagnostics.psm1" -Force
+          try {
+            $result = Test-SecretRedaction
+            if ($result) {
+              Write-Host "PASS: Redaction self-test passed" -ForegroundColor Green
+            } else {
+              throw "Redaction self-test returned false"
+            }
+          } catch {
+            Write-Host "FAIL: Redaction self-test failed: $_" -ForegroundColor Red
+            Write-Host "Refusing to run gates until redaction is fixed." -ForegroundColor Yellow
+            exit 1
+          }
+
+      # =========================================================================
+      # PREFLIGHT: Validate required secrets are present
+      # =========================================================================
+      - name: Validate secrets
+        shell: bash
+        env:
+          # Qobuzarr credentials (masked automatically by GitHub)
+          QOBUZARR_AUTH_TOKEN: ${{ secrets.QOBUZARR_AUTH_TOKEN }}
+          QOBUZARR_USER_ID: ${{ secrets.QOBUZARR_USER_ID }}
+          QOBUZ_AUTH_TOKEN: ${{ secrets.QOBUZ_AUTH_TOKEN }}
+          QOBUZ_USER_ID: ${{ secrets.QOBUZ_USER_ID }}
+          # Tidalarr credentials
+          TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
+          TIDALARR_CONFIG_PATH: ${{ secrets.TIDALARR_CONFIG_PATH }}
+          TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
+          # Brainarr credentials
+          BRAINARR_LLM_BASE_URL: ${{ secrets.BRAINARR_LLM_BASE_URL }}
+          # Cross-repo PAT for private plugin repos
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          set -euo pipefail
+
+          # Mask secrets explicitly (GitHub does this, but belt-and-suspenders)
+          echo "::add-mask::${QOBUZARR_AUTH_TOKEN:-}"
+          echo "::add-mask::${QOBUZ_AUTH_TOKEN:-}"
+          echo "::add-mask::${TIDALARR_REDIRECT_URL:-}"
+          echo "::add-mask::${TIDAL_REDIRECT_URL:-}"
+          echo "::add-mask::${BRAINARR_LLM_BASE_URL:-}"
+          echo "::add-mask::${CROSS_REPO_PAT:-}"
+
+          # Check CROSS_REPO_PAT (required for private plugin repos)
+          if [[ -z "${CROSS_REPO_PAT:-}" ]]; then
+            echo "::error::CROSS_REPO_PAT secret is required to checkout private plugin repos"
+            exit 1
+          fi
+
+          # Check plugin-specific credentials based on which gates are enabled
+          if [[ "$INPUT_RUN_SEARCH_GATE" == "true" || "$INPUT_RUN_GRAB_GATE" == "true" ]]; then
+            # Check Qobuzarr credentials
+            if [[ "$INPUT_PLUGINS" == *"Qobuzarr"* ]]; then
+              has_qobuz=false
+              if [[ -n "${QOBUZARR_AUTH_TOKEN:-}" || -n "${QOBUZ_AUTH_TOKEN:-}" ]]; then
+                has_qobuz=true
+              fi
+              if [[ "$has_qobuz" != "true" ]]; then
+                echo "::warning::Qobuzarr credentials missing - Qobuzarr gates will SKIP"
+              fi
+            fi
+
+            # Check Tidalarr credentials
+            if [[ "$INPUT_PLUGINS" == *"Tidalarr"* ]]; then
+              has_tidal=false
+              if [[ -n "${TIDALARR_REDIRECT_URL:-}" || -n "${TIDAL_REDIRECT_URL:-}" || -n "${TIDALARR_CONFIG_PATH:-}" ]]; then
+                has_tidal=true
+              fi
+              if [[ "$has_tidal" != "true" ]]; then
+                echo "::warning::Tidalarr credentials missing - Tidalarr gates will SKIP"
+              fi
+            fi
+          fi
+
+          # Check Brainarr credentials for ImportList gate
+          if [[ "$INPUT_RUN_IMPORTLIST_GATE" == "true" && "$INPUT_PLUGINS" == *"Brainarr"* ]]; then
+            if [[ -z "${BRAINARR_LLM_BASE_URL:-}" ]]; then
+              echo "::warning::BRAINARR_LLM_BASE_URL missing - Brainarr ImportList gate will SKIP"
+            fi
+          fi
+
+          echo "Secret validation complete"
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Checkout Qobuzarr
+        if: contains(inputs.plugins, 'Qobuzarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Qobuzarr
+          ref: main
+          path: qobuzarr
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          submodules: recursive
+
+      - name: Checkout Tidalarr
+        if: contains(inputs.plugins, 'Tidalarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Tidalarr
+          ref: main
+          path: tidalarr
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          submodules: recursive
+
+      - name: Checkout Brainarr
+        if: contains(inputs.plugins, 'Brainarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Brainarr
+          ref: main
+          path: brainarr
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          submodules: recursive
+
+      - name: Pull Lidarr Docker image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/hotio/lidarr:${INPUT_LIDARR_TAG}"
+          echo "Pulling $IMAGE..."
+
+          n=0
+          until [ "$n" -ge 3 ]; do
+            docker pull "$IMAGE" && break
+            n=$((n+1))
+            echo "Pull failed ($n/3). Retrying in 10s..." && sleep 10
+          done
+
+          if ! docker images --format '{{.Repository}}:{{.Tag}}' | grep -qF "ghcr.io/hotio/lidarr:${INPUT_LIDARR_TAG}"; then
+            echo "::error::Failed to pull Docker image after 3 attempts"
+            exit 1
+          fi
+
+      - name: Extract Lidarr assemblies
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/hotio/lidarr:${INPUT_LIDARR_TAG}"
+
+          echo "Creating temporary container..."
+          cid=$(docker create "$IMAGE")
+
+          echo "Extracting assemblies..."
+          mkdir -p _lidarr_extracted
+          docker cp "$cid:/app" _lidarr_extracted/ 2>/dev/null || docker cp "$cid:/opt/lidarr" _lidarr_extracted/ 2>/dev/null || {
+            echo "::error::Could not extract from /app or /opt/lidarr"
+            docker rm "$cid" >/dev/null
+            exit 1
+          }
+          docker rm "$cid" >/dev/null
+
+          # Copy to plugin ext directories
+          for plugin_dir in qobuzarr tidalarr brainarr; do
+            if [ -d "$plugin_dir" ]; then
+              mkdir -p "$plugin_dir/ext/Lidarr/_output/net8.0"
+              find _lidarr_extracted -type f -name "*.dll" -exec cp {} "$plugin_dir/ext/Lidarr/_output/net8.0/" \;
+            fi
+          done
+
+          rm -rf _lidarr_extracted
+          echo "Assembly extraction complete"
+
+      - name: Sync tools to plugin submodules
+        shell: bash
+        run: |
+          set -euo pipefail
+          for plugin_dir in qobuzarr tidalarr brainarr; do
+            submod="$plugin_dir/ext/Lidarr.Plugin.Common"
+            if [ -d "$submod" ]; then
+              echo "Syncing tools to $submod..."
+              [ -d "tools" ] && rm -rf "$submod/tools" && cp -r tools "$submod/tools"
+              [ -d "build" ] && rm -rf "$submod/build" && cp -r build "$submod/build"
+              [ -d "scripts" ] && rm -rf "$submod/scripts" && cp -r scripts "$submod/scripts"
+            fi
+          done
+
+      - name: Build plugin packages
+        shell: pwsh
+        run: |
+          $plugins = $env:INPUT_PLUGINS -split ','
+
+          foreach ($plugin in $plugins) {
+            $pluginLower = $plugin.Trim().ToLower()
+            $pluginDir = "./$pluginLower"
+
+            if (-not (Test-Path $pluginDir)) {
+              Write-Host "::warning::Plugin directory $pluginDir not found, skipping build"
+              continue
+            }
+
+            Write-Host "Building $plugin..." -ForegroundColor Cyan
+            Push-Location $pluginDir
+            try {
+              if (Test-Path "build.ps1") {
+                ./build.ps1 -Configuration Release -Restore -Package
+              } else {
+                Import-Module "../tools/PluginPack.psm1" -Force
+                $csproj = Get-ChildItem -Filter "*.csproj" | Where-Object { $_.Name -notmatch "Tests" } | Select-Object -First 1
+                if ($csproj) {
+                  New-PluginPackage -Csproj $csproj.Name -Manifest "plugin.json" -MergeAssemblies -Framework "net8.0" -Configuration Release
+                }
+              }
+              if ($LASTEXITCODE -ne 0) { throw "$plugin build failed" }
+            } finally {
+              Pop-Location
+            }
+          }
+
+      - name: Locate plugin zips and create manifest
+        id: locate-plugins
+        shell: pwsh
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          $manifest = @{
+            timestamp = (Get-Date -Format "o")
+            run_id = $env:GITHUB_RUN_ID
+            lidarr_tag = $env:INPUT_LIDARR_TAG
+            plugins = @{}
+            gates = @{
+              search = $env:INPUT_RUN_SEARCH_GATE -eq "true"
+              grab = $env:INPUT_RUN_GRAB_GATE -eq "true"
+              importlist = $env:INPUT_RUN_IMPORTLIST_GATE -eq "true"
+              validate_metadata = $env:INPUT_VALIDATE_METADATA -eq "true"
+              force_config_update = $env:INPUT_FORCE_CONFIG_UPDATE -eq "true"
+            }
+          }
+
+          function Find-PluginZip {
+            param([string]$PluginDir, [string]$Pattern)
+            $zips = Get-ChildItem -Path $PluginDir -Recurse -Filter "*.zip" -ErrorAction SilentlyContinue |
+              Where-Object { $_.FullName -notmatch '[\\/](\.git|ext|obj)[\\/]' -and $_.Name -match $Pattern } |
+              Sort-Object LastWriteTimeUtc -Descending
+            return $zips | Select-Object -First 1
+          }
+
+          $plugins = $env:INPUT_PLUGINS -split ','
+          $pluginZips = @()
+
+          foreach ($plugin in $plugins) {
+            $pluginName = $plugin.Trim()
+            $pluginDir = "./$($pluginName.ToLower())"
+
+            if (Test-Path $pluginDir) {
+              $zip = Find-PluginZip -PluginDir $pluginDir -Pattern $pluginName
+              if ($zip) {
+                $pluginZips += "$pluginName=$($zip.FullName)"
+                $manifest.plugins[$pluginName] = @{
+                  zip = $zip.FullName
+                  size = $zip.Length
+                }
+                Write-Host "$pluginName zip: $($zip.FullName)"
+              } else {
+                Write-Host "::warning::No zip found for $pluginName"
+              }
+            }
+          }
+
+          # Save manifest
+          $manifest | ConvertTo-Json -Depth 5 | Set-Content -Path "run-manifest.json"
+
+          # Export for later steps
+          $pluginZipList = $pluginZips -join ","
+          "PLUGIN_ZIPS=$pluginZipList" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # =========================================================================
+      # COLD-START CLEANUP: Remove stale config-cold-* directories
+      # Safety: Only deletes under .e2e-bootstrap/ with config-cold- prefix
+      # =========================================================================
+      - name: Cleanup stale cold-start configs
+        shell: bash
+        run: |
+          # Clean up any leftover cold-start config directories from previous runs
+          # SAFETY: Anchored to .e2e-bootstrap/ and requires config-cold- prefix
+          BASE_DIR=".e2e-bootstrap"
+          if [ -d "$BASE_DIR" ]; then
+            # Double-check we're in the right place
+            if [[ "$(pwd)" != *".e2e-bootstrap"* ]]; then
+              old_count=$(find "$BASE_DIR" -maxdepth 1 -type d -name 'config-cold-*' 2>/dev/null | wc -l)
+              if [ "$old_count" -gt 0 ]; then
+                echo "Removing $old_count stale cold-start config directories..."
+                # Only remove directories matching exact pattern under BASE_DIR
+                find "$BASE_DIR" -maxdepth 1 -type d -name 'config-cold-*' -exec rm -rf {} + 2>/dev/null || true
+              fi
+            fi
+          fi
+
+      - name: Start Lidarr container
+        id: start-container
+        shell: bash
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          set -euo pipefail
+
+          CONTAINER_NAME="lidarr-e2e-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+
+          # Cold-start mode: use unique GUID-based config to prove Configure gate works from scratch
+          if [[ "${INPUT_COLD_START:-false}" == "true" ]]; then
+            CONFIG_GUID=$(uuidgen | tr -d '-' | head -c 12)
+            CONFIG_DIR=".e2e-bootstrap/config-cold-${CONFIG_GUID}"
+            echo "::notice::COLD-START MODE: Using fresh config dir $CONFIG_DIR"
+            echo "E2E_COLD_START=true" >> $GITHUB_ENV
+            echo "E2E_CONFIG_DIR=$CONFIG_DIR" >> $GITHUB_ENV
+          else
+            CONFIG_DIR=".e2e-bootstrap/config"
+            echo "E2E_COLD_START=false" >> $GITHUB_ENV
+            echo "E2E_CONFIG_DIR=$CONFIG_DIR" >> $GITHUB_ENV
+          fi
+
+          # Create directories (fresh for cold-start, reused otherwise)
+          mkdir -p "$CONFIG_DIR" .e2e-bootstrap/downloads .e2e-bootstrap/plugins
+
+          # Copy plugin zips to plugins directory
+          IFS=',' read -ra ZIPS <<< "$PLUGIN_ZIPS"
+          for entry in "${ZIPS[@]}"; do
+            plugin_name="${entry%%=*}"
+            zip_path="${entry#*=}"
+            if [ -f "$zip_path" ]; then
+              cp "$zip_path" ".e2e-bootstrap/plugins/"
+              echo "Copied $plugin_name zip"
+            fi
+          done
+
+          # Start container with dynamic config dir (cold-start uses unique path)
+          docker run -d \
+            --name "$CONTAINER_NAME" \
+            -p 8686:8686 \
+            -v "$(pwd)/${CONFIG_DIR}:/config" \
+            -v "$(pwd)/.e2e-bootstrap/downloads:/downloads" \
+            -v "$(pwd)/.e2e-bootstrap/plugins:/plugins" \
+            -e PUID=1000 \
+            -e PGID=1000 \
+            "ghcr.io/hotio/lidarr:${INPUT_LIDARR_TAG}"
+
+          echo "Waiting for Lidarr to start..."
+          sleep 10
+
+          # Install plugins
+          for zip in .e2e-bootstrap/plugins/*.zip; do
+            if [ -f "$zip" ]; then
+              docker exec "$CONTAINER_NAME" sh -c "unzip -o /plugins/$(basename "$zip") -d /config/plugins/" || true
+            fi
+          done
+
+          # Restart to load plugins
+          docker restart "$CONTAINER_NAME"
+          sleep 15
+
+          # Wait for API
+          n=0
+          until [ "$n" -ge 30 ]; do
+            if curl -s "http://localhost:8686/api/v1/system/status" >/dev/null 2>&1; then
+              echo "Lidarr API is ready"
+              break
+            fi
+            n=$((n+1))
+            echo "Waiting for API ($n/30)..."
+            sleep 2
+          done
+
+      - name: Extract API key
+        id: api-key
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Extract API key from container config
+          API_KEY=$(docker exec "$CONTAINER_NAME" cat /config/config.xml 2>/dev/null | grep -oP '(?<=<ApiKey>)[^<]+' || true)
+
+          if [ -z "$API_KEY" ]; then
+            echo "::error::Could not extract API key from container"
+            exit 1
+          fi
+
+          # Mask the API key
+          echo "::add-mask::$API_KEY"
+          echo "LIDARR_API_KEY=$API_KEY" >> $GITHUB_ENV
+          echo "API key extracted successfully"
+
+      # =========================================================================
+      # RUN E2E GATES
+      # =========================================================================
+      - name: Run E2E gates
+        id: run-gates
+        shell: pwsh
+        env:
+          # Qobuzarr credentials
+          QOBUZARR_AUTH_TOKEN: ${{ secrets.QOBUZARR_AUTH_TOKEN }}
+          QOBUZARR_USER_ID: ${{ secrets.QOBUZARR_USER_ID }}
+          QOBUZARR_COUNTRY_CODE: ${{ secrets.QOBUZARR_COUNTRY_CODE }}
+          QOBUZ_AUTH_TOKEN: ${{ secrets.QOBUZ_AUTH_TOKEN }}
+          QOBUZ_USER_ID: ${{ secrets.QOBUZ_USER_ID }}
+          QOBUZ_COUNTRY_CODE: ${{ secrets.QOBUZ_COUNTRY_CODE }}
+          # Tidalarr credentials
+          TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
+          TIDALARR_CONFIG_PATH: ${{ secrets.TIDALARR_CONFIG_PATH }}
+          TIDALARR_MARKET: ${{ secrets.TIDALARR_MARKET }}
+          TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
+          TIDAL_MARKET: ${{ secrets.TIDAL_MARKET }}
+          # Brainarr LLM credentials
+          BRAINARR_LLM_BASE_URL: ${{ secrets.BRAINARR_LLM_BASE_URL }}
+          BRAINARR_MODEL_ID: ${{ secrets.BRAINARR_MODEL_ID }}
+          BRAINARR_MODEL: ${{ secrets.BRAINARR_MODEL }}
+          BRAINARR_PROVIDER: ${{ secrets.BRAINARR_PROVIDER }}
+        run: |
+          # Set gate configuration from inputs
+          if ($env:INPUT_VALIDATE_METADATA -eq "true") {
+            $env:E2E_VALIDATE_METADATA = "1"
+          }
+          if ($env:INPUT_FORCE_CONFIG_UPDATE -eq "true") {
+            $env:E2E_FORCE_CONFIG_UPDATE = "1"
+          }
+
+          # Determine gate to run
+          $gate = "configure"  # Always start with configure
+
+          if ($env:INPUT_RUN_SEARCH_GATE -eq "true") {
+            $gate = "all"  # 'all' includes search, albumsearch, grab
+          }
+          if ($env:INPUT_RUN_IMPORTLIST_GATE -eq "true" -and $gate -eq "configure") {
+            $gate = "importlist"
+          }
+          if ($env:INPUT_RUN_GRAB_GATE -eq "true") {
+            $gate = "all"
+          }
+
+          Write-Host "Running E2E gates: $gate" -ForegroundColor Cyan
+          Write-Host "Plugins: $env:INPUT_PLUGINS" -ForegroundColor Gray
+
+          $params = @{
+            Plugins = $env:INPUT_PLUGINS
+            Gate = $gate
+            LidarrUrl = "http://localhost:8686"
+            ApiKey = $env:LIDARR_API_KEY
+            ContainerName = $env:CONTAINER_NAME
+            DiagnosticsPath = "./.e2e-bootstrap/diagnostics"
+          }
+
+          if ($env:INPUT_VALIDATE_METADATA -eq "true") {
+            $params.ValidateMetadata = $true
+          }
+
+          if ($env:INPUT_FORCE_CONFIG_UPDATE -eq "true") {
+            $params.ForceConfigUpdate = $true
+          }
+
+          if ($env:INPUT_POST_RESTART_GRAB -eq "true") {
+            $params.PostRestartGrab = $true
+            $timeoutMin = [int]$env:INPUT_POST_RESTART_GRAB_TIMEOUT_MIN
+            if ($timeoutMin -gt 0) {
+              $params.PostRestartGrabTimeoutMin = $timeoutMin
+            }
+          }
+
+          if ($env:INPUT_RUN_BRAINARR_LLM_GATE -eq "true" -or $env:BRAINARR_LLM_BASE_URL) {
+            $params.RunBrainarrLLMGate = $true
+            if ($env:BRAINARR_LLM_BASE_URL) {
+              $params.BrainarrLLMBaseUrl = $env:BRAINARR_LLM_BASE_URL
+            }
+            if ($env:BRAINARR_MODEL_ID) {
+              $params.BrainarrModelId = $env:BRAINARR_MODEL_ID
+            }
+            if ($env:INPUT_STRICT_BRAINARR -eq "true") {
+              $params.StrictBrainarr = $true
+            }
+            $syncTimeout = [int]$env:INPUT_BRAINARR_SYNC_TIMEOUT_SEC
+            if ($syncTimeout -gt 0) {
+              $params.BrainarrSyncTimeoutSec = $syncTimeout
+            }
+          }
+
+          # Run the e2e-runner
+          try {
+            & ./scripts/e2e-runner.ps1 @params
+            $exitCode = $LASTEXITCODE
+          } catch {
+            Write-Host "::error::E2E runner threw exception: $_"
+            $exitCode = 1
+          }
+
+          if ($exitCode -ne 0) {
+            Write-Host "::error::E2E gates failed with exit code $exitCode"
+            exit $exitCode
+          }
+
+          Write-Host "E2E gates completed successfully" -ForegroundColor Green
+
+      # =========================================================================
+      # JOB SUMMARY: Parse v1.2 manifest for first-pass triage (best-effort)
+      # =========================================================================
+      - name: Generate job summary
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          E2E_COLD_START: ${{ env.E2E_COLD_START }}
+        run: |
+          # Best-effort summary generation - never fail the build
+          $ErrorActionPreference = 'Continue'
+          $manifestPath = ".e2e-bootstrap/diagnostics/run-manifest.json"
+          $summaryFile = $env:GITHUB_STEP_SUMMARY
+          $artifactUrl = "$($env:GITHUB_SERVER_URL)/$($env:GITHUB_REPOSITORY)/actions/runs/$($env:GITHUB_RUN_ID)"
+
+          function Write-FallbackSummary {
+            param([string]$Title, [string]$Message)
+            $sb = [System.Text.StringBuilder]::new()
+            [void]$sb.AppendLine("## :warning: $Title")
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine($Message)
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine("### Next Steps")
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine("1. Check the [workflow logs]($artifactUrl) for error details")
+            [void]$sb.AppendLine("2. Download the ``e2e-diagnostics`` artifact for full context")
+            [void]$sb.AppendLine("3. Look for ``run-manifest.json`` in the diagnostics bundle")
+            $sb.ToString() | Out-File -FilePath $summaryFile -Encoding utf8
+          }
+
+          # Check if manifest exists
+          if (-not (Test-Path $manifestPath)) {
+            Write-FallbackSummary -Title "E2E Run Manifest Not Found" -Message "The run manifest was not generated. This usually means the runner failed before completing or crashed during execution."
+            Write-Host "::warning::Run manifest not found at $manifestPath"
+            exit 0
+          }
+
+          # Check if manifest is empty or too small
+          $fileInfo = Get-Item $manifestPath
+          if ($fileInfo.Length -lt 50) {
+            Write-FallbackSummary -Title "E2E Run Manifest Empty/Corrupt" -Message "The run manifest exists but appears to be empty or corrupt (size: $($fileInfo.Length) bytes)."
+            Write-Host "::warning::Run manifest too small: $($fileInfo.Length) bytes"
+            exit 0
+          }
+
+          try {
+            $rawJson = Get-Content $manifestPath -Raw
+            $manifest = $rawJson | ConvertFrom-Json
+
+            # Validate required fields exist (backward compat check)
+            if (-not $manifest.schemaVersion) {
+              Write-FallbackSummary -Title "E2E Run Manifest Invalid" -Message "The run manifest is missing required field ``schemaVersion``. This may be a v1.0 manifest or corrupt file."
+              exit 0
+            }
+
+            $sb = [System.Text.StringBuilder]::new()
+
+            # Header with overall status
+            $statusEmoji = if ($manifest.summary.overallSuccess) { ":white_check_mark:" } else { ":x:" }
+            $statusText = if ($manifest.summary.overallSuccess) { "PASSED" } else { "FAILED" }
+
+            [void]$sb.AppendLine("## $statusEmoji E2E Bootstrap: $statusText")
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine("| Metric | Value |")
+            [void]$sb.AppendLine("|--------|-------|")
+            [void]$sb.AppendLine("| Schema Version | ``$($manifest.schemaVersion)`` |")
+            [void]$sb.AppendLine("| Lidarr | ``$($manifest.lidarr.version ?? 'n/a')`` @ ``$($manifest.lidarr.branch ?? 'n/a')`` |")
+            [void]$sb.AppendLine("| Image | ``$($manifest.lidarr.imageTag ?? 'n/a')`` |")
+            $durationSec = if ($manifest.summary.totalDurationMs) { [math]::Round($manifest.summary.totalDurationMs / 1000, 1) } else { 0 }
+            [void]$sb.AppendLine("| Duration | ${durationSec}s |")
+            if ($env:E2E_COLD_START -eq 'true') {
+              [void]$sb.AppendLine("| Mode | :snowflake: **Cold Start** (fresh config) |")
+            }
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine("### Gate Results")
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine("| Gate | Plugin | Outcome | Duration |")
+            [void]$sb.AppendLine("|------|--------|---------|----------|")
+
+            if ($manifest.results) {
+              foreach ($result in $manifest.results) {
+                $outcomeEmoji = switch ($result.outcome) {
+                  "success" { ":white_check_mark:" }
+                  "failed" { ":x:" }
+                  "skipped" { ":fast_forward:" }
+                  default { ":question:" }
+                }
+                $duration = if ($result.durationMs) { "$([math]::Round($result.durationMs / 1000, 1))s" } else { "n/a" }
+                [void]$sb.AppendLine("| $($result.gate ?? 'unknown') | $($result.plugin ?? 'unknown') | $outcomeEmoji $($result.outcome ?? 'unknown') | $duration |")
+              }
+
+              # Failed gates detail section with action hints
+              $failedGates = @($manifest.results | Where-Object { $_.outcome -eq "failed" })
+              if ($failedGates.Count -gt 0) {
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("### :x: Failed Gates")
+
+                # Action hint lookup based on error codes
+                $actionHints = @{
+                  'E2E_AUTH_MISSING'         = ':key: **Action:** Set the required secrets in repository settings'
+                  'E2E_API_TIMEOUT'          = ':hourglass: **Action:** Check network connectivity or increase timeout'
+                  'E2E_NO_RELEASES_ATTRIBUTED' = ':cd: **Action:** Verify indexer credentials and search query'
+                  'E2E_QUEUE_NOT_FOUND'      = ':inbox_tray: **Action:** Check download client configuration'
+                  'E2E_ZERO_AUDIO_FILES'     = ':musical_note: **Action:** Verify download completed with audio files'
+                  'E2E_METADATA_MISSING'     = ':label: **Action:** Check plugin metadata extraction logic'
+                  'E2E_DOCKER_UNAVAILABLE'   = ':whale: **Action:** Ensure Docker daemon is running'
+                  'E2E_CONFIG_INVALID'       = ':gear: **Action:** Review plugin configuration settings'
+                  'E2E_IMPORT_FAILED'        = ':package: **Action:** Check import paths and permissions'
+                }
+
+                foreach ($failed in $failedGates) {
+                  [void]$sb.AppendLine("")
+                  [void]$sb.AppendLine("**$($failed.gate) ($($failed.plugin))**")
+                  if ($failed.errorCode) {
+                    [void]$sb.AppendLine("- Error Code: ``$($failed.errorCode)``")
+                    # Add action hint if available
+                    if ($actionHints.ContainsKey($failed.errorCode)) {
+                      [void]$sb.AppendLine("- $($actionHints[$failed.errorCode])")
+                    }
+                  }
+                  if ($failed.outcomeReason) {
+                    [void]$sb.AppendLine("- Reason: $($failed.outcomeReason)")
+                  }
+                  if ($failed.errors -and $failed.errors.Count -gt 0) {
+                    [void]$sb.AppendLine("- Errors:")
+                    foreach ($err in $failed.errors | Select-Object -First 3) {
+                      [void]$sb.AppendLine("  - ``$err``")
+                    }
+                  }
+                }
+
+                # Host bug detection action hints
+                if ($manifest.hostBugSuspected -and $manifest.hostBugSuspected.detected) {
+                  $hostHint = switch ($manifest.hostBugSuspected.classification) {
+                    'ALC'              { ':rotating_light: **Action:** Report to Lidarr maintainers - this is a host runtime bug' }
+                    'ABI_MISMATCH'     { ':hammer: **Action:** Rebuild plugins against the current host version' }
+                    'DEPENDENCY_DRIFT' { ':link: **Action:** Check assembly binding redirects or update dependencies' }
+                    'LOAD_FAILURE'     { ':mag: **Action:** Investigate assembly loading - check paths and permissions' }
+                    'TYPE_INIT_FAILURE' { ':warning: **Action:** Check static constructors and configuration loading' }
+                    default            { ':grey_question: **Action:** Investigate assembly loading issues' }
+                  }
+                  [void]$sb.AppendLine("")
+                  [void]$sb.AppendLine("### :rotating_light: Host Issue Detected")
+                  [void]$sb.AppendLine("- Classification: ``$($manifest.hostBugSuspected.classification)``")
+                  [void]$sb.AppendLine("- Severity: ``$($manifest.hostBugSuspected.severity)``")
+                  [void]$sb.AppendLine("- $hostHint")
+                }
+              }
+
+              # Skipped gates section
+              $skippedGates = @($manifest.results | Where-Object { $_.outcome -eq "skipped" })
+              if ($skippedGates.Count -gt 0) {
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("### :fast_forward: Skipped Gates")
+                foreach ($skipped in $skippedGates) {
+                  $reason = if ($skipped.outcomeReason) { $skipped.outcomeReason } else { "No reason provided" }
+                  [void]$sb.AppendLine("- **$($skipped.gate) ($($skipped.plugin))**: $reason")
+                }
+              }
+            }
+
+            # Stop reason if present (v1.2+)
+            if ($manifest.effective -and $manifest.effective.stopReason) {
+              [void]$sb.AppendLine("")
+              [void]$sb.AppendLine("### :stop_sign: Pipeline Stopped")
+              [void]$sb.AppendLine("Reason: $($manifest.effective.stopReason)")
+            }
+
+            # Sources section (collapsed, v1.2+)
+            if ($manifest.sources) {
+              [void]$sb.AppendLine("")
+              [void]$sb.AppendLine("<details>")
+              [void]$sb.AppendLine("<summary>Source Versions</summary>")
+              [void]$sb.AppendLine("")
+              [void]$sb.AppendLine("| Repo | SHA | Source |")
+              [void]$sb.AppendLine("|------|-----|--------|")
+              foreach ($repo in @('common', 'qobuzarr', 'tidalarr', 'brainarr')) {
+                $src = $manifest.sources.$repo
+                $sha = if ($src -and $src.sha) { $src.sha } else { "n/a" }
+                $prov = if ($src -and $src.source) { $src.source } else { "unknown" }
+                [void]$sb.AppendLine("| $repo | ``$sha`` | $prov |")
+              }
+              [void]$sb.AppendLine("")
+              [void]$sb.AppendLine("</details>")
+            }
+
+            # Artifact link
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine("---")
+            [void]$sb.AppendLine(":package: [View full artifacts]($artifactUrl)")
+
+            $sb.ToString() | Out-File -FilePath $summaryFile -Encoding utf8
+            Write-Host "Job summary generated successfully"
+
+          } catch {
+            Write-Host "::warning::Failed to parse run manifest: $_"
+            Write-FallbackSummary -Title "Error Parsing Run Manifest" -Message "Failed to parse the run manifest JSON: ``$_``"
+          }
+
+      # =========================================================================
+      # ALWAYS COLLECT DIAGNOSTICS (on success or failure)
+      # =========================================================================
+      - name: Collect container diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p .e2e-bootstrap/diagnostics
+
+          echo "::group::Container status"
+          docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Image}}" | tee .e2e-bootstrap/diagnostics/containers.txt
+          echo "::endgroup::"
+
+          if docker ps -a --format '{{.Names}}' | grep -qF "$CONTAINER_NAME"; then
+            echo "::group::Container logs"
+            docker logs "$CONTAINER_NAME" --tail 5000 2>&1 | tee .e2e-bootstrap/diagnostics/container.log
+            echo "::endgroup::"
+
+            echo "::group::Container inspect"
+            docker inspect "$CONTAINER_NAME" > .e2e-bootstrap/diagnostics/inspect.json 2>&1
+            echo "::endgroup::"
+
+            # Stop and remove container
+            docker rm -f "$CONTAINER_NAME" || true
+          fi
+
+      - name: Upload run manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: run-manifest
+          path: run-manifest.json
+          if-no-files-found: warn
+
+      - name: Upload diagnostics bundle
+        if: failure() || inputs.upload_diagnostics_on_success
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-diagnostics-${{ github.run_id }}
+          path: |
+            .e2e-bootstrap/diagnostics/
+            .e2e-bootstrap/config*/logs/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload plugin zips (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-packages
+          path: |
+            qobuzarr/**/*.zip
+            tidalarr/**/*.zip
+            brainarr/**/*.zip
+          if-no-files-found: warn
+
+      # =========================================================================
+      # FINAL CLEANUP: Remove cold-start config dir (diagnostics already captured)
+      # Safety: Validates path contains expected prefix before deletion
+      # =========================================================================
+      - name: Cleanup cold-start config
+        if: always() && env.E2E_COLD_START == 'true'
+        shell: bash
+        run: |
+          # Remove this run's cold-start config directory (logs already in diagnostics artifact)
+          # SAFETY: Only delete if path is anchored to .e2e-bootstrap/ AND contains config-cold-
+          CONFIG_DIR="${E2E_CONFIG_DIR:-}"
+          if [ -n "$CONFIG_DIR" ] && [ -d "$CONFIG_DIR" ]; then
+            # Validate path structure before deletion
+            if [[ "$CONFIG_DIR" == .e2e-bootstrap/config-cold-* ]]; then
+              echo "Cleaning up cold-start config: $CONFIG_DIR"
+              rm -rf "$CONFIG_DIR"
+            else
+              echo "::warning::Skipping cleanup - path does not match expected pattern: $CONFIG_DIR"
+            fi
+          fi
+
+  # ===========================================================================
+  # CANARY JOB: Test against latest pr-plugins tag (non-blocking)
+  # Catches host regressions early by testing the moving tag
+  # ===========================================================================
+  canary:
+    name: Canary (pr-plugins latest)
+    if: inputs.run_canary == true
+    runs-on: ubuntu-latest
+    continue-on-error: true  # Never block main workflow - this is informational
+    env:
+      CANARY_TAG: pr-plugins  # Moving tag - always latest plugins branch build
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "PowerShell already installed"
+            exit 0
+          fi
+          . /etc/os-release || true
+          CODENAME=${VERSION_CODENAME:-"jammy"}
+          curl -fsSL "https://packages.microsoft.com/config/ubuntu/$CODENAME/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb \
+            || curl -fsSL "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb
+          sudo dpkg -i packages-microsoft-prod.deb
+          sudo apt-get update
+          sudo apt-get install -y powershell
+
+      - name: Redaction self-test
+        shell: pwsh
+        run: |
+          Import-Module "$env:GITHUB_WORKSPACE/scripts/lib/e2e-diagnostics.psm1" -Force
+          $result = Test-SecretRedaction
+          if (-not $result) { throw "Redaction self-test failed" }
+
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Checkout Qobuzarr
+        if: contains(inputs.plugins, 'Qobuzarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Qobuzarr
+          ref: main
+          path: qobuzarr
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          submodules: recursive
+
+      - name: Checkout Tidalarr
+        if: contains(inputs.plugins, 'Tidalarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Tidalarr
+          ref: main
+          path: tidalarr
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          submodules: recursive
+
+      - name: Checkout Brainarr
+        if: contains(inputs.plugins, 'Brainarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Brainarr
+          ref: main
+          path: brainarr
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          submodules: recursive
+
+      - name: Pull canary Lidarr image
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/hotio/lidarr:${CANARY_TAG}"
+          echo "::notice::CANARY: Testing against $IMAGE (moving tag)"
+
+          n=0
+          until [ "$n" -ge 3 ]; do
+            docker pull "$IMAGE" && break
+            n=$((n+1))
+            echo "Pull failed ($n/3). Retrying in 10s..." && sleep 10
+          done
+
+          # Extract actual image digest for reporting
+          DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null || echo "unknown")
+          echo "CANARY_DIGEST=$DIGEST" >> $GITHUB_ENV
+          echo "::notice::Canary image digest: $DIGEST"
+
+      - name: Extract Lidarr assemblies
+        shell: bash
+        run: |
+          set -euo pipefail
+          IMAGE="ghcr.io/hotio/lidarr:${CANARY_TAG}"
+          cid=$(docker create "$IMAGE")
+          mkdir -p _lidarr_extracted
+          docker cp "$cid:/app" _lidarr_extracted/ 2>/dev/null || docker cp "$cid:/opt/lidarr" _lidarr_extracted/ 2>/dev/null || {
+            docker rm "$cid" >/dev/null
+            exit 1
+          }
+          docker rm "$cid" >/dev/null
+
+          for plugin_dir in qobuzarr tidalarr brainarr; do
+            if [ -d "$plugin_dir" ]; then
+              mkdir -p "$plugin_dir/ext/Lidarr/_output/net8.0"
+              find _lidarr_extracted -type f -name "*.dll" -exec cp {} "$plugin_dir/ext/Lidarr/_output/net8.0/" \;
+            fi
+          done
+          rm -rf _lidarr_extracted
+
+      - name: Sync tools to plugin submodules
+        shell: bash
+        run: |
+          for plugin_dir in qobuzarr tidalarr brainarr; do
+            submod="$plugin_dir/ext/Lidarr.Plugin.Common"
+            if [ -d "$submod" ]; then
+              [ -d "tools" ] && rm -rf "$submod/tools" && cp -r tools "$submod/tools"
+              [ -d "build" ] && rm -rf "$submod/build" && cp -r build "$submod/build"
+              [ -d "scripts" ] && rm -rf "$submod/scripts" && cp -r scripts "$submod/scripts"
+            fi
+          done
+
+      - name: Build plugin packages
+        shell: pwsh
+        run: |
+          $plugins = $env:INPUT_PLUGINS -split ','
+          foreach ($plugin in $plugins) {
+            $pluginLower = $plugin.Trim().ToLower()
+            $pluginDir = "./$pluginLower"
+            if (-not (Test-Path $pluginDir)) { continue }
+
+            Push-Location $pluginDir
+            try {
+              if (Test-Path "build.ps1") {
+                ./build.ps1 -Configuration Release -Restore -Package
+              } else {
+                Import-Module "../tools/PluginPack.psm1" -Force
+                $csproj = Get-ChildItem -Filter "*.csproj" | Where-Object { $_.Name -notmatch "Tests" } | Select-Object -First 1
+                if ($csproj) {
+                  New-PluginPackage -Csproj $csproj.Name -Manifest "plugin.json" -MergeAssemblies -Framework "net8.0" -Configuration Release
+                }
+              }
+            } finally {
+              Pop-Location
+            }
+          }
+
+      - name: Locate plugin zips
+        id: locate-plugins
+        shell: pwsh
+        run: |
+          $plugins = $env:INPUT_PLUGINS -split ','
+          $pluginZips = @()
+          foreach ($plugin in $plugins) {
+            $pluginName = $plugin.Trim()
+            $pluginDir = "./$($pluginName.ToLower())"
+            if (Test-Path $pluginDir) {
+              $zip = Get-ChildItem -Path $pluginDir -Recurse -Filter "*.zip" -ErrorAction SilentlyContinue |
+                Where-Object { $_.FullName -notmatch '[\\/](\.git|ext|obj)[\\/]' -and $_.Name -match $pluginName } |
+                Sort-Object LastWriteTimeUtc -Descending | Select-Object -First 1
+              if ($zip) { $pluginZips += "$pluginName=$($zip.FullName)" }
+            }
+          }
+          "PLUGIN_ZIPS=$($pluginZips -join ',')" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Start canary container
+        id: start-container
+        shell: bash
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          CONTAINER_NAME="lidarr-canary-${GITHUB_RUN_ID}"
+          echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
+
+          mkdir -p .e2e-canary/config .e2e-canary/downloads .e2e-canary/plugins
+
+          IFS=',' read -ra ZIPS <<< "$PLUGIN_ZIPS"
+          for entry in "${ZIPS[@]}"; do
+            zip_path="${entry#*=}"
+            [ -f "$zip_path" ] && cp "$zip_path" ".e2e-canary/plugins/"
+          done
+
+          docker run -d \
+            --name "$CONTAINER_NAME" \
+            -p 8687:8686 \
+            -v "$(pwd)/.e2e-canary/config:/config" \
+            -v "$(pwd)/.e2e-canary/downloads:/downloads" \
+            -v "$(pwd)/.e2e-canary/plugins:/plugins" \
+            -e PUID=1000 \
+            -e PGID=1000 \
+            "ghcr.io/hotio/lidarr:${CANARY_TAG}"
+
+          sleep 10
+
+          for zip in .e2e-canary/plugins/*.zip; do
+            [ -f "$zip" ] && docker exec "$CONTAINER_NAME" sh -c "unzip -o /plugins/$(basename "$zip") -d /config/plugins/" || true
+          done
+
+          docker restart "$CONTAINER_NAME"
+          sleep 15
+
+          n=0
+          until [ "$n" -ge 30 ]; do
+            curl -s "http://localhost:8687/api/v1/system/status" >/dev/null 2>&1 && break
+            n=$((n+1))
+            sleep 2
+          done
+
+      - name: Extract API key
+        shell: bash
+        run: |
+          API_KEY=$(docker exec "$CONTAINER_NAME" cat /config/config.xml 2>/dev/null | grep -oP '(?<=<ApiKey>)[^<]+' || true)
+          [ -z "$API_KEY" ] && exit 1
+          echo "::add-mask::$API_KEY"
+          echo "LIDARR_API_KEY=$API_KEY" >> $GITHUB_ENV
+
+      - name: Run canary E2E gates
+        id: run-gates
+        shell: pwsh
+        env:
+          # Credentials for search-level canary (only used if canary_level=search)
+          QOBUZARR_AUTH_TOKEN: ${{ secrets.QOBUZARR_AUTH_TOKEN }}
+          QOBUZARR_USER_ID: ${{ secrets.QOBUZARR_USER_ID }}
+          QOBUZ_AUTH_TOKEN: ${{ secrets.QOBUZ_AUTH_TOKEN }}
+          QOBUZ_USER_ID: ${{ secrets.QOBUZ_USER_ID }}
+          TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
+          TIDALARR_CONFIG_PATH: ${{ secrets.TIDALARR_CONFIG_PATH }}
+          TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
+        run: |
+          # Determine gate based on canary_level input
+          $canaryLevel = $env:INPUT_CANARY_LEVEL
+          if ([string]::IsNullOrEmpty($canaryLevel)) { $canaryLevel = "configure" }
+
+          $gate = switch ($canaryLevel) {
+            "search" { "albumsearch" }  # Includes Schema, Configure, Search, AlbumSearch
+            default  { "configure" }     # Minimal: Schema + Configure only
+          }
+
+          Write-Host "::notice::CANARY: Running $gate gate (level=$canaryLevel) against pr-plugins (latest)" -ForegroundColor Cyan
+
+          $params = @{
+            Plugins = $env:INPUT_PLUGINS
+            Gate = $gate
+            LidarrUrl = "http://localhost:8687"
+            ApiKey = $env:LIDARR_API_KEY
+            ContainerName = $env:CONTAINER_NAME
+            DiagnosticsPath = "./.e2e-canary/diagnostics"
+          }
+
+          try {
+            & ./scripts/e2e-runner.ps1 @params
+            $exitCode = $LASTEXITCODE
+          } catch {
+            Write-Host "::warning::Canary gate threw exception: $_"
+            $exitCode = 1
+          }
+
+          if ($exitCode -ne 0) {
+            Write-Host "::warning::CANARY FAILED - Latest pr-plugins may have breaking changes"
+            Write-Host "::warning::This is non-blocking but should be investigated"
+          } else {
+            Write-Host "::notice::CANARY PASSED - Plugins compatible with latest pr-plugins"
+          }
+
+          exit $exitCode
+
+      - name: Generate canary summary
+        if: always()
+        continue-on-error: true
+        shell: pwsh
+        env:
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: |
+          $manifestPath = ".e2e-canary/diagnostics/run-manifest.json"
+          $canaryLevel = if ($env:INPUT_CANARY_LEVEL) { $env:INPUT_CANARY_LEVEL } else { "configure" }
+          $sb = [System.Text.StringBuilder]::new()
+
+          [void]$sb.AppendLine("## :bird: Canary Results (pr-plugins latest, level=$canaryLevel)")
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("| Property | Value |")
+          [void]$sb.AppendLine("|----------|-------|")
+          [void]$sb.AppendLine("| Image Tag | ``pr-plugins`` (moving) |")
+          [void]$sb.AppendLine("| Digest | ``$($env:CANARY_DIGEST ?? 'unknown')`` |")
+
+          if (Test-Path $manifestPath) {
+            try {
+              $m = Get-Content $manifestPath -Raw | ConvertFrom-Json
+              $status = if ($m.summary.overallSuccess) { ":white_check_mark: PASSED" } else { ":warning: FAILED" }
+              [void]$sb.AppendLine("| Result | $status |")
+              [void]$sb.AppendLine("| Lidarr Version | ``$($m.lidarr.version ?? 'n/a')`` |")
+
+              if (-not $m.summary.overallSuccess -and $m.hostBugSuspected) {
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("### :rotating_light: Host Issue Detected")
+                [void]$sb.AppendLine("- Classification: ``$($m.hostBugSuspected.classification)``")
+                [void]$sb.AppendLine("- Severity: ``$($m.hostBugSuspected.severity)``")
+                [void]$sb.AppendLine("- Description: $($m.hostBugSuspected.description)")
+              }
+            } catch {
+              [void]$sb.AppendLine("| Result | :question: Parse error |")
+            }
+          } else {
+            [void]$sb.AppendLine("| Result | :x: No manifest |")
+          }
+
+          [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("*Canary tests the latest plugins branch build to catch host regressions early.*")
+
+          $sb.ToString() | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Collect canary diagnostics
+        if: always()
+        shell: bash
+        run: |
+          set +e
+          mkdir -p .e2e-canary/diagnostics
+          docker logs "$CONTAINER_NAME" --tail 2000 2>&1 > .e2e-canary/diagnostics/container.log || true
+          docker inspect "$CONTAINER_NAME" > .e2e-canary/diagnostics/inspect.json 2>&1 || true
+          docker rm -f "$CONTAINER_NAME" || true
+
+      - name: Upload canary diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-canary-diagnostics-${{ github.run_id }}
+          path: .e2e-canary/diagnostics/
+          if-no-files-found: warn
+          retention-days: 7
