@@ -334,6 +334,26 @@ $script:E2EComponentIdsState = Read-E2EComponentIdsState -Path $script:E2ECompon
 $script:E2EComponentResolution = @{}
 $script:E2EComponentResolutionCandidates = @{}
 
+# Track instance key provenance for manifest
+$script:E2EInstanceKeySource = if (-not [string]::IsNullOrWhiteSpace($ComponentIdsInstanceKey) -and $script:E2EComponentIdsInstanceKey -eq $ComponentIdsInstanceKey.Trim()) {
+    "explicit"
+} else {
+    "computed"
+}
+
+# Get effective lock policy from shared function (single source of truth)
+# This returns clamped values and the source (default|env)
+$script:E2ELockPolicyResult = Get-E2EComponentIdsEffectiveLockPolicy
+$script:E2ELockPolicy = @{
+    TimeoutMs = $script:E2ELockPolicyResult.TimeoutMs
+    RetryDelayMs = $script:E2ELockPolicyResult.RetryDelayMs
+    StaleSeconds = $script:E2ELockPolicyResult.StaleSeconds
+}
+$script:E2ELockPolicySource = $script:E2ELockPolicyResult.Source
+
+# Track whether persistence is enabled for manifest
+$script:E2EPersistenceEnabled = -not $DisableComponentIdPersistence
+
 function Save-E2EComponentIdsIfEnabled {
     param(
         [Parameter(Mandatory)]
@@ -2980,6 +3000,13 @@ if ($EmitJson) {
             DiagnosticsBundlePath = if ($bundlePath) { $bundlePath } else { $null }
             LidarrVersion = $lidarrVersion
             LidarrBranch = $lidarrBranch
+            ComponentIds = @{
+                InstanceKey = $script:E2EComponentIdsInstanceKey
+                InstanceKeySource = $script:E2EInstanceKeySource
+                LockPolicy = $script:E2ELockPolicy
+                LockPolicySource = $script:E2ELockPolicySource
+                PersistenceEnabled = $script:E2EPersistenceEnabled
+            }
         }
 
         New-Item -ItemType Directory -Path (Split-Path $JsonOutputPath -Parent) -Force -ErrorAction SilentlyContinue | Out-Null

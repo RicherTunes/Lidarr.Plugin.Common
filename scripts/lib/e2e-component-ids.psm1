@@ -212,6 +212,69 @@ function Read-E2EComponentIdsState {
     }
 }
 
+<#
+.SYNOPSIS
+    Gets the effective lock policy settings with clamping and source tracking.
+.DESCRIPTION
+    Returns a hashtable with the effective (clamped) lock policy values and the source.
+    This is the single source of truth for lock policy - used by both the state writer
+    and the manifest emitter.
+
+    Clamp bounds:
+    - TimeoutMs: 0-5000 (default 750)
+    - RetryDelayMs: 1-250 (default 50)
+    - StaleSeconds: 0-3600 (default 120)
+.OUTPUTS
+    Hashtable with: TimeoutMs, RetryDelayMs, StaleSeconds, Source (default|env)
+#>
+function Get-E2EComponentIdsEffectiveLockPolicy {
+    $defaults = @{
+        TimeoutMs = 750
+        RetryDelayMs = 50
+        StaleSeconds = 120
+    }
+
+    $effective = @{
+        TimeoutMs = $defaults.TimeoutMs
+        RetryDelayMs = $defaults.RetryDelayMs
+        StaleSeconds = $defaults.StaleSeconds
+    }
+    $source = "default"
+
+    # Parse env vars (only valid numeric values)
+    try {
+        if ($env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -and $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -match '^\d+$') {
+            $effective.TimeoutMs = [int]$env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            $source = "env"
+        }
+        if ($env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS -and $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS -match '^\d+$') {
+            $effective.RetryDelayMs = [int]$env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
+            $source = "env"
+        }
+        if ($env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -and $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -match '^\d+$') {
+            $effective.StaleSeconds = [int]$env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
+            $source = "env"
+        }
+    } catch { }
+
+    # Clamp to sane bounds (avoid accidental huge waits / tight loops)
+    if ($effective.TimeoutMs -lt 0) { $effective.TimeoutMs = 0 }
+    if ($effective.TimeoutMs -gt 5000) { $effective.TimeoutMs = 5000 }
+
+    if ($effective.RetryDelayMs -lt 1) { $effective.RetryDelayMs = 1 }
+    if ($effective.RetryDelayMs -gt 250) { $effective.RetryDelayMs = 250 }
+
+    if ($effective.StaleSeconds -lt 0) { $effective.StaleSeconds = 0 }
+    if ($effective.StaleSeconds -gt 3600) { $effective.StaleSeconds = 3600 }
+
+    return @{
+        TimeoutMs = $effective.TimeoutMs
+        RetryDelayMs = $effective.RetryDelayMs
+        StaleSeconds = $effective.StaleSeconds
+        Source = $source
+    }
+}
+
 function Write-E2EComponentIdsState {
     param(
         [Parameter(Mandatory)]
@@ -235,31 +298,11 @@ function Write-E2EComponentIdsState {
         $lockPath = "$Path.lock"
         $lockAcquired = $false
 
-        $lockTimeoutMs = 750
-        $lockRetryDelayMs = 50
-        $lockStaleSeconds = 120
-
-        try {
-            if ($env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -and $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -match '^\d+$') {
-                $lockTimeoutMs = [int]$env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
-            }
-            if ($env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS -and $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS -match '^\d+$') {
-                $lockRetryDelayMs = [int]$env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
-            }
-            if ($env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -and $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -match '^\d+$') {
-                $lockStaleSeconds = [int]$env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
-            }
-        } catch { }
-
-        # Clamp to sane bounds (avoid accidental huge waits / tight loops)
-        if ($lockTimeoutMs -lt 0) { $lockTimeoutMs = 0 }
-        if ($lockTimeoutMs -gt 5000) { $lockTimeoutMs = 5000 }
-
-        if ($lockRetryDelayMs -lt 1) { $lockRetryDelayMs = 1 }
-        if ($lockRetryDelayMs -gt 250) { $lockRetryDelayMs = 250 }
-
-        if ($lockStaleSeconds -lt 0) { $lockStaleSeconds = 0 }
-        if ($lockStaleSeconds -gt 3600) { $lockStaleSeconds = 3600 }
+        # Get effective lock policy from shared function
+        $lockPolicy = Get-E2EComponentIdsEffectiveLockPolicy
+        $lockTimeoutMs = $lockPolicy.TimeoutMs
+        $lockRetryDelayMs = $lockPolicy.RetryDelayMs
+        $lockStaleSeconds = $lockPolicy.StaleSeconds
 
         $deadline = (Get-Date).AddMilliseconds($lockTimeoutMs)
 
@@ -579,6 +622,7 @@ Export-ModuleMember -Function `
     Get-E2EComponentIdsDefaultPath, `
     Get-E2EComponentIdsInstanceKey, `
     Resolve-E2EComponentIdsInstanceKey, `
+    Get-E2EComponentIdsEffectiveLockPolicy, `
     Read-E2EComponentIdsState, `
     Write-E2EComponentIdsState, `
     Get-E2EPreferredComponentId, `
