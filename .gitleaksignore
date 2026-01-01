@@ -1,0 +1,5 @@
+# Gitleaks ignore file
+# See: https://github.com/gitleaks/gitleaks#gitleaksignore
+
+# Test fixtures containing intentional fake secrets for redaction testing
+scripts/tests/Test-SecretRedaction.ps1
