@@ -252,17 +252,40 @@ except SchemaError as e:
         $tempScript = [System.IO.Path]::GetTempFileName() + '.py'
         $pythonScript | Out-File -FilePath $tempScript -Encoding UTF8 -Force
 
+        # Run validation with timeout (60s should be plenty for schema validation)
+        $validationTimeoutSec = 60
         if ($pythonCmd -eq 'py -3') {
-            $output = & py -3 $tempScript $Manifest $Schema 2>&1
+            $job = Start-Job -ScriptBlock {
+                param($script, $manifest, $schema)
+                py -3 $script $manifest $schema 2>&1
+            } -ArgumentList $tempScript, $Manifest, $Schema
         }
         else {
-            $output = & $pythonCmd $tempScript $Manifest $Schema 2>&1
+            $job = Start-Job -ScriptBlock {
+                param($cmd, $script, $manifest, $schema)
+                & $cmd $script $manifest $schema 2>&1
+            } -ArgumentList $pythonCmd, $tempScript, $Manifest, $Schema
         }
-        $exitCode = $LASTEXITCODE
 
+        $completed = $job | Wait-Job -Timeout $validationTimeoutSec
+        if (-not $completed) {
+            Stop-Job $job -ErrorAction SilentlyContinue
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
+            Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
+            Write-ValidationError "Python validation timed out after ${validationTimeoutSec}s"
+            Write-ValidationError "  Manifest: $Manifest"
+            Write-ValidationError "  Schema: $Schema"
+            Write-ValidationError "  Command: $pythonCmd $tempScript"
+            return 1
+        }
+
+        $output = Receive-Job $job
+        $exitCode = $job.ChildJobs[0].JobStateInfo.Reason.ExitCode
+        if ($null -eq $exitCode) { $exitCode = if ($job.State -eq 'Completed') { 0 } else { 1 } }
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
         Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
 
-        if ($exitCode -eq 0) {
+        if ($exitCode -eq 0 -or ($output -match 'Manifest is valid')) {
             Write-Success "Manifest is valid"
             return 0
         }
@@ -275,6 +298,8 @@ except SchemaError as e:
     }
     catch {
         Write-ValidationError "Python validator failed: $_"
+        Write-ValidationError "  Manifest: $Manifest"
+        Write-ValidationError "  Schema: $Schema"
         return 1
     }
 }
@@ -282,14 +307,24 @@ except SchemaError as e:
 # ============================================================================
 # Validator: Node ajv-cli (local install only, no network/npx)
 # ============================================================================
+function Test-AjvVersionOutput {
+    param([string]$VersionOutput)
+    # Sanity check: ajv --version should contain "ajv" and a semver-like pattern
+    # This prevents accidentally using a different tool named "ajv"
+    if ($VersionOutput -match 'ajv|Ajv' -and $VersionOutput -match '\d+\.\d+') {
+        return $true
+    }
+    return $false
+}
+
 function Test-NodeValidator {
     # Only check for locally installed ajv command - avoid npx which can trigger network
     # Check if ajv is directly callable (global install)
     try {
         $ajvPath = Get-Command 'ajv' -ErrorAction SilentlyContinue
         if ($ajvPath) {
-            $null = & ajv --version 2>&1
-            if ($LASTEXITCODE -eq 0) {
+            $versionOutput = & ajv --version 2>&1
+            if ($LASTEXITCODE -eq 0 -and (Test-AjvVersionOutput $versionOutput)) {
                 return $true
             }
         }
@@ -302,7 +337,13 @@ function Test-NodeValidator {
         $localAjv = Join-Path $PWD 'node_modules/.bin/ajv.cmd'
     }
     if (Test-Path $localAjv) {
-        return $true
+        try {
+            $versionOutput = & $localAjv --version 2>&1
+            if ($LASTEXITCODE -eq 0 -and (Test-AjvVersionOutput $versionOutput)) {
+                return $true
+            }
+        }
+        catch { }
     }
 
     # Do NOT fall back to npx - it can trigger network installs
@@ -310,11 +351,17 @@ function Test-NodeValidator {
 }
 
 function Get-AjvCommand {
-    # Check global install first
-    $ajvPath = Get-Command 'ajv' -ErrorAction SilentlyContinue
-    if ($ajvPath) {
-        return 'ajv'
+    # Check global install first (with sanity check)
+    try {
+        $ajvPath = Get-Command 'ajv' -ErrorAction SilentlyContinue
+        if ($ajvPath) {
+            $versionOutput = & ajv --version 2>&1
+            if ($LASTEXITCODE -eq 0 -and (Test-AjvVersionOutput $versionOutput)) {
+                return 'ajv'
+            }
+        }
     }
+    catch { }
 
     # Check local install
     $localAjv = Join-Path $PWD 'node_modules/.bin/ajv'
@@ -322,7 +369,13 @@ function Get-AjvCommand {
         $localAjv = Join-Path $PWD 'node_modules/.bin/ajv.cmd'
     }
     if (Test-Path $localAjv) {
-        return $localAjv
+        try {
+            $versionOutput = & $localAjv --version 2>&1
+            if ($LASTEXITCODE -eq 0 -and (Test-AjvVersionOutput $versionOutput)) {
+                return $localAjv
+            }
+        }
+        catch { }
     }
 
     return $null
@@ -335,11 +388,31 @@ function Invoke-NodeValidator {
     Write-Info "Validator: ajv-cli ($ajvCmd)"
 
     try {
-        # ajv validate -s schema.json -d manifest.json
-        $output = & $ajvCmd validate -s $Schema -d $Manifest --spec=draft2020 2>&1
-        $exitCode = $LASTEXITCODE
+        # Run validation with timeout (60s should be plenty)
+        $validationTimeoutSec = 60
+        $job = Start-Job -ScriptBlock {
+            param($cmd, $schema, $manifest)
+            & $cmd validate -s $schema -d $manifest --spec=draft2020 2>&1
+        } -ArgumentList $ajvCmd, $Schema, $Manifest
 
-        if ($exitCode -eq 0) {
+        $completed = $job | Wait-Job -Timeout $validationTimeoutSec
+        if (-not $completed) {
+            Stop-Job $job -ErrorAction SilentlyContinue
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
+            Write-ValidationError "Ajv validation timed out after ${validationTimeoutSec}s"
+            Write-ValidationError "  Manifest: $Manifest"
+            Write-ValidationError "  Schema: $Schema"
+            Write-ValidationError "  Command: $ajvCmd validate -s ... -d ..."
+            return 1
+        }
+
+        $output = Receive-Job $job
+        $exitCode = $job.ChildJobs[0].JobStateInfo.Reason.ExitCode
+        if ($null -eq $exitCode) { $exitCode = if ($job.State -eq 'Completed') { 0 } else { 1 } }
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+
+        # ajv outputs "valid" on success
+        if ($exitCode -eq 0 -or ($output -match '^valid$|is valid')) {
             Write-Success "Manifest is valid"
             return 0
         }
@@ -354,6 +427,8 @@ function Invoke-NodeValidator {
     }
     catch {
         Write-ValidationError "Node validator failed: $_"
+        Write-ValidationError "  Manifest: $Manifest"
+        Write-ValidationError "  Schema: $Schema"
         return 1
     }
 }
