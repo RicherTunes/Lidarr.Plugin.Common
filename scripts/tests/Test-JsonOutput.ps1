@@ -660,9 +660,77 @@ $componentIdsTests = @(
     }
 )
 
-# ============================================================================
-# Edge Case Tests - Lock Policy Clamping and Source Classification
-# ============================================================================
+# ============================================================================  
+# Schema Tests - Component Resolution Provenance (TDD: not yet implemented)
+# ============================================================================  
+# These tests define the desired contract for a structured
+# details.componentResolution block in the JSON manifest.
+#
+# They are expected to FAIL until the runner/json emitter populates:
+#   details.componentResolution.{indexer,downloadClient,importList}
+$componentResolutionTests = @(
+    @{
+        Name = "Configure result includes details.componentResolution"
+        Test = {
+            param($obj)
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            return $r.details.PSObject.Properties.Name -contains 'componentResolution'
+        }
+    }
+    @{
+        Name = "componentResolution.indexer has selectedId and strategy"
+        Test = {
+            param($obj)
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if (-not ($r.details.PSObject.Properties.Name -contains 'componentResolution')) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr) { return $false }
+            if (-not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            if ($null -eq $cr.indexer.selectedId) { return $false }
+            if ([string]::IsNullOrWhiteSpace($cr.indexer.strategy)) { return $false }
+            return $true
+        }
+    }
+    @{
+        Name = "componentResolution.downloadClient uses camelCase key (not downloadclient)"
+        Test = {
+            param($obj)
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if (-not ($r.details.PSObject.Properties.Name -contains 'componentResolution')) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr) { return $false }
+            # Use -ccontains for case-sensitive comparison to verify camelCase
+            return ($cr.PSObject.Properties.Name -ccontains 'downloadClient') -and
+                   (-not ($cr.PSObject.Properties.Name -ccontains 'downloadclient'))
+        }
+    }
+    @{
+        Name = "Ambiguous component selection emits candidateIds and safeToPersist=false"
+        Test = {
+            param($obj)
+            $r = $obj.results | Where-Object { $_.gate -eq 'Search' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if ($r.errorCode -ne 'E2E_COMPONENT_AMBIGUOUS') { return $false }
+
+            if (-not ($r.details.PSObject.Properties.Name -contains 'componentResolution')) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr) { return $false }
+            if (-not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+
+            $cids = @($cr.indexer.candidateIds)
+            if ($cids.Count -lt 2) { return $false }
+            if ($cr.indexer.safeToPersist -ne $false) { return $false }
+            return $true
+        }
+    }
+)
+
+# ============================================================================  
+# Edge Case Tests - Lock Policy Clamping and Source Classification       
+# ============================================================================  
 
 $lockPolicyClampingTests = @(
     @{
@@ -942,9 +1010,32 @@ if (Test-Path $jsonModulePath) {
         })
         (New-MockGateResult -Gate "Configure" -PluginName "Qobuzarr" -Outcome "success" -Details @{
             Actions = @("Created indexer", "Created download client")
+            # Runner records resolution + IDs today; componentResolution will be derived from these.
+            resolution = @{
+                indexer = "implementationName"
+                downloadclient = "implementationName"
+            }
+            componentIds = @{
+                indexerId = 101
+                downloadClientId = 201
+            }
         })
         (New-MockGateResult -Gate "Search" -PluginName "Qobuzarr" -Outcome "skipped" -SkipReason "Missing env vars: QOBUZARR_AUTH_TOKEN" -Details @{
             CredentialAllOf = @("authToken", "userId")
+        })
+        # Ambiguity example (should fail loudly + include candidate IDs)
+        (New-MockGateResult -Gate "Search" -PluginName "Tidalarr" -Outcome "failed" -Errors @("Ambiguous configured indexer selection for Tidalarr (ambiguousImplementationName): IDs=2,3") -Details @{
+            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+            componentType = "indexer"
+            resolution = @{
+                indexer = "ambiguousImplementationName"
+            }
+            componentIds = @{
+                indexerCandidateIds = @(
+                    2,
+                    3
+                )
+            }
         })
     )
 
@@ -973,6 +1064,7 @@ if (Test-Path $jsonModulePath) {
         @{ Name = "v1.2 Diagnostics"; Tests = $v12DiagnosticsTests }
         @{ Name = "v1.2 Host Bug Detection"; Tests = $v12HostBugTests }
         @{ Name = "Component IDs Provenance"; Tests = $componentIdsTests }
+        @{ Name = "Component Resolution Provenance"; Tests = $componentResolutionTests }
         @{ Name = "Lock Policy Clamping"; Tests = $lockPolicyClampingTests }
         @{ Name = "Instance Key Source"; Tests = $instanceKeySourceTests }
         @{ Name = "Assembly Issue Classification"; Tests = $alcDetectionTests }
