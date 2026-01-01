@@ -18,6 +18,7 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 - Preferred component IDs stored in `.e2e-bootstrap/e2e-component-ids.json` (schema v2, instance-namespaced).
 - Gates resolve components via `Find-ConfiguredComponent` (no more `name -like "*$plugin*"` discovery).
 - Component selection reports resolution strategy and candidate IDs (for triage), and gates fail loudly on ambiguous matches.
+- Fuzzy selection can be disabled via `-DisableFuzzyComponentMatch` / `E2E_DISABLE_FUZZY_COMPONENT_MATCH=1` (enabled by default in CI).
 - ImportList gate supports `-ImportListId` and does not wildcard-match by name.
 - CI cold-start assertions:
   - Case A (no secrets): Configure should SKIP and **not create plugin-specific components**.
@@ -34,7 +35,7 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 
 ### P1 (correctness hardening)
 - [ ] Record Lidarr host fingerprint (`lidarrVersion`, `branch`, `imageDigest`) into the preferred-ID state entries (diagnostics only; no effect on selection).
-- [ ] Reduce/disable fuzzy fallback in `Select-ConfiguredComponent` (flag-gated), and add explicit tests for “no accidental selection”.
+- [x] Reduce/disable fuzzy fallback in `Select-ConfiguredComponent` (flag-gated), and add explicit tests for “no accidental selection”.
 
 ### P2 (concurrency + usability)
 - [ ] Add state-write lock backoff tuning via env var (still best-effort).
