@@ -104,7 +104,7 @@ function Test-PowerShellValidator {
 function Invoke-PowerShellValidator {
     param([string]$Manifest, [string]$Schema)
 
-    Write-Info "Using PowerShell Test-Json validator"
+    Write-Info "Validator: PowerShell Test-Json ($($PSVersionTable.PSVersion))"
 
     try {
         $content = Get-Content -Path $Manifest -Raw -ErrorAction Stop
@@ -117,7 +117,7 @@ function Invoke-PowerShellValidator {
     try {
         $result = Test-Json -Json $content -SchemaFile $Schema -ErrorAction Stop
         if ($result) {
-            Write-Success "Manifest is valid (PowerShell Test-Json)"
+            Write-Success "Manifest is valid"
             return 0
         }
         else {
@@ -141,10 +141,62 @@ function Invoke-PowerShellValidator {
 # ============================================================================
 # Validator: Python jsonschema
 # ============================================================================
-function Test-PythonValidator {
+function Get-PythonCommand {
+    # On Windows, prefer py -3 (Python Launcher) to avoid Microsoft Store stub
+    if ($IsWindows -or $env:OS -match 'Windows') {
+        try {
+            $job = Start-Job { py -3 --version 2>&1 }
+            $result = $job | Wait-Job -Timeout 5 | Receive-Job
+            Remove-Job $job -Force -ErrorAction SilentlyContinue
+            if ($LASTEXITCODE -eq 0 -and $result -match 'Python') {
+                return 'py -3'
+            }
+        }
+        catch { }
+    }
+
+    # Try python3 (Linux/macOS default)
     try {
-        $null = & python3 -c "import jsonschema" 2>&1
-        return $LASTEXITCODE -eq 0
+        $job = Start-Job { python3 --version 2>&1 }
+        $result = $job | Wait-Job -Timeout 5 | Receive-Job
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+        if ($LASTEXITCODE -eq 0 -and $result -match 'Python') {
+            return 'python3'
+        }
+    }
+    catch { }
+
+    # Fallback to python
+    try {
+        $job = Start-Job { python --version 2>&1 }
+        $result = $job | Wait-Job -Timeout 5 | Receive-Job
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+        if ($LASTEXITCODE -eq 0 -and $result -match 'Python') {
+            return 'python'
+        }
+    }
+    catch { }
+
+    return $null
+}
+
+function Test-PythonValidator {
+    $pythonCmd = Get-PythonCommand
+    if (-not $pythonCmd) { return $false }
+
+    try {
+        # Check if jsonschema module is installed (with timeout)
+        $checkScript = 'import jsonschema; print("ok")'
+        if ($pythonCmd -eq 'py -3') {
+            $job = Start-Job -ScriptBlock { param($s) py -3 -c $s 2>&1 } -ArgumentList $checkScript
+        }
+        else {
+            $job = Start-Job -ScriptBlock { param($cmd, $s) & $cmd -c $s 2>&1 } -ArgumentList $pythonCmd, $checkScript
+        }
+        $result = $job | Wait-Job -Timeout 10 | Receive-Job
+        Remove-Job $job -Force -ErrorAction SilentlyContinue
+
+        return $result -match 'ok'
     }
     catch {
         return $false
@@ -154,7 +206,8 @@ function Test-PythonValidator {
 function Invoke-PythonValidator {
     param([string]$Manifest, [string]$Schema)
 
-    Write-Info "Using Python jsonschema validator"
+    $pythonCmd = Get-PythonCommand
+    Write-Info "Validator: python-jsonschema ($pythonCmd)"
 
     $pythonScript = @'
 import sys
@@ -195,11 +248,22 @@ except SchemaError as e:
 '@
 
     try {
-        $output = $pythonScript | python3 - $Manifest $Schema 2>&1
+        # Write script to temp file to avoid piping issues
+        $tempScript = [System.IO.Path]::GetTempFileName() + '.py'
+        $pythonScript | Out-File -FilePath $tempScript -Encoding UTF8 -Force
+
+        if ($pythonCmd -eq 'py -3') {
+            $output = & py -3 $tempScript $Manifest $Schema 2>&1
+        }
+        else {
+            $output = & $pythonCmd $tempScript $Manifest $Schema 2>&1
+        }
         $exitCode = $LASTEXITCODE
 
+        Remove-Item $tempScript -Force -ErrorAction SilentlyContinue
+
         if ($exitCode -eq 0) {
-            Write-Success "Manifest is valid (Python jsonschema)"
+            Write-Success "Manifest is valid"
             return 0
         }
         else {
@@ -216,30 +280,67 @@ except SchemaError as e:
 }
 
 # ============================================================================
-# Validator: Node ajv-cli
+# Validator: Node ajv-cli (local install only, no network/npx)
 # ============================================================================
 function Test-NodeValidator {
+    # Only check for locally installed ajv command - avoid npx which can trigger network
+    # Check if ajv is directly callable (global install)
     try {
-        $null = & npx ajv --version 2>&1
-        return $LASTEXITCODE -eq 0
+        $ajvPath = Get-Command 'ajv' -ErrorAction SilentlyContinue
+        if ($ajvPath) {
+            $null = & ajv --version 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                return $true
+            }
+        }
     }
-    catch {
-        return $false
+    catch { }
+
+    # Check for ajv-cli in local node_modules/.bin
+    $localAjv = Join-Path $PWD 'node_modules/.bin/ajv'
+    if ($IsWindows -or $env:OS -match 'Windows') {
+        $localAjv = Join-Path $PWD 'node_modules/.bin/ajv.cmd'
     }
+    if (Test-Path $localAjv) {
+        return $true
+    }
+
+    # Do NOT fall back to npx - it can trigger network installs
+    return $false
+}
+
+function Get-AjvCommand {
+    # Check global install first
+    $ajvPath = Get-Command 'ajv' -ErrorAction SilentlyContinue
+    if ($ajvPath) {
+        return 'ajv'
+    }
+
+    # Check local install
+    $localAjv = Join-Path $PWD 'node_modules/.bin/ajv'
+    if ($IsWindows -or $env:OS -match 'Windows') {
+        $localAjv = Join-Path $PWD 'node_modules/.bin/ajv.cmd'
+    }
+    if (Test-Path $localAjv) {
+        return $localAjv
+    }
+
+    return $null
 }
 
 function Invoke-NodeValidator {
     param([string]$Manifest, [string]$Schema)
 
-    Write-Info "Using Node ajv-cli validator"
+    $ajvCmd = Get-AjvCommand
+    Write-Info "Validator: ajv-cli ($ajvCmd)"
 
     try {
         # ajv validate -s schema.json -d manifest.json
-        $output = & npx ajv validate -s $Schema -d $Manifest --spec=draft2020 2>&1
+        $output = & $ajvCmd validate -s $Schema -d $Manifest --spec=draft2020 2>&1
         $exitCode = $LASTEXITCODE
 
         if ($exitCode -eq 0) {
-            Write-Success "Manifest is valid (Node ajv-cli)"
+            Write-Success "Manifest is valid"
             return 0
         }
         else {
@@ -263,7 +364,7 @@ function Invoke-NodeValidator {
 function Invoke-StructuralValidator {
     param([string]$Manifest, [string]$Schema)
 
-    Write-Info "Using minimal structural validator (partial coverage only)"
+    Write-Info "Validator: structural-fallback (partial coverage only)"
 
     # Required fields from schema
     $requiredFields = @(
