@@ -522,9 +522,22 @@ function Get-ComponentResolution {
 
     if (-not $resolution -and -not $componentIds) { return $null }
 
-    # Strategies that are safe to persist (deterministic, unambiguous)
+    # Canonical strategies (lowercase for case-insensitive matching)
+    # Safe to persist: deterministic, unambiguous selection
     # Note: 'updated' is an action outcome, not a selection strategy - excluded intentionally
-    $safeStrategies = @('preferredId', 'created', 'implementationName', 'implementation')
+    $safeStrategies = @('preferredid', 'created', 'implementationname', 'implementation')
+
+    # Helper: coerce value to integer if possible (type stability)
+    function CoerceToInt($value) {
+        if ($null -eq $value) { return $null }
+        try { return [int]$value } catch { return $value }
+    }
+
+    # Helper: normalize strategy to canonical form
+    function NormalizeStrategy($raw) {
+        if ([string]::IsNullOrWhiteSpace($raw)) { return 'none' }
+        return $raw.ToString().Trim()
+    }
 
     $result = [ordered]@{}
 
@@ -541,14 +554,15 @@ function Get-ComponentResolution {
         }
 
         # Try both camelCase and lowercase variants when looking up strategy
-        $strategy = $null
+        $rawStrategy = $null
         if ($resolution) {
-            $strategy = Get-SafeProperty -Object $resolution -PropertyName $outputKey
+            $rawStrategy = Get-SafeProperty -Object $resolution -PropertyName $outputKey
             # Try lowercase variant if not found
-            if (-not $strategy -and $lowercaseKey) {
-                $strategy = Get-SafeProperty -Object $resolution -PropertyName $lowercaseKey
+            if (-not $rawStrategy -and $lowercaseKey) {
+                $rawStrategy = Get-SafeProperty -Object $resolution -PropertyName $lowercaseKey
             }
         }
+        $strategy = NormalizeStrategy $rawStrategy
 
         # Get selectedId and candidateIds from componentIds
         $selectedId = $null
@@ -557,20 +571,23 @@ function Get-ComponentResolution {
         if ($componentIds) {
             # Try camelCase ID key first (e.g., indexerId, downloadClientId)
             $idKey = "${outputKey}Id"
-            $selectedId = Get-SafeProperty -Object $componentIds -PropertyName $idKey
+            $rawId = Get-SafeProperty -Object $componentIds -PropertyName $idKey
+            $selectedId = CoerceToInt $rawId
 
             # Try candidate IDs with camelCase
             $candidateKey = "${outputKey}CandidateIds"
             $candidates = Get-SafeProperty -Object $componentIds -PropertyName $candidateKey
             if ($candidates) {
-                $candidateIds = @($candidates)
+                $candidateIds = @($candidates | ForEach-Object { CoerceToInt $_ })
             }
         }
 
         # Only emit if we have at least a strategy or selectedId or candidates
-        if ($null -ne $strategy -or $null -ne $selectedId -or $candidateIds.Count -gt 0) {
-            $isSafe = $strategy -and ($safeStrategies -contains $strategy)
-            $isAmbiguous = $strategy -and ($strategy -match '^ambiguous')
+        if ($strategy -ne 'none' -or $null -ne $selectedId -or $candidateIds.Count -gt 0) {
+            # Case-insensitive check against canonical safe strategies
+            $strategyLower = $strategy.ToLowerInvariant()
+            $isSafe = $safeStrategies -contains $strategyLower
+            $isAmbiguous = $strategy -match '(?i)^ambiguous'
 
             # Default candidateIds to [selectedId] when known (improves forensic value)
             if ($candidateIds.Count -eq 0 -and $null -ne $selectedId) {
@@ -579,7 +596,7 @@ function Get-ComponentResolution {
 
             $result[$outputKey] = [ordered]@{
                 selectedId = $selectedId
-                strategy = if ($strategy) { $strategy } else { 'none' }
+                strategy = $strategy
                 candidateIds = $candidateIds
                 safeToPersist = ($isSafe -and -not $isAmbiguous)
             }
