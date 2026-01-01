@@ -50,6 +50,32 @@ function Get-E2EComponentIdsInstanceKey {
     }
 }
 
+function Resolve-E2EComponentIdsInstanceKey {
+    param(
+        [Parameter(Mandatory)]
+        [string]$LidarrUrl,
+
+        [Parameter(Mandatory)]
+        [string]$ContainerName,
+
+        [string]$InstanceSalt = "",
+
+        # Optional explicit override for the instance key (power users).
+        # If invalid (empty/whitespace or contains unsafe characters), falls back to computed hashing.
+        [AllowNull()]
+        [string]$ExplicitInstanceKey
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($ExplicitInstanceKey)) {
+        $candidate = $ExplicitInstanceKey.Trim()
+        if ($candidate.Length -gt 0 -and $candidate.Length -le 64 -and $candidate -match '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$') {
+            return $candidate
+        }
+    }
+
+    return Get-E2EComponentIdsInstanceKey -LidarrUrl $LidarrUrl -ContainerName $ContainerName -InstanceSalt $InstanceSalt
+}
+
 function Read-E2EComponentIdsState {
     param(
         [Parameter(Mandatory)]
@@ -208,14 +234,41 @@ function Write-E2EComponentIdsState {
         # Failure to acquire a lock must not break runs; we just return $false.
         $lockPath = "$Path.lock"
         $lockAcquired = $false
-        $deadline = (Get-Date).AddMilliseconds(750)
+
+        $lockTimeoutMs = 750
+        $lockRetryDelayMs = 50
+        $lockStaleSeconds = 120
+
+        try {
+            if ($env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -and $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -match '^\d+$') {
+                $lockTimeoutMs = [int]$env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            }
+            if ($env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS -and $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS -match '^\d+$') {
+                $lockRetryDelayMs = [int]$env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
+            }
+            if ($env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -and $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -match '^\d+$') {
+                $lockStaleSeconds = [int]$env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
+            }
+        } catch { }
+
+        # Clamp to sane bounds (avoid accidental huge waits / tight loops)
+        if ($lockTimeoutMs -lt 0) { $lockTimeoutMs = 0 }
+        if ($lockTimeoutMs -gt 5000) { $lockTimeoutMs = 5000 }
+
+        if ($lockRetryDelayMs -lt 1) { $lockRetryDelayMs = 1 }
+        if ($lockRetryDelayMs -gt 250) { $lockRetryDelayMs = 250 }
+
+        if ($lockStaleSeconds -lt 0) { $lockStaleSeconds = 0 }
+        if ($lockStaleSeconds -gt 3600) { $lockStaleSeconds = 3600 }
+
+        $deadline = (Get-Date).AddMilliseconds($lockTimeoutMs)
 
         while (-not $lockAcquired -and (Get-Date) -lt $deadline) {
             try {
                 if (Test-Path -LiteralPath $lockPath) {
                     try {
                         $age = (Get-Date -AsUTC) - (Get-Item -LiteralPath $lockPath).LastWriteTimeUtc
-                        if ($age.TotalSeconds -ge 120) {
+                        if ($age.TotalSeconds -ge $lockStaleSeconds) {
                             Remove-Item -LiteralPath $lockPath -Force -ErrorAction SilentlyContinue
                         }
                     } catch { }
@@ -225,7 +278,7 @@ function Write-E2EComponentIdsState {
                 $lockAcquired = $true
             }
             catch {
-                Start-Sleep -Milliseconds 50
+                Start-Sleep -Milliseconds $lockRetryDelayMs
             }
         }
 
@@ -525,6 +578,7 @@ function Select-ConfiguredComponent {
 Export-ModuleMember -Function `
     Get-E2EComponentIdsDefaultPath, `
     Get-E2EComponentIdsInstanceKey, `
+    Resolve-E2EComponentIdsInstanceKey, `
     Read-E2EComponentIdsState, `
     Write-E2EComponentIdsState, `
     Get-E2EPreferredComponentId, `
