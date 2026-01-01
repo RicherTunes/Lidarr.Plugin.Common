@@ -799,6 +799,172 @@ $componentResolutionTests = @(
     }
 )
 
+# ============================================================================
+# Schema Tests - matchedOn Provenance (TDD: new feature)
+# ============================================================================
+# These tests define the contract for matchedOn enum field.
+# matchedOn normalizes the strategy to a clean enum: preferredId | implementationName | implementation | created | none
+
+$matchedOnTests = @(
+    @{
+        Name = "strategy=preferredId yields matchedOn=preferredId"
+        Test = {
+            param($obj)
+            # PostRestartGrab has strategy='preferredId'
+            $r = $obj.results | Where-Object { $_.gate -eq 'PostRestartGrab' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'downloadClient')) { return $false }
+            if (-not ($cr.downloadClient.PSObject.Properties.Name -contains 'matchedOn')) { return $false }
+            return ($cr.downloadClient.matchedOn -eq 'preferredId')
+        }
+    }
+    @{
+        Name = "strategy=implementationName yields matchedOn=implementationName"
+        Test = {
+            param($obj)
+            # Configure Qobuzarr has strategy='implementationName'
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            if (-not ($cr.indexer.PSObject.Properties.Name -contains 'matchedOn')) { return $false }
+            return ($cr.indexer.matchedOn -eq 'implementationName')
+        }
+    }
+    @{
+        Name = "strategy=created yields matchedOn=created"
+        Test = {
+            param($obj)
+            # AlbumSearch Qobuzarr has strategy='created' (new mock needed)
+            $r = $obj.results | Where-Object { $_.gate -eq 'AlbumSearch' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            if (-not ($cr.indexer.PSObject.Properties.Name -contains 'matchedOn')) { return $false }
+            return ($cr.indexer.matchedOn -eq 'created')
+        }
+    }
+    @{
+        Name = "ambiguous strategy yields matchedOn=none"
+        Test = {
+            param($obj)
+            # Search Tidalarr has ambiguous strategy
+            $r = $obj.results | Where-Object { $_.gate -eq 'Search' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            if (-not ($cr.indexer.PSObject.Properties.Name -contains 'matchedOn')) { return $false }
+            return ($cr.indexer.matchedOn -eq 'none')
+        }
+    }
+    @{
+        Name = "null selectedId yields matchedOn=none"
+        Test = {
+            param($obj)
+            # Configure Tidalarr has null selectedId
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            if (-not ($cr.indexer.PSObject.Properties.Name -contains 'matchedOn')) { return $false }
+            return ($cr.indexer.matchedOn -eq 'none')
+        }
+    }
+    @{
+        Name = "matchedOn is lowerCamelCase (preferredId not PreferredId)"
+        Test = {
+            param($obj)
+            $r = $obj.results | Where-Object { $_.gate -eq 'PostRestartGrab' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'downloadClient')) { return $false }
+            if (-not ($cr.downloadClient.PSObject.Properties.Name -contains 'matchedOn')) { return $false }
+            $matchedOn = $cr.downloadClient.matchedOn
+            # matchedOn should be one of the enum values in lowerCamelCase
+            $validValues = @('preferredId', 'implementationName', 'implementation', 'created', 'none')
+            return ($matchedOn -cin $validValues)
+        }
+    }
+    @{
+        Name = "strategy=updated yields matchedOn=none (action outcome, not selection)"
+        Test = {
+            param($obj)
+            # Revalidation Brainarr has strategy='updated'
+            $r = $obj.results | Where-Object { $_.gate -eq 'Revalidation' -and $_.plugin -eq 'Brainarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            if (-not ($cr.indexer.PSObject.Properties.Name -contains 'matchedOn')) { return $false }
+            return ($cr.indexer.matchedOn -eq 'none')
+        }
+    }
+    @{
+        Name = "mixed-case ImplementationName strategy yields matchedOn=implementationName (normalized)"
+        Test = {
+            param($obj)
+            # ImportList Tidalarr has strategy='ImplementationName' (mixed case)
+            $r = $obj.results | Where-Object { $_.gate -eq 'ImportList' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'importList')) { return $false }
+            if (-not ($cr.importList.PSObject.Properties.Name -contains 'matchedOn')) { return $false }
+            return ($cr.importList.matchedOn -eq 'implementationName')
+        }
+    }
+)
+
+# ============================================================================
+# Schema Tests - persistedIdsUpdated Flag
+# ============================================================================
+
+$persistedIdsUpdatedTests = @(
+    @{
+        Name = "persistedIdsUpdated is present in details"
+        Test = {
+            param($obj)
+            # Configure result should have this flag
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            return ($r.details.PSObject.Properties.Name -contains 'persistedIdsUpdated')
+        }
+    }
+    @{
+        Name = "persistedIdsUpdated is boolean"
+        Test = {
+            param($obj)
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if (-not ($r.details.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+            return ($r.details.persistedIdsUpdated -is [bool])
+        }
+    }
+    @{
+        Name = "persistedIdsUpdated=true when IDs were written"
+        Test = {
+            param($obj)
+            # Configure Qobuzarr creates components, should have persistedIdsUpdated=true
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if (-not ($r.details.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+            # Gate that creates/updates components should have true
+            return ($r.details.persistedIdsUpdated -eq $true)
+        }
+    }
+    @{
+        Name = "persistedIdsUpdated=false when no IDs written (skipped gate)"
+        Test = {
+            param($obj)
+            # Skipped gate should have persistedIdsUpdated=false
+            $r = $obj.results | Where-Object { $_.outcome -eq 'skipped' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if (-not ($r.details.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+            # Skipped gates don't write IDs
+            return ($r.details.persistedIdsUpdated -eq $false)
+        }
+    }
+)
+
 # ============================================================================  
 # Edge Case Tests - Lock Policy Clamping and Source Classification       
 # ============================================================================  
@@ -1152,6 +1318,20 @@ if (Test-Path $jsonModulePath) {
                 indexerCandidateIds = @(100, 101)
             }
         })
+        # AlbumSearch with strategy='created' (newly created component)
+        (New-MockGateResult -Gate "AlbumSearch" -PluginName "Qobuzarr" -Outcome "success" -Details @{
+            resolution = @{
+                indexer = "created"
+            }
+            componentIds = @{
+                indexerId = 999
+            }
+            persistedIdsUpdated = $true
+        })
+        # Skipped gate - persistedIdsUpdated should be false
+        (New-MockGateResult -Gate "Grab" -PluginName "Brainarr" -Outcome "skipped" -SkipReason "No download client configured" -Details @{
+            persistedIdsUpdated = $false
+        })
     )
 
     $mockContext = New-MockRunContext
@@ -1180,6 +1360,8 @@ if (Test-Path $jsonModulePath) {
         @{ Name = "v1.2 Host Bug Detection"; Tests = $v12HostBugTests }
         @{ Name = "Component IDs Provenance"; Tests = $componentIdsTests }
         @{ Name = "Component Resolution Provenance"; Tests = $componentResolutionTests }
+        @{ Name = "matchedOn Provenance"; Tests = $matchedOnTests }
+        @{ Name = "persistedIdsUpdated Flag"; Tests = $persistedIdsUpdatedTests }
         @{ Name = "Lock Policy Clamping"; Tests = $lockPolicyClampingTests }
         @{ Name = "Instance Key Source"; Tests = $instanceKeySourceTests }
         @{ Name = "Assembly Issue Classification"; Tests = $alcDetectionTests }

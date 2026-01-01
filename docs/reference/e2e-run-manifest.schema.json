@@ -383,7 +383,65 @@
         "details": {
           "type": "object",
           "additionalProperties": true,
-          "description": "Gate-specific details (extensible)."
+          "description": "Gate-specific details (extensible).",
+          "properties": {
+            "componentResolution": {
+              "$ref": "#/$defs/componentResolution"
+            },
+            "persistedIdsUpdated": {
+              "type": "boolean",
+              "description": "Whether preferred component IDs were written during this gate execution."
+            }
+          }
+        }
+      }
+    },
+    "componentResolution": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Component selection resolution details for indexer, downloadClient, and importList.",
+      "properties": {
+        "indexer": {
+          "$ref": "#/$defs/componentResolutionEntry"
+        },
+        "downloadClient": {
+          "$ref": "#/$defs/componentResolutionEntry"
+        },
+        "importList": {
+          "$ref": "#/$defs/componentResolutionEntry"
+        }
+      }
+    },
+    "componentResolutionEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Resolution details for a single component type.",
+      "required": ["selectedId", "strategy", "matchedOn", "candidateIds", "safeToPersist"],
+      "properties": {
+        "selectedId": {
+          "oneOf": [
+            { "type": "null" },
+            { "type": "integer" }
+          ],
+          "description": "The ID of the selected component, or null if none."
+        },
+        "strategy": {
+          "type": "string",
+          "description": "The resolution strategy used (preferredId, implementationName, implementation, created, ambiguous*, updated, fuzzy, none)."
+        },
+        "matchedOn": {
+          "type": "string",
+          "enum": ["preferredId", "implementationName", "implementation", "created", "none"],
+          "description": "Normalized enum derived from strategy. Maps known safe strategies to canonical lowerCamelCase values, or 'none' for ambiguous/unknown."
+        },
+        "candidateIds": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "description": "Array of candidate component IDs. Defaults to [selectedId] when unambiguous."
+        },
+        "safeToPersist": {
+          "type": "boolean",
+          "description": "Whether it is safe to persist this ID for future runs. False for ambiguous, fuzzy, updated, or null selectedId."
         }
       }
     }

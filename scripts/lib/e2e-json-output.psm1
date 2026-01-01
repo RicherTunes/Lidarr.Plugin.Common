@@ -527,6 +527,15 @@ function Get-ComponentResolution {
     # Note: 'updated' is an action outcome, not a selection strategy - excluded intentionally
     $safeStrategies = @('preferredid', 'created', 'implementationname', 'implementation')
 
+    # matchedOn enum: normalized enum derived from strategy
+    # Values: preferredId, implementationName, implementation, created, none
+    $matchedOnEnumMap = @{
+        'preferredid' = 'preferredId'
+        'implementationname' = 'implementationName'
+        'implementation' = 'implementation'
+        'created' = 'created'
+    }
+
     # Helper: coerce value to integer if possible (type stability)
     function CoerceToInt($value) {
         if ($null -eq $value) { return $null }
@@ -537,6 +546,27 @@ function Get-ComponentResolution {
     function NormalizeStrategy($raw) {
         if ([string]::IsNullOrWhiteSpace($raw)) { return 'none' }
         return $raw.ToString().Trim()
+    }
+
+    # Helper: derive matchedOn enum from strategy
+    # Returns lowerCamelCase enum value: preferredId, implementationName, implementation, created, none
+    function DeriveMatchedOn($strategy, $selectedId) {
+        # If no selectedId, always return 'none'
+        if ($null -eq $selectedId) { return 'none' }
+
+        # If strategy starts with 'ambiguous', return 'none'
+        if ($strategy -match '(?i)^ambiguous') { return 'none' }
+
+        # Normalize to lowercase for lookup
+        $strategyLower = $strategy.ToLowerInvariant()
+
+        # Map to canonical enum value if it's a known safe strategy
+        if ($matchedOnEnumMap.ContainsKey($strategyLower)) {
+            return $matchedOnEnumMap[$strategyLower]
+        }
+
+        # Unknown strategy (including 'updated', 'fuzzy', 'none', etc.) → 'none'
+        return 'none'
     }
 
     $result = [ordered]@{}
@@ -603,9 +633,13 @@ function Get-ComponentResolution {
               $candidateMatchesSelected = ($candidateIds.Count -eq 0) -or
                   ($hasSelectedId -and $candidateIds.Count -eq 1 -and $candidateIds[0] -eq $selectedId)
 
+              # Derive matchedOn enum value
+              $matchedOn = DeriveMatchedOn -strategy $strategy -selectedId $selectedId
+
               $result[$outputKey] = [ordered]@{
                   selectedId = $selectedId
                   strategy = $strategy
+                  matchedOn = $matchedOn
                   candidateIds = $candidateIds
                   safeToPersist = ($isSafe -and -not $isAmbiguous -and $hasSelectedId -and $hasAtMostOneCandidate -and $candidateMatchesSelected)
               }
@@ -700,6 +734,28 @@ function ConvertTo-E2ERunManifest {
         $componentResolution = Get-ComponentResolution -Details $details
         if ($componentResolution) {
             $details['componentResolution'] = $componentResolution
+        }
+
+        # Add persistedIdsUpdated flag
+        # Logic: check if already provided in input, otherwise derive from context
+        if (-not $details.Contains('persistedIdsUpdated')) {
+            # Derive persistedIdsUpdated:
+            # - Skipped gates never persist IDs
+            # - If componentResolution has any safeToPersist=true and strategy indicates creation/update, it's true
+            # - Default to false for safety
+            $persistedIdsUpdated = $false
+            if ($result.Outcome -ne 'skipped' -and $componentResolution) {
+                # Check if any component resolution indicates IDs were written
+                # (safeToPersist=true + strategy is 'created' or outcome was successful with IDs)
+                foreach ($compKey in $componentResolution.Keys) {
+                    $compRes = $componentResolution[$compKey]
+                    if ($compRes.safeToPersist -eq $true -and $null -ne $compRes.selectedId) {
+                        $persistedIdsUpdated = $true
+                        break
+                    }
+                }
+            }
+            $details['persistedIdsUpdated'] = $persistedIdsUpdated
         }
 
         $jsonResults += [ordered]@{
