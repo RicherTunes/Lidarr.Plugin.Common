@@ -461,6 +461,12 @@ try {
         $hasAmbiguityError = ($result.Errors | Where-Object { $_ -like "*Ambiguous configured indexer selection*" } | Select-Object -First 1)
         Write-TestResult -TestName "Ambiguous configured components -> Error mentions ambiguity" `
             -Passed ([bool]$hasAmbiguityError)
+
+        Write-TestResult -TestName "Ambiguous configured components -> ErrorCode=E2E_COMPONENT_AMBIGUOUS" `
+            -Passed ($result.Details.ErrorCode -eq "E2E_COMPONENT_AMBIGUOUS")
+
+        Write-TestResult -TestName "Ambiguous configured components -> ComponentType=indexer" `
+            -Passed ($result.Details.ComponentType -eq "indexer")
     }
 }
 catch {

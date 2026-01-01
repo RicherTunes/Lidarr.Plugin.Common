@@ -1007,6 +1007,8 @@ function Test-ConfigureGateForPlugin {
                             $result.Outcome = "failed"
                             $result.Success = $false
                             $result.Errors += "Ambiguous configured indexer selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                            $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            $result.Details.ComponentType = "indexer"
                             $result.Details.resolution["indexer"] = $amb.Resolution
                             $result.Details.componentIds["indexerCandidateIds"] = $amb.CandidateIds
                             return $result
@@ -1018,6 +1020,8 @@ function Test-ConfigureGateForPlugin {
                             $result.Outcome = "failed"
                             $result.Success = $false
                             $result.Errors += "Ambiguous configured download client selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                            $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            $result.Details.ComponentType = "downloadclient"
                             $result.Details.resolution["downloadclient"] = $amb.Resolution
                             $result.Details.componentIds["downloadClientCandidateIds"] = $amb.CandidateIds
                             return $result
@@ -1040,6 +1044,8 @@ function Test-ConfigureGateForPlugin {
                             $result.Outcome = "failed"
                             $result.Success = $false
                             $result.Errors += "Ambiguous configured import list selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                            $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            $result.Details.ComponentType = "importlist"
                             $result.Details.resolution["importlist"] = $amb.Resolution
                             $result.Details.componentIds["importListCandidateIds"] = $amb.CandidateIds
                             return $result
@@ -1340,18 +1346,83 @@ function Test-PersistGate {
         try {
             if ($cfg.ExpectIndexer) {
                 $idx = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
+                if (-not $idx) {
+                    $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
+                    if ($amb.IsAmbiguous) {
+                        $result.Outcome = "failed"
+                        $result.Success = $false
+                        $result.Errors += "Ambiguous configured indexer selection during Persist baseline capture for $plugin ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                        $result.Details = @{
+                            Reason = "Ambiguous configured indexer selection"
+                            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            ComponentType = "indexer"
+                            Plugin = $plugin
+                            Phase = "baselineCapture"
+                            Resolution = $amb.Resolution
+                            CandidateIds = $amb.CandidateIds
+                        }
+                        return $result
+                    }
+                }
                 if ($idx) { $baseline[$plugin].IndexerId = $idx.id }
             }
+
             if ($cfg.ExpectDownloadClient) {
                 $dc = Find-ConfiguredComponent -Type "downloadclient" -PluginName $plugin
+                if (-not $dc) {
+                    $amb = Get-ComponentAmbiguityDetails -Type "downloadclient" -PluginName $plugin
+                    if ($amb.IsAmbiguous) {
+                        $result.Outcome = "failed"
+                        $result.Success = $false
+                        $result.Errors += "Ambiguous configured download client selection during Persist baseline capture for $plugin ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                        $result.Details = @{
+                            Reason = "Ambiguous configured download client selection"
+                            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            ComponentType = "downloadclient"
+                            Plugin = $plugin
+                            Phase = "baselineCapture"
+                            Resolution = $amb.Resolution
+                            CandidateIds = $amb.CandidateIds
+                        }
+                        return $result
+                    }
+                }
                 if ($dc) { $baseline[$plugin].DownloadClientId = $dc.id }
             }
+
             if ($cfg.ExpectImportList) {
                 $il = Find-ConfiguredComponent -Type "importlist" -PluginName $plugin
+                if (-not $il) {
+                    $amb = Get-ComponentAmbiguityDetails -Type "importlist" -PluginName $plugin
+                    if ($amb.IsAmbiguous) {
+                        $result.Outcome = "failed"
+                        $result.Success = $false
+                        $result.Errors += "Ambiguous configured import list selection during Persist baseline capture for $plugin ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                        $result.Details = @{
+                            Reason = "Ambiguous configured import list selection"
+                            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            ComponentType = "importlist"
+                            Plugin = $plugin
+                            Phase = "baselineCapture"
+                            Resolution = $amb.Resolution
+                            CandidateIds = $amb.CandidateIds
+                        }
+                        return $result
+                    }
+                }
                 if ($il) { $baseline[$plugin].ImportListId = $il.id }
             }
         }
-        catch { }
+        catch {
+            $result.Outcome = "failed"
+            $result.Success = $false
+            $result.Errors += "Persist baseline capture error for $plugin: $_"
+            $result.Details = @{
+                Reason = "Persist baseline capture error"
+                Plugin = $plugin
+            }
+            return $result
+        }
     }
 
     # Restart container.
@@ -1639,8 +1710,10 @@ foreach ($plugin in $pluginList) {
                     $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
                     if ($amb.IsAmbiguous) {
                         Write-Host "       FAIL (ambiguous configured indexer selection)" -ForegroundColor Red
-                        $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{
+                        $allResults += New-OutcomeResult -Gate "Search" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{   
                             Reason = "Ambiguous configured indexer selection"
+                            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            ComponentType = "indexer"
                             Resolution = $amb.Resolution
                             CandidateIds = $amb.CandidateIds
                         }
@@ -1815,6 +1888,8 @@ foreach ($plugin in $pluginList) {
                         Write-Host "       FAIL (ambiguous configured indexer selection)" -ForegroundColor Red
                         $allResults += New-OutcomeResult -Gate "AlbumSearch" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{
                             Reason = "Ambiguous configured indexer selection"
+                            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                            ComponentType = "indexer"
                             Resolution = $amb.Resolution
                             CandidateIds = $amb.CandidateIds
                         }
@@ -2234,6 +2309,21 @@ if ($runPersistRerun) {
             $pluginIndexer = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
 
             if (-not $pluginIndexer) {
+                $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
+                if ($amb.IsAmbiguous) {
+                    Write-Host "       FAIL (ambiguous configured indexer selection)" -ForegroundColor Red
+                    $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{
+                        Reason = "Ambiguous configured indexer selection"
+                        ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                        ComponentType = "indexer"
+                        Resolution = $amb.Resolution
+                        CandidateIds = $amb.CandidateIds
+                    }
+                    $overallSuccess = $false
+                    $stopNow = $true
+                    break
+                }
+
                 Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
                 $allResults += New-OutcomeResult -Gate "Revalidation" -PluginName $plugin -Outcome "skipped" -Details @{
                     Reason = "No configured indexer found post-restart"
@@ -2370,6 +2460,21 @@ if ($runPostRestartGrab) {
             $pluginIndexer = Find-ConfiguredComponent -Type "indexer" -PluginName $plugin
 
             if (-not $pluginIndexer) {
+                $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin
+                if ($amb.IsAmbiguous) {
+                    Write-Host "       FAIL (ambiguous configured indexer selection)" -ForegroundColor Red
+                    $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors @("Ambiguous configured indexer selection ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')") -Details @{
+                        Reason = "Ambiguous configured indexer selection"
+                        ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                        ComponentType = "indexer"
+                        Resolution = $amb.Resolution
+                        CandidateIds = $amb.CandidateIds
+                    }
+                    $overallSuccess = $false
+                    $stopNow = $true
+                    break
+                }
+
                 Write-Host "       SKIP (no configured indexer found)" -ForegroundColor Yellow
                 $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "skipped" -Details @{
                     Reason = "No configured indexer found post-restart"

@@ -53,7 +53,7 @@ Assert-True -Condition ($content -like '*-ComponentIdsInstanceSalt*' -or $conten
 # ---------------------------------------------------------------------------
 $ambNeedle = 'Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $plugin'
 $ambIndexerCalls = ([regex]::Matches($content, [regex]::Escape($ambNeedle))).Count
-Assert-True -Condition ($ambIndexerCalls -ge 2) -Message "Runner checks for ambiguous configured indexer selection in multiple gates (Search + AlbumSearch)"
+Assert-True -Condition ($ambIndexerCalls -ge 4) -Message "Runner checks for ambiguous configured indexer selection across multiple gates (Search/AlbumSearch/Revalidation/PostRestartGrab)"
 
 # ---------------------------------------------------------------------------
 # Guardrail 3: ImportList gate must not select by user-controlled name
