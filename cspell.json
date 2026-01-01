@@ -71,6 +71,12 @@
     "TrevTV",
     "APIKEY",
     "importlist",
+    "downloadclients",
+    "hostnames",
+    "unredacted",
+    "refreshtoken",
+    "accesstoken",
+    "clientsecret",
     "creds"
   ],
   "ignorePaths": [

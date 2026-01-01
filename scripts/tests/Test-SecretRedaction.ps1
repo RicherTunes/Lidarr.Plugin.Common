@@ -23,7 +23,7 @@ $testResults = @(
             CredentialAllOf = @('authToken', 'userId', 'apiKey')
             authToken = 'secret123abc'
             password = 'mypassword'
-            apiKey = 'abcd1234567890abcd1234567890ab'
+            apiKey = 'abcd1234567890abcd1234567890ab' # gitleaks:allow
         }
         StartTime = [DateTime]::UtcNow.AddSeconds(-1)
         EndTime = [DateTime]::UtcNow
@@ -45,7 +45,7 @@ $testContext = @{
     StopReason = $null
     RedactionSelfTestExecuted = $true
     RedactionSelfTestPassed = $true
-    RunnerArgs = @('-ApiKey', 'abcd1234567890abcd1234567890ab', '-Gate', 'search')
+    RunnerArgs = @('-ApiKey', 'abcd1234567890abcd1234567890ab', '-Gate', 'search') # gitleaks:allow
     DiagnosticsBundlePath = $null
     DiagnosticsIncludedFiles = @()
     LidarrVersion = '2.9.6'
