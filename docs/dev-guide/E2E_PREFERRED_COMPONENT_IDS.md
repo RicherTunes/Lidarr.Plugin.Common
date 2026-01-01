@@ -20,6 +20,13 @@ Default path: `.e2e-bootstrap/e2e-component-ids.json` (override with `E2E_COMPON
 
 Optional: set `E2E_COMPONENT_IDS_INSTANCE_SALT` (or `-ComponentIdsInstanceSalt`) to avoid collisions when reusing the same `(LidarrUrl + ContainerName)` against different config directories/instances.
 
+Power users: set `E2E_COMPONENT_IDS_INSTANCE_KEY` (or `E2E_INSTANCE_KEY`, or `-ComponentIdsInstanceKey`) to explicitly override the computed instance key. When set, the runner uses the provided key verbatim (trimmed) and ignores the computed hash/salt.
+
+Lock tuning (best-effort; never fails the run):
+- `E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS` (default: 750, max: 5000)
+- `E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS` (default: 50, max: 250)
+- `E2E_COMPONENT_IDS_LOCK_STALE_SECONDS` (default: 120, max: 3600)
+
 Schema (v2, instance-namespaced):
 ```json
 {
@@ -52,6 +59,8 @@ Note: `lidarrVersion` is best-effort metadata for diagnostics; it may be `null` 
 4. Else: fuzzy fallback (backward compat) — should be last resort and safe
 
 Each selection records a `resolution` string in the run manifest (e.g., `preferredId`, `implementationName`, `implementation`, `fuzzy`, `none`).
+
+Note: fuzzy matching is intended for backward compatibility only and is typically disabled in CI via `E2E_DISABLE_FUZZY_COMPONENT_MATCH=1`.
 
 ## Acceptance Tests (TDD)
 
