@@ -305,6 +305,17 @@ if (Test-Path $jsonModulePath) {
             Common = "git"
             TestPlugin = "git"
         }
+        ComponentIds = @{
+            InstanceKey = "test-instance-key"
+            InstanceKeySource = "explicit"
+            LockPolicy = @{
+                TimeoutMs = 1000
+                RetryDelayMs = 100
+                StaleSeconds = 60
+            }
+            LockPolicySource = "env"
+            PersistenceEnabled = $true
+        }
     }
 
     # Generate JSON
@@ -318,6 +329,14 @@ if (Test-Path $jsonModulePath) {
     Assert-True ($obj.results.Count -eq 2) "Module output: results has 2 entries"
     Assert-True ($obj.results[0].outcome -in @('success', 'failed', 'skipped')) "Module output: outcome is valid enum"
     Assert-True ($obj.hostBugSuspected.detected -is [bool]) "Module output: hostBugSuspected.detected is boolean"
+
+    # Component IDs conformance tests
+    Assert-True ($null -ne $obj.componentIds) "Module output: componentIds block is present"
+    Assert-Equal "test-instance-key" $obj.componentIds.instanceKey "Module output: componentIds.instanceKey matches"
+    Assert-True ($obj.componentIds.instanceKeySource -in @('explicit', 'computed')) "Module output: componentIds.instanceKeySource is valid enum"
+    Assert-True ($obj.componentIds.lockPolicy.timeoutMs -is [int] -or $obj.componentIds.lockPolicy.timeoutMs -is [long]) "Module output: lockPolicy.timeoutMs is integer"
+    Assert-True ($obj.componentIds.lockPolicySource -in @('default', 'env')) "Module output: componentIds.lockPolicySource is valid enum"
+    Assert-True ($obj.componentIds.persistenceEnabled -is [bool]) "Module output: componentIds.persistenceEnabled is boolean"
 
 } else {
     Write-Host "  [SKIP] JSON module not found: $jsonModulePath" -ForegroundColor Yellow
