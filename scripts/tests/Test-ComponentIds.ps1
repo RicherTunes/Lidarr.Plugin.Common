@@ -68,6 +68,10 @@ try {
     Set-E2EPreferredComponentId -State $state -InstanceKey $instanceKey -LidarrUrl "http://localhost:8686" -ContainerName "lidarr-test" -PluginName "Qobuzarr" -Type "downloadclient" -Id 201
     Set-E2EPreferredComponentId -State $state -InstanceKey $instanceKey -LidarrUrl "http://localhost:8686" -ContainerName "lidarr-test" -PluginName "Brainarr" -Type "importlist" -Id 301
 
+    Set-E2EComponentIdsInstanceHostFingerprint -State $state -InstanceKey $instanceKey -LidarrUrl "http://localhost:8686" -ContainerName "lidarr-test" `
+        -LidarrVersion "3.1.1.4884" -LidarrBranch "plugins" -ImageTag "ghcr.io/hotio/lidarr:pr-plugins-3.1.1.4884" -ImageDigest "sha256:deadbeef" -ImageId "sha256:deadbeef" `
+        -ContainerId "abc123def456" -ContainerStartedAt "2025-01-01T00:00:00.0000000Z"
+
     # Write should be best-effort and return true on success
     $writeOk = Write-E2EComponentIdsState -Path $statePath -State $state
     Write-TestResult -TestName "Write returns true on success" -Passed ($writeOk -eq $true)
@@ -76,6 +80,12 @@ try {
     Write-TestResult -TestName "Round-trip preserves Qobuzarr indexerId" -Passed ((Get-E2EPreferredComponentId -State $roundTrip -InstanceKey $instanceKey -PluginName "Qobuzarr" -Type "indexer") -eq 101)
     Write-TestResult -TestName "Round-trip preserves Qobuzarr downloadClientId" -Passed ((Get-E2EPreferredComponentId -State $roundTrip -InstanceKey $instanceKey -PluginName "Qobuzarr" -Type "downloadclient") -eq 201)
     Write-TestResult -TestName "Round-trip preserves Brainarr importListId" -Passed ((Get-E2EPreferredComponentId -State $roundTrip -InstanceKey $instanceKey -PluginName "Brainarr" -Type "importlist") -eq 301)
+
+    $instanceState = $roundTrip.instances[$instanceKey]
+    Write-TestResult -TestName "Round-trip preserves host lidarrVersion fingerprint" -Passed ($instanceState.lidarrVersion -eq "3.1.1.4884")
+    Write-TestResult -TestName "Round-trip preserves host lidarrBranch fingerprint" -Passed ($instanceState.lidarrBranch -eq "plugins")
+    Write-TestResult -TestName "Round-trip preserves host imageDigest fingerprint" -Passed ($instanceState.imageDigest -eq "sha256:deadbeef")
+    Write-TestResult -TestName "Round-trip preserves host containerId fingerprint" -Passed ($instanceState.containerId -eq "abc123def456")
 
     $otherInstanceKey = Get-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "different-container"
     Write-TestResult -TestName "Different instanceKey does not read IDs" -Passed ($null -eq (Get-E2EPreferredComponentId -State $roundTrip -InstanceKey $otherInstanceKey -PluginName "Qobuzarr" -Type "indexer"))

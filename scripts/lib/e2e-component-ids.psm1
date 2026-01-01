@@ -118,6 +118,12 @@ function Read-E2EComponentIdsState {
                     lidarrUrl = ($instanceObj.PSObject.Properties["lidarrUrl"]?.Value)
                     containerName = ($instanceObj.PSObject.Properties["containerName"]?.Value)
                     lidarrVersion = ($instanceObj.PSObject.Properties["lidarrVersion"]?.Value)
+                    lidarrBranch = ($instanceObj.PSObject.Properties["lidarrBranch"]?.Value)
+                    imageTag = ($instanceObj.PSObject.Properties["imageTag"]?.Value)
+                    imageDigest = ($instanceObj.PSObject.Properties["imageDigest"]?.Value)
+                    imageId = ($instanceObj.PSObject.Properties["imageId"]?.Value)
+                    containerId = ($instanceObj.PSObject.Properties["containerId"]?.Value)
+                    containerStartedAt = ($instanceObj.PSObject.Properties["containerStartedAt"]?.Value)
                     updatedAt = ($instanceObj.PSObject.Properties["updatedAt"]?.Value)
                     plugins = $pluginsState
                 }
@@ -155,6 +161,12 @@ function Read-E2EComponentIdsState {
                 lidarrUrl = $null
                 containerName = $null
                 lidarrVersion = $null
+                lidarrBranch = $null
+                imageTag = $null
+                imageDigest = $null
+                imageId = $null
+                containerId = $null
+                containerStartedAt = $null
                 updatedAt = $null
                 plugins = $legacyPlugins
             }
@@ -347,6 +359,76 @@ function Set-E2EPreferredComponentId {
     $plugins[$PluginName][$key] = $Id
 }
 
+function Set-E2EComponentIdsInstanceHostFingerprint {
+    param(
+        [Parameter(Mandatory)]
+        [hashtable]$State,
+
+        [Parameter(Mandatory)]
+        [string]$InstanceKey,
+
+        [Parameter(Mandatory)]
+        [string]$LidarrUrl,
+
+        [Parameter(Mandatory)]
+        [string]$ContainerName,
+
+        [AllowNull()]
+        [string]$LidarrVersion,
+
+        [AllowNull()]
+        [string]$LidarrBranch,
+
+        [AllowNull()]
+        [string]$ImageTag,
+
+        [AllowNull()]
+        [string]$ImageDigest,
+
+        [AllowNull()]
+        [string]$ImageId,
+
+        [AllowNull()]
+        [string]$ContainerId,
+
+        [AllowNull()]
+        [string]$ContainerStartedAt
+    )
+
+    if (-not $State.ContainsKey("instances") -or $State["instances"] -isnot [hashtable]) {
+        $State["instances"] = @{}
+    }
+
+    if (-not $State["instances"].ContainsKey($InstanceKey) -or $State["instances"][$InstanceKey] -isnot [hashtable]) {
+        $State["instances"][$InstanceKey] = @{
+            lidarrUrl = $LidarrUrl
+            containerName = $ContainerName
+            lidarrVersion = $null
+            lidarrBranch = $null
+            imageTag = $null
+            imageDigest = $null
+            imageId = $null
+            containerId = $null
+            containerStartedAt = $null
+            updatedAt = (Get-Date).ToString("o")
+            plugins = @{}
+        }
+    }
+
+    $instance = $State["instances"][$InstanceKey]
+    $instance["lidarrUrl"] = $LidarrUrl
+    $instance["containerName"] = $ContainerName
+    $instance["updatedAt"] = (Get-Date).ToString("o")
+
+    if (-not [string]::IsNullOrWhiteSpace($LidarrVersion)) { $instance["lidarrVersion"] = $LidarrVersion }
+    if (-not [string]::IsNullOrWhiteSpace($LidarrBranch)) { $instance["lidarrBranch"] = $LidarrBranch }
+    if (-not [string]::IsNullOrWhiteSpace($ImageTag)) { $instance["imageTag"] = $ImageTag }
+    if (-not [string]::IsNullOrWhiteSpace($ImageDigest)) { $instance["imageDigest"] = $ImageDigest }
+    if (-not [string]::IsNullOrWhiteSpace($ImageId)) { $instance["imageId"] = $ImageId }
+    if (-not [string]::IsNullOrWhiteSpace($ContainerId)) { $instance["containerId"] = $ContainerId }
+    if (-not [string]::IsNullOrWhiteSpace($ContainerStartedAt)) { $instance["containerStartedAt"] = $ContainerStartedAt }
+}
+
 function Select-ConfiguredComponent {
     param(
         [AllowNull()]
@@ -447,4 +529,5 @@ Export-ModuleMember -Function `
     Write-E2EComponentIdsState, `
     Get-E2EPreferredComponentId, `
     Set-E2EPreferredComponentId, `
+    Set-E2EComponentIdsInstanceHostFingerprint, `
     Select-ConfiguredComponent

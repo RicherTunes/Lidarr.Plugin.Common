@@ -331,6 +331,56 @@ function Save-E2EComponentIdsIfEnabled {
     if ($DisableComponentIdPersistence) { return }
     if ($null -eq $ComponentIds) { return }
 
+    # Persist host fingerprint into the preferred-ID state (diagnostics only; never used for selection).
+    # Best-effort: failures must not break runs.
+    if (-not $script:E2EComponentIdsHostFingerprint) {
+        $fp = @{
+            lidarrVersion = $null
+            lidarrBranch = $null
+            imageTag = $null
+            imageDigest = $null
+            imageId = $null
+            containerId = $null
+            containerStartedAt = $null
+        }
+
+        try {
+            $apiKeyVar = Get-Variable -Name effectiveApiKey -Scope Script -ErrorAction SilentlyContinue
+            $apiKey = if ($apiKeyVar) { $apiKeyVar.Value } else { $null }
+            if (-not [string]::IsNullOrWhiteSpace($apiKey)) {
+                $status = Invoke-RestMethod -Uri "$LidarrUrl/api/v1/system/status" -Headers @{ 'X-Api-Key' = $apiKey } -TimeoutSec 5
+                if ($status) {
+                    $fp.lidarrVersion = $status.version
+                    $fp.lidarrBranch = $status.branch
+                }
+            }
+        } catch { }
+
+        try {
+            if (-not [string]::IsNullOrWhiteSpace($ContainerName)) {
+                $inspectArr = docker inspect $ContainerName 2>$null | ConvertFrom-Json
+                $inspect = if ($inspectArr -is [array]) { $inspectArr | Select-Object -First 1 } else { $inspectArr }
+                if ($inspect) {
+                    $fp.imageTag = $inspect.Config.Image
+                    $fp.imageDigest = $inspect.Image
+                    $fp.imageId = $inspect.Image
+                    if ($inspect.Id) { $fp.containerId = $inspect.Id.Substring(0, [Math]::Min(12, $inspect.Id.Length)) }
+                    if ($inspect.State -and $inspect.State.StartedAt) {
+                        try { $fp.containerStartedAt = [DateTime]::Parse($inspect.State.StartedAt).ToUniversalTime().ToString("o") } catch { }
+                    }
+                }
+            }
+        } catch { }
+
+        $script:E2EComponentIdsHostFingerprint = $fp
+    }
+
+    try {
+        $fp = $script:E2EComponentIdsHostFingerprint
+        Set-E2EComponentIdsInstanceHostFingerprint -State $script:E2EComponentIdsState -InstanceKey $script:E2EComponentIdsInstanceKey -LidarrUrl $LidarrUrl -ContainerName $ContainerName `
+            -LidarrVersion $fp.lidarrVersion -LidarrBranch $fp.lidarrBranch -ImageTag $fp.imageTag -ImageDigest $fp.imageDigest -ImageId $fp.imageId -ContainerId $fp.containerId -ContainerStartedAt $fp.containerStartedAt
+    } catch { }
+
     $safeResolutions = @("preferredId", "implementationName", "implementation", "created")
     $resolvedIndexer = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "indexer|$PluginName" -DefaultValue "none"
     $resolvedClient = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "downloadclient|$PluginName" -DefaultValue "none"

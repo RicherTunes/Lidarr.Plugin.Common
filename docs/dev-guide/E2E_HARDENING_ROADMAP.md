@@ -34,7 +34,7 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 - [ ] Consider tightening “safe persistence” further: drop `implementation` if it proves unnecessary in practice (keep `created` + `preferredId` + `implementationName`).
 
 ### P1 (correctness hardening)
-- [ ] Record Lidarr host fingerprint (`lidarrVersion`, `branch`, `imageDigest`) into the preferred-ID state entries (diagnostics only; no effect on selection).
+- [x] Record Lidarr host fingerprint (`lidarrVersion`, `branch`, `imageTag`, `imageDigest`, `containerId`, `containerStartedAt`) into the preferred-ID state entries (diagnostics only; no effect on selection).
 - [x] Reduce/disable fuzzy fallback in `Select-ConfiguredComponent` (flag-gated), and add explicit tests for “no accidental selection”.
 
 ### P2 (concurrency + usability)
