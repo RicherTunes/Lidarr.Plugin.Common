@@ -225,6 +225,10 @@ param(
     # Disable reading preferred IDs (always use discovery). Writing may still occur if enabled.
     [switch]$DisableStoredComponentIds,
 
+    # Disable fuzzy (substring) matching when resolving configured components.
+    # Recommended for CI hardening; avoids selecting the wrong component when multiple exist.
+    [switch]$DisableFuzzyComponentMatch,
+
     # Disable writing/updating the component IDs state file.
     [switch]$DisableComponentIdPersistence
 )
@@ -264,9 +268,21 @@ if ($env:BRAINARR_SYNC_TIMEOUT_SEC) {
     }
 }
 
-# Environment variable override for ConfigurePassIfAlreadyConfigured
+# Environment variable override for ConfigurePassIfAlreadyConfigured     
 if (-not $ConfigurePassIfAlreadyConfigured -and $env:E2E_CONFIGURE_PASS_IF_CONFIGURED -eq '1') {
     $ConfigurePassIfAlreadyConfigured = $true
+}
+
+# Environment variable + CI defaults for disabling fuzzy matching
+if (-not $DisableFuzzyComponentMatch) {
+    $disableFuzzyRaw = "$($env:E2E_DISABLE_FUZZY_COMPONENT_MATCH)".Trim().ToLowerInvariant()
+    if ($disableFuzzyRaw -in @("1", "true", "yes")) {
+        $DisableFuzzyComponentMatch = $true
+    }
+    elseif (-not [string]::IsNullOrWhiteSpace("$($env:CI)")) {
+        # CI default: reduce ambiguity by avoiding substring matching
+        $DisableFuzzyComponentMatch = $true
+    }
 }
 
 # Default JSON output path if EmitJson requested
@@ -579,7 +595,7 @@ function Find-ConfiguredComponent {
     }
 
     $preferredIdValue = if ($null -ne $preferredId) { [int]$preferredId } else { 0 }
-    $selection = Select-ConfiguredComponent -Items $items -PluginName $PluginName -PreferredId $preferredIdValue
+    $selection = Select-ConfiguredComponent -Items $items -PluginName $PluginName -PreferredId $preferredIdValue -DisableFuzzyMatch:$DisableFuzzyComponentMatch
     $script:E2EComponentResolution["$Type|$PluginName"] = $selection.Resolution
     if ($selection.PSObject.Properties["CandidateIds"] -and $selection.CandidateIds) {
         $script:E2EComponentResolutionCandidates["$Type|$PluginName"] = @($selection.CandidateIds)
@@ -1088,6 +1104,18 @@ function Test-ConfigureGateForPlugin {
             $indexer = Find-ConfiguredComponent -Type "indexer" -PluginName $PluginName
 
             if (-not $indexer) {
+                $amb = Get-ComponentAmbiguityDetails -Type "indexer" -PluginName $PluginName
+                if ($amb.IsAmbiguous) {
+                    $result.Outcome = "failed"
+                    $result.Success = $false
+                    $result.Errors += "Ambiguous configured indexer selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                    $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                    $result.Details.ComponentType = "indexer"
+                    $result.Details.resolution["indexer"] = $amb.Resolution
+                    $result.Details.componentIds["indexerCandidateIds"] = $amb.CandidateIds
+                    return $result
+                }
+
                 # Create new indexer from schema
                 $schema = Get-ComponentSchema -Type "indexer" -ImplementationMatch $PluginName
                 if (-not $schema) {
@@ -1130,6 +1158,18 @@ function Test-ConfigureGateForPlugin {
             $client = Find-ConfiguredComponent -Type "downloadclient" -PluginName $PluginName
 
             if (-not $client) {
+                $amb = Get-ComponentAmbiguityDetails -Type "downloadclient" -PluginName $PluginName
+                if ($amb.IsAmbiguous) {
+                    $result.Outcome = "failed"
+                    $result.Success = $false
+                    $result.Errors += "Ambiguous configured download client selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                    $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                    $result.Details.ComponentType = "downloadclient"
+                    $result.Details.resolution["downloadclient"] = $amb.Resolution
+                    $result.Details.componentIds["downloadClientCandidateIds"] = $amb.CandidateIds
+                    return $result
+                }
+
                 # Create new download client from schema
                 $schema = Get-ComponentSchema -Type "downloadclient" -ImplementationMatch $PluginName
                 if (-not $schema) {
@@ -1172,6 +1212,18 @@ function Test-ConfigureGateForPlugin {
             $importList = Find-ConfiguredComponent -Type "importlist" -PluginName $PluginName
 
             if (-not $importList) {
+                $amb = Get-ComponentAmbiguityDetails -Type "importlist" -PluginName $PluginName
+                if ($amb.IsAmbiguous) {
+                    $result.Outcome = "failed"
+                    $result.Success = $false
+                    $result.Errors += "Ambiguous configured import list selection for $PluginName ($($amb.Resolution)): IDs=$($amb.CandidateIds -join ',')"
+                    $result.Details.ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+                    $result.Details.ComponentType = "importlist"
+                    $result.Details.resolution["importlist"] = $amb.Resolution
+                    $result.Details.componentIds["importListCandidateIds"] = $amb.CandidateIds
+                    return $result
+                }
+
                 # Create new import list from schema
                 $schema = Get-ComponentSchema -Type "importlist" -ImplementationMatch $PluginName
                 if (-not $schema) {

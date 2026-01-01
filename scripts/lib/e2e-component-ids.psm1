@@ -356,7 +356,11 @@ function Select-ConfiguredComponent {
         [string]$PluginName,
 
         [AllowNull()]
-        [int]$PreferredId
+        [int]$PreferredId,
+
+        # When set, disables fuzzy matching (substring match) on implementation.
+        # Useful for CI hardening to avoid selecting the wrong component when multiple exist.
+        [switch]$DisableFuzzyMatch
     )
 
     $arr = if ($Items -is [array]) { @($Items) } elseif ($null -ne $Items) { @($Items) } else { @() }
@@ -422,13 +426,16 @@ function Select-ConfiguredComponent {
     if ($match) { return [PSCustomObject]@{ Component = $match; Resolution = "implementation"; CandidateIds = @() } }
 
     # Priority 3: Fuzzy match on implementation only (backward compatibility). Require uniqueness.
-    $matches = @($arr | Where-Object { (Get-ItemValue -Item $_ -Name "implementation") -like "*$PluginName*" })
-    if ($matches.Count -gt 1) {
-        $candidateIds = @($matches | ForEach-Object { Get-ItemId -Item $_ } | Where-Object { $null -ne $_ })
-        return [PSCustomObject]@{ Component = $null; Resolution = "ambiguousFuzzy"; CandidateIds = $candidateIds }
+    # This match is intentionally optional and should generally be disabled in CI to avoid drift.
+    if (-not $DisableFuzzyMatch) {
+        $matches = @($arr | Where-Object { (Get-ItemValue -Item $_ -Name "implementation") -like "*$PluginName*" })
+        if ($matches.Count -gt 1) {
+            $candidateIds = @($matches | ForEach-Object { Get-ItemId -Item $_ } | Where-Object { $null -ne $_ })
+            return [PSCustomObject]@{ Component = $null; Resolution = "ambiguousFuzzy"; CandidateIds = $candidateIds }
+        }
+        $match = $matches | Select-Object -First 1
+        if ($match) { return [PSCustomObject]@{ Component = $match; Resolution = "fuzzy"; CandidateIds = @() } }
     }
-    $match = $matches | Select-Object -First 1
-    if ($match) { return [PSCustomObject]@{ Component = $match; Resolution = "fuzzy"; CandidateIds = @() } }
 
     return [PSCustomObject]@{ Component = $null; Resolution = "none"; CandidateIds = @() }
 }

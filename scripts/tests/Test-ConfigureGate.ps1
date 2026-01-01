@@ -289,7 +289,7 @@ function Get-E2EPreferredComponentId {
 }
 
  function Select-ConfiguredComponent {
-     param($Items, [string]$PluginName, [int]$PreferredId)
+     param($Items, [string]$PluginName, [int]$PreferredId, [switch]$DisableFuzzyMatch)
      $arr = if ($Items -is [array]) { @($Items) } elseif ($null -ne $Items) { @($Items) } else { @() }
      # Simulate ambiguity detection (matches runner/module behavior): do not guess.
      $nameMatches = @($arr | Where-Object { $_.implementationName -eq $PluginName })
@@ -517,6 +517,121 @@ try {
     }
 } catch {
     Write-TestResult -TestName "Brainarr PassIfAlreadyConfigured test" -Passed $false -Message $_.Exception.Message
+}
+
+Write-Host ""
+
+# =============================================================================
+# Test 10: Configure gate must FAIL (not create) on ambiguous component selection
+# =============================================================================
+Write-Host "Test Group: Configure Gate Fail-Fast on Ambiguity (Env Vars Present)" -ForegroundColor Yellow
+
+try {
+    # -----------------------------
+    # Case 10a: Qobuzarr indexer ambiguous
+    # -----------------------------
+    $originalQobuzToken = $env:QOBUZARR_AUTH_TOKEN
+    $originalQobuzTokenAlt = $env:QOBUZ_AUTH_TOKEN
+    $env:QOBUZARR_AUTH_TOKEN = "token-placeholder"
+    $env:QOBUZ_AUTH_TOKEN = $null
+
+    $script:mockComponents = @{
+        indexer = @(
+            [PSCustomObject]@{ id = 101; implementationName = "Qobuzarr"; implementation = "QobuzIndexer"; name = "Qobuzarr A" },
+            [PSCustomObject]@{ id = 102; implementationName = "Qobuzarr"; implementation = "QobuzIndexer"; name = "Qobuzarr B" }
+        )
+        downloadclient = @(
+            [PSCustomObject]@{ id = 201; implementationName = "Qobuzarr"; implementation = "QobuzDownloadClient"; name = "Qobuzarr Download" }
+        )
+        importlist = @()
+    }
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Qobuzarr"
+
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> Outcome=failed" `
+            -Passed ($result.Outcome -eq "failed")
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ErrorCode=E2E_COMPONENT_AMBIGUOUS" `
+            -Passed ($result.Details.ErrorCode -eq "E2E_COMPONENT_AMBIGUOUS")
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ComponentType=indexer" `
+            -Passed ($result.Details.ComponentType -eq "indexer")
+    }
+}
+catch {
+    Write-TestResult -TestName "Configure gate ambiguity (env vars present) - Qobuzarr indexer" -Passed $false -Message $_.Exception.Message
+}
+finally {
+    $env:QOBUZARR_AUTH_TOKEN = $originalQobuzToken
+    $env:QOBUZ_AUTH_TOKEN = $originalQobuzTokenAlt
+}
+
+try {
+    # -----------------------------
+    # Case 10b: Qobuzarr download client ambiguous (indexer unique)
+    # -----------------------------
+    $originalQobuzToken = $env:QOBUZARR_AUTH_TOKEN
+    $originalQobuzTokenAlt = $env:QOBUZ_AUTH_TOKEN
+    $env:QOBUZARR_AUTH_TOKEN = "token-placeholder"
+    $env:QOBUZ_AUTH_TOKEN = $null
+
+    $script:mockComponents = @{
+        indexer = @(
+            [PSCustomObject]@{ id = 101; implementationName = "Qobuzarr"; implementation = "QobuzIndexer"; name = "Qobuzarr" }
+        )
+        downloadclient = @(
+            [PSCustomObject]@{ id = 201; implementationName = "Qobuzarr"; implementation = "QobuzDownloadClient"; name = "Qobuzarr Download A" },
+            [PSCustomObject]@{ id = 202; implementationName = "Qobuzarr"; implementation = "QobuzDownloadClient"; name = "Qobuzarr Download B" }
+        )
+        importlist = @()
+    }
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Qobuzarr"
+
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ComponentType=downloadclient" `
+            -Passed ($result.Details.ComponentType -eq "downloadclient")
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ErrorCode=E2E_COMPONENT_AMBIGUOUS (downloadclient)" `
+            -Passed ($result.Details.ErrorCode -eq "E2E_COMPONENT_AMBIGUOUS")
+    }
+}
+catch {
+    Write-TestResult -TestName "Configure gate ambiguity (env vars present) - Qobuzarr download client" -Passed $false -Message $_.Exception.Message
+}
+finally {
+    $env:QOBUZARR_AUTH_TOKEN = $originalQobuzToken
+    $env:QOBUZ_AUTH_TOKEN = $originalQobuzTokenAlt
+}
+
+try {
+    # -----------------------------
+    # Case 10c: Brainarr import list ambiguous
+    # -----------------------------
+    $originalBrainarrUrl = $env:BRAINARR_LLM_BASE_URL
+    $env:BRAINARR_LLM_BASE_URL = "http://localhost:1234"
+
+    $script:mockComponents = @{
+        indexer = @()
+        downloadclient = @()
+        importlist = @(
+            [PSCustomObject]@{ id = 301; implementationName = "Brainarr"; implementation = "Brainarr"; name = "Brainarr A" },
+            [PSCustomObject]@{ id = 302; implementationName = "Brainarr"; implementation = "Brainarr"; name = "Brainarr B" }
+        )
+    }
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Brainarr"
+
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ComponentType=importlist" `
+            -Passed ($result.Details.ComponentType -eq "importlist")
+        Write-TestResult -TestName "Configure gate ambiguity (env vars present) -> ErrorCode=E2E_COMPONENT_AMBIGUOUS (importlist)" `
+            -Passed ($result.Details.ErrorCode -eq "E2E_COMPONENT_AMBIGUOUS")
+    }
+}
+catch {
+    Write-TestResult -TestName "Configure gate ambiguity (env vars present) - Brainarr importlist" -Passed $false -Message $_.Exception.Message
+}
+finally {
+    $env:BRAINARR_LLM_BASE_URL = $originalBrainarrUrl
 }
 
 Write-Host ""

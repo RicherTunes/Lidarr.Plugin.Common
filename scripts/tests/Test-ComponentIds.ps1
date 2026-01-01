@@ -141,6 +141,15 @@ try {
     $sel = Select-ConfiguredComponent -Items $items -PluginName "Qobuzarr" -PreferredId 0
     Write-TestResult -TestName "Name-only fuzzy does not select unrelated item" -Passed ($null -eq $sel.Component -and $sel.Resolution -eq "none")
 
+    # ===================================================================
+    # Selection: fuzzy match can be disabled (CI hardening)
+    # ===================================================================
+    $items = @(
+        [PSCustomObject]@{ id = 25; name = "X"; implementationName = "Other"; implementation = "QobuzarrSomething" }
+    )
+    $sel = Select-ConfiguredComponent -Items $items -PluginName "Qobuzarr" -PreferredId 0 -DisableFuzzyMatch
+    Write-TestResult -TestName "DisableFuzzyMatch prevents implementation substring selection" -Passed ($null -eq $sel.Component -and $sel.Resolution -eq "none")
+
     # ====================================================================
     # Selection: ambiguous matches return none (do not guess)
     # ====================================================================
