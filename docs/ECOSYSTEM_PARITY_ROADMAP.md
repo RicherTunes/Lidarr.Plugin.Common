@@ -6,12 +6,13 @@ This document tracks progress toward full structural and behavioral parity acros
 
 | Dimension | Tidalarr | Qobuzarr | Brainarr | Common |
 |-----------|----------|----------|----------|--------|
-| **Packaging** | 100% | 100% | 100% | Policy complete |
-| **Naming/Path** | 90% | 95% | N/A | FileSystemUtilities |
-| **Concurrency** | 95% | 100% | N/A | BaseDownloadOrchestrator |
-| **E2E Gates** | Pending | Proven | Pending | Harness ready |
+| **Packaging** | ✅ | ✅ | ✅ | Policy complete |
+| **Naming/Path** | ✅ | ✅ | N/A | FileSystemUtilities |
+| **Concurrency** | ✅ | ✅ | N/A | BaseDownloadOrchestrator |
+| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | Single-authority pattern |
+| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | JSON schema (PR #187) |
 
-**Overall Ecosystem Parity: ~93-95%**
+**Overall Ecosystem Parity: ~97%**
 
 ---
 
@@ -130,6 +131,36 @@ Options:
 
 ---
 
+## Auth Lifecycle Hardening (PR2–PR4)
+
+### Single Token Authority Pattern
+Both streaming plugins follow a "single token authority" architecture:
+
+| Plugin | Authority Class | Interfaces Implemented |
+|--------|-----------------|------------------------|
+| Tidalarr | `TidalOAuthService` | ITidalAuth, IStreamingTokenProvider |
+| Qobuzarr | `QobuzAuthenticationService` | IQobuzAuthenticationService, IStreamingTokenProvider |
+
+**Invariants (tested via characterization tests)**:
+- One class implements all auth interfaces (no adapters/wrappers)
+- Expected lifetime is single instance per container (DI same-instance test)
+- No competing token providers (Tidalarr PR2)
+
+### Token Storage Patterns
+
+| Plugin | Storage | Fallback | TTL |
+|--------|---------|----------|-----|
+| Tidalarr | `FileTokenStore` (ConfigPath) | `FailOnIOTokenStore` (throws) | Persistent |
+| Qobuzarr | `ICacheManager` (in-memory) | N/A | 24 hours |
+
+**Key difference**: Tidalarr uses file-based OAuth tokens; Qobuzarr uses in-memory session cache.
+- Qobuzarr has no file persistence risk
+- Tidalarr's `FailOnIOTokenStore` prevents silent writes to temp directory when ConfigPath not set
+
+**Note**: If Lidarr's host DI lifetime changes, the DI characterization tests should be updated accordingly.
+
+---
+
 ## Phase 3: Persistent E2E Gates
 
 ### 3.1 Gate Definitions
@@ -141,7 +172,7 @@ Options:
 | **ReleaseSearch** | 2 | Required | `AlbumSearch` command → `/api/v1/release?albumId=` returns results |
 | **Grab** | 3 | Required | Release grabbed → file appears in /downloads |
 
-**Current implementation**: Gates 0-1 are implemented. Gates 2-3 require additional work.
+**Current implementation**: All gates (0-3) are implemented and passing for streaming plugins.
 
 ### 3.2 E2E Runner
 **Location**: `lidarr.plugin.common/scripts/e2e-runner.ps1`
@@ -152,13 +183,30 @@ Features:
 - URL/token redaction in diagnostics
 - Cascade skip (Grab skipped when Search skipped)
 
+**E2E Gate Cascade (current)**:
+Schema → Configure → Search → AlbumSearch → Grab → Persist → Revalidation
+
+**Optional Gates**:
+- ImportList (Brainarr)
+- Metadata (opt-in via `-ValidateMetadata`)
+- PostRestartGrab (opt-in via `-PostRestartGrab`)
+
+**PR #187 Enhancements** (pending merge):
+- JSON Schema validation: `manifest.schema.json` with `$schema` fetchable pinning
+- Job summary output for GitHub Actions with per-plugin pass/fail table
+- Expanded gate granularity with Revalidation gate
+
 ### 3.3 Plugin-Specific Status
 
-| Plugin | Schema | Config/Auth | ReleaseSearch | Grab |
-|--------|--------|-------------|---------------|------|
-| Qobuzarr | ✅ PASS | ⏭️ SKIP (no creds) | ❌ Not impl | ❌ Not impl |
-| Tidalarr | ✅ PASS | ✅ PASS | ❌ Not impl | ❌ Not impl |
-| Brainarr | ✅ PASS | N/A (import list) | N/A | N/A |
+| Plugin | Schema | Configure | Search | AlbumSearch | Grab | Persist | Revalidation |
+|--------|--------|-----------|--------|-------------|------|---------|--------------|
+| Tidalarr | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Qobuzarr | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Brainarr | ✅ | N/A | N/A | N/A | N/A | N/A | N/A |
+
+| Plugin | ImportList | BrainarrLLM |
+|--------|------------|-------------|
+| Brainarr | ⏭️/✅ (config-dependent) | ⏭️/✅ (opt-in) |
 
 **3-Plugin Coexistence**: ✅ All three plugins load simultaneously in same Lidarr instance.
 
@@ -242,6 +290,12 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 
 | Date | Change |
 |------|--------|
+| 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary (pending merge) |
+| 2025-12-31 | Qobuzarr PR4: Dead code deletion + 8 auth characterization tests (incl. DI same-instance) |
+| 2025-12-31 | Tidalarr PR3: TidalOAuthService fallback → FailOnIOTokenStore (no silent temp writes) |
+| 2025-12-31 | Tidalarr PR2: Auth lifecycle unification - single token authority, scoped IStreamingTokenProvider |
+| 2025-12-31 | E2E bootstrap validation: All gates pass for Tidalarr (Schema→Persist→Revalidation) |
+| 2025-12-31 | Added Auth Lifecycle Hardening section documenting single-authority pattern |
 | 2025-12-30 | Added multi-plugin stability caveat (:8691 best-effort until Lidarr ALC fix) |
 | 2025-12-30 | PR #186: SimpleDownloadOrchestrator metadata tagging + ILogger + fail-fast |
 | 2025-12-27 | Brainarr PR #346: FluentValidation exclusion fix with guard test |
