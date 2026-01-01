@@ -453,6 +453,8 @@ jobs:
             echo "::notice::COLD-START MODE: Using fresh config dir $CONFIG_DIR"
             echo "E2E_COLD_START=true" >> $GITHUB_ENV
             echo "E2E_CONFIG_DIR=$CONFIG_DIR" >> $GITHUB_ENV
+            # Salt preferred-ID state by cold-start GUID to avoid cross-instance collisions
+            echo "E2E_COMPONENT_IDS_INSTANCE_SALT=$CONFIG_GUID" >> $GITHUB_ENV
           else
             CONFIG_DIR=".e2e-bootstrap/config"
             echo "E2E_COLD_START=false" >> $GITHUB_ENV
@@ -733,6 +735,46 @@ jobs:
             }
           }
 
+          # If any plugin created/configured components (Case B), ensure preferred ID state was persisted.
+          $statePath = ".e2e-bootstrap/e2e-component-ids.json"
+          $configureResultsWithIds = @($manifest.results | Where-Object {
+            $_.gate -eq "Configure" -and $_.outcome -eq "success" -and $_.details -and $_.details.componentIds
+          })
+
+          $anyConfiguredWithIds = $false
+          foreach ($r in $configureResultsWithIds) {
+            $plugin = $r.plugin
+            $hasCreds = switch ($plugin) {
+              "Qobuzarr" { $env:HAS_QOBUZ_CREDS -eq "true" }
+              "Tidalarr" { $env:HAS_TIDAL_CREDS -eq "true" }
+              "Brainarr" { $env:HAS_BRAINARR_CREDS -eq "true" }
+              default { $false }
+            }
+            if (-not $hasCreds) { continue }
+
+            $ids = $r.details.componentIds
+            $hasAnyId = ($ids.indexerId -and $ids.indexerId -gt 0) -or
+                        ($ids.downloadClientId -and $ids.downloadClientId -gt 0) -or
+                        ($ids.importListId -and $ids.importListId -gt 0)
+            if ($hasAnyId) { $anyConfiguredWithIds = $true; break }
+          }
+
+          if ($anyConfiguredWithIds) {
+            if (-not (Test-Path $statePath)) {
+              $failures += "Preferred component ID state file not found at '$statePath' after Configure success with secrets"
+            }
+            else {
+              try {
+                $state = Get-Content $statePath -Raw | ConvertFrom-Json
+                if ($null -eq $state) {
+                  $failures += "Preferred component ID state file '$statePath' is empty or invalid JSON"
+                }
+              } catch {
+                $failures += "Preferred component ID state file '$statePath' could not be parsed as JSON"
+              }
+            }
+          }
+
           # Report results
           if ($failures.Count -gt 0) {
             Write-Host "::error::Cold-start validation failed with $($failures.Count) assertion(s):"
@@ -743,6 +785,93 @@ jobs:
           }
 
           Write-Host "Cold-start validation passed" -ForegroundColor Green
+
+      # =========================================================================
+      # WARM-RUN ASSERTION: Prefer stored component IDs
+      # Proves the second Configure run uses preferred IDs after state persistence.
+      # =========================================================================
+      - name: Validate warm-run uses preferred IDs
+        if: env.E2E_COLD_START == 'true'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $statePath = ".e2e-bootstrap/e2e-component-ids.json"
+          if (-not (Test-Path $statePath)) {
+            Write-Host "No component ID state file found; skipping warm-run assertion." -ForegroundColor Yellow
+            exit 0
+          }
+
+          Import-Module "./scripts/lib/e2e-component-ids.psm1" -Force
+          $salt = $env:E2E_COMPONENT_IDS_INSTANCE_SALT
+          $instanceKey = Get-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName $env:CONTAINER_NAME -InstanceSalt ($salt ?? "")
+          $state = Read-E2EComponentIdsState -Path $statePath
+
+          $pluginsState = $null
+          if ($state.instances.ContainsKey($instanceKey)) {
+            $pluginsState = $state.instances[$instanceKey].plugins
+          } elseif ($state.instances.ContainsKey("legacy") -and $state.instances.Count -eq 1) {
+            $pluginsState = $state.instances["legacy"].plugins
+          }
+
+          if ($null -eq $pluginsState -or $pluginsState.Count -eq 0) {
+            Write-Host "No stored component IDs for instanceKey '$instanceKey'; skipping warm-run assertion." -ForegroundColor Yellow
+            exit 0
+          }
+
+          $warmManifestPath = ".e2e-bootstrap/diagnostics/warm-run-manifest.json"
+          $params = @{
+            Plugins = $env:INPUT_PLUGINS
+            Gate = "configure"
+            LidarrUrl = "http://localhost:8686"
+            ApiKey = $env:LIDARR_API_KEY
+            ContainerName = $env:CONTAINER_NAME
+            DiagnosticsPath = "./.e2e-bootstrap/diagnostics"
+            EmitJson = $true
+            JsonOutputPath = $warmManifestPath
+            ConfigurePassIfAlreadyConfigured = $true
+            ComponentIdsInstanceSalt = ($env:E2E_COMPONENT_IDS_INSTANCE_SALT ?? "")
+          }
+
+          & ./scripts/e2e-runner.ps1 @params
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Warm Configure run failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+          if (-not (Test-Path $warmManifestPath)) {
+            Write-Host "::error::Warm-run manifest not found at '$warmManifestPath'"
+            exit 1
+          }
+
+          $warmManifest = Get-Content $warmManifestPath -Raw | ConvertFrom-Json
+          $failures = @()
+
+          foreach ($pluginName in $pluginsState.Keys) {
+            $configure = @($warmManifest.results | Where-Object { $_.gate -eq "Configure" -and $_.plugin -eq $pluginName }) | Select-Object -First 1
+            if (-not $configure) {
+              $failures += "[$pluginName] Warm run missing Configure result"
+              continue
+            }
+            if ($configure.outcome -ne "success") {
+              $failures += "[$pluginName] Warm Configure expected success, got $($configure.outcome)"
+              continue
+            }
+            if (-not $configure.details -or $configure.details.preferredIdUsed -ne $true) {
+              $failures += "[$pluginName] Warm Configure expected details.preferredIdUsed=true"
+              continue
+            }
+          }
+
+          if ($failures.Count -gt 0) {
+            Write-Host "::error::Warm-run preferred ID assertion failed with $($failures.Count) issue(s):"
+            foreach ($f in $failures) {
+              Write-Host "  - $f" -ForegroundColor Red
+            }
+            exit 1
+          }
+
+          Write-Host "Warm-run preferred ID assertion passed" -ForegroundColor Green
 
       # =========================================================================
       # NO-JUNK API CHECK: Verify no stray components created (cold-start only)
@@ -765,28 +894,81 @@ jobs:
 
           echo "Verifying no junk components were created (Case A - no secrets)..."
 
-          # Check indexers
-          indexer_count=$(curl -s "http://localhost:8686/api/v1/indexer" -H "X-Api-Key: $LIDARR_API_KEY" | jq 'length')
-          if [[ "$indexer_count" -gt 0 ]]; then
-            echo "::error::Found $indexer_count indexer(s) - expected 0 in cold-start without secrets"
+          fetch_json() {
+            local url="$1"
+            local attempts=10
+            local delay=2
+
+            for ((i=1; i<=attempts; i++)); do
+              if out=$(curl -fsS "$url" -H "X-Api-Key: $LIDARR_API_KEY"); then
+                echo "$out"
+                return 0
+              fi
+              echo "Retry $i/$attempts: $url not ready yet"
+              sleep "$delay"
+            done
+
+            echo "::error::Failed to query $url after $attempts attempts"
+            return 1
+          }
+
+          # IMPORTANT: Do not assert total counts are 0. Lidarr may create defaults.
+          # We assert that no plugin-specific components were created.
+          # (Components are considered plugin-specific if implementationName matches plugin name.)
+
+          indexers_json="$(fetch_json 'http://localhost:8686/api/v1/indexer')"
+          clients_json="$(fetch_json 'http://localhost:8686/api/v1/downloadclient')"
+          importlists_json="$(fetch_json 'http://localhost:8686/api/v1/importlist')"
+
+          plugin_indexer_count=$(echo "$indexers_json" | jq '[.[] | select(
+              (.implementationName == "Qobuzarr") or
+              (.implementation == "QobuzIndexer") or
+              (.implementationName == "Tidalarr") or
+              (.implementation == "TidalLidarrIndexer")
+            )] | length')
+          plugin_client_count=$(echo "$clients_json" | jq '[.[] | select(
+              (.implementationName == "Qobuzarr") or
+              (.implementation == "QobuzDownloadClient") or
+              (.implementationName == "Tidalarr") or
+              (.implementation == "TidalLidarrDownloadClient")
+            )] | length')
+          plugin_importlist_count=$(echo "$importlists_json" | jq '[.[] | select(
+              (.implementationName == "Brainarr") or
+              (.implementation == "BrainarrImportList")
+            )] | length')
+
+          if [[ "$plugin_indexer_count" -gt 0 ]]; then
+            echo "::error::Found $plugin_indexer_count plugin indexer(s) in cold-start without secrets (expected 0)"
+            echo "$indexers_json" | jq -c '[.[] | select(
+                (.implementationName == "Qobuzarr") or
+                (.implementation == "QobuzIndexer") or
+                (.implementationName == "Tidalarr") or
+                (.implementation == "TidalLidarrIndexer")
+              ) | {id, name, implementationName, implementation}]'
             exit 1
           fi
 
-          # Check download clients
-          client_count=$(curl -s "http://localhost:8686/api/v1/downloadclient" -H "X-Api-Key: $LIDARR_API_KEY" | jq 'length')
-          if [[ "$client_count" -gt 0 ]]; then
-            echo "::error::Found $client_count download client(s) - expected 0 in cold-start without secrets"
+          if [[ "$plugin_client_count" -gt 0 ]]; then
+            echo "::error::Found $plugin_client_count plugin download client(s) in cold-start without secrets (expected 0)"
+            echo "$clients_json" | jq -c '[.[] | select(
+                (.implementationName == "Qobuzarr") or
+                (.implementation == "QobuzDownloadClient") or
+                (.implementationName == "Tidalarr") or
+                (.implementation == "TidalLidarrDownloadClient")
+              ) | {id, name, implementationName, implementation}]'
             exit 1
           fi
 
-          # Check import lists
-          importlist_count=$(curl -s "http://localhost:8686/api/v1/importlist" -H "X-Api-Key: $LIDARR_API_KEY" | jq 'length')
-          if [[ "$importlist_count" -gt 0 ]]; then
-            echo "::error::Found $importlist_count import list(s) - expected 0 in cold-start without secrets"
+          if [[ "$plugin_importlist_count" -gt 0 ]]; then
+            echo "::error::Found $plugin_importlist_count Brainarr import list(s) in cold-start without secrets (expected 0)"
+            echo "$importlists_json" | jq -c '[.[] | select(
+                (.implementationName == "Brainarr") or
+                (.implementation == "BrainarrImportList")
+              ) | {id, name, implementationName, implementation}]'
             exit 1
           fi
 
-          echo "No-junk check passed: 0 indexers, 0 download clients, 0 import lists"
+          echo "No-junk check passed: no plugin-specific indexers/download clients/import lists were created"
 
       # =========================================================================
       # JOB SUMMARY: Parse v1.2 manifest for first-pass triage (best-effort)

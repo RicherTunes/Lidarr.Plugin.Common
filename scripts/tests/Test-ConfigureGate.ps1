@@ -276,6 +276,29 @@ $script:mockComponents = @{
     )
 }
 
+# Minimal stubs for new preferred-ID infrastructure (keep tests hermetic)
+$script:E2EComponentIdsState = @{}
+$script:E2EComponentResolution = @{}
+$DisableStoredComponentIds = $true
+$DisableComponentIdPersistence = $true
+
+function Get-E2EPreferredComponentId {
+    param([hashtable]$State, [string]$PluginName, [string]$Type)
+    return $null
+}
+
+function Select-ConfiguredComponent {
+    param($Items, [string]$PluginName, [int]$PreferredId)
+    $arr = if ($Items -is [array]) { @($Items) } elseif ($null -ne $Items) { @($Items) } else { @() }
+    $match = $arr | Where-Object { $_.implementationName -eq $PluginName } | Select-Object -First 1
+    if (-not $match) { $match = $arr | Where-Object { $_.implementation -eq $PluginName } | Select-Object -First 1 }
+    if (-not $match) { $match = $arr | Where-Object { $_.name -like "*$PluginName*" } | Select-Object -First 1 }
+    return [PSCustomObject]@{ Component = $match; Resolution = if ($match) { "test" } else { "none" } }
+}
+
+function Save-E2EComponentIdsIfEnabled { param([string]$PluginName, [hashtable]$ComponentIds) return }
+function Get-HashtableStringOrDefault { param([hashtable]$Table, [string]$Key, [string]$DefaultValue) return $DefaultValue }
+
 function Invoke-LidarrApi {
     param([string]$Endpoint, [string]$Method = "GET", $Body = $null)
     if ($Endpoint -in @("indexer", "downloadclient", "importlist")) {

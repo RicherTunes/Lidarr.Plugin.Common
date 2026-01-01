@@ -1664,6 +1664,10 @@ function Test-ImportListGate {
         [Parameter(Mandatory)]
         [string]$PluginName,
 
+        # Optional: prefer a known configured import list ID (stable + deterministic).
+        # When provided, the gate will try to use this ID first and fall back to discovery if not found.
+        [int]$ImportListId = 0,
+
         [int]$CommandTimeoutSec = 120,
 
         [string[]]$CredentialAllOfFieldNames = @(),
@@ -1705,10 +1709,25 @@ function Test-ImportListGate {
 
         # Step 2: Find configured import list
         $importLists = Invoke-LidarrApi -Endpoint "importlist"
-        $configuredList = $importLists | Where-Object {
-            $_.implementation -like "*$PluginName*" -or
-            $_.name -like "*$PluginName*"
-        } | Select-Object -First 1
+
+        $configuredList = $null
+        if ($ImportListId -gt 0) {
+            try {
+                $configuredList = Invoke-LidarrApi -Endpoint "importlist/$ImportListId"
+            }
+            catch {
+                # Fall back to discovery when the stored/preferred ID no longer exists.
+                $configuredList = $null
+            }
+        }
+
+        if (-not $configuredList) {
+            # Avoid user-controlled name matching; prefer implementation/implementationName.
+            $configuredList = $importLists | Where-Object {
+                [string]::Equals([string]$_.implementationName, $PluginName, [StringComparison]::OrdinalIgnoreCase) -or
+                ([string]$_.implementation -like "*$PluginName*")
+            } | Select-Object -First 1
+        }
 
         if (-not $configuredList) {
             $result.Outcome = 'skipped'
