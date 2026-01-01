@@ -487,9 +487,9 @@ function Get-OutcomeReason {
 function Get-SafeProperty {
     param($Object, [string]$PropertyName)
     if ($null -eq $Object) { return $null }
-    # Handle hashtables
+    # Handle dictionaries (hashtables, OrderedDictionary, etc.)
     if ($Object -is [System.Collections.IDictionary]) {
-        if ($Object.ContainsKey($PropertyName)) {
+        if ($Object.Contains($PropertyName)) {
             return $Object[$PropertyName]
         }
         return $null
@@ -499,6 +499,89 @@ function Get-SafeProperty {
         return $Object.$PropertyName
     }
     return $null
+}
+
+<#
+.SYNOPSIS
+    Transforms details.resolution + details.componentIds into details.componentResolution.
+.DESCRIPTION
+    Produces a structured componentResolution block with proper camelCase keys,
+    selectedId, strategy, candidateIds, and safeToPersist for each component type.
+
+    safeToPersist rules:
+    - true: preferredId, created, updated, implementationName, implementation
+    - false: fuzzy, ambiguous*, none
+#>
+function Get-ComponentResolution {
+    param([hashtable]$Details)
+
+    if (-not $Details) { return $null }
+
+    $resolution = Get-SafeProperty -Object $Details -PropertyName 'resolution'
+    $componentIds = Get-SafeProperty -Object $Details -PropertyName 'componentIds'
+
+    if (-not $resolution -and -not $componentIds) { return $null }
+
+    # Strategies that are safe to persist (deterministic, unambiguous)
+    $safeStrategies = @('preferredId', 'created', 'updated', 'implementationName', 'implementation')
+
+    $result = [ordered]@{}
+
+    # Component types to process (output key names in camelCase)
+    $componentTypes = @('indexer', 'downloadClient', 'importList')
+
+    # Process each component type
+    foreach ($outputKey in $componentTypes) {
+        # Determine lowercase variant
+        $lowercaseKey = switch ($outputKey) {
+            'downloadClient' { 'downloadclient' }
+            'importList' { 'importlist' }
+            default { $null }
+        }
+
+        # Try both camelCase and lowercase variants when looking up strategy
+        $strategy = $null
+        if ($resolution) {
+            $strategy = Get-SafeProperty -Object $resolution -PropertyName $outputKey
+            # Try lowercase variant if not found
+            if (-not $strategy -and $lowercaseKey) {
+                $strategy = Get-SafeProperty -Object $resolution -PropertyName $lowercaseKey
+            }
+        }
+
+        # Get selectedId and candidateIds from componentIds
+        $selectedId = $null
+        $candidateIds = @()
+
+        if ($componentIds) {
+            # Try camelCase ID key first (e.g., indexerId, downloadClientId)
+            $idKey = "${outputKey}Id"
+            $selectedId = Get-SafeProperty -Object $componentIds -PropertyName $idKey
+
+            # Try candidate IDs with camelCase
+            $candidateKey = "${outputKey}CandidateIds"
+            $candidates = Get-SafeProperty -Object $componentIds -PropertyName $candidateKey
+            if ($candidates) {
+                $candidateIds = @($candidates)
+            }
+        }
+
+        # Only emit if we have at least a strategy or selectedId or candidates
+        if ($null -ne $strategy -or $null -ne $selectedId -or $candidateIds.Count -gt 0) {
+            $isSafe = $strategy -and ($safeStrategies -contains $strategy)
+            $isAmbiguous = $strategy -and ($strategy -match '^ambiguous')
+
+            $result[$outputKey] = [ordered]@{
+                selectedId = $selectedId
+                strategy = if ($strategy) { $strategy } else { 'none' }
+                candidateIds = $candidateIds
+                safeToPersist = ($isSafe -and -not $isAmbiguous)
+            }
+        }
+    }
+
+    if ($result.Count -eq 0) { return $null }
+    return $result
 }
 
 <#
@@ -578,6 +661,13 @@ function ConvertTo-E2ERunManifest {
         # Remove errorCode from details (it is a top-level field now)
         if ($details.Contains('errorCode')) {
             $details.Remove('errorCode')
+        }
+
+        # Add componentResolution from resolution + componentIds
+        # Pass the converted details since we need the camelCase keys
+        $componentResolution = Get-ComponentResolution -Details $details
+        if ($componentResolution) {
+            $details['componentResolution'] = $componentResolution
         }
 
         $jsonResults += [ordered]@{
