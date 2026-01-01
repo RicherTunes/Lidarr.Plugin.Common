@@ -275,6 +275,50 @@
           "description": "Sanitized error line that matched."
         }
       }
+    },
+    "componentIds": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Component ID resolution and persistence settings for this run.",
+      "properties": {
+        "instanceKey": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The instance key used to scope preferred component IDs."
+        },
+        "instanceKeySource": {
+          "type": "string",
+          "enum": ["explicit", "computed"],
+          "description": "How the instance key was determined: explicit (from E2E_INSTANCE_KEY env var or parameter) or computed (hash of url|container|salt)."
+        },
+        "lockPolicy": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Lock policy settings used for state file persistence.",
+          "properties": {
+            "timeoutMs": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Lock acquisition timeout in milliseconds."
+            },
+            "retryDelayMs": {
+              "type": "integer",
+              "minimum": 1,
+              "description": "Delay between lock retry attempts in milliseconds."
+            },
+            "staleSeconds": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Age in seconds after which a stale lock is auto-removed."
+            }
+          }
+        },
+        "lockPolicySource": {
+          "type": "string",
+          "enum": ["default", "env"],
+          "description": "How lock policy was determined: default (hardcoded values) or env (from E2E_COMPONENT_IDS_LOCK_* env vars)."
+        }
+      }
     }
   },
   "$defs": {

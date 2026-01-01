@@ -740,6 +740,38 @@ function ConvertTo-E2ERunManifest {
         }
     }
 
+    # Component IDs provenance tracking (optional - only if context provides it)
+    $componentIdsContext = Get-SafeProperty -Object $Context -PropertyName 'ComponentIds'
+    if ($componentIdsContext) {
+        $instanceKey = Get-SafeProperty -Object $componentIdsContext -PropertyName 'InstanceKey'
+        $instanceKeySource = Get-SafeProperty -Object $componentIdsContext -PropertyName 'InstanceKeySource'
+        $lockPolicy = Get-SafeProperty -Object $componentIdsContext -PropertyName 'LockPolicy'
+        $lockPolicySource = Get-SafeProperty -Object $componentIdsContext -PropertyName 'LockPolicySource'
+
+        $componentIdsBlock = [ordered]@{}
+
+        if ($instanceKey) {
+            $componentIdsBlock['instanceKey'] = $instanceKey
+        }
+        if ($instanceKeySource) {
+            $componentIdsBlock['instanceKeySource'] = $instanceKeySource
+        }
+        if ($lockPolicy) {
+            $componentIdsBlock['lockPolicy'] = [ordered]@{
+                timeoutMs = Get-SafeProperty -Object $lockPolicy -PropertyName 'TimeoutMs'
+                retryDelayMs = Get-SafeProperty -Object $lockPolicy -PropertyName 'RetryDelayMs'
+                staleSeconds = Get-SafeProperty -Object $lockPolicy -PropertyName 'StaleSeconds'
+            }
+        }
+        if ($lockPolicySource) {
+            $componentIdsBlock['lockPolicySource'] = $lockPolicySource
+        }
+
+        if ($componentIdsBlock.Count -gt 0) {
+            $manifest['componentIds'] = $componentIdsBlock
+        }
+    }
+
     return $manifest | ConvertTo-Json -Depth 10
 }
 
