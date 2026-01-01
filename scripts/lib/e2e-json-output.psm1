@@ -589,19 +589,28 @@ function Get-ComponentResolution {
             $isSafe = $safeStrategies -contains $strategyLower
             $isAmbiguous = $strategy -match '(?i)^ambiguous'
 
-            # Default candidateIds to [selectedId] when known (improves forensic value)
-            if ($candidateIds.Count -eq 0 -and $null -ne $selectedId) {
-                $candidateIds = @($selectedId)
-            }
+              # Default candidateIds to [selectedId] when known (improves forensic value)
+              if ($candidateIds.Count -eq 0 -and $null -ne $selectedId) {
+                  $candidateIds = @($selectedId)
+              }
 
-            $result[$outputKey] = [ordered]@{
-                selectedId = $selectedId
-                strategy = $strategy
-                candidateIds = $candidateIds
-                safeToPersist = ($isSafe -and -not $isAmbiguous)
-            }
-        }
-    }
+              # safeToPersist must be conservative:
+              # - requires a selectedId
+              # - requires at most 1 candidate (otherwise ambiguity leaked through)
+              # - if a candidate exists, it must match selectedId
+              $hasSelectedId = ($null -ne $selectedId)
+              $hasAtMostOneCandidate = ($candidateIds.Count -le 1)
+              $candidateMatchesSelected = ($candidateIds.Count -eq 0) -or
+                  ($hasSelectedId -and $candidateIds.Count -eq 1 -and $candidateIds[0] -eq $selectedId)
+
+              $result[$outputKey] = [ordered]@{
+                  selectedId = $selectedId
+                  strategy = $strategy
+                  candidateIds = $candidateIds
+                  safeToPersist = ($isSafe -and -not $isAmbiguous -and $hasSelectedId -and $hasAtMostOneCandidate -and $candidateMatchesSelected)
+              }
+          }
+      }
 
     if ($result.Count -eq 0) { return $null }
     return $result

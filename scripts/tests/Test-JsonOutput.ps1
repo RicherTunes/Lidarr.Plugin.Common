@@ -770,6 +770,33 @@ $componentResolutionTests = @(
             return ($cr.importList.strategy -eq 'ImplementationName') -and ($cr.importList.safeToPersist -eq $true)
         }
     }
+    @{
+        Name = "safeToPersist requires selectedId (strategy alone is not enough)"
+        Test = {
+            param($obj)
+            # Configure result for Tidalarr intentionally omits componentIds to simulate missing IDs
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            # If selectedId is null, safeToPersist must be false even if strategy is a "safe" value
+            return ($null -eq $cr.indexer.selectedId) -and ($cr.indexer.safeToPersist -eq $false)
+        }
+    }
+    @{
+        Name = "Multiple candidateIds forces safeToPersist=false (even if strategy is safe)"
+        Test = {
+            param($obj)
+            # Configure result for Brainarr includes multiple candidate IDs with a safe-looking strategy
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Brainarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            $cids = @($cr.indexer.candidateIds)
+            if ($cids.Count -lt 2) { return $false }
+            return ($cr.indexer.safeToPersist -eq $false)
+        }
+    }
 )
 
 # ============================================================================  
@@ -1106,6 +1133,23 @@ if (Test-Path $jsonModulePath) {
             }
             componentIds = @{
                 importListId = 321
+            }
+        })
+        # Safe-looking strategy but missing selectedId must not be treated as safe-to-persist
+        (New-MockGateResult -Gate "Configure" -PluginName "Tidalarr" -Outcome "success" -Details @{
+            resolution = @{
+                indexer = "implementationName"
+            }
+            # componentIds intentionally omitted
+        })
+        # Multiple candidates must force safeToPersist=false even with safe-looking strategy
+        (New-MockGateResult -Gate "Configure" -PluginName "Brainarr" -Outcome "success" -Details @{
+            resolution = @{
+                indexer = "implementationName"
+            }
+            componentIds = @{
+                indexerId = 100
+                indexerCandidateIds = @(100, 101)
             }
         })
     )

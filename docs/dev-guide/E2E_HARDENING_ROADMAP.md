@@ -71,6 +71,7 @@ When a gate resolves components (Configure/Search/AlbumSearch/Grab/Revalidation/
 Invariants:
 - `candidateIds` is always an array; defaults to `[selectedId]` when known.
 - `safeToPersist` MUST be `false` for ambiguous/fuzzy/no-match strategies.
+- `safeToPersist` MUST be `false` when `selectedId` is null, or when `candidateIds` contains multiple values (even if the strategy string is "safe").
 - Ambiguity is a **failure**: outcome MUST be `failed` with `errorCode=E2E_COMPONENT_AMBIGUOUS` and `candidateIds` populated for triage.
 
 Mapping rules (minimal):
