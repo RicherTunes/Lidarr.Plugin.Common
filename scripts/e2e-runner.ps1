@@ -111,6 +111,12 @@
     Timeout in seconds for Brainarr LLM sync command (default: 120).
     Increase for slow LLM endpoints. Can also be set via BRAINARR_SYNC_TIMEOUT_SEC.
 
+.PARAMETER ConfigurePassIfAlreadyConfigured
+    When set and env vars are missing, but plugin components already exist in Lidarr,
+    the Configure gate returns SUCCESS (not SKIP). This enables idempotent runs where
+    the gate passes once components have been configured (manually or in a prior run).
+    Can also be enabled via E2E_CONFIGURE_PASS_IF_CONFIGURED=1 environment variable.
+
 .NOTES
     Configure Gate Environment Variables:
 
@@ -201,7 +207,11 @@ param(
     [string]$JsonOutputPath,
 
     # Emit JSON manifest (auto-enabled if JsonOutputPath specified)
-    [switch]$EmitJson
+    [switch]$EmitJson,
+
+    # When env vars are missing but components already exist, return success (not skip)
+    # This enables idempotent runs where Configure gate passes once components are configured
+    [switch]$ConfigurePassIfAlreadyConfigured
 )
 
 # Environment variable override for ForceConfigUpdate
@@ -237,6 +247,11 @@ if ($env:BRAINARR_SYNC_TIMEOUT_SEC) {
     if ([int]::TryParse($env:BRAINARR_SYNC_TIMEOUT_SEC, [ref]$parsed) -and $parsed -gt 0) {
         $BrainarrSyncTimeoutSec = $parsed
     }
+}
+
+# Environment variable override for ConfigurePassIfAlreadyConfigured
+if (-not $ConfigurePassIfAlreadyConfigured -and $env:E2E_CONFIGURE_PASS_IF_CONFIGURED -eq '1') {
+    $ConfigurePassIfAlreadyConfigured = $true
 }
 
 # Default JSON output path if EmitJson requested
@@ -433,6 +448,15 @@ function Find-ConfiguredComponent {
     $items = Invoke-LidarrApi -Endpoint $endpoint
     if (-not $items) { return $null }
 
+    # Priority 1: Exact implementationName match (most reliable)
+    $match = $items | Where-Object { $_.implementationName -eq $PluginName } | Select-Object -First 1
+    if ($match) { return $match }
+
+    # Priority 2: Exact implementation match
+    $match = $items | Where-Object { $_.implementation -eq $PluginName } | Select-Object -First 1
+    if ($match) { return $match }
+
+    # Priority 3: Fuzzy match on implementation or name (backward compatibility)
     return $items | Where-Object {
         $_.implementation -like "*$PluginName*" -or
         $_.name -like "*$PluginName*"
@@ -796,7 +820,9 @@ function Test-ConfigureGateForPlugin {
 
         [hashtable]$PluginConfig = @{},
 
-        [switch]$ForceUpdate
+        [switch]$ForceUpdate,
+
+        [switch]$PassIfAlreadyConfigured
     )
 
     $result = [PSCustomObject]@{
@@ -807,6 +833,13 @@ function Test-ConfigureGateForPlugin {
         Actions = @()
         Errors = @()
         SkipReason = $null
+        Details = @{
+            componentIds = @{}
+            alreadyConfigured = $false
+            created = $false
+            updated = $false
+            forceUpdateUsed = $ForceUpdate.IsPresent
+        }
     }
 
     # ==========================================================================
@@ -827,8 +860,44 @@ function Test-ConfigureGateForPlugin {
         $envConfig = Get-PluginEnvConfig -PluginName $PluginName
 
         if (-not $envConfig.HasRequiredEnvVars) {
-            # Missing required env vars → SKIP (not FAIL)
+            # Missing required env vars - check if components already exist
             $missingList = $envConfig.MissingRequired -join ", "
+
+            if ($PassIfAlreadyConfigured) {
+                # Check if required components already exist
+                $existingComponents = @{}
+                $allRequiredExist = $true
+
+                if ($PluginName -in @("Qobuzarr", "Tidalarr")) {
+                    $indexer = Find-ConfiguredComponent -Type "indexer" -PluginName $PluginName
+                    $client = Find-ConfiguredComponent -Type "downloadclient" -PluginName $PluginName
+
+                    if ($indexer) { $existingComponents["indexerId"] = $indexer.id }
+                    if ($client) { $existingComponents["downloadClientId"] = $client.id }
+
+                    if (-not $indexer -or -not $client) {
+                        $allRequiredExist = $false
+                    }
+                }
+                elseif ($PluginName -eq "Brainarr") {
+                    $importList = Find-ConfiguredComponent -Type "importlist" -PluginName $PluginName
+
+                    if ($importList) { $existingComponents["importListId"] = $importList.id }
+                    else { $allRequiredExist = $false }
+                }
+
+                if ($allRequiredExist -and $existingComponents.Count -gt 0) {
+                    # Components exist - return success (idempotent)
+                    $result.Outcome = "success"
+                    $result.Success = $true
+                    $result.Details.componentIds = $existingComponents
+                    $result.Details.alreadyConfigured = $true
+                    $result.Actions += "Env vars missing; existing component(s) present -> no-op"
+                    return $result
+                }
+            }
+
+            # Components missing or PassIfAlreadyConfigured not set -> SKIP
             $result.SkipReason = "Missing env vars: $missingList"
             return $result
         }
@@ -851,6 +920,8 @@ function Test-ConfigureGateForPlugin {
                 $created = New-ComponentFromEnv -Type "indexer" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.IndexerFields
                 if ($created) {
                     $result.Actions += "Created indexer '$PluginName' (id=$($created.id))"
+                    $result.Details.componentIds["indexerId"] = $created.id
+                    $result.Details.created = $true
                 } else {
                     $result.Errors += "Failed to create indexer for $PluginName"
                     $result.Outcome = "failed"
@@ -858,9 +929,11 @@ function Test-ConfigureGateForPlugin {
                 }
             } else {
                 # Update existing indexer (auth fields only, unless ForceUpdate)
+                $result.Details.componentIds["indexerId"] = $indexer.id
                 $updateResult = Update-ComponentAuthFields -Type "indexer" -ExistingComponent $indexer -FieldValues $envConfig.IndexerFields -ForceUpdate:$ForceUpdate
                 if ($updateResult.Updated) {
                     $result.Actions += "Updated indexer auth fields: $($updateResult.ChangedFields -join ', ')"
+                    $result.Details.updated = $true
                 } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
                     $result.Actions += "Indexer '$PluginName' already configured: $($updateResult.ChangedFields -join ', ')"
                 } else {
@@ -887,6 +960,8 @@ function Test-ConfigureGateForPlugin {
                 $created = New-ComponentFromEnv -Type "downloadclient" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.DownloadClientFields
                 if ($created) {
                     $result.Actions += "Created download client '$PluginName' (id=$($created.id))"
+                    $result.Details.componentIds["downloadClientId"] = $created.id
+                    $result.Details.created = $true
                 } else {
                     $result.Errors += "Failed to create download client for $PluginName"
                     $result.Outcome = "failed"
@@ -894,9 +969,11 @@ function Test-ConfigureGateForPlugin {
                 }
             } else {
                 # Update existing download client (auth fields only, unless ForceUpdate)
+                $result.Details.componentIds["downloadClientId"] = $client.id
                 $updateResult = Update-ComponentAuthFields -Type "downloadclient" -ExistingComponent $client -FieldValues $envConfig.DownloadClientFields -ForceUpdate:$ForceUpdate
                 if ($updateResult.Updated) {
                     $result.Actions += "Updated download client auth fields: $($updateResult.ChangedFields -join ', ')"
+                    $result.Details.updated = $true
                 } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
                     $result.Actions += "Download client '$PluginName' already configured: $($updateResult.ChangedFields -join ', ')"
                 } else {
@@ -923,6 +1000,8 @@ function Test-ConfigureGateForPlugin {
                 $created = New-ComponentFromEnv -Type "importlist" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.ImportListFields
                 if ($created) {
                     $result.Actions += "Created import list '$PluginName' (id=$($created.id))"
+                    $result.Details.componentIds["importListId"] = $created.id
+                    $result.Details.created = $true
                 } else {
                     $result.Errors += "Failed to create import list for $PluginName"
                     $result.Outcome = "failed"
@@ -930,9 +1009,11 @@ function Test-ConfigureGateForPlugin {
                 }
             } else {
                 # Update existing import list
+                $result.Details.componentIds["importListId"] = $importList.id
                 $updateResult = Update-ComponentAuthFields -Type "importlist" -ExistingComponent $importList -FieldValues $envConfig.ImportListFields -ForceUpdate:$ForceUpdate
                 if ($updateResult.Updated) {
                     $result.Actions += "Updated import list fields: $($updateResult.ChangedFields -join ', ')"
+                    $result.Details.updated = $true
                 } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
                     $result.Actions += "Import list '$PluginName' already configured: $($updateResult.ChangedFields -join ', ')"
                 } else {
@@ -1311,11 +1392,16 @@ foreach ($plugin in $pluginList) {
         Write-Host "  Configure Gate..." -ForegroundColor Cyan
 
         $gateStart = Get-Date
-        $configureResult = Test-ConfigureGateForPlugin -PluginName $plugin -PluginConfig $config -ForceUpdate:$ForceConfigUpdate
+        $configureResult = Test-ConfigureGateForPlugin -PluginName $plugin -PluginConfig $config -ForceUpdate:$ForceConfigUpdate -PassIfAlreadyConfigured:$ConfigurePassIfAlreadyConfigured
         $gateEnd = Get-Date
         $allResults += New-OutcomeResult -Gate "Configure" -PluginName $plugin -Outcome $configureResult.Outcome -Errors $configureResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details @{
             Actions = $configureResult.Actions
             SkipReason = $configureResult.SkipReason
+            componentIds = $configureResult.Details.componentIds
+            alreadyConfigured = $configureResult.Details.alreadyConfigured
+            created = $configureResult.Details.created
+            updated = $configureResult.Details.updated
+            forceUpdateUsed = $configureResult.Details.forceUpdateUsed
         }
 
         if ($configureResult.Outcome -eq "skipped") {

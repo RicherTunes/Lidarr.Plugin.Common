@@ -251,6 +251,185 @@ foreach ($testField in @("authToken", "password", "redirectUrl", "refreshToken",
 Write-Host ""
 
 # =============================================================================
+# Test 6: PassIfAlreadyConfigured - Components exist -> success
+# =============================================================================
+Write-Host "Test Group: PassIfAlreadyConfigured with Existing Components" -ForegroundColor Yellow
+
+# Extract Find-ConfiguredComponent function
+$findFunctionMatch = [regex]::Match($scriptContent, '(?s)function Find-ConfiguredComponent \{.*?^\}', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+
+# Extract Test-ConfigureGateForPlugin function
+$testConfigureFunctionMatch = [regex]::Match($scriptContent, '(?s)function Test-ConfigureGateForPlugin \{.*?^\}(?=\s*\n\s*function|\s*\n\s*#|\s*$)', [System.Text.RegularExpressions.RegexOptions]::Multiline)
+
+# Create mock functions for hermetic testing
+$mockFunctions = @'
+# Mock Invoke-LidarrApi to return fake components
+$script:mockComponents = @{
+    indexer = @(
+        [PSCustomObject]@{ id = 101; implementation = "Qobuzarr"; name = "Qobuzarr" }
+    )
+    downloadclient = @(
+        [PSCustomObject]@{ id = 201; implementation = "Qobuzarr"; name = "Qobuzarr Download" }
+    )
+    importlist = @(
+        [PSCustomObject]@{ id = 301; implementation = "Brainarr"; name = "Brainarr Import List" }
+    )
+}
+
+function Invoke-LidarrApi {
+    param([string]$Endpoint, [string]$Method = "GET", $Body = $null)
+    if ($Endpoint -in @("indexer", "downloadclient", "importlist")) {
+        return $script:mockComponents[$Endpoint]
+    }
+    return $null
+}
+
+function Get-ComponentSchema { param($Type, $ImplementationMatch) return $null }
+function New-ComponentFromEnv { param($Type, $PluginName, $Schema, $FieldValues) return $null }
+function Update-ComponentAuthFields { param($Type, $ExistingComponent, $FieldValues, [switch]$ForceUpdate) return @{ Updated = $false; ChangedFields = @() } }
+'@
+
+try {
+    # Save original functions if they exist
+    $originalInvokeLidarrApi = if (Get-Command Invoke-LidarrApi -ErrorAction SilentlyContinue) { ${function:Invoke-LidarrApi} } else { $null }
+
+    # Load mock functions
+    Invoke-Expression $mockFunctions
+
+    # Load Find-ConfiguredComponent
+    if ($findFunctionMatch.Success) {
+        Invoke-Expression $findFunctionMatch.Value
+    }
+
+    # Load Get-PluginEnvConfig (already loaded from earlier test)
+    # Load Test-ConfigureGateForPlugin
+    if ($testConfigureFunctionMatch.Success) {
+        Invoke-Expression $testConfigureFunctionMatch.Value
+    }
+
+    # Clear env vars to trigger "missing env vars" path
+    $env:QOBUZARR_AUTH_TOKEN = $null
+    $env:QOBUZ_AUTH_TOKEN = $null
+
+    # Test: Qobuzarr with PassIfAlreadyConfigured and components exist
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Qobuzarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: Outcome=success" `
+            -Passed ($result.Outcome -eq "success")
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: Success=true" `
+            -Passed ($result.Success -eq $true)
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: alreadyConfigured=true" `
+            -Passed ($result.Details.alreadyConfigured -eq $true)
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: indexerId populated" `
+            -Passed ($result.Details.componentIds["indexerId"] -eq 101)
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: downloadClientId populated" `
+            -Passed ($result.Details.componentIds["downloadClientId"] -eq 201)
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + components exist: Action message correct" `
+            -Passed ($result.Actions -contains "Env vars missing; existing component(s) present -> no-op")
+    } else {
+        Write-TestResult -TestName "Parse Test-ConfigureGateForPlugin function" -Passed $false -Message "Could not find function"
+    }
+} catch {
+    Write-TestResult -TestName "PassIfAlreadyConfigured test execution" -Passed $false -Message $_.Exception.Message
+}
+
+Write-Host ""
+
+# =============================================================================
+# Test 7: PassIfAlreadyConfigured - Components missing -> skip
+# =============================================================================
+Write-Host "Test Group: PassIfAlreadyConfigured with Missing Components" -ForegroundColor Yellow
+
+try {
+    # Update mock to return empty components
+    $script:mockComponents = @{
+        indexer = @()
+        downloadclient = @()
+        importlist = @()
+    }
+
+    # Clear env vars
+    $env:QOBUZARR_AUTH_TOKEN = $null
+    $env:QOBUZ_AUTH_TOKEN = $null
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Qobuzarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + no components: Outcome=skipped" `
+            -Passed ($result.Outcome -eq "skipped")
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + no components: Success=false" `
+            -Passed ($result.Success -eq $false)
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + no components: SkipReason contains 'Missing env vars'" `
+            -Passed ($result.SkipReason -like "*Missing env vars*")
+
+        Write-TestResult -TestName "PassIfAlreadyConfigured + no components: alreadyConfigured=false" `
+            -Passed ($result.Details.alreadyConfigured -eq $false)
+    }
+} catch {
+    Write-TestResult -TestName "PassIfAlreadyConfigured missing components test" -Passed $false -Message $_.Exception.Message
+}
+
+# Restore env vars
+$env:QOBUZARR_AUTH_TOKEN = $originalToken
+$env:QOBUZ_AUTH_TOKEN = $originalQobuzToken
+
+Write-Host ""
+
+# =============================================================================
+# Test 8: Brainarr PassIfAlreadyConfigured
+# =============================================================================
+Write-Host "Test Group: Brainarr PassIfAlreadyConfigured" -ForegroundColor Yellow
+
+try {
+    # Update mock to return Brainarr import list
+    $script:mockComponents = @{
+        indexer = @()
+        downloadclient = @()
+        importlist = @(
+            [PSCustomObject]@{ id = 301; implementation = "Brainarr"; name = "Brainarr" }
+        )
+    }
+
+    # Clear env vars
+    $env:BRAINARR_LLM_BASE_URL = $null
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Brainarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "Brainarr + PassIfAlreadyConfigured + import list exists: Outcome=success" `
+            -Passed ($result.Outcome -eq "success")
+
+        Write-TestResult -TestName "Brainarr + PassIfAlreadyConfigured: importListId populated" `
+            -Passed ($result.Details.componentIds["importListId"] -eq 301)
+
+        Write-TestResult -TestName "Brainarr + PassIfAlreadyConfigured: alreadyConfigured=true" `
+            -Passed ($result.Details.alreadyConfigured -eq $true)
+    }
+
+    # Test with missing import list
+    $script:mockComponents.importlist = @()
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "Brainarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "Brainarr + no import list: Outcome=skipped" `
+            -Passed ($result.Outcome -eq "skipped")
+    }
+} catch {
+    Write-TestResult -TestName "Brainarr PassIfAlreadyConfigured test" -Passed $false -Message $_.Exception.Message
+}
+
+Write-Host ""
+
+# =============================================================================
 # Summary
 # =============================================================================
 Write-Host "========================================" -ForegroundColor Cyan
