@@ -47,6 +47,13 @@ try {
     $saltedKey2 = Get-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "lidarr-test" -InstanceSalt "CONFIG-COLD-123"
     Write-TestResult -TestName "InstanceSalt is case-insensitive" -Passed ($saltedKey2 -eq $saltedKey)
 
+    $explicitKey = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "lidarr-test" -ExplicitInstanceKey "explicit-instance"
+    Write-TestResult -TestName "Explicit instance key override is used verbatim" -Passed ($explicitKey -eq "explicit-instance")
+    $explicitKeyTrim = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "lidarr-test" -ExplicitInstanceKey "  explicit-instance  "
+    Write-TestResult -TestName "Explicit instance key is trimmed" -Passed ($explicitKeyTrim -eq "explicit-instance")
+    $explicitInvalid = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "lidarr-test" -ExplicitInstanceKey "bad key"
+    Write-TestResult -TestName "Invalid explicit instance key falls back to computed key" -Passed ($explicitInvalid -eq $instanceKey)
+
     # =============================================================================
     # Read: missing file
     # =============================================================================
@@ -98,6 +105,24 @@ try {
     Write-TestResult -TestName "Write returns false when lock is held" -Passed ($writeLocked -eq $false)
     Write-TestResult -TestName "Write does not remove another process lock" -Passed (Test-Path -LiteralPath "$statePath.lock")
     Remove-Item -LiteralPath "$statePath.lock" -Force -ErrorAction SilentlyContinue
+
+    # ==========================================================================
+    # Write: lock env var override (stale seconds)
+    # ==========================================================================
+    # When stale threshold is 0, any existing lock is treated as stale and removed.
+    $oldStaleSeconds = $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
+    try {
+        $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = "0"
+        Set-Content -LiteralPath "$statePath.lock" -Value "locked" -Encoding UTF8 -NoNewline
+        $writeAfterEnvOverride = Write-E2EComponentIdsState -Path $statePath -State $state
+        Write-TestResult -TestName "Lock stale seconds env var override allows write" -Passed ($writeAfterEnvOverride -eq $true)
+        Write-TestResult -TestName "Env override removes stale lock file" -Passed (-not (Test-Path -LiteralPath "$statePath.lock"))
+    }
+    finally {
+        if ($null -eq $oldStaleSeconds) { Remove-Item env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -ErrorAction SilentlyContinue }
+        else { $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = $oldStaleSeconds }
+        Remove-Item -LiteralPath "$statePath.lock" -Force -ErrorAction SilentlyContinue
+    }
 
     # ==========================================================================
     # Write: stale lock cleanup uses UTC timestamps (avoid time zone bugs)

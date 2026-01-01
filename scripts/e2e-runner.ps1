@@ -217,10 +217,15 @@ param(
     # If not specified, defaults to .e2e-bootstrap/e2e-component-ids.json       
     [string]$ComponentIdsPath,
 
-    # Optional salt to avoid preferred-ID collisions when reusing the same
-    # (LidarrUrl + ContainerName) against different config dirs/instances.
+    # Optional salt to avoid preferred-ID collisions when reusing the same      
+    # (LidarrUrl + ContainerName) against different config dirs/instances.      
     # Can also be set via E2E_COMPONENT_IDS_INSTANCE_SALT.
     [string]$ComponentIdsInstanceSalt,
+
+    # Optional explicit instance key override for preferred component IDs.
+    # When set, this key is used verbatim and the computed (LidarrUrl|ContainerName|Salt) hash is not used.
+    # Can also be set via E2E_COMPONENT_IDS_INSTANCE_KEY or E2E_INSTANCE_KEY.
+    [string]$ComponentIdsInstanceKey,
 
     # Disable reading preferred IDs (always use discovery). Writing may still occur if enabled.
     [switch]$DisableStoredComponentIds,
@@ -256,6 +261,16 @@ if (-not $BrainarrModelId) {
         $BrainarrModelId = $env:BRAINARR_MODEL_ID
     } elseif ($env:BRAINARR_MODEL) {
         $BrainarrModelId = $env:BRAINARR_MODEL
+    }
+}
+
+# Environment variable overrides for preferred component IDs state
+if (-not $ComponentIdsInstanceKey) {
+    if ($env:E2E_COMPONENT_IDS_INSTANCE_KEY) {
+        $ComponentIdsInstanceKey = $env:E2E_COMPONENT_IDS_INSTANCE_KEY
+    }
+    elseif ($env:E2E_INSTANCE_KEY) {
+        $ComponentIdsInstanceKey = $env:E2E_INSTANCE_KEY
     }
 }
 if (-not $StrictBrainarr -and $env:E2E_STRICT_BRAINARR -eq '1') {
@@ -314,7 +329,7 @@ $script:E2EComponentIdsPath = $ComponentIdsPath
 if (-not $ComponentIdsInstanceSalt) {
     $ComponentIdsInstanceSalt = $env:E2E_COMPONENT_IDS_INSTANCE_SALT
 }
-$script:E2EComponentIdsInstanceKey = Get-E2EComponentIdsInstanceKey -LidarrUrl $LidarrUrl -ContainerName $ContainerName -InstanceSalt ($ComponentIdsInstanceSalt ?? "")
+$script:E2EComponentIdsInstanceKey = Resolve-E2EComponentIdsInstanceKey -LidarrUrl $LidarrUrl -ContainerName $ContainerName -InstanceSalt ($ComponentIdsInstanceSalt ?? "") -ExplicitInstanceKey ($ComponentIdsInstanceKey ?? "")
 $script:E2EComponentIdsState = Read-E2EComponentIdsState -Path $script:E2EComponentIdsPath
 $script:E2EComponentResolution = @{}
 $script:E2EComponentResolutionCandidates = @{}

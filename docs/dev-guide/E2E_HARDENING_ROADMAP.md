@@ -38,8 +38,8 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 - [x] Reduce/disable fuzzy fallback in `Select-ConfiguredComponent` (flag-gated), and add explicit tests for “no accidental selection”.
 
 ### P2 (concurrency + usability)
-- [ ] Add state-write lock backoff tuning via env var (still best-effort).
-- [ ] Add `E2E_INSTANCE_KEY` override for power users (explicit key beats heuristics).
+- [x] Add state-write lock backoff tuning via env var (still best-effort).      
+- [x] Add `E2E_INSTANCE_KEY` override for power users (explicit key beats heuristics).
 
 ## References
 
