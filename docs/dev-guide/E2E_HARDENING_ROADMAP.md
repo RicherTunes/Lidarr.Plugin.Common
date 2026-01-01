@@ -33,6 +33,52 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 - [x] Make ambiguity loud: if multiple configured components match a plugin, fail the gate and include candidate IDs for debugging.
 - [ ] Consider tightening “safe persistence” further: drop `implementation` if it proves unnecessary in practice (keep `created` + `preferredId` + `implementationName`).
 
+### P0.1 (manifest provenance)
+- [x] Emit `results[].details.componentResolution` in the JSON manifest (v1.2+) so failures are diagnosable without reading runner logs.
+
+#### Contract: `results[].details.componentResolution`
+This is **additive**. Keep existing booleans like `details.indexerFound` / `details.downloadClientFound` for backward compatibility.
+
+When a gate resolves components (Configure/Search/AlbumSearch/Grab/Revalidation/PostRestartGrab/ImportList), the manifest should include:
+
+```json
+{
+  "details": {
+    "componentResolution": {
+      "indexer": {
+        "selectedId": 101,
+        "strategy": "preferredId",
+        "candidateIds": [101],
+        "safeToPersist": true
+      },
+      "downloadClient": {
+        "selectedId": 201,
+        "strategy": "implementationName",
+        "candidateIds": [201],
+        "safeToPersist": true
+      },
+      "importList": {
+        "selectedId": 301,
+        "strategy": "created",
+        "candidateIds": [301],
+        "safeToPersist": true
+      }
+    }
+  }
+}
+```
+
+Invariants:
+- `candidateIds` is always an array; defaults to `[selectedId]` when known.
+- `safeToPersist` MUST be `false` for ambiguous/fuzzy/no-match strategies.
+- `safeToPersist` MUST be `false` when `selectedId` is null, or when `candidateIds` contains multiple values (even if the strategy string is "safe").
+- Ambiguity is a **failure**: outcome MUST be `failed` with `errorCode=E2E_COMPONENT_AMBIGUOUS` and `candidateIds` populated for triage.
+
+Mapping rules (minimal):
+- `strategy` comes from runner resolution (`preferredId`, `created`, `implementationName`, `implementation`, `fuzzy`, `none`, `ambiguous*`).
+- `safeToPersist` is true only for: `preferredId`, `created`, `implementationName`, `implementation`.
+- Note: `updated` is an action outcome, not a selection strategy — excluded from safe strategies.
+
 ### P1 (correctness hardening)
 - [x] Record Lidarr host fingerprint (`lidarrVersion`, `branch`, `imageTag`, `imageDigest`, `containerId`, `containerStartedAt`) into the preferred-ID state entries (diagnostics only; no effect on selection).
 - [x] Reduce/disable fuzzy fallback in `Select-ConfiguredComponent` (flag-gated), and add explicit tests for “no accidental selection”.

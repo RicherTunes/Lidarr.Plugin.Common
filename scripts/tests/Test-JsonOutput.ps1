@@ -15,6 +15,12 @@ Set-StrictMode -Version Latest
 $scriptRoot = $PSScriptRoot
 $libPath = Join-Path (Join-Path $scriptRoot "..") "lib"
 $jsonModulePath = Join-Path $libPath "e2e-json-output.psm1"
+$componentIdsModulePath = Join-Path $libPath "e2e-component-ids.psm1"
+
+# Import component-ids module for edge case tests
+if (Test-Path $componentIdsModulePath) {
+    Import-Module $componentIdsModulePath -Force
+}
 
 # Test results tracking
 $script:testsPassed = 0
@@ -114,6 +120,17 @@ function New-MockRunContext {
             Qobuzarr = "git"
             Tidalarr = "env"
             Brainarr = "unknown"
+        }
+        ComponentIds = @{
+            InstanceKey = "i-abc123def456"
+            InstanceKeySource = "computed"
+            LockPolicy = @{
+                TimeoutMs = 750
+                RetryDelayMs = 50
+                StaleSeconds = 120
+            }
+            LockPolicySource = "default"
+            PersistenceEnabled = $true
         }
     }
 }
@@ -601,6 +618,370 @@ $v12HostBugTests = @(
 )
 
 # ============================================================================
+# Schema Tests - Component IDs Provenance
+# ============================================================================
+
+$componentIdsTests = @(
+    @{
+        Name = "componentIds block is present when context provided"
+        Test = { param($obj) $obj.PSObject.Properties.Name -contains 'componentIds' }
+    }
+    @{
+        Name = "componentIds.instanceKey is present"
+        Test = { param($obj) -not [string]::IsNullOrWhiteSpace($obj.componentIds.instanceKey) }
+    }
+    @{
+        Name = "componentIds.instanceKeySource is explicit or computed"
+        Test = { param($obj) $obj.componentIds.instanceKeySource -in @('explicit', 'computed') }
+    }
+    @{
+        Name = "componentIds.lockPolicy is present"
+        Test = { param($obj) $null -ne $obj.componentIds.lockPolicy }
+    }
+    @{
+        Name = "componentIds.lockPolicy.timeoutMs is integer >= 0"
+        Test = { param($obj) $obj.componentIds.lockPolicy.timeoutMs -is [int] -or $obj.componentIds.lockPolicy.timeoutMs -is [long] }
+    }
+    @{
+        Name = "componentIds.lockPolicy.retryDelayMs is integer >= 1"
+        Test = { param($obj) $obj.componentIds.lockPolicy.retryDelayMs -ge 1 }
+    }
+    @{
+        Name = "componentIds.lockPolicy.staleSeconds is integer >= 0"
+        Test = { param($obj) $obj.componentIds.lockPolicy.staleSeconds -ge 0 }
+    }
+    @{
+        Name = "componentIds.lockPolicySource is default or env"
+        Test = { param($obj) $obj.componentIds.lockPolicySource -in @('default', 'env') }
+    }
+    @{
+        Name = "componentIds.persistenceEnabled is boolean"
+        Test = { param($obj) $obj.componentIds.persistenceEnabled -is [bool] }
+    }
+)
+
+# ============================================================================  
+# Schema Tests - Component Resolution Provenance (TDD: not yet implemented)
+# ============================================================================  
+# These tests define the desired contract for a structured
+# details.componentResolution block in the JSON manifest.
+#
+# They are expected to FAIL until the runner/json emitter populates:
+#   details.componentResolution.{indexer,downloadClient,importList}
+$componentResolutionTests = @(
+    @{
+        Name = "Configure result includes details.componentResolution"
+        Test = {
+            param($obj)
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            return $r.details.PSObject.Properties.Name -contains 'componentResolution'
+        }
+    }
+    @{
+        Name = "componentResolution.indexer has selectedId and strategy"
+        Test = {
+            param($obj)
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if (-not ($r.details.PSObject.Properties.Name -contains 'componentResolution')) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr) { return $false }
+            if (-not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            if ($null -eq $cr.indexer.selectedId) { return $false }
+            if ([string]::IsNullOrWhiteSpace($cr.indexer.strategy)) { return $false }
+            return $true
+        }
+    }
+    @{
+        Name = "componentResolution.downloadClient uses camelCase key (not downloadclient)"
+        Test = {
+            param($obj)
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if (-not ($r.details.PSObject.Properties.Name -contains 'componentResolution')) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr) { return $false }
+            # Use -ccontains for case-sensitive comparison to verify camelCase
+            return ($cr.PSObject.Properties.Name -ccontains 'downloadClient') -and
+                   (-not ($cr.PSObject.Properties.Name -ccontains 'downloadclient'))
+        }
+    }
+    @{
+        Name = "Ambiguous component selection emits candidateIds and safeToPersist=false"
+        Test = {
+            param($obj)
+            $r = $obj.results | Where-Object { $_.gate -eq 'Search' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if ($r.errorCode -ne 'E2E_COMPONENT_AMBIGUOUS') { return $false }
+
+            if (-not ($r.details.PSObject.Properties.Name -contains 'componentResolution')) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr) { return $false }
+            if (-not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+
+            $cids = @($cr.indexer.candidateIds)
+            if ($cids.Count -lt 2) { return $false }
+            if ($cr.indexer.safeToPersist -ne $false) { return $false }
+            return $true
+        }
+    }
+    @{
+        Name = "strategy=updated never yields safeToPersist=true (regression)"
+        Test = {
+            param($obj)
+            # Find the Revalidation result for Brainarr which has strategy='updated'
+            $r = $obj.results | Where-Object { $_.gate -eq 'Revalidation' -and $_.plugin -eq 'Brainarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            if (-not ($r.details.PSObject.Properties.Name -contains 'componentResolution')) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr) { return $false }
+            if (-not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            # 'updated' is an action outcome, NOT a selection strategy - must not be safe
+            if ($cr.indexer.strategy -ne 'updated') { return $false }
+            return ($cr.indexer.safeToPersist -eq $false)
+        }
+    }
+    @{
+        Name = "selectedId is coerced to integer when possible (type stability)"
+        Test = {
+            param($obj)
+            # PostRestartGrab has downloadClientId = "789" (string)
+            $r = $obj.results | Where-Object { $_.gate -eq 'PostRestartGrab' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'downloadClient')) { return $false }
+            # Should be numeric (int or int64 after JSON round-trip), not string "789"
+            $id = $cr.downloadClient.selectedId
+            $isNumeric = ($id -is [int]) -or ($id -is [int64])
+            return $isNumeric -and ($id -eq 789)
+        }
+    }
+    @{
+        Name = "strategy matching is case-insensitive (ImplementationName → safeToPersist=true)"
+        Test = {
+            param($obj)
+            # ImportList gate has strategy = "ImplementationName" (mixed case)
+            $r = $obj.results | Where-Object { $_.gate -eq 'ImportList' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'importList')) { return $false }
+            # Mixed-case should still be recognized as safe
+            return ($cr.importList.strategy -eq 'ImplementationName') -and ($cr.importList.safeToPersist -eq $true)
+        }
+    }
+    @{
+        Name = "safeToPersist requires selectedId (strategy alone is not enough)"
+        Test = {
+            param($obj)
+            # Configure result for Tidalarr intentionally omits componentIds to simulate missing IDs
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            # If selectedId is null, safeToPersist must be false even if strategy is a "safe" value
+            return ($null -eq $cr.indexer.selectedId) -and ($cr.indexer.safeToPersist -eq $false)
+        }
+    }
+    @{
+        Name = "Multiple candidateIds forces safeToPersist=false (even if strategy is safe)"
+        Test = {
+            param($obj)
+            # Configure result for Brainarr includes multiple candidate IDs with a safe-looking strategy
+            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Brainarr' } | Select-Object -First 1
+            if (-not $r) { return $false }
+            $cr = $r.details.componentResolution
+            if (-not $cr -or -not ($cr.PSObject.Properties.Name -contains 'indexer')) { return $false }
+            $cids = @($cr.indexer.candidateIds)
+            if ($cids.Count -lt 2) { return $false }
+            return ($cr.indexer.safeToPersist -eq $false)
+        }
+    }
+)
+
+# ============================================================================  
+# Edge Case Tests - Lock Policy Clamping and Source Classification       
+# ============================================================================  
+
+$lockPolicyClampingTests = @(
+    @{
+        Name = "Get-E2EComponentIdsEffectiveLockPolicy returns defaults when no env vars set"
+        Test = {
+            param($obj)
+            # Clear env vars
+            $savedTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            $savedRetry = $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
+            $savedStale = $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $null
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = $null
+                $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = $null
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.TimeoutMs -eq 750 -and $result.RetryDelayMs -eq 50 -and $result.StaleSeconds -eq 120 -and $result.Source -eq "default"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $savedTimeout
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = $savedRetry
+                $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = $savedStale
+            }
+        }
+    }
+    @{
+        Name = "Empty string env vars are ignored (source=default)"
+        Test = {
+            param($obj)
+            $savedTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = ""
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.TimeoutMs -eq 750 -and $result.Source -eq "default"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $savedTimeout
+            }
+        }
+    }
+    @{
+        Name = "Whitespace-only env vars are ignored (source=default)"
+        Test = {
+            param($obj)
+            $savedTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = "   "
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.TimeoutMs -eq 750 -and $result.Source -eq "default"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $savedTimeout
+            }
+        }
+    }
+    @{
+        Name = "Non-numeric env vars are ignored (source=default)"
+        Test = {
+            param($obj)
+            $savedTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = "abc"
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.TimeoutMs -eq 750 -and $result.Source -eq "default"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $savedTimeout
+            }
+        }
+    }
+    @{
+        Name = "Out-of-range timeout is clamped to 5000, source=env"
+        Test = {
+            param($obj)
+            $savedTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = "60000"
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.TimeoutMs -eq 5000 -and $result.Source -eq "env"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $savedTimeout
+            }
+        }
+    }
+    @{
+        Name = "Out-of-range retryDelay is clamped to 250, source=env"
+        Test = {
+            param($obj)
+            $savedRetry = $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = "1000"
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.RetryDelayMs -eq 250 -and $result.Source -eq "env"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = $savedRetry
+            }
+        }
+    }
+    @{
+        Name = "Zero retryDelay is clamped to 1, source=env"
+        Test = {
+            param($obj)
+            $savedRetry = $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = "0"
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.RetryDelayMs -eq 1 -and $result.Source -eq "env"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_RETRY_DELAY_MS = $savedRetry
+            }
+        }
+    }
+    @{
+        Name = "Out-of-range staleSeconds is clamped to 3600, source=env"
+        Test = {
+            param($obj)
+            $savedStale = $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
+            try {
+                $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = "9999"
+                $result = Get-E2EComponentIdsEffectiveLockPolicy
+                return $result.StaleSeconds -eq 3600 -and $result.Source -eq "env"
+            } finally {
+                $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = $savedStale
+            }
+        }
+    }
+)
+
+# ============================================================================
+# Edge Case Tests - Instance Key Source Classification
+# ============================================================================
+
+$instanceKeySourceTests = @(
+    @{
+        Name = "Resolve-E2EComponentIdsInstanceKey returns computed hash when no explicit key"
+        Test = {
+            param($obj)
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey ""
+            return $result -match '^i-[a-f0-9]{12}$'
+        }
+    }
+    @{
+        Name = "Resolve-E2EComponentIdsInstanceKey accepts valid explicit key"
+        Test = {
+            param($obj)
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey "my-custom-key"
+            return $result -eq "my-custom-key"
+        }
+    }
+    @{
+        Name = "Invalid explicit key (too long) falls back to computed"
+        Test = {
+            param($obj)
+            $longKey = "a" * 100  # Over 64 char limit
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey $longKey
+            return $result -match '^i-[a-f0-9]{12}$'  # Should be computed hash, not the long key
+        }
+    }
+    @{
+        Name = "Invalid explicit key (unsafe chars) falls back to computed"
+        Test = {
+            param($obj)
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey "key with spaces!"
+            return $result -match '^i-[a-f0-9]{12}$'  # Should be computed hash
+        }
+    }
+    @{
+        Name = "Empty explicit key uses computed"
+        Test = {
+            param($obj)
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey ""
+            return $result -match '^i-[a-f0-9]{12}$'
+        }
+    }
+    @{
+        Name = "Whitespace-only explicit key uses computed"
+        Test = {
+            param($obj)
+            $result = Resolve-E2EComponentIdsInstanceKey -LidarrUrl "http://localhost:8686" -ContainerName "test" -InstanceSalt "" -ExplicitInstanceKey "   "
+            return $result -match '^i-[a-f0-9]{12}$'
+        }
+    }
+)
+
+# ============================================================================
 # Assembly Issue Detection Tests (Tiered Classification)
 # ============================================================================
 
@@ -700,9 +1081,76 @@ if (Test-Path $jsonModulePath) {
         })
         (New-MockGateResult -Gate "Configure" -PluginName "Qobuzarr" -Outcome "success" -Details @{
             Actions = @("Created indexer", "Created download client")
+            # Runner records resolution + IDs today; componentResolution will be derived from these.
+            resolution = @{
+                indexer = "implementationName"
+                downloadclient = "implementationName"
+            }
+            componentIds = @{
+                indexerId = 101
+                downloadClientId = 201
+            }
         })
         (New-MockGateResult -Gate "Search" -PluginName "Qobuzarr" -Outcome "skipped" -SkipReason "Missing env vars: QOBUZARR_AUTH_TOKEN" -Details @{
             CredentialAllOf = @("authToken", "userId")
+        })
+        # Ambiguity example (should fail loudly + include candidate IDs)
+        (New-MockGateResult -Gate "Search" -PluginName "Tidalarr" -Outcome "failed" -Errors @("Ambiguous configured indexer selection for Tidalarr (ambiguousImplementationName): IDs=2,3") -Details @{
+            ErrorCode = "E2E_COMPONENT_AMBIGUOUS"
+            componentType = "indexer"
+            resolution = @{
+                indexer = "ambiguousImplementationName"
+            }
+            componentIds = @{
+                indexerCandidateIds = @(
+                    2,
+                    3
+                )
+            }
+        })
+        # Regression: 'updated' is an action outcome, NOT a selection strategy (must not be safeToPersist=true)
+        (New-MockGateResult -Gate "Revalidation" -PluginName "Brainarr" -Outcome "success" -Details @{
+            resolution = @{
+                indexer = "updated"
+            }
+            componentIds = @{
+                indexerId = 555
+            }
+        })
+        # Type coercion test: string ID should be coerced to integer
+        (New-MockGateResult -Gate "PostRestartGrab" -PluginName "Qobuzarr" -Outcome "success" -Details @{
+            resolution = @{
+                downloadClient = "preferredId"
+            }
+            componentIds = @{
+                downloadClientId = "789"  # String, should become int
+            }
+        })
+        # Case normalization test: mixed-case strategy should still match safe strategies
+        (New-MockGateResult -Gate "ImportList" -PluginName "Tidalarr" -Outcome "success" -Details @{
+            resolution = @{
+                importList = "ImplementationName"  # Mixed case
+            }
+            componentIds = @{
+                importListId = 321
+            }
+        })
+        # Safe-looking strategy but missing selectedId must not be treated as safe-to-persist
+        (New-MockGateResult -Gate "Configure" -PluginName "Tidalarr" -Outcome "success" -Details @{
+            resolution = @{
+                indexer = "implementationName"
+            }
+            # componentIds intentionally omitted
+        })
+        # Multiple candidates must force safeToPersist=false even with safe-looking strategy
+        (New-MockGateResult -Gate "Configure" -PluginName "Brainarr" -Outcome "success" -Details @{
+            resolution = @{
+                indexer = "implementationName"
+            }
+            componentIds = @{
+                indexerId = 100
+                indexerCandidateIds = @(100, 101)
+            }
         })
     )
 
@@ -730,6 +1178,10 @@ if (Test-Path $jsonModulePath) {
         @{ Name = "v1.2 Effective"; Tests = $v12EffectiveTests }
         @{ Name = "v1.2 Diagnostics"; Tests = $v12DiagnosticsTests }
         @{ Name = "v1.2 Host Bug Detection"; Tests = $v12HostBugTests }
+        @{ Name = "Component IDs Provenance"; Tests = $componentIdsTests }
+        @{ Name = "Component Resolution Provenance"; Tests = $componentResolutionTests }
+        @{ Name = "Lock Policy Clamping"; Tests = $lockPolicyClampingTests }
+        @{ Name = "Instance Key Source"; Tests = $instanceKeySourceTests }
         @{ Name = "Assembly Issue Classification"; Tests = $alcDetectionTests }
     )
 
