@@ -4,6 +4,12 @@
 $script:LidarrApiUrl = $null
 $script:LidarrApiKey = $null
 
+# Import shared classifier (single source of truth for credential prereq detection)
+$classifierPath = Join-Path $PSScriptRoot "e2e-error-classifier.psm1"
+if (Test-Path $classifierPath) {
+    Import-Module $classifierPath -Force
+}
+
 function Initialize-E2EGates {
     <#
     .SYNOPSIS
@@ -589,9 +595,15 @@ function Test-IsCredentialPrereqSkipReason {
         [string]$SkipReason
     )
 
-    if ([string]::IsNullOrWhiteSpace($SkipReason)) { return $false }     
+    if ([string]::IsNullOrWhiteSpace($SkipReason)) { return $false }
 
-    return $SkipReason -match '(?i)(credentials not configured|missing/invalid credentials|not authenticated|auth error|invalid_grant|invalid_client|unauthorized|forbidden|401|403|credential(s)? file missing)'
+    if (Get-Command -Name Get-E2EErrorClassification -ErrorAction SilentlyContinue) {
+        $classification = Get-E2EErrorClassification -Messages @($SkipReason)
+        return [bool]$classification.isCredentialPrereq
+    }
+
+    # Fallback (shouldn't happen in normal usage): keep previous behavior if module import fails.
+    return $SkipReason -match '(?i)(credentials not configured|missing env vars|missing/invalid credentials|not authenticated|auth error|invalid_grant|invalid_client|unauthorized|forbidden|401|403|credential(s)? file missing)'
 }
 
 function Test-GrabGate {

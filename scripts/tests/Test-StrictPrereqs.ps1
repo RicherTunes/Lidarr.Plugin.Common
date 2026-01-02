@@ -31,7 +31,7 @@ Assert-Equal -Name "Credentials not configured -> true" -Actual (Test-IsCredenti
 Assert-Equal -Name "Indexer invalid credentials -> true" -Actual (Test-IsCredentialPrereqSkipReason 'Indexer test indicates missing/invalid credentials') -Expected $true
 Assert-Equal -Name "Auth error -> true" -Actual (Test-IsCredentialPrereqSkipReason 'Grab failed with auth error: 401 Unauthorized') -Expected $true
 Assert-Equal -Name "Credentials file missing -> true" -Actual (Test-IsCredentialPrereqSkipReason 'Credentials file missing post-restart') -Expected $true
-Assert-Equal -Name "Missing env vars -> false" -Actual (Test-IsCredentialPrereqSkipReason 'Missing env vars: QOBUZARR_AUTH_TOKEN') -Expected $false
+Assert-Equal -Name "Missing env vars -> true" -Actual (Test-IsCredentialPrereqSkipReason 'Missing env vars: QOBUZARR_AUTH_TOKEN') -Expected $true
 Assert-Equal -Name "Non-credential skip reason -> false" -Actual (Test-IsCredentialPrereqSkipReason 'No configured indexer found') -Expected $false
 
 Write-Host ""
