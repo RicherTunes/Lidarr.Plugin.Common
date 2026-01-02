@@ -24,6 +24,9 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
   - Case A (no secrets): Configure should SKIP and **not create plugin-specific components**.
   - Case B (with secrets): Configure should create or confirm components.
   - Warm-run assertion: Configure should **prefer stored IDs** when present.
+- CI schema validation:
+  - `scripts/validate-manifest.ps1` validates `run-manifest.json` against `docs/reference/e2e-run-manifest.schema.json`.
+  - Cold-start assertions are centralized in `scripts/ci/assert-cold-start.ps1` (fixture-tested).
 
 ## Next steps (TDD-first)
 
@@ -36,7 +39,7 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 ### P0.1 (manifest provenance)
 - [x] Emit `results[].details.componentResolution` in the JSON manifest (v1.2+) so failures are diagnosable without reading runner logs.
 - [x] Add `matchedOn` enum to make resolution strategy unambiguous for diagnostics.
-- [x] Add `persistedIdsUpdated` boolean to signal when preferred-ID state was written.
+- [x] Emit factual preferred-ID persistence outcome under the top-level `componentIds` block (`persistedIdsUpdateAttempted` / `persistedIdsUpdated` / `persistedIdsUpdateReason`).
 
 #### Contract: `results[].details.componentResolution`
 This is **additive**. Keep existing booleans like `details.indexerFound` / `details.downloadClientFound` for backward compatibility.
@@ -68,8 +71,13 @@ When a gate resolves components (Configure/Search/AlbumSearch/Grab/Revalidation/
         "candidateIds": [301],
         "safeToPersist": true
       }
-    },
-    "persistedIdsUpdated": true
+    }
+  },
+  "componentIds": {
+    "persistenceEligible": true,
+    "persistedIdsUpdateAttempted": true,
+    "persistedIdsUpdated": true,
+    "persistedIdsUpdateReason": "written"
   }
 }
 ```
@@ -80,7 +88,7 @@ Invariants:
 - `safeToPersist` MUST be `false` when `selectedId` is null, or when `candidateIds` contains multiple values (even if the strategy string is "safe").
 - Ambiguity is a **failure**: outcome MUST be `failed` with `errorCode=E2E_COMPONENT_AMBIGUOUS` and `candidateIds` populated for triage.
 - `matchedOn` MUST be a normalized enum derived from `strategy` (see mapping rules below).
-- `persistedIdsUpdated` MUST be `true` only when preferred-ID state was actually written during the gate execution.
+- Preferred-ID persistence outcome is reported under the top-level `componentIds` block; `persistedIdsUpdated` MUST be `true` only when preferred-ID state was actually written (not merely eligible).
 
 #### `matchedOn` enum values
 
