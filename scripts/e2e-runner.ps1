@@ -1590,7 +1590,7 @@ function Test-PersistGate {
         catch {
             $result.Outcome = "failed"
             $result.Success = $false
-            $result.Errors += "Persist baseline capture error for $plugin: $_"
+            $result.Errors += "Persist baseline capture error for ${plugin}: $_"
             $result.Details = @{
                 Reason = "Persist baseline capture error"
                 Plugin = $plugin
