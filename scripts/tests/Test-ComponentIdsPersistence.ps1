@@ -108,6 +108,47 @@ try {
     Write-TestResult -TestName "no_changes: Reason = 'no_changes'" -Passed ($result.Reason -eq "no_changes")
 
     # ==========================================================================
+    # Test: no_changes with UNORDERED hashtables (stability test)
+    # ==========================================================================
+    Write-Host "`nno_changes stability (unordered hashtables):" -ForegroundColor Yellow
+
+    $statePath = Join-Path $tempRoot "no_changes_unordered.json"
+
+    # First write with unordered hashtable
+    $stateUnordered1 = @{
+        schemaVersion = 2
+        instances = @{
+            "test-instance" = @{
+                plugins = @{
+                    "Qobuzarr" = @{ indexerId = 101; downloadClientId = 201 }
+                }
+                lidarrUrl = "http://localhost:8686"
+                containerName = "lidarr-test"
+            }
+        }
+    }
+    $initialResult = Write-E2EComponentIdsState -Path $statePath -State $stateUnordered1
+    Write-TestResult -TestName "no_changes stability: initial write succeeds" -Passed ($initialResult.Wrote -eq $true)
+
+    # Create a NEW hashtable with same values but potentially different key order
+    $stateUnordered2 = @{
+        instances = @{
+            "test-instance" = @{
+                containerName = "lidarr-test"
+                lidarrUrl = "http://localhost:8686"
+                plugins = @{
+                    "Qobuzarr" = @{ downloadClientId = 201; indexerId = 101 }
+                }
+            }
+        }
+        schemaVersion = 2
+    }
+
+    # This should detect no_changes despite different hashtable construction order
+    $result = Write-E2EComponentIdsState -Path $statePath -State $stateUnordered2
+    Write-TestResult -TestName "no_changes stability: unordered hashtables detected as same" -Passed ($result.Reason -eq "no_changes")
+
+    # ==========================================================================
     # Test: written returns structured result (file content changed)
     # ==========================================================================
     Write-Host "`nwritten scenario:" -ForegroundColor Yellow
@@ -166,6 +207,51 @@ try {
     Write-TestResult -TestName "invariant: Wrote is always present" -Passed ($null -ne $result.Wrote)
     Write-TestResult -TestName "invariant: Reason is always present" -Passed (-not [string]::IsNullOrEmpty($result.Reason))
     Write-TestResult -TestName "invariant: Reason is valid enum" -Passed ($result.Reason -in @("written", "no_changes", "lock_timeout", "io_error"))
+
+    # ==========================================================================
+    # Test: reason enum validation - all code paths return valid reason
+    # ==========================================================================
+    Write-Host "`nReason enum validation:" -ForegroundColor Yellow
+
+    $validReasons = @("written", "no_changes", "lock_timeout", "io_error")
+
+    # Test each scenario returns valid reason
+    $statePath = Join-Path $tempRoot "enum_test.json"
+    $state = @{ schemaVersion = 2; instances = @{} }
+
+    # written
+    $result = Write-E2EComponentIdsState -Path $statePath -State $state
+    Write-TestResult -TestName "reason enum: 'written' is valid" -Passed ($result.Reason -in $validReasons)
+
+    # no_changes
+    $result = Write-E2EComponentIdsState -Path $statePath -State $state
+    Write-TestResult -TestName "reason enum: 'no_changes' is valid" -Passed ($result.Reason -in $validReasons)
+
+    # lock_timeout
+    Set-Content -LiteralPath "$statePath.lock" -Value "locked" -Encoding UTF8 -NoNewline
+    $oldTimeout = $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS
+    $oldStale = $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS
+    try {
+        $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = "1"
+        $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = "9999"
+        $result = Write-E2EComponentIdsState -Path $statePath -State $state
+        Write-TestResult -TestName "reason enum: 'lock_timeout' is valid" -Passed ($result.Reason -in $validReasons)
+    }
+    finally {
+        if ($null -eq $oldTimeout) { Remove-Item env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS -ErrorAction SilentlyContinue }
+        else { $env:E2E_COMPONENT_IDS_LOCK_TIMEOUT_MS = $oldTimeout }
+        if ($null -eq $oldStale) { Remove-Item env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS -ErrorAction SilentlyContinue }
+        else { $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = $oldStale }
+        Remove-Item -LiteralPath "$statePath.lock" -Force -ErrorAction SilentlyContinue
+    }
+
+    # io_error
+    $statePathIo = Join-Path $tempRoot "enum_io.json"
+    $tmpPath = "$statePathIo.tmp"
+    New-Item -ItemType Directory -Path $tmpPath -Force | Out-Null
+    $result = Write-E2EComponentIdsState -Path $statePathIo -State $state
+    Write-TestResult -TestName "reason enum: 'io_error' is valid" -Passed ($result.Reason -in $validReasons)
+    Remove-Item -LiteralPath $tmpPath -Recurse -Force -ErrorAction SilentlyContinue
 
     # ==========================================================================
     # Test: backward compatibility - boolean coercion still works
