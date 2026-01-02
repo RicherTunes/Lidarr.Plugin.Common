@@ -364,11 +364,24 @@ jobs:
             -c Release \
             -p:RunAnalyzers=false
 
-          # Locate the built runtime DLL (avoid obj/ref reference assemblies).
-          OVERRIDE_DLL=$(find src/NzbDrone.Common/bin -name "Lidarr.Common.dll" -path "*Release*" -type f | head -1)
+          # Locate the built runtime DLL
+          # Lidarr uses shared _output/ folder, not per-project bin/ folders
+          # Priority: _output/net8.0 (Lidarr convention) > bin/Release (standard)
+          OVERRIDE_DLL=""
+          for search_path in "_output/net8.0" "src/NzbDrone.Common/bin/Release"; do
+            if [ -d "$search_path" ]; then
+              candidate=$(find "$search_path" -name "Lidarr.Common.dll" -type f 2>/dev/null | head -1)
+              if [ -n "$candidate" ] && [ -f "$candidate" ]; then
+                OVERRIDE_DLL="$candidate"
+                break
+              fi
+            fi
+          done
+
           if [ -z "$OVERRIDE_DLL" ] || [ ! -f "$OVERRIDE_DLL" ]; then
             echo "::error::Failed to locate built Lidarr.Common.dll"
-            find src/NzbDrone.Common -name "Lidarr.Common.dll" -type f || true
+            echo "Searched: _output/net8.0, src/NzbDrone.Common/bin/Release"
+            find . -name "Lidarr.Common.dll" -type f 2>/dev/null || true
             exit 1
           fi
 
