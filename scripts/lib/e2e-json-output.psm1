@@ -13,17 +13,10 @@ if (Test-Path $diagnosticsPath) {
     Import-Module $diagnosticsPath -Force -Global
 }
 
-# Standard error codes for CI triage (v1.2) - E2E_ prefix for namespace isolation
-$script:ErrorCodes = @{
-    'E2E_AUTH_MISSING' = @('auth', 'token', 'credential', 'api.?key', 'unauthorized', '401')
-    'E2E_API_TIMEOUT' = @('timeout', 'timed out', 'connection refused', 'unreachable')
-    'E2E_NO_RELEASES_ATTRIBUTED' = @('no releases', 'zero releases', 'releases attributed')
-    'E2E_QUEUE_NOT_FOUND' = @('queue', 'not found in queue', 'download queue')
-    'E2E_ZERO_AUDIO_FILES' = @('audio files', 'no audio', 'zero.*files')
-    'E2E_METADATA_MISSING' = @('metadata', 'missing.*field', 'required field')
-    'E2E_DOCKER_UNAVAILABLE' = @('docker', 'container', 'daemon')
-    'E2E_CONFIG_INVALID' = @('config', 'configuration', 'invalid.*setting')
-    'E2E_IMPORT_FAILED' = @('import', 'failed.*import')
+# Import shared classifier (single source of truth for errorCode inference)
+$classifierPath = Join-Path $PSScriptRoot "e2e-error-classifier.psm1"
+if (Test-Path $classifierPath) {
+    Import-Module $classifierPath -Force -Global
 }
 
 # Host bug detection patterns with tiered classification
@@ -419,16 +412,9 @@ function Get-ErrorCode {
         if ($explicitCode) { return $explicitCode }
     }
 
-    # Infer from error messages
-    $errorText = ($Result.Errors -join ' ').ToLower()
-    if (-not $errorText) { return $null }
-
-    foreach ($code in $script:ErrorCodes.Keys) {
-        foreach ($pattern in $script:ErrorCodes[$code]) {
-            if ($errorText -match $pattern) {
-                return $code
-            }
-        }
+    if (Get-Command -Name Get-E2EErrorClassification -ErrorAction SilentlyContinue) {
+        $classification = Get-E2EErrorClassification -Messages @($Result.Errors)
+        return $classification.errorCode
     }
 
     return $null
