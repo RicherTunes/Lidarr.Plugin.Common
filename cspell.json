@@ -77,7 +77,8 @@
     "refreshtoken",
     "accesstoken",
     "clientsecret",
-    "creds"
+    "creds",
+    "prereqs"
   ],
   "ignorePaths": [
     "**/bin",
