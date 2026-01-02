@@ -1099,6 +1099,10 @@ jobs:
             docker inspect "$CONTAINER_NAME" > .e2e-bootstrap/diagnostics/inspect.json 2>&1
             echo "::endgroup::"
 
+            echo "::group::Plugin folder listing"
+            docker exec "$CONTAINER_NAME" find /config/plugins -maxdepth 4 -type f -printf '%p\n' 2>/dev/null | tee .e2e-bootstrap/diagnostics/plugin-files.txt || echo "Could not list plugin files"
+            echo "::endgroup::"
+
             # Stop and remove container
             docker rm -f "$CONTAINER_NAME" || true
           fi
