@@ -569,14 +569,15 @@ jobs:
           # Poll indexer schema until plugin implementations appear
 
           n=0
-          max_retries=30  # 60 seconds total
+          max_retries=60  # 120 seconds total (migrations can take 30+ seconds)
           while [ "$n" -lt "$max_retries" ]; do
             # Check if Qobuzarr schema exists (first plugin in list)
-            schema_count=$(curl -s "http://localhost:8686/api/v1/indexer/schema" \
-              -H "X-Api-Key: $LIDARR_API_KEY" \
-              2>/dev/null | grep -c "Qobuzarr" || echo "0")
+            # Use grep -o and wc -l to reliably count matches
+            response=$(curl -s "http://localhost:8686/api/v1/indexer/schema" \
+              -H "X-Api-Key: $LIDARR_API_KEY" 2>/dev/null || true)
 
-            if [ "$schema_count" -gt 0 ]; then
+            # Check if response contains "Qobuzarr" (indicating plugin loaded)
+            if echo "$response" | grep -q "Qobuzarr"; then
               echo "✓ Plugin schemas loaded (found Qobuzarr in indexer schema)"
               break
             fi
@@ -587,10 +588,15 @@ jobs:
           done
 
           if [ "$n" -ge "$max_retries" ]; then
-            echo "::warning::Plugin schemas did not appear after 60 seconds"
-            echo "Indexer schema response:"
+            echo "::warning::Plugin schemas did not appear after 120 seconds"
+            echo "Indexer schema response (first 1000 chars):"
             curl -s "http://localhost:8686/api/v1/indexer/schema" \
-              -H "X-Api-Key: $LIDARR_API_KEY" 2>/dev/null | head -500 || true
+              -H "X-Api-Key: $LIDARR_API_KEY" 2>/dev/null | head -c 1000 || true
+            echo ""
+            echo "Container status:"
+            docker ps -a --filter "name=$CONTAINER_NAME" --format "{{.Status}}" || true
+            echo "Recent container logs:"
+            docker logs "$CONTAINER_NAME" --tail 30 2>&1 || true
           fi
 
           echo "::endgroup::"
@@ -1457,12 +1463,11 @@ jobs:
         run: |
           echo "::group::Waiting for canary plugin schemas..."
           n=0
-          max_retries=30
+          max_retries=60
           while [ "$n" -lt "$max_retries" ]; do
-            schema_count=$(curl -s "http://localhost:8687/api/v1/indexer/schema" \
-              -H "X-Api-Key: $LIDARR_API_KEY" \
-              2>/dev/null | grep -c "Qobuzarr" || echo "0")
-            if [ "$schema_count" -gt 0 ]; then
+            response=$(curl -s "http://localhost:8687/api/v1/indexer/schema" \
+              -H "X-Api-Key: $LIDARR_API_KEY" 2>/dev/null || true)
+            if echo "$response" | grep -q "Qobuzarr"; then
               echo "✓ Plugin schemas loaded (found Qobuzarr in indexer schema)"
               break
             fi
@@ -1471,7 +1476,9 @@ jobs:
             sleep 2
           done
           if [ "$n" -ge "$max_retries" ]; then
-            echo "::warning::Plugin schemas did not appear after 60 seconds"
+            echo "::warning::Plugin schemas did not appear after 120 seconds"
+            echo "Recent container logs:"
+            docker logs "$CONTAINER_NAME" --tail 30 2>&1 || true
           fi
           echo "::endgroup::"
 
