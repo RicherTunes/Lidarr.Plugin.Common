@@ -614,6 +614,87 @@ $v12EffectiveTests = @(
     }
 )
 
+# ============================================================================
+# Array Type Invariant Tests (CRITICAL: prevents JSON scalar unwrapping)
+# ============================================================================
+# PowerShell can auto-unwrap single-element arrays in hashtables during
+# ConvertTo-Json. These tests ensure the fix at e2e-json-output.psm1 lines
+# 797-808 prevents this from happening.
+
+$arrayTypeInvariantTests = @(
+    @{
+        Name = "Single-element EffectiveGates remains array in JSON"
+        Test = {
+            param($obj)
+            # Create context with single gate
+            $ctx = New-MockRunContext -EffectiveGates @("Schema")
+            $results = @((New-MockGateResult -Gate "Schema" -PluginName "Test" -Outcome "success"))
+            $json = ConvertTo-E2ERunManifest -Results $results -Context $ctx
+            $parsed = $json | ConvertFrom-Json
+            # MUST be array, not string
+            return ($parsed.effective.gates -is [array]) -and ($parsed.effective.gates.Count -eq 1)
+        }
+    }
+    @{
+        Name = "Multi-element EffectiveGates remains array in JSON"
+        Test = {
+            param($obj)
+            $ctx = New-MockRunContext -EffectiveGates @("Schema", "Configure", "Search")
+            $results = @((New-MockGateResult -Gate "Schema" -PluginName "Test" -Outcome "success"))
+            $json = ConvertTo-E2ERunManifest -Results $results -Context $ctx
+            $parsed = $json | ConvertFrom-Json
+            return ($parsed.effective.gates -is [array]) -and ($parsed.effective.gates.Count -eq 3)
+        }
+    }
+    @{
+        Name = "Empty EffectiveGates produces empty array (not null)"
+        Test = {
+            param($obj)
+            $ctx = New-MockRunContext -EffectiveGates @()
+            $results = @((New-MockGateResult -Gate "Schema" -PluginName "Test" -Outcome "success"))
+            $json = ConvertTo-E2ERunManifest -Results $results -Context $ctx
+            $parsed = $json | ConvertFrom-Json
+            return ($parsed.effective.gates -is [array]) -and ($parsed.effective.gates.Count -eq 0)
+        }
+    }
+    @{
+        Name = "Null EffectiveGates produces empty array (not null)"
+        Test = {
+            param($obj)
+            $ctx = New-MockRunContext
+            $ctx.Remove('EffectiveGates')  # Simulate missing key
+            $results = @((New-MockGateResult -Gate "Schema" -PluginName "Test" -Outcome "success"))
+            $json = ConvertTo-E2ERunManifest -Results $results -Context $ctx
+            $parsed = $json | ConvertFrom-Json
+            return ($parsed.effective.gates -is [array])
+        }
+    }
+    @{
+        Name = "String EffectiveGates is coerced to array"
+        Test = {
+            param($obj)
+            $ctx = New-MockRunContext
+            $ctx.EffectiveGates = "Schema"  # String, not array
+            $results = @((New-MockGateResult -Gate "Schema" -PluginName "Test" -Outcome "success"))
+            $json = ConvertTo-E2ERunManifest -Results $results -Context $ctx
+            $parsed = $json | ConvertFrom-Json
+            return ($parsed.effective.gates -is [array]) -and ($parsed.effective.gates.Count -eq 1)
+        }
+    }
+    @{
+        Name = "Single-element EffectivePlugins remains array in JSON"
+        Test = {
+            param($obj)
+            $ctx = New-MockRunContext -Plugins @("Qobuzarr")
+            $results = @((New-MockGateResult -Gate "Schema" -PluginName "Qobuzarr" -Outcome "success"))
+            $json = ConvertTo-E2ERunManifest -Results $results -Context $ctx
+            $parsed = $json | ConvertFrom-Json
+            # Both effective.plugins and request.plugins should be arrays
+            return ($parsed.effective.plugins -is [array]) -and ($parsed.request.plugins -is [array])
+        }
+    }
+)
+
 $v12DiagnosticsTests = @(
     @{
         Name = "diagnostics.includedFiles is an array"
@@ -1605,6 +1686,7 @@ if (Test-Path $jsonModulePath) {
         @{ Name = "Lock Policy Clamping"; Tests = $lockPolicyClampingTests }
         @{ Name = "Instance Key Source"; Tests = $instanceKeySourceTests }
         @{ Name = "Assembly Issue Classification"; Tests = $alcDetectionTests }
+        @{ Name = "Array Type Invariant (CRITICAL)"; Tests = $arrayTypeInvariantTests }
     )
 
     foreach ($group in $testGroups) {
