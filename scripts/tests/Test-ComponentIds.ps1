@@ -79,9 +79,9 @@ try {
         -LidarrVersion "3.1.1.4884" -LidarrBranch "plugins" -ImageTag "ghcr.io/hotio/lidarr:pr-plugins-3.1.1.4884" -ImageDigest "sha256:deadbeef" -ImageId "sha256:deadbeef" `
         -ContainerId "abc123def456" -ContainerStartedAt "2025-01-01T00:00:00.0000000Z"
 
-    # Write should be best-effort and return true on success
-    $writeOk = Write-E2EComponentIdsState -Path $statePath -State $state
-    Write-TestResult -TestName "Write returns true on success" -Passed ($writeOk -eq $true)
+    # Write should be best-effort and return structured result on success
+    $writeResult = Write-E2EComponentIdsState -Path $statePath -State $state
+    Write-TestResult -TestName "Write returns structured result with Wrote=true on success" -Passed ($writeResult.Wrote -eq $true -and $writeResult.Reason -eq "written")
     $roundTrip = Read-E2EComponentIdsState -Path $statePath
 
     Write-TestResult -TestName "Round-trip preserves Qobuzarr indexerId" -Passed ((Get-E2EPreferredComponentId -State $roundTrip -InstanceKey $instanceKey -PluginName "Qobuzarr" -Type "indexer") -eq 101)
@@ -98,11 +98,11 @@ try {
     Write-TestResult -TestName "Different instanceKey does not read IDs" -Passed ($null -eq (Get-E2EPreferredComponentId -State $roundTrip -InstanceKey $otherInstanceKey -PluginName "Qobuzarr" -Type "indexer"))
 
     # ==========================================================================
-    # Write: lock contention is best-effort (returns false, does not throw)
+    # Write: lock contention is best-effort (returns structured result, does not throw)
     # ==========================================================================
     Set-Content -LiteralPath "$statePath.lock" -Value "locked" -Encoding UTF8 -NoNewline
-    $writeLocked = Write-E2EComponentIdsState -Path $statePath -State $state
-    Write-TestResult -TestName "Write returns false when lock is held" -Passed ($writeLocked -eq $false)
+    $writeLockedResult = Write-E2EComponentIdsState -Path $statePath -State $state
+    Write-TestResult -TestName "Write returns lock_timeout when lock is held" -Passed ($writeLockedResult.Wrote -eq $false -and $writeLockedResult.Reason -eq "lock_timeout")
     Write-TestResult -TestName "Write does not remove another process lock" -Passed (Test-Path -LiteralPath "$statePath.lock")
     Remove-Item -LiteralPath "$statePath.lock" -Force -ErrorAction SilentlyContinue
 
@@ -114,8 +114,8 @@ try {
     try {
         $env:E2E_COMPONENT_IDS_LOCK_STALE_SECONDS = "0"
         Set-Content -LiteralPath "$statePath.lock" -Value "locked" -Encoding UTF8 -NoNewline
-        $writeAfterEnvOverride = Write-E2EComponentIdsState -Path $statePath -State $state
-        Write-TestResult -TestName "Lock stale seconds env var override allows write" -Passed ($writeAfterEnvOverride -eq $true)
+        $writeAfterEnvOverrideResult = Write-E2EComponentIdsState -Path $statePath -State $state
+        Write-TestResult -TestName "Lock stale seconds env var override allows write" -Passed ($writeAfterEnvOverrideResult.Wrote -eq $true -or $writeAfterEnvOverrideResult.Reason -eq "no_changes")
         Write-TestResult -TestName "Env override removes stale lock file" -Passed (-not (Test-Path -LiteralPath "$statePath.lock"))
     }
     finally {
@@ -135,8 +135,8 @@ try {
         Set-Content -LiteralPath "$statePath.lock" -Value "locked" -Encoding UTF8 -NoNewline
         (Get-Item -LiteralPath "$statePath.lock").LastWriteTimeUtc = [datetime]::UtcNow.AddSeconds(-121)
 
-        $writeAfterStaleLock = Write-E2EComponentIdsState -Path $statePath -State $state
-        Write-TestResult -TestName "Stale lock cleanup allows write" -Passed ($writeAfterStaleLock -eq $true)
+        $writeAfterStaleLockResult = Write-E2EComponentIdsState -Path $statePath -State $state
+        Write-TestResult -TestName "Stale lock cleanup allows write" -Passed ($writeAfterStaleLockResult.Wrote -eq $true -or $writeAfterStaleLockResult.Reason -eq "no_changes")
         Write-TestResult -TestName "Stale lock cleanup removes lock file" -Passed (-not (Test-Path -LiteralPath "$statePath.lock"))
     }
 

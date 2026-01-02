@@ -177,6 +177,10 @@ When running `-Gate all`, gates execute in order: **Schema → Search → AlbumS
 - **SKIP (yellow)**: Credentials not configured or auth error detected (e.g., `invalid_grant`, `unauthorized`)
 - **FAIL (red)**: Real regression - API error, attribution bug, file validation failure
 
+**Strict prereqs (CI hardening):**
+- Use `-StrictPrereqs` (or `STRICT_E2E=1` / `E2E_STRICT_PREREQS=1`) to convert *credential-related* SKIPs into FAILs for gates that require credentials (Search/AlbumSearch/Grab/ImportList/Revalidation/PostRestartGrab).
+- Keep strict prereqs disabled for cold-start/no-secrets runs, otherwise the expected “missing creds” SKIPs become failures.
+
 ### Credential Detection
 
 The runner checks indexer/download client field values:
