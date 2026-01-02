@@ -27,6 +27,15 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 - CI schema validation:
   - `scripts/validate-manifest.ps1` validates `run-manifest.json` against `docs/reference/e2e-run-manifest.schema.json`.
   - Cold-start assertions are centralized in `scripts/ci/assert-cold-start.ps1` (fixture-tested).
+- CI strict modes:
+  - `scripts/ci/validate-manifest-ci.ps1 -Strict` treats “no validator available” as a hard failure in CI cold-start runs.
+  - `-StrictPrereqs` / `STRICT_E2E=1` converts credential-related SKIPs into FAILs for credentialed gates (prevents “silent green”).
+- Golden manifest fixtures:
+  - `scripts/tests/fixtures/golden-manifests/*.json` + `scripts/tests/Test-GoldenManifests.ps1` prevent schema/semantics drift for common outcomes:
+    - PASS
+    - `E2E_AUTH_MISSING`
+    - `E2E_COMPONENT_AMBIGUOUS`
+    - host bug classification (`hostBugSuspected.classification = ALC`)
 
 ## Next steps (TDD-first)
 

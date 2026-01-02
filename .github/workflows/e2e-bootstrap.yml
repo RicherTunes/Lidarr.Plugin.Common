@@ -591,6 +591,12 @@ jobs:
             EmitJson = $true  # Always emit manifest for CI validation
           }
 
+          # CI semantics: if we're running credentialed gates, missing creds should FAIL (not SKIP).
+          # This prevents "silent green" where Search/Grab are skipped due to missing secrets.
+          if ($gate -ne "configure") {
+            $params.StrictPrereqs = $true
+          }
+
           # Enable idempotent Configure for non-cold-start runs (reduces SKIP spam)
           if ($env:E2E_COLD_START -ne "true") {
             $params.ConfigurePassIfAlreadyConfigured = $true
