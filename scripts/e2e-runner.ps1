@@ -117,6 +117,11 @@
     the gate passes once components have been configured (manually or in a prior run).
     Can also be enabled via E2E_CONFIGURE_PASS_IF_CONFIGURED=1 environment variable.
 
+.PARAMETER StrictPrereqs
+    When set, credential-related SKIPs (e.g., missing credentials, invalid OAuth) are treated as FAIL.
+    Intended for CI to prevent missing/expired credentials from silently skipping functional gates.
+    Can also be enabled via STRICT_E2E=1 or E2E_STRICT_PREREQS=1 environment variables.
+
 .NOTES
     Configure Gate Environment Variables:
 
@@ -213,6 +218,9 @@ param(
     # This enables idempotent runs where Configure gate passes once components are configured
     [switch]$ConfigurePassIfAlreadyConfigured,
 
+    # When set, treat credential prereq SKIPs as FAIL (CI hardening).
+    [switch]$StrictPrereqs,
+
     # Preferred component IDs state file (used to make persistent runs deterministic)
     # If not specified, defaults to .e2e-bootstrap/e2e-component-ids.json       
     [string]$ComponentIdsPath,
@@ -286,6 +294,15 @@ if ($env:BRAINARR_SYNC_TIMEOUT_SEC) {
 # Environment variable override for ConfigurePassIfAlreadyConfigured     
 if (-not $ConfigurePassIfAlreadyConfigured -and $env:E2E_CONFIGURE_PASS_IF_CONFIGURED -eq '1') {
     $ConfigurePassIfAlreadyConfigured = $true
+}
+
+# Environment variable override for StrictPrereqs
+if (-not $StrictPrereqs) {
+    $rawStrict = "$($env:E2E_STRICT_PREREQS)".Trim().ToLowerInvariant()
+    $rawStrict2 = "$($env:STRICT_E2E)".Trim().ToLowerInvariant()
+    if ($rawStrict -in @("1", "true", "yes") -or $rawStrict2 -in @("1", "true", "yes")) {
+        $StrictPrereqs = $true
+    }
 }
 
 # Environment variable + CI defaults for disabling fuzzy matching
@@ -1983,6 +2000,16 @@ foreach ($plugin in $pluginList) {
 
                         # If Search was skipped due to missing credentials, downstream functional gates should also skip.
                         if ($Gate -eq "all") { $skipGrabForPlugin = $true }
+
+                        if ($StrictPrereqs -and (Test-IsCredentialPrereqSkipReason -SkipReason $reason)) {
+                            Write-Host "       FAIL (strict prereqs: credentials required)" -ForegroundColor Red
+                            $allResults[-1].Outcome = "failed"
+                            $allResults[-1].Success = $false
+                            $allResults[-1].Errors = @("Strict prereqs: $reason")
+                            $overallSuccess = $false
+                            $stopNow = $true
+                            break
+                        }
                     }
                     elseif ($searchResult.Success) {
                         if (-not $skipIndexerTest) {
@@ -2111,6 +2138,16 @@ foreach ($plugin in $pluginList) {
                         if (-not $reason) { $reason = "Skipped by gate policy" }
                         Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
                         $skipGrabForPlugin = $true
+
+                        if ($StrictPrereqs -and (Test-IsCredentialPrereqSkipReason -SkipReason $reason)) {
+                            Write-Host "       FAIL (strict prereqs: credentials required)" -ForegroundColor Red
+                            $allResults[-1].Outcome = "failed"
+                            $allResults[-1].Success = $false
+                            $allResults[-1].Errors = @("Strict prereqs: $reason")
+                            $overallSuccess = $false
+                            $stopNow = $true
+                            break
+                        }
                     }
                     elseif ($albumSearchResult.Success) {
                         Write-Host "       PASS ($($albumSearchResult.PluginReleaseCount) releases from $plugin)" -ForegroundColor Green
@@ -2209,6 +2246,16 @@ foreach ($plugin in $pluginList) {
                     $reason = $grabResult.SkipReason
                     if (-not $reason) { $reason = "Skipped by gate policy" }
                     Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+
+                    if ($StrictPrereqs -and (Test-IsCredentialPrereqSkipReason -SkipReason $reason)) {
+                        Write-Host "       FAIL (strict prereqs: credentials required)" -ForegroundColor Red
+                        $allResults[-1].Outcome = "failed"
+                        $allResults[-1].Success = $false
+                        $allResults[-1].Errors = @("Strict prereqs: $reason")
+                        $overallSuccess = $false
+                        $stopNow = $true
+                        break
+                    }
                 }
                 elseif ($grabResult.Success) {
                     Write-Host "       PASS (queued: $($grabResult.ReleaseTitle))" -ForegroundColor Green
@@ -2315,6 +2362,16 @@ foreach ($plugin in $pluginList) {
                     $reason = $importListResult.SkipReason
                     if (-not $reason) { $reason = "Skipped by gate policy" }
                     Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+
+                    if ($StrictPrereqs -and (Test-IsCredentialPrereqSkipReason -SkipReason $reason)) {
+                        Write-Host "       FAIL (strict prereqs: credentials required)" -ForegroundColor Red
+                        $allResults[-1].Outcome = "failed"
+                        $allResults[-1].Success = $false
+                        $allResults[-1].Errors = @("Strict prereqs: $reason")
+                        $overallSuccess = $false
+                        $stopNow = $true
+                        break
+                    }
                 }
                 elseif ($importListResult.Success) {
                     Write-Host "       PASS (sync completed for $($importListResult.ImportListName))" -ForegroundColor Green
@@ -2506,6 +2563,16 @@ if ($runPersistRerun) {
                                 Reason = "Credentials file missing post-restart"
                                 CredentialFile = $probeFilePath
                             }
+
+                            if ($StrictPrereqs -and (Test-IsCredentialPrereqSkipReason -SkipReason "Credentials file missing post-restart")) {
+                                Write-Host "       FAIL (strict prereqs: credentials required)" -ForegroundColor Red
+                                $allResults[-1].Outcome = "failed"
+                                $allResults[-1].Success = $false
+                                $allResults[-1].Errors = @("Strict prereqs: Credentials file missing post-restart")
+                                $overallSuccess = $false
+                                $stopNow = $true
+                                break
+                            }
                             continue
                         }
                     }
@@ -2556,6 +2623,16 @@ if ($runPersistRerun) {
                 $reason = $revalResult.SkipReason
                 if (-not $reason) { $reason = "Skipped by gate policy" }
                 Write-Host "       SKIP ($reason)" -ForegroundColor DarkGray
+
+                if ($StrictPrereqs -and (Test-IsCredentialPrereqSkipReason -SkipReason $reason)) {
+                    Write-Host "       FAIL (strict prereqs: credentials required)" -ForegroundColor Red
+                    $allResults[-1].Outcome = "failed"
+                    $allResults[-1].Success = $false
+                    $allResults[-1].Errors = @("Strict prereqs: $reason")
+                    $overallSuccess = $false
+                    $stopNow = $true
+                    break
+                }
             }
             elseif ($revalResult.Success) {
                 if (-not $skipIndexerTest) {
@@ -2664,6 +2741,16 @@ if ($runPostRestartGrab) {
                                 Reason = "Credentials file missing post-restart"
                                 CredentialFile = $probeFilePath
                             }
+
+                            if ($StrictPrereqs -and (Test-IsCredentialPrereqSkipReason -SkipReason "Credentials file missing post-restart")) {
+                                Write-Host "       FAIL (strict prereqs: credentials required)" -ForegroundColor Red
+                                $allResults[-1].Outcome = "failed"
+                                $allResults[-1].Success = $false
+                                $allResults[-1].Errors = @("Strict prereqs: Credentials file missing post-restart")
+                                $overallSuccess = $false
+                                $stopNow = $true
+                                break
+                            }
                             continue
                         }
                     }
@@ -2691,6 +2778,16 @@ if ($runPostRestartGrab) {
                 $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "skipped" -Details @{
                     Reason = $reason
                     AlbumSearchOutcome = $albumSearchResult.Outcome
+                }
+
+                if ($StrictPrereqs -and (Test-IsCredentialPrereqSkipReason -SkipReason $reason)) {
+                    Write-Host "       FAIL (strict prereqs: credentials required)" -ForegroundColor Red
+                    $allResults[-1].Outcome = "failed"
+                    $allResults[-1].Success = $false
+                    $allResults[-1].Errors = @("Strict prereqs: $reason")
+                    $overallSuccess = $false
+                    $stopNow = $true
+                    break
                 }
                 continue
             }
@@ -2735,6 +2832,16 @@ if ($runPostRestartGrab) {
                     $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "skipped" -Details @{
                         Reason = "Grab failed with auth error post-restart"
                         Error = $grabErr
+                    }
+
+                    if ($StrictPrereqs -and (Test-IsCredentialPrereqSkipReason -SkipReason "Grab failed with auth error post-restart")) {
+                        Write-Host "       FAIL (strict prereqs: credentials required)" -ForegroundColor Red
+                        $allResults[-1].Outcome = "failed"
+                        $allResults[-1].Success = $false
+                        $allResults[-1].Errors = @("Strict prereqs: Grab failed with auth error post-restart")
+                        $overallSuccess = $false
+                        $stopNow = $true
+                        break
                     }
                     continue
                 }
