@@ -462,7 +462,10 @@ jobs:
           fi
 
           # Create directories (fresh for cold-start, reused otherwise)
-          mkdir -p "$CONFIG_DIR/plugins" .e2e-bootstrap/downloads
+          #
+          # IMPORTANT: Lidarr expects plugins under /config/plugins/<Vendor>/<PluginName>/.
+          # Our vendor folder is "RicherTunes" (matches local persistent runner conventions).
+          mkdir -p "$CONFIG_DIR/plugins/RicherTunes" .e2e-bootstrap/downloads
 
           # ============================================================================
           # PRE-SEED: Extract plugins to config dir BEFORE container starts
@@ -475,8 +478,9 @@ jobs:
             plugin_name="${entry%%=*}"
             zip_path="${entry#*=}"
             if [ -f "$zip_path" ]; then
-              # Each plugin in its own subdirectory (plugins/Qobuzarr/, plugins/Tidalarr/, etc.)
-              plugin_dir="$CONFIG_DIR/plugins/$plugin_name"
+              # Each plugin in its own subdirectory under the vendor folder:
+              # plugins/RicherTunes/Qobuzarr/, plugins/RicherTunes/Tidalarr/, etc.
+              plugin_dir="$CONFIG_DIR/plugins/RicherTunes/$plugin_name"
               mkdir -p "$plugin_dir"
               echo "Extracting $plugin_name from $zip_path to $plugin_dir..."
               unzip -o "$zip_path" -d "$plugin_dir"
@@ -489,14 +493,26 @@ jobs:
 
           # Verify plugins exist before startup (hard check)
           echo "::group::Verify pre-seeded plugins"
-          plugin_count=$(find "$CONFIG_DIR/plugins" -name "plugin.json" -type f 2>/dev/null | wc -l)
+          plugin_count=$(find "$CONFIG_DIR/plugins/RicherTunes" -name "plugin.json" -type f 2>/dev/null | wc -l)
           if [ "$plugin_count" -eq 0 ]; then
-            echo "::error::No plugin.json files found in $CONFIG_DIR/plugins/ - pre-seed failed!"
+            echo "::error::No plugin.json files found in $CONFIG_DIR/plugins/RicherTunes/ - pre-seed failed!"
             ls -laR "$CONFIG_DIR/plugins/" || true
             exit 1
           fi
           echo "Found $plugin_count plugin(s) with plugin.json:"
-          find "$CONFIG_DIR/plugins" -name "plugin.json" -type f
+          find "$CONFIG_DIR/plugins/RicherTunes" -name "plugin.json" -type f
+          echo ""
+          echo "Expected plugin.json locations:"
+          for entry in "${ZIPS[@]}"; do
+            plugin_name="${entry%%=*}"
+            expected="$CONFIG_DIR/plugins/RicherTunes/$plugin_name/plugin.json"
+            if [ -f "$expected" ]; then
+              echo "  ✓ $expected"
+            else
+              echo "::error::Missing expected plugin.json: $expected"
+              exit 1
+            fi
+          done
           echo ""
           echo "Pre-seeded plugin directory contents:"
           ls -laR "$CONFIG_DIR/plugins/"
@@ -1407,7 +1423,7 @@ jobs:
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
 
           # Pre-seed: extract plugins before container starts
-          mkdir -p .e2e-canary/config/plugins .e2e-canary/downloads
+          mkdir -p .e2e-canary/config/plugins/RicherTunes .e2e-canary/downloads
 
           echo "::group::Pre-seed plugins for canary"
           IFS=',' read -ra ZIPS <<< "$PLUGIN_ZIPS"
@@ -1415,8 +1431,8 @@ jobs:
             plugin_name="${entry%%=*}"
             zip_path="${entry#*=}"
             if [ -f "$zip_path" ]; then
-              # Each plugin in its own subdirectory to avoid file collisions
-              plugin_dir=".e2e-canary/config/plugins/$plugin_name"
+              # Each plugin in its own subdirectory under the vendor folder
+              plugin_dir=".e2e-canary/config/plugins/RicherTunes/$plugin_name"
               mkdir -p "$plugin_dir"
               echo "Extracting $plugin_name to $plugin_dir..."
               unzip -o "$zip_path" -d "$plugin_dir"
@@ -1428,9 +1444,9 @@ jobs:
           echo "::endgroup::"
 
           # Verify plugins exist (hard check)
-          plugin_count=$(find ".e2e-canary/config/plugins" -name "plugin.json" -type f 2>/dev/null | wc -l)
+          plugin_count=$(find ".e2e-canary/config/plugins/RicherTunes" -name "plugin.json" -type f 2>/dev/null | wc -l)
           echo "Found $plugin_count plugin(s) for canary:"
-          find ".e2e-canary/config/plugins" -name "plugin.json" -type f || true
+          find ".e2e-canary/config/plugins/RicherTunes" -name "plugin.json" -type f || true
 
           docker run -d \
             --name "$CONTAINER_NAME" \
