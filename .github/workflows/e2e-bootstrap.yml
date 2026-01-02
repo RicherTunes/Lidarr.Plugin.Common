@@ -467,6 +467,7 @@ jobs:
           # ============================================================================
           # PRE-SEED: Extract plugins to config dir BEFORE container starts
           # This ensures Lidarr sees plugins at first boot (deterministic loading)
+          # Each plugin gets its own subdirectory to avoid file collisions
           # ============================================================================
           echo "::group::Pre-seed plugins to $CONFIG_DIR/plugins/"
           IFS=',' read -ra ZIPS <<< "$PLUGIN_ZIPS"
@@ -474,8 +475,11 @@ jobs:
             plugin_name="${entry%%=*}"
             zip_path="${entry#*=}"
             if [ -f "$zip_path" ]; then
-              echo "Extracting $plugin_name from $zip_path..."
-              unzip -o "$zip_path" -d "$CONFIG_DIR/plugins/"
+              # Each plugin in its own subdirectory (plugins/Qobuzarr/, plugins/Tidalarr/, etc.)
+              plugin_dir="$CONFIG_DIR/plugins/$plugin_name"
+              mkdir -p "$plugin_dir"
+              echo "Extracting $plugin_name from $zip_path to $plugin_dir..."
+              unzip -o "$zip_path" -d "$plugin_dir"
               echo "  ✓ $plugin_name extracted"
             else
               echo "::warning::Plugin zip not found: $zip_path"
@@ -1366,15 +1370,22 @@ jobs:
             plugin_name="${entry%%=*}"
             zip_path="${entry#*=}"
             if [ -f "$zip_path" ]; then
-              unzip -o "$zip_path" -d ".e2e-canary/config/plugins/"
+              # Each plugin in its own subdirectory to avoid file collisions
+              plugin_dir=".e2e-canary/config/plugins/$plugin_name"
+              mkdir -p "$plugin_dir"
+              echo "Extracting $plugin_name to $plugin_dir..."
+              unzip -o "$zip_path" -d "$plugin_dir"
               echo "  ✓ $plugin_name extracted"
+            else
+              echo "::warning::Plugin zip not found: $zip_path"
             fi
           done
           echo "::endgroup::"
 
-          # Verify plugins exist
+          # Verify plugins exist (hard check)
           plugin_count=$(find ".e2e-canary/config/plugins" -name "plugin.json" -type f 2>/dev/null | wc -l)
-          echo "Found $plugin_count plugin(s) for canary"
+          echo "Found $plugin_count plugin(s) for canary:"
+          find ".e2e-canary/config/plugins" -name "plugin.json" -type f || true
 
           docker run -d \
             --name "$CONTAINER_NAME" \
