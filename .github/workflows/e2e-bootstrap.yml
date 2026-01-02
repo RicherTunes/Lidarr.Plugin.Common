@@ -656,11 +656,11 @@ jobs:
             exit 0
           }
 
-          & ./scripts/validate-manifest.ps1 -ManifestPath $manifestPath -Quiet
-          $exitCode = $LASTEXITCODE
-          if ($exitCode -ne 0) {
-            Write-Host "::error::Run manifest schema validation failed with exit code $exitCode"
-            exit $exitCode
+          # Use CI wrapper with -Strict to treat "no validator" as failure
+          & ./scripts/ci/validate-manifest-ci.ps1 -ManifestPath $manifestPath -Strict -Quiet
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Run manifest schema validation failed"
+            exit 1
           }
 
       # =========================================================================
