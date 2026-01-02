@@ -1406,6 +1406,12 @@ jobs:
             ContainerName = $env:CONTAINER_NAME
             DiagnosticsPath = "./.e2e-canary/diagnostics"
           }
+          
+          # Canary semantics: if the canary is running credentialed gates, missing creds should FAIL (not SKIP).
+          # This is non-blocking for the workflow overall (continue-on-error), but prevents “green-by-skip” canary runs.
+          if ($gate -ne "configure") {
+            $params.StrictPrereqs = $true
+          }
 
           try {
             & ./scripts/e2e-runner.ps1 @params
