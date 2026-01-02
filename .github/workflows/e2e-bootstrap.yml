@@ -556,6 +556,45 @@ jobs:
           echo "LIDARR_API_KEY=$API_KEY" >> $GITHUB_ENV
           echo "API key extracted successfully"
 
+      - name: Wait for plugins to load
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::Waiting for plugin schemas..."
+
+          # After API is ready, Lidarr still needs time to complete:
+          # 1. Database migrations
+          # 2. Plugin assembly loading
+          # 3. DI registration
+          # Poll indexer schema until plugin implementations appear
+
+          n=0
+          max_retries=30  # 60 seconds total
+          while [ "$n" -lt "$max_retries" ]; do
+            # Check if Qobuzarr schema exists (first plugin in list)
+            schema_count=$(curl -s "http://localhost:8686/api/v1/indexer/schema" \
+              -H "X-Api-Key: $LIDARR_API_KEY" \
+              2>/dev/null | grep -c "Qobuzarr" || echo "0")
+
+            if [ "$schema_count" -gt 0 ]; then
+              echo "✓ Plugin schemas loaded (found Qobuzarr in indexer schema)"
+              break
+            fi
+
+            n=$((n+1))
+            echo "Waiting for plugin schemas ($n/$max_retries)..."
+            sleep 2
+          done
+
+          if [ "$n" -ge "$max_retries" ]; then
+            echo "::warning::Plugin schemas did not appear after 60 seconds"
+            echo "Indexer schema response:"
+            curl -s "http://localhost:8686/api/v1/indexer/schema" \
+              -H "X-Api-Key: $LIDARR_API_KEY" 2>/dev/null | head -500 || true
+          fi
+
+          echo "::endgroup::"
+
       # =========================================================================
       # RUN E2E GATES
       # =========================================================================
@@ -1412,6 +1451,29 @@ jobs:
           [ -z "$API_KEY" ] && exit 1
           echo "::add-mask::$API_KEY"
           echo "LIDARR_API_KEY=$API_KEY" >> $GITHUB_ENV
+
+      - name: Wait for plugins to load (canary)
+        shell: bash
+        run: |
+          echo "::group::Waiting for canary plugin schemas..."
+          n=0
+          max_retries=30
+          while [ "$n" -lt "$max_retries" ]; do
+            schema_count=$(curl -s "http://localhost:8687/api/v1/indexer/schema" \
+              -H "X-Api-Key: $LIDARR_API_KEY" \
+              2>/dev/null | grep -c "Qobuzarr" || echo "0")
+            if [ "$schema_count" -gt 0 ]; then
+              echo "✓ Plugin schemas loaded (found Qobuzarr in indexer schema)"
+              break
+            fi
+            n=$((n+1))
+            echo "Waiting for plugin schemas ($n/$max_retries)..."
+            sleep 2
+          done
+          if [ "$n" -ge "$max_retries" ]; then
+            echo "::warning::Plugin schemas did not appear after 60 seconds"
+          fi
+          echo "::endgroup::"
 
       - name: Run canary E2E gates
         id: run-gates
