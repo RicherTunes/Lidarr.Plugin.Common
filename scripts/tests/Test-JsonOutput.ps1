@@ -135,6 +135,30 @@ function New-MockRunContext {
     }
 }
 
+function New-ManifestWithComponentIdsPersistence {
+    param(
+        [hashtable]$ComponentIdsPersistence,
+        [bool]$PersistenceEnabled = $true
+    )
+
+    $ctx = New-MockRunContext
+
+    # Ensure componentIds exists in context
+    if (-not $ctx.ContainsKey('ComponentIds') -or -not $ctx.ComponentIds) {
+        $ctx.ComponentIds = @{}
+    }
+
+    $ctx.ComponentIds.PersistenceEnabled = $PersistenceEnabled
+    $ctx.ComponentIdsPersistence = $ComponentIdsPersistence
+
+    $results = @(
+        (New-MockGateResult -Gate "Schema" -PluginName "Qobuzarr" -Outcome "success" -Details @{})
+    )
+
+    $json = ConvertTo-E2ERunManifest -Results $results -Context $ctx
+    return ($json | ConvertFrom-Json)
+}
+
 # ============================================================================
 # Schema Tests - Core Structure
 # ============================================================================
@@ -463,7 +487,10 @@ $camelCaseTests = @(
         Test = {
             param($obj)
             foreach ($r in $obj.results) {
-                foreach ($key in $r.details.PSObject.Properties.Name) {
+                if (-not $r.details) { continue }
+                $props = $r.details.PSObject.Properties
+                if (-not $props) { continue }
+                foreach ($key in $props.Name) {
                     # First char should be lowercase (lowerCamelCase)
                     if ($key.Length -gt 0 -and $key[0] -cmatch '[A-Z]') {
                         Write-Host "    Warning: details key '$key' is not lowerCamelCase" -ForegroundColor Yellow
@@ -918,55 +945,268 @@ $matchedOnTests = @(
 # Schema Tests - persistedIdsUpdated Flag
 # ============================================================================
 
+# Legacy field removal tests - verify details.persistedIdsUpdated is NOT emitted
 $persistedIdsUpdatedTests = @(
     @{
-        Name = "persistedIdsUpdated is present in details"
+        Name = "details.persistedIdsUpdated is NOT present (moved to componentIds block)"
         Test = {
             param($obj)
-            # Configure result should have this flag
-            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
-            if (-not $r) { return $false }
-            return ($r.details.PSObject.Properties.Name -contains 'persistedIdsUpdated')
+            # Verify no result has the legacy field
+            foreach ($r in $obj.results) {
+                if ($null -eq $r.details) { continue }
+                try {
+                    $propNames = @($r.details.PSObject.Properties | ForEach-Object { $_.Name })
+                    if ($propNames -contains 'persistedIdsUpdated') {
+                        return $false
+                    }
+                } catch {
+                    continue
+                }
+            }
+            return $true
         }
     }
     @{
-        Name = "persistedIdsUpdated is boolean"
+        Name = "componentIds.persistedIdsUpdated IS present (new location)"
         Test = {
             param($obj)
-            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
-            if (-not $r) { return $false }
-            if (-not ($r.details.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
-            return ($r.details.persistedIdsUpdated -is [bool])
+            if (-not $obj.componentIds) { return $false }
+            return ($obj.componentIds.PSObject.Properties.Name -contains 'persistedIdsUpdated')
         }
     }
     @{
-        Name = "persistedIdsUpdated=true when IDs were written"
+        Name = "componentIds.persistedIdsUpdateAttempted IS present (new location)"
         Test = {
             param($obj)
-            # Configure Qobuzarr creates components, should have persistedIdsUpdated=true
-            $r = $obj.results | Where-Object { $_.gate -eq 'Configure' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
-            if (-not $r) { return $false }
-            if (-not ($r.details.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
-            # Gate that creates/updates components should have true
-            return ($r.details.persistedIdsUpdated -eq $true)
+            if (-not $obj.componentIds) { return $false }
+            return ($obj.componentIds.PSObject.Properties.Name -contains 'persistedIdsUpdateAttempted')
         }
     }
     @{
-        Name = "persistedIdsUpdated=false when no IDs written (skipped gate)"
+        Name = "componentIds.persistedIdsUpdateReason IS present (new location)"
         Test = {
             param($obj)
-            # Skipped gate should have persistedIdsUpdated=false
-            $r = $obj.results | Where-Object { $_.outcome -eq 'skipped' } | Select-Object -First 1
-            if (-not $r) { return $false }
-            if (-not ($r.details.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
-            # Skipped gates don't write IDs
-            return ($r.details.persistedIdsUpdated -eq $false)
+            if (-not $obj.componentIds) { return $false }
+            return ($obj.componentIds.PSObject.Properties.Name -contains 'persistedIdsUpdateReason')
         }
     }
 )
 
-# ============================================================================  
-# Edge Case Tests - Lock Policy Clamping and Source Classification       
+# ============================================================================
+# Schema Tests - ComponentIds Persistence Outcome (factual, not aspirational)
+# ============================================================================
+
+$componentIdsPersistenceTests = @(
+    @{
+        Name = "Eligible + lock_timeout => attempted=true, updated=false, reason=lock_timeout"
+        Test = {
+            param($obj)
+            $m = New-ManifestWithComponentIdsPersistence -ComponentIdsPersistence @{
+                Eligible = $true
+                Attempted = $true
+                Wrote = $false
+                Reason = "lock_timeout"
+            }
+            $ci = $m.componentIds
+            if (-not $ci) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistenceEligible')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateAttempted')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateReason')) { return $false }
+
+            return ($ci.persistenceEnabled -eq $true) -and
+                   ($ci.persistenceEligible -eq $true) -and
+                   ($ci.persistedIdsUpdateAttempted -eq $true) -and
+                   ($ci.persistedIdsUpdated -eq $false) -and
+                   ($ci.persistedIdsUpdateReason -eq "lock_timeout")
+        }
+    }
+    @{
+        Name = "Eligible + written => attempted=true, updated=true, reason=written"
+        Test = {
+            param($obj)
+            $m = New-ManifestWithComponentIdsPersistence -ComponentIdsPersistence @{
+                Eligible = $true
+                Attempted = $true
+                Wrote = $true
+                Reason = "written"
+            }
+            $ci = $m.componentIds
+            if (-not $ci) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistenceEligible')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateAttempted')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateReason')) { return $false }
+
+            return ($ci.persistenceEligible -eq $true) -and
+                   ($ci.persistedIdsUpdateAttempted -eq $true) -and
+                   ($ci.persistedIdsUpdated -eq $true) -and
+                   ($ci.persistedIdsUpdateReason -eq "written")
+        }
+    }
+    @{
+        Name = "Not eligible => attempted=false, updated=false, reason=not_eligible (even if context claims attempted/wrote)"
+        Test = {
+            param($obj)
+            $m = New-ManifestWithComponentIdsPersistence -ComponentIdsPersistence @{
+                Eligible = $false
+                Attempted = $true
+                Wrote = $true
+                Reason = "written"
+            }
+            $ci = $m.componentIds
+            if (-not $ci) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistenceEligible')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateAttempted')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateReason')) { return $false }
+
+            return ($ci.persistenceEligible -eq $false) -and
+                   ($ci.persistedIdsUpdateAttempted -eq $false) -and
+                   ($ci.persistedIdsUpdated -eq $false) -and
+                   ($ci.persistedIdsUpdateReason -eq "not_eligible")
+        }
+    }
+    @{
+        Name = "Persistence disabled => attempted=false, updated=false, reason=disabled (even if eligible)"
+        Test = {
+            param($obj)
+            $m = New-ManifestWithComponentIdsPersistence -PersistenceEnabled:$false -ComponentIdsPersistence @{
+                Eligible = $true
+                Attempted = $true
+                Wrote = $true
+                Reason = "written"
+            }
+            $ci = $m.componentIds
+            if (-not $ci) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistenceEnabled')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistenceEligible')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateAttempted')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateReason')) { return $false }
+
+            return ($ci.persistenceEnabled -eq $false) -and
+                   ($ci.persistenceEligible -eq $true) -and
+                   ($ci.persistedIdsUpdateAttempted -eq $false) -and
+                   ($ci.persistedIdsUpdated -eq $false) -and
+                   ($ci.persistedIdsUpdateReason -eq "disabled")
+        }
+    }
+    @{
+        Name = "Eligible + no_changes => attempted=true, updated=false, reason=no_changes"
+        Test = {
+            param($obj)
+            $m = New-ManifestWithComponentIdsPersistence -ComponentIdsPersistence @{
+                Eligible = $true
+                Attempted = $true
+                Wrote = $false
+                Reason = "no_changes"
+            }
+            $ci = $m.componentIds
+            if (-not $ci) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistenceEligible')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateAttempted')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateReason')) { return $false }
+
+            return ($ci.persistenceEligible -eq $true) -and
+                   ($ci.persistedIdsUpdateAttempted -eq $true) -and
+                   ($ci.persistedIdsUpdated -eq $false) -and
+                   ($ci.persistedIdsUpdateReason -eq "no_changes")
+        }
+    }
+    @{
+        Name = "Eligible + io_error => attempted=true, updated=false, reason=io_error"
+        Test = {
+            param($obj)
+            $m = New-ManifestWithComponentIdsPersistence -ComponentIdsPersistence @{
+                Eligible = $true
+                Attempted = $true
+                Wrote = $false
+                Reason = "io_error"
+            }
+            $ci = $m.componentIds
+            if (-not $ci) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistenceEligible')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateAttempted')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateReason')) { return $false }
+
+            return ($ci.persistenceEligible -eq $true) -and
+                   ($ci.persistedIdsUpdateAttempted -eq $true) -and
+                   ($ci.persistedIdsUpdated -eq $false) -and
+                   ($ci.persistedIdsUpdateReason -eq "io_error")
+        }
+    }
+    @{
+        Name = "Invariant: updated=true implies attempted=true (wrote=true forces attempted=true)"
+        Test = {
+            param($obj)
+            $m = New-ManifestWithComponentIdsPersistence -ComponentIdsPersistence @{
+                Eligible = $true
+                Attempted = $false
+                Wrote = $true
+                Reason = "written"
+            }
+            $ci = $m.componentIds
+            if (-not $ci) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateAttempted')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+
+            return ($ci.persistedIdsUpdated -eq $true) -and
+                   ($ci.persistedIdsUpdateAttempted -eq $true)
+        }
+    }
+    @{
+        Name = "Legacy field removed: no results[].details.persistedIdsUpdated anywhere"
+        Test = {
+            param($obj)
+            $m = New-ManifestWithComponentIdsPersistence -ComponentIdsPersistence @{
+                Eligible = $true
+                Attempted = $true
+                Wrote = $true
+                Reason = "written"
+            }
+
+            foreach ($r in @($m.results)) {
+                if ($null -eq $r.details) { continue }
+                try {
+                    $propNames = @($r.details.PSObject.Properties | ForEach-Object { $_.Name })
+                    if ($propNames -contains "persistedIdsUpdated") {
+                        return $false
+                    }
+                } catch {
+                    continue
+                }
+            }
+            return $true
+        }
+    }
+    @{
+        Name = "Missing ComponentIdsPersistence defaults to attempted=false, updated=false, reason=unknown"
+        Test = {
+            param($obj)
+
+            $ctx = New-MockRunContext
+            $results = @((New-MockGateResult -Gate "Schema" -PluginName "Qobuzarr" -Outcome "success" -Details @{}))
+            $json = ConvertTo-E2ERunManifest -Results $results -Context $ctx
+            $m = $json | ConvertFrom-Json
+
+            $ci = $m.componentIds
+            if (-not $ci) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateAttempted')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdated')) { return $false }
+            if (-not ($ci.PSObject.Properties.Name -contains 'persistedIdsUpdateReason')) { return $false }
+
+            return ($ci.persistedIdsUpdateAttempted -eq $false) -and
+                   ($ci.persistedIdsUpdated -eq $false) -and
+                   ($ci.persistedIdsUpdateReason -eq "unknown")
+        }
+    }
+)
+
+# ============================================================================
+# Edge Case Tests - Lock Policy Clamping and Source Classification
 # ============================================================================  
 
 $lockPolicyClampingTests = @(
@@ -1326,11 +1566,10 @@ if (Test-Path $jsonModulePath) {
             componentIds = @{
                 indexerId = 999
             }
-            persistedIdsUpdated = $true
         })
-        # Skipped gate - persistedIdsUpdated should be false
+        # Skipped gate - has no component resolution details
         (New-MockGateResult -Gate "Grab" -PluginName "Brainarr" -Outcome "skipped" -SkipReason "No download client configured" -Details @{
-            persistedIdsUpdated = $false
+            nextStep = "Configure download client"
         })
     )
 
@@ -1359,9 +1598,10 @@ if (Test-Path $jsonModulePath) {
         @{ Name = "v1.2 Diagnostics"; Tests = $v12DiagnosticsTests }
         @{ Name = "v1.2 Host Bug Detection"; Tests = $v12HostBugTests }
         @{ Name = "Component IDs Provenance"; Tests = $componentIdsTests }
+        @{ Name = "ComponentIds Persistence Outcome"; Tests = $componentIdsPersistenceTests }
         @{ Name = "Component Resolution Provenance"; Tests = $componentResolutionTests }
         @{ Name = "matchedOn Provenance"; Tests = $matchedOnTests }
-        @{ Name = "persistedIdsUpdated Flag"; Tests = $persistedIdsUpdatedTests }
+        @{ Name = "persistedIdsUpdated Flag (legacy)"; Tests = $persistedIdsUpdatedTests }
         @{ Name = "Lock Policy Clamping"; Tests = $lockPolicyClampingTests }
         @{ Name = "Instance Key Source"; Tests = $instanceKeySourceTests }
         @{ Name = "Assembly Issue Classification"; Tests = $alcDetectionTests }

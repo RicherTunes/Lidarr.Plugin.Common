@@ -321,6 +321,23 @@
         "persistenceEnabled": {
           "type": "boolean",
           "description": "Whether component ID state persistence is enabled for this run."
+        },
+        "persistenceEligible": {
+          "type": "boolean",
+          "description": "Whether any component resolution had safeToPersist=true (eligible to persist)."
+        },
+        "persistedIdsUpdateAttempted": {
+          "type": "boolean",
+          "description": "Whether an attempt was made to write component ID state."
+        },
+        "persistedIdsUpdated": {
+          "type": "boolean",
+          "description": "Whether component ID state was actually written. Only true when write succeeded."
+        },
+        "persistedIdsUpdateReason": {
+          "type": "string",
+          "enum": ["disabled", "not_eligible", "no_changes", "lock_timeout", "io_error", "written", "unknown"],
+          "description": "Reason for the persistence outcome: disabled (persistence off), not_eligible (no safe IDs), no_changes (file unchanged), lock_timeout (couldn't acquire lock), io_error (write failed), written (success), unknown (no info)."
         }
       }
     }
@@ -387,10 +404,6 @@
           "properties": {
             "componentResolution": {
               "$ref": "#/$defs/componentResolution"
-            },
-            "persistedIdsUpdated": {
-              "type": "boolean",
-              "description": "Whether preferred component IDs were written during this gate execution."
             }
           }
         }

@@ -736,26 +736,9 @@ function ConvertTo-E2ERunManifest {
             $details['componentResolution'] = $componentResolution
         }
 
-        # Add persistedIdsUpdated flag
-        # Logic: check if already provided in input, otherwise derive from context
-        if (-not $details.Contains('persistedIdsUpdated')) {
-            # Derive persistedIdsUpdated:
-            # - Skipped gates never persist IDs
-            # - If componentResolution has any safeToPersist=true and strategy indicates creation/update, it's true
-            # - Default to false for safety
-            $persistedIdsUpdated = $false
-            if ($result.Outcome -ne 'skipped' -and $componentResolution) {
-                # Check if any component resolution indicates IDs were written
-                # (safeToPersist=true + strategy is 'created' or outcome was successful with IDs)
-                foreach ($compKey in $componentResolution.Keys) {
-                    $compRes = $componentResolution[$compKey]
-                    if ($compRes.safeToPersist -eq $true -and $null -ne $compRes.selectedId) {
-                        $persistedIdsUpdated = $true
-                        break
-                    }
-                }
-            }
-            $details['persistedIdsUpdated'] = $persistedIdsUpdated
+        # Remove legacy persistedIdsUpdated from details if present (moved to componentIds block)
+        if ($details.Contains('persistedIdsUpdated')) {
+            $details.Remove('persistedIdsUpdated')
         }
 
         $jsonResults += [ordered]@{
@@ -948,6 +931,50 @@ function ConvertTo-E2ERunManifest {
         if ($null -ne $persistenceEnabled) {
             $componentIdsBlock['persistenceEnabled'] = [bool]$persistenceEnabled
         }
+
+        # Add factual persistence outcome fields from ComponentIdsPersistence
+        # These reflect what ACTUALLY happened, not what was eligible to happen
+        $persistenceResult = Get-SafeProperty -Object $Context -PropertyName 'ComponentIdsPersistence'
+
+        # Defaults when no persistence result provided
+        $eligible = $false
+        $attempted = $false
+        $updated = $false
+        $reason = "unknown"
+        $hasExplicitResult = $false
+
+        if ($persistenceResult) {
+            $hasExplicitResult = $true
+            $eligible = [bool](Get-SafeProperty -Object $persistenceResult -PropertyName 'Eligible')
+            $attempted = [bool](Get-SafeProperty -Object $persistenceResult -PropertyName 'Attempted')
+            $updated = [bool](Get-SafeProperty -Object $persistenceResult -PropertyName 'Wrote')
+            $reason = (Get-SafeProperty -Object $persistenceResult -PropertyName 'Reason')
+            if (-not $reason) { $reason = "unknown" }
+        }
+
+        # Apply invariants:
+        # 1. If persistence disabled → attempted=false, updated=false, reason="disabled"
+        if ($persistenceEnabled -eq $false) {
+            $attempted = $false
+            $updated = $false
+            $reason = "disabled"
+        }
+        # 2. If not eligible AND we have explicit result → attempted=false, updated=false, reason="not_eligible"
+        #    (only override if we got an actual result saying not eligible; missing result stays "unknown")
+        elseif ($hasExplicitResult -and -not $eligible) {
+            $attempted = $false
+            $updated = $false
+            $reason = "not_eligible"
+        }
+        # 3. If updated=true → attempted must also be true (invariant)
+        if ($updated) {
+            $attempted = $true
+        }
+
+        $componentIdsBlock['persistenceEligible'] = $eligible
+        $componentIdsBlock['persistedIdsUpdateAttempted'] = $attempted
+        $componentIdsBlock['persistedIdsUpdated'] = $updated
+        $componentIdsBlock['persistedIdsUpdateReason'] = $reason
 
         if ($componentIdsBlock.Count -gt 0) {
             $manifest['componentIds'] = $componentIdsBlock
