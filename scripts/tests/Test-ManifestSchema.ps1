@@ -352,8 +352,8 @@ Write-Host "Hermetic Disk-Write Test" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
 if (Test-Path $jsonModulePath) {
-    # Create temp file path
-    $tempPath = Join-Path $env:TEMP "e2e-manifest-test-$([Guid]::NewGuid().ToString('N').Substring(0,8)).json"
+    # Create temp file path (cross-platform: use .NET GetTempPath instead of $env:TEMP)
+    $tempPath = Join-Path ([System.IO.Path]::GetTempPath()) "e2e-manifest-test-$([Guid]::NewGuid().ToString('N').Substring(0,8)).json"
 
     try {
         # Create mock data
