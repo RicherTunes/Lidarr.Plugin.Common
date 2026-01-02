@@ -462,55 +462,76 @@ jobs:
           fi
 
           # Create directories (fresh for cold-start, reused otherwise)
-          mkdir -p "$CONFIG_DIR" .e2e-bootstrap/downloads .e2e-bootstrap/plugins
+          mkdir -p "$CONFIG_DIR/plugins" .e2e-bootstrap/downloads
 
-          # Copy plugin zips to plugins directory
+          # ============================================================================
+          # PRE-SEED: Extract plugins to config dir BEFORE container starts
+          # This ensures Lidarr sees plugins at first boot (deterministic loading)
+          # ============================================================================
+          echo "::group::Pre-seed plugins to $CONFIG_DIR/plugins/"
           IFS=',' read -ra ZIPS <<< "$PLUGIN_ZIPS"
           for entry in "${ZIPS[@]}"; do
             plugin_name="${entry%%=*}"
             zip_path="${entry#*=}"
             if [ -f "$zip_path" ]; then
-              cp "$zip_path" ".e2e-bootstrap/plugins/"
-              echo "Copied $plugin_name zip"
+              echo "Extracting $plugin_name from $zip_path..."
+              unzip -o "$zip_path" -d "$CONFIG_DIR/plugins/"
+              echo "  ✓ $plugin_name extracted"
+            else
+              echo "::warning::Plugin zip not found: $zip_path"
             fi
           done
+          echo "::endgroup::"
 
-          # Start container with dynamic config dir (cold-start uses unique path)
+          # Verify plugins exist before startup (hard check)
+          echo "::group::Verify pre-seeded plugins"
+          plugin_count=$(find "$CONFIG_DIR/plugins" -name "plugin.json" -type f 2>/dev/null | wc -l)
+          if [ "$plugin_count" -eq 0 ]; then
+            echo "::error::No plugin.json files found in $CONFIG_DIR/plugins/ - pre-seed failed!"
+            ls -laR "$CONFIG_DIR/plugins/" || true
+            exit 1
+          fi
+          echo "Found $plugin_count plugin(s) with plugin.json:"
+          find "$CONFIG_DIR/plugins" -name "plugin.json" -type f
+          echo ""
+          echo "Pre-seeded plugin directory contents:"
+          ls -laR "$CONFIG_DIR/plugins/"
+          echo "::endgroup::"
+
+          # Save host-side plugin listing for diagnostics (proves plugins existed before startup)
+          mkdir -p .e2e-bootstrap/diagnostics
+          find "$CONFIG_DIR/plugins" -type f > .e2e-bootstrap/diagnostics/host-plugins-pre-start.txt
+          echo "PRE_START_PLUGIN_LISTING=$(pwd)/.e2e-bootstrap/diagnostics/host-plugins-pre-start.txt" >> $GITHUB_ENV
+
+          # Start container with plugins already in place (no post-start deployment needed)
           docker run -d \
             --name "$CONTAINER_NAME" \
             -p 8686:8686 \
             -v "$(pwd)/${CONFIG_DIR}:/config" \
             -v "$(pwd)/.e2e-bootstrap/downloads:/downloads" \
-            -v "$(pwd)/.e2e-bootstrap/plugins:/plugins" \
             -e PUID=1000 \
             -e PGID=1000 \
             "ghcr.io/hotio/lidarr:${INPUT_LIDARR_TAG}"
 
-          echo "Waiting for Lidarr to start..."
-          sleep 10
+          echo "Waiting for Lidarr to start (plugins pre-seeded, no restart needed)..."
 
-          # Install plugins
-          for zip in .e2e-bootstrap/plugins/*.zip; do
-            if [ -f "$zip" ]; then
-              docker exec "$CONTAINER_NAME" sh -c "unzip -o /plugins/$(basename "$zip") -d /config/plugins/" || true
-            fi
-          done
-
-          # Restart to load plugins
-          docker restart "$CONTAINER_NAME"
-          sleep 15
-
-          # Wait for API
+          # Wait for API (extended timeout since no restart)
           n=0
-          until [ "$n" -ge 30 ]; do
+          until [ "$n" -ge 45 ]; do
             if curl -s "http://localhost:8686/api/v1/system/status" >/dev/null 2>&1; then
-              echo "Lidarr API is ready"
+              echo "✓ Lidarr API is ready"
               break
             fi
             n=$((n+1))
-            echo "Waiting for API ($n/30)..."
+            echo "Waiting for API ($n/45)..."
             sleep 2
           done
+
+          if [ "$n" -ge 45 ]; then
+            echo "::error::Lidarr API failed to become ready after 90 seconds"
+            docker logs "$CONTAINER_NAME" --tail 50 || true
+            exit 1
+          fi
 
       - name: Extract API key
         id: api-key
@@ -1336,35 +1357,38 @@ jobs:
           CONTAINER_NAME="lidarr-canary-${GITHUB_RUN_ID}"
           echo "CONTAINER_NAME=$CONTAINER_NAME" >> $GITHUB_ENV
 
-          mkdir -p .e2e-canary/config .e2e-canary/downloads .e2e-canary/plugins
+          # Pre-seed: extract plugins before container starts
+          mkdir -p .e2e-canary/config/plugins .e2e-canary/downloads
 
+          echo "::group::Pre-seed plugins for canary"
           IFS=',' read -ra ZIPS <<< "$PLUGIN_ZIPS"
           for entry in "${ZIPS[@]}"; do
+            plugin_name="${entry%%=*}"
             zip_path="${entry#*=}"
-            [ -f "$zip_path" ] && cp "$zip_path" ".e2e-canary/plugins/"
+            if [ -f "$zip_path" ]; then
+              unzip -o "$zip_path" -d ".e2e-canary/config/plugins/"
+              echo "  ✓ $plugin_name extracted"
+            fi
           done
+          echo "::endgroup::"
+
+          # Verify plugins exist
+          plugin_count=$(find ".e2e-canary/config/plugins" -name "plugin.json" -type f 2>/dev/null | wc -l)
+          echo "Found $plugin_count plugin(s) for canary"
 
           docker run -d \
             --name "$CONTAINER_NAME" \
             -p 8687:8686 \
             -v "$(pwd)/.e2e-canary/config:/config" \
             -v "$(pwd)/.e2e-canary/downloads:/downloads" \
-            -v "$(pwd)/.e2e-canary/plugins:/plugins" \
             -e PUID=1000 \
             -e PGID=1000 \
             "ghcr.io/hotio/lidarr:${CANARY_TAG}"
 
-          sleep 10
-
-          for zip in .e2e-canary/plugins/*.zip; do
-            [ -f "$zip" ] && docker exec "$CONTAINER_NAME" sh -c "unzip -o /plugins/$(basename "$zip") -d /config/plugins/" || true
-          done
-
-          docker restart "$CONTAINER_NAME"
-          sleep 15
+          echo "Waiting for canary Lidarr (plugins pre-seeded)..."
 
           n=0
-          until [ "$n" -ge 30 ]; do
+          until [ "$n" -ge 45 ]; do
             curl -s "http://localhost:8687/api/v1/system/status" >/dev/null 2>&1 && break
             n=$((n+1))
             sleep 2
