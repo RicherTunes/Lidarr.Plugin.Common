@@ -276,6 +276,15 @@ function Get-E2EComponentIdsEffectiveLockPolicy {
 }
 
 function Write-E2EComponentIdsState {
+    <#
+    .SYNOPSIS
+        Persists component ID state to disk with structured result.
+    .DESCRIPTION
+        Returns a hashtable with factual persistence outcome:
+        - Attempted: Always $true when this function is called
+        - Wrote: $true only when file content actually changed
+        - Reason: One of "written", "no_changes", "lock_timeout", "io_error"
+    #>
     param(
         [Parameter(Mandatory)]
         [string]$Path,
@@ -283,6 +292,8 @@ function Write-E2EComponentIdsState {
         [Parameter(Mandatory)]
         [hashtable]$State
     )
+
+    $lockAcquired = $false
 
     try {
         $dir = Split-Path -Parent $Path
@@ -294,9 +305,8 @@ function Write-E2EComponentIdsState {
         }
 
         # Best-effort file lock to reduce concurrent writer clobbering.
-        # Failure to acquire a lock must not break runs; we just return $false.
+        # Failure to acquire a lock returns structured result (does not throw).
         $lockPath = "$Path.lock"
-        $lockAcquired = $false
 
         # Get effective lock policy from shared function
         $lockPolicy = Get-E2EComponentIdsEffectiveLockPolicy
@@ -326,20 +336,42 @@ function Write-E2EComponentIdsState {
         }
 
         if (-not $lockAcquired) {
-            return $false
+            return @{ Attempted = $true; Wrote = $false; Reason = "lock_timeout" }
         }
 
-        $json = $State | ConvertTo-Json -Depth 10
+        # Serialize new state using ConvertTo-Json -Compress for stable comparison
+        $newJson = $State | ConvertTo-Json -Depth 10 -Compress
+
+        # Check if file already has identical content (no_changes detection)
+        if (Test-Path -LiteralPath $Path) {
+            try {
+                $existingRaw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+                if (-not [string]::IsNullOrEmpty($existingRaw)) {
+                    # Re-serialize existing content for stable comparison
+                    $existingObj = $existingRaw | ConvertFrom-Json -ErrorAction Stop
+                    $existingJson = $existingObj | ConvertTo-Json -Depth 10 -Compress
+                    if ($existingJson -eq $newJson) {
+                        return @{ Attempted = $true; Wrote = $false; Reason = "no_changes" }
+                    }
+                }
+            }
+            catch {
+                # If we can't read/parse existing file, proceed with write
+            }
+        }
+
+        # Write with pretty formatting for human readability
+        $prettyJson = $State | ConvertTo-Json -Depth 10
         $tmp = "$Path.tmp"
-        Set-Content -LiteralPath $tmp -Value $json -Encoding UTF8 -NoNewline    
+        Set-Content -LiteralPath $tmp -Value $prettyJson -Encoding UTF8 -NoNewline
 
         Move-Item -LiteralPath $tmp -Destination $Path -Force
-        return $true
+        return @{ Attempted = $true; Wrote = $true; Reason = "written" }
     }
     catch {
         # Best-effort: a state persistence failure must never break the E2E run.
         try { Remove-Item -LiteralPath "$Path.tmp" -Force -ErrorAction SilentlyContinue } catch { }
-        return $false
+        return @{ Attempted = $true; Wrote = $false; Reason = "io_error" }
     }
     finally {
         if ($lockAcquired) {

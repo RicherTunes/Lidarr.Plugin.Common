@@ -354,6 +354,10 @@ $script:E2ELockPolicySource = $script:E2ELockPolicyResult.Source
 # Track whether persistence is enabled for manifest
 $script:E2EPersistenceEnabled = -not $DisableComponentIdPersistence
 
+# Track factual persistence outcome for manifest
+# Will be populated by Save-E2EComponentIdsIfEnabled when write actually happens
+$script:E2EComponentIdsPersistenceResult = $null
+
 function Save-E2EComponentIdsIfEnabled {
     param(
         [Parameter(Mandatory)]
@@ -432,12 +436,28 @@ function Save-E2EComponentIdsIfEnabled {
     }
 
     try {
-        $ok = Write-E2EComponentIdsState -Path $script:E2EComponentIdsPath -State $script:E2EComponentIdsState
-        if (-not $ok) {
-            Write-Warning "Preferred component IDs could not be persisted to '$($script:E2EComponentIdsPath)'. Continuing (best-effort)."
+        $writeResult = Write-E2EComponentIdsState -Path $script:E2EComponentIdsPath -State $script:E2EComponentIdsState
+
+        # Track the factual persistence outcome for manifest
+        $script:E2EComponentIdsPersistenceResult = @{
+            Eligible = $true  # If we got here, we had safe resolutions
+            Attempted = $writeResult.Attempted
+            Wrote = $writeResult.Wrote
+            Reason = $writeResult.Reason
+        }
+
+        if (-not $writeResult.Wrote -and $writeResult.Reason -ne "no_changes") {
+            Write-Warning "Preferred component IDs could not be persisted to '$($script:E2EComponentIdsPath)' (reason: $($writeResult.Reason)). Continuing (best-effort)."
         }
     }
     catch {
+        # Track the exception as io_error
+        $script:E2EComponentIdsPersistenceResult = @{
+            Eligible = $true
+            Attempted = $true
+            Wrote = $false
+            Reason = "io_error"
+        }
         Write-Warning "Preferred component IDs could not be persisted to '$($script:E2EComponentIdsPath)'. Continuing (best-effort). Error: $($_.Exception.Message)"
     }
 }
@@ -3007,6 +3027,7 @@ if ($EmitJson) {
                 LockPolicySource = $script:E2ELockPolicySource
                 PersistenceEnabled = $script:E2EPersistenceEnabled
             }
+            ComponentIdsPersistence = $script:E2EComponentIdsPersistenceResult
         }
 
         New-Item -ItemType Directory -Path (Split-Path $JsonOutputPath -Parent) -Force -ErrorAction SilentlyContinue | Out-Null
