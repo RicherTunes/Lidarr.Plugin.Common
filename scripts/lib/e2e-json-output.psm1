@@ -840,8 +840,9 @@ function ConvertTo-E2ERunManifest {
             plugins = if ($plugins) { @($plugins) } else { @() }
         }
         effective = [ordered]@{
-            gates = if ($effectiveGates) { @($effectiveGates) } else { @() }
-            plugins = if ($effectivePlugins) { @($effectivePlugins) } else { @() }
+            # CRITICAL: Cast to Object[] prevents ConvertTo-Json from unwrapping single-element arrays
+            gates = [object[]]$effectiveGates
+            plugins = [object[]]$effectivePlugins
             stopReason = $stopReason
         }
         redaction = [ordered]@{
