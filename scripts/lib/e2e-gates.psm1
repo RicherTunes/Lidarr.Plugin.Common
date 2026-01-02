@@ -576,6 +576,24 @@ function Test-SearchGate {
     return $result
 }
 
+function Test-IsCredentialPrereqSkipReason {
+    <#
+    .SYNOPSIS
+        Detects whether a skip reason is due to missing/invalid credentials.
+    .DESCRIPTION
+        Used by the runner to optionally convert "skipped" credential prereqs into failures
+        under strict CI modes (e.g., STRICT_E2E=1).
+    #>
+    param(
+        [AllowNull()]
+        [string]$SkipReason
+    )
+
+    if ([string]::IsNullOrWhiteSpace($SkipReason)) { return $false }     
+
+    return $SkipReason -match '(?i)(credentials not configured|missing/invalid credentials|not authenticated|auth error|invalid_grant|invalid_client|unauthorized|forbidden|401|403|credential(s)? file missing)'
+}
+
 function Test-GrabGate {
     <#
     .SYNOPSIS
@@ -2964,4 +2982,4 @@ function Test-BrainarrLLMGate {
     return $result
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-BrainarrLLMGate, Invoke-LidarrApi
+Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-BrainarrLLMGate, Invoke-LidarrApi
