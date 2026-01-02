@@ -88,6 +88,26 @@ on:
         options:
           - configure
           - search
+      use_host_override:
+        description: Mount patched Lidarr.Common.dll to fix multi-plugin ALC bug (auto=enable for >1 plugin)
+        type: choice
+        required: false
+        default: auto
+        options:
+          - auto
+          - always
+          - never
+      lidarr_override_repo:
+        description: Repository for patched Lidarr host (fork with ALC fix)
+        type: string
+        required: false
+        default: RicherTunes/Lidarr
+      lidarr_override_ref:
+        description: Git ref for patched Lidarr host (branch/tag/sha)
+        type: string
+        required: false
+        # Pinned SHA is recommended for deterministic builds; override as needed.
+        default: 1e741479fad766584e196187c61bea302085704a
 
 permissions:
   contents: read
@@ -110,6 +130,9 @@ env:
   INPUT_POST_RESTART_GRAB: ${{ inputs.post_restart_grab }}
   INPUT_POST_RESTART_GRAB_TIMEOUT_MIN: ${{ inputs.post_restart_grab_timeout_min }}
   INPUT_CANARY_LEVEL: ${{ inputs.canary_level }}
+  INPUT_USE_HOST_OVERRIDE: ${{ inputs.use_host_override }}
+  INPUT_LIDARR_OVERRIDE_REPO: ${{ inputs.lidarr_override_repo }}
+  INPUT_LIDARR_OVERRIDE_REF: ${{ inputs.lidarr_override_ref }}
 
 jobs:
   bootstrap:
@@ -260,6 +283,104 @@ jobs:
           path: brainarr
           token: ${{ secrets.CROSS_REPO_PAT }}
           submodules: recursive
+
+      # =========================================================================
+      # HOST OVERRIDE: Build patched Lidarr.Common.dll to fix multi-plugin ALC bug
+      # This is only used when multiple plugins are tested (or explicitly enabled)
+      # =========================================================================
+      - name: Determine host override mode
+        id: host-override
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # Count plugins (ignore empty/whitespace entries).
+          plugin_count=$(printf '%s' "${INPUT_PLUGINS:-}" | tr ',' '\n' | sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' | sed '/^$/d' | wc -l | tr -d ' ')
+          echo "Plugin count: $plugin_count"
+
+          # Determine if host override should be enabled
+          use_override="false"
+          override_reason=""
+
+          case "${INPUT_USE_HOST_OVERRIDE:-auto}" in
+            always)
+              use_override="true"
+              override_reason="explicitly enabled via input"
+              ;;
+            never)
+              use_override="false"
+              override_reason="explicitly disabled via input"
+              ;;
+            auto|*)
+              if [ "$plugin_count" -gt 1 ]; then
+                use_override="true"
+                override_reason="auto-enabled for multi-plugin ($plugin_count plugins)"
+              else
+                use_override="false"
+                override_reason="auto-disabled for single plugin"
+              fi
+              ;;
+          esac
+
+          echo "USE_HOST_OVERRIDE=$use_override" >> $GITHUB_ENV
+          echo "HOST_OVERRIDE_REASON=$override_reason" >> $GITHUB_ENV
+          echo "use_override=$use_override" >> $GITHUB_OUTPUT
+
+          if [ "$use_override" = "true" ]; then
+            echo "::notice::Host override ENABLED: $override_reason"
+          else
+            echo "Host override disabled: $override_reason"
+          fi
+
+      - name: Checkout patched Lidarr host
+        if: steps.host-override.outputs.use_override == 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.lidarr_override_repo || 'RicherTunes/Lidarr' }}
+          ref: ${{ inputs.lidarr_override_ref || '1e741479fad766584e196187c61bea302085704a' }}
+          path: _lidarr_host_override
+          token: ${{ secrets.CROSS_REPO_PAT || github.token }}
+
+      - name: Build patched Lidarr.Common.dll
+        if: steps.host-override.outputs.use_override == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::Building patched Lidarr.Common.dll"
+
+          cd _lidarr_host_override
+
+          # Record the exact commit SHA for manifest traceability
+          OVERRIDE_SHA=$(git rev-parse HEAD)
+          echo "HOST_OVERRIDE_SHA=$OVERRIDE_SHA" >> $GITHUB_ENV
+          echo "Building from commit: $OVERRIDE_SHA"
+
+          # Build only NzbDrone.Common (produces Lidarr.Common.dll)
+          # -p:RunAnalyzers=false speeds up build and avoids analyzer issues
+          dotnet build src/NzbDrone.Common/Lidarr.Common.csproj \
+            -c Release \
+            -p:RunAnalyzers=false \
+            --no-restore || dotnet build src/NzbDrone.Common/Lidarr.Common.csproj \
+            -c Release \
+            -p:RunAnalyzers=false
+
+          # Locate the built runtime DLL (avoid obj/ref reference assemblies).
+          OVERRIDE_DLL=$(find src/NzbDrone.Common/bin -name "Lidarr.Common.dll" -path "*Release*" -type f | head -1)
+          if [ -z "$OVERRIDE_DLL" ] || [ ! -f "$OVERRIDE_DLL" ]; then
+            echo "::error::Failed to locate built Lidarr.Common.dll"
+            find src/NzbDrone.Common -name "Lidarr.Common.dll" -type f || true
+            exit 1
+          fi
+
+          echo "Built DLL: $OVERRIDE_DLL"
+          ls -la "$OVERRIDE_DLL"
+
+          # Copy to workspace root for container mount
+          cp "$OVERRIDE_DLL" "$GITHUB_WORKSPACE/_host_override_Lidarr.Common.dll"
+          echo "HOST_OVERRIDE_DLL_PATH=$GITHUB_WORKSPACE/_host_override_Lidarr.Common.dll" >> $GITHUB_ENV
+
+          echo "::endgroup::"
+          echo "::notice::Patched Lidarr.Common.dll built successfully from $OVERRIDE_SHA"
 
       - name: Pull Lidarr Docker image
         shell: bash
@@ -523,15 +644,28 @@ jobs:
           find "$CONFIG_DIR/plugins" -type f > .e2e-bootstrap/diagnostics/host-plugins-pre-start.txt
           echo "PRE_START_PLUGIN_LISTING=$(pwd)/.e2e-bootstrap/diagnostics/host-plugins-pre-start.txt" >> $GITHUB_ENV
 
+          # Build docker run arguments
+          DOCKER_ARGS=(
+            -d
+            --name "$CONTAINER_NAME"
+            -p 8686:8686
+            -v "$(pwd)/${CONFIG_DIR}:/config"
+            -v "$(pwd)/.e2e-bootstrap/downloads:/downloads"
+            -e PUID=1000
+            -e PGID=1000
+          )
+
+          # Conditionally add host override mount
+          if [[ "${USE_HOST_OVERRIDE:-false}" == "true" ]] && [ -f "${HOST_OVERRIDE_DLL_PATH:-}" ]; then
+            echo "::notice::Mounting patched Lidarr.Common.dll from $HOST_OVERRIDE_DLL_PATH"
+            DOCKER_ARGS+=(-v "${HOST_OVERRIDE_DLL_PATH}:/app/bin/Lidarr.Common.dll:ro")
+            echo "E2E_HOST_OVERRIDE_MOUNTED=true" >> $GITHUB_ENV
+          else
+            echo "E2E_HOST_OVERRIDE_MOUNTED=false" >> $GITHUB_ENV
+          fi
+
           # Start container with plugins already in place (no post-start deployment needed)
-          docker run -d \
-            --name "$CONTAINER_NAME" \
-            -p 8686:8686 \
-            -v "$(pwd)/${CONFIG_DIR}:/config" \
-            -v "$(pwd)/.e2e-bootstrap/downloads:/downloads" \
-            -e PUID=1000 \
-            -e PGID=1000 \
-            "ghcr.io/hotio/lidarr:${INPUT_LIDARR_TAG}"
+          docker run "${DOCKER_ARGS[@]}" "ghcr.io/hotio/lidarr:${INPUT_LIDARR_TAG}"
 
           echo "Waiting for Lidarr to start (plugins pre-seeded, no restart needed)..."
 
@@ -1035,6 +1169,11 @@ jobs:
             [void]$sb.AppendLine("| Duration | ${durationSec}s |")
             if ($env:E2E_COLD_START -eq 'true') {
               [void]$sb.AppendLine("| Mode | :snowflake: **Cold Start** (fresh config) |")
+            }
+            # Show host override status from manifest
+            if ($manifest.lidarr.hostOverride -and $manifest.lidarr.hostOverride.used) {
+              $overrideSha = if ($manifest.lidarr.hostOverride.sha) { $manifest.lidarr.hostOverride.sha.Substring(0, 7) } else { 'unknown' }
+              [void]$sb.AppendLine("| Host Override | :wrench: **Enabled** (SHA: ``$overrideSha``) |")
             }
             [void]$sb.AppendLine("")
             [void]$sb.AppendLine("### Gate Results")
