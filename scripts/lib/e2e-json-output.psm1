@@ -793,6 +793,19 @@ function ConvertTo-E2ERunManifest {
     $plugins = Get-SafeProperty -Object $Context -PropertyName 'Plugins'
     $effectiveGates = Get-SafeProperty -Object $Context -PropertyName 'EffectiveGates'
     $effectivePlugins = Get-SafeProperty -Object $Context -PropertyName 'EffectivePlugins'
+
+    # CRITICAL: Ensure effectiveGates/effectivePlugins are always arrays (prevents JSON scalar unwrapping)
+    # PowerShell can auto-unwrap single-element arrays in hashtables during ConvertTo-Json
+    if ($null -eq $effectiveGates) {
+        $effectiveGates = @()
+    } elseif ($effectiveGates -isnot [array]) {
+        $effectiveGates = @($effectiveGates)
+    }
+    if ($null -eq $effectivePlugins) {
+        $effectivePlugins = @()
+    } elseif ($effectivePlugins -isnot [array]) {
+        $effectivePlugins = @($effectivePlugins)
+    }
     $stopReason = Get-SafeProperty -Object $Context -PropertyName 'StopReason'
     $redactionSelfTestExecuted = Get-SafeProperty -Object $Context -PropertyName 'RedactionSelfTestExecuted'
     $redactionSelfTestPassed = Get-SafeProperty -Object $Context -PropertyName 'RedactionSelfTestPassed'
