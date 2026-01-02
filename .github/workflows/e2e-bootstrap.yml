@@ -591,6 +591,12 @@ jobs:
             EmitJson = $true  # Always emit manifest for CI validation
           }
 
+          # CI semantics: if we're running credentialed gates, missing creds should FAIL (not SKIP).
+          # This prevents "silent green" where Search/Grab are skipped due to missing secrets.
+          if ($gate -ne "configure") {
+            $params.StrictPrereqs = $true
+          }
+
           # Enable idempotent Configure for non-cold-start runs (reduces SKIP spam)
           if ($env:E2E_COLD_START -ne "true") {
             $params.ConfigurePassIfAlreadyConfigured = $true
@@ -645,6 +651,24 @@ jobs:
 
           Write-Host "E2E gates completed successfully" -ForegroundColor Green
 
+      - name: Validate run manifest schema
+        if: always()
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $manifestPath = ".e2e-bootstrap/diagnostics/run-manifest.json"
+          if (-not (Test-Path $manifestPath)) {
+            Write-Host "::warning::Run manifest not found at $manifestPath; skipping schema validation." -ForegroundColor Yellow
+            exit 0
+          }
+
+          # Use CI wrapper with -Strict to treat "no validator" as failure
+          & ./scripts/ci/validate-manifest-ci.ps1 -ManifestPath $manifestPath -Strict -Quiet
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "::error::Run manifest schema validation failed"
+            exit 1
+          }
+
       # =========================================================================
       # COLD-START ASSERTIONS: Validate expected outcomes in manifest
       # =========================================================================
@@ -657,134 +681,13 @@ jobs:
           HAS_TIDAL_CREDS: ${{ secrets.TIDALARR_REDIRECT_URL != '' || secrets.TIDAL_REDIRECT_URL != '' || secrets.TIDALARR_CONFIG_PATH != '' }}
           HAS_BRAINARR_CREDS: ${{ secrets.BRAINARR_LLM_BASE_URL != '' }}
         run: |
-          $ErrorActionPreference = 'Stop'
-          $manifestPath = ".e2e-bootstrap/diagnostics/run-manifest.json"
-
-          if (-not (Test-Path $manifestPath)) {
-            Write-Host "::error::Cold-start validation failed: run-manifest.json not found"
-            exit 1
-          }
-
-          $manifest = Get-Content $manifestPath -Raw | ConvertFrom-Json
-          $failures = @()
-
-          # Validate schema exists
-          if (-not $manifest.schemaVersion) {
-            $failures += "Manifest missing schemaVersion"
-          }
-
-          foreach ($result in $manifest.results) {
-            $plugin = $result.plugin
-            $gate = $result.gate
-
-            # Schema gate must always succeed
-            if ($gate -eq "Schema") {
-              if ($result.outcome -ne "success") {
-                $failures += "[$plugin] Schema gate expected success, got $($result.outcome)"
-              }
-            }
-
-            # Configure gate assertions depend on whether secrets are provided
-            if ($gate -eq "Configure") {
-              $hasCreds = switch ($plugin) {
-                "Qobuzarr" { $env:HAS_QOBUZ_CREDS -eq "true" }
-                "Tidalarr" { $env:HAS_TIDAL_CREDS -eq "true" }
-                "Brainarr" { $env:HAS_BRAINARR_CREDS -eq "true" }
-                default { $false }
-              }
-
-              if ($hasCreds) {
-                # Case B: With secrets - expect success + created
-                if ($result.outcome -ne "success") {
-                  $failures += "[$plugin] Configure gate expected success (secrets provided), got $($result.outcome)"
-                }
-                if ($result.details -and $result.details.created -ne $true) {
-                  # Allow alreadyConfigured=true for idempotent re-runs
-                  if ($result.details.alreadyConfigured -ne $true) {
-                    $failures += "[$plugin] Configure gate expected created=true or alreadyConfigured=true on cold-start with secrets"
-                  }
-                }
-              } else {
-                # Case A: Without secrets - expect skipped, no junk created
-                if ($result.outcome -ne "skipped") {
-                  $failures += "[$plugin] Configure gate expected skipped (no secrets), got $($result.outcome)"
-                }
-                if ($result.details) {
-                  if ($result.details.created -eq $true) {
-                    $failures += "[$plugin] Configure gate must not create components without secrets (created=true)"
-                  }
-                  if ($result.details.updated -eq $true) {
-                    $failures += "[$plugin] Configure gate must not update components without secrets (updated=true)"
-                  }
-                  if ($result.details.alreadyConfigured -eq $true) {
-                    # This is fine - components exist from prior run
-                  }
-                  # Validate componentIds are not populated (no junk IDs)
-                  if ($result.details.componentIds) {
-                    $ids = $result.details.componentIds
-                    $hasJunkIds = ($ids.indexerId -and $ids.indexerId -gt 0) -or
-                                  ($ids.downloadClientId -and $ids.downloadClientId -gt 0) -or
-                                  ($ids.importListId -and $ids.importListId -gt 0)
-                    # Only flag as junk if created=true (discovery of existing components is OK)
-                    if ($hasJunkIds -and $result.details.created -eq $true) {
-                      $failures += "[$plugin] Configure gate created components without secrets (componentIds populated with created=true)"
-                    }
-                  }
-                }
-              }
-            }
-          }
-
-          # If any plugin created/configured components (Case B), ensure preferred ID state was persisted.
-          $statePath = ".e2e-bootstrap/e2e-component-ids.json"
-          $configureResultsWithIds = @($manifest.results | Where-Object {
-            $_.gate -eq "Configure" -and $_.outcome -eq "success" -and $_.details -and $_.details.componentIds
-          })
-
-          $anyConfiguredWithIds = $false
-          foreach ($r in $configureResultsWithIds) {
-            $plugin = $r.plugin
-            $hasCreds = switch ($plugin) {
-              "Qobuzarr" { $env:HAS_QOBUZ_CREDS -eq "true" }
-              "Tidalarr" { $env:HAS_TIDAL_CREDS -eq "true" }
-              "Brainarr" { $env:HAS_BRAINARR_CREDS -eq "true" }
-              default { $false }
-            }
-            if (-not $hasCreds) { continue }
-
-            $ids = $r.details.componentIds
-            $hasAnyId = ($ids.indexerId -and $ids.indexerId -gt 0) -or
-                        ($ids.downloadClientId -and $ids.downloadClientId -gt 0) -or
-                        ($ids.importListId -and $ids.importListId -gt 0)
-            if ($hasAnyId) { $anyConfiguredWithIds = $true; break }
-          }
-
-          if ($anyConfiguredWithIds) {
-            if (-not (Test-Path $statePath)) {
-              $failures += "Preferred component ID state file not found at '$statePath' after Configure success with secrets"
-            }
-            else {
-              try {
-                $state = Get-Content $statePath -Raw | ConvertFrom-Json
-                if ($null -eq $state) {
-                  $failures += "Preferred component ID state file '$statePath' is empty or invalid JSON"
-                }
-              } catch {
-                $failures += "Preferred component ID state file '$statePath' could not be parsed as JSON"
-              }
-            }
-          }
-
-          # Report results
-          if ($failures.Count -gt 0) {
-            Write-Host "::error::Cold-start validation failed with $($failures.Count) assertion(s):"
-            foreach ($f in $failures) {
-              Write-Host "  - $f" -ForegroundColor Red
-            }
-            exit 1
-          }
-
-          Write-Host "Cold-start validation passed" -ForegroundColor Green
+          & ./scripts/ci/assert-cold-start.ps1 `
+            -ManifestPath ".e2e-bootstrap/diagnostics/run-manifest.json" `
+            -Plugins "$env:INPUT_PLUGINS" `
+            -HasQobuzCreds "$env:HAS_QOBUZ_CREDS" `
+            -HasTidalCreds "$env:HAS_TIDAL_CREDS" `
+            -HasBrainarrCreds "$env:HAS_BRAINARR_CREDS"
+          exit $LASTEXITCODE
 
       # =========================================================================
       # WARM-RUN ASSERTION: Prefer stored component IDs

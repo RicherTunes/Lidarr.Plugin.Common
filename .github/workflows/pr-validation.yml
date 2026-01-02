@@ -60,3 +60,16 @@ jobs:
 
       - name: Test
         run: dotnet test -c Release --no-build
+
+      - name: Script tests (E2E runner)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = Get-ChildItem -Path ./scripts/tests -Filter 'Test-*.ps1' | Sort-Object Name
+          if (-not $tests) {
+            throw "No script tests found under ./scripts/tests"
+          }
+          foreach ($test in $tests) {
+            Write-Host "Running $($test.Name)..." -ForegroundColor Cyan
+            & $test.FullName
+          }

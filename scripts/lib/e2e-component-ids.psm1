@@ -275,7 +275,88 @@ function Get-E2EComponentIdsEffectiveLockPolicy {
     }
 }
 
+function ConvertTo-CanonicalJson {
+    <#
+    .SYNOPSIS
+        Converts an object to JSON with sorted keys for stable comparison.
+    .DESCRIPTION
+        Recursively sorts all keys in hashtables/PSCustomObjects before serialization.
+        This ensures two objects with the same content produce identical JSON regardless
+        of the order keys were added.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        $InputObject,
+
+        [int]$Depth = 10
+    )
+
+    function ConvertTo-Ordered {
+        param($Obj)
+
+        if ($null -eq $Obj) { return $null }
+
+        # Handle arrays first (before checking other types)
+        if ($Obj -is [array]) {
+            return @($Obj | ForEach-Object { ConvertTo-Ordered $_ })
+        }
+
+        # Hashtables
+        if ($Obj -is [hashtable]) {
+            $ordered = [ordered]@{}
+            foreach ($key in ($Obj.Keys | Sort-Object)) {
+                $ordered[$key] = ConvertTo-Ordered $Obj[$key]
+            }
+            return $ordered
+        }
+
+        # Other dictionaries (like OrderedDictionary)
+        if ($Obj -is [System.Collections.IDictionary]) {
+            $ordered = [ordered]@{}
+            foreach ($key in ($Obj.Keys | Sort-Object)) {
+                $ordered[$key] = ConvertTo-Ordered $Obj[$key]
+            }
+            return $ordered
+        }
+
+        # Primitives - return as-is
+        if ($Obj -is [string] -or $Obj -is [System.ValueType]) {
+            return $Obj
+        }
+
+        # PSCustomObject or other complex objects with properties
+        try {
+            $props = @($Obj.PSObject.Properties)
+            if ($props.Count -gt 0) {
+                $ordered = [ordered]@{}
+                $propNames = @($props | ForEach-Object { $_.Name }) | Sort-Object
+                foreach ($name in $propNames) {
+                    $ordered[$name] = ConvertTo-Ordered $Obj.PSObject.Properties[$name].Value
+                }
+                return $ordered
+            }
+        }
+        catch {
+            # Object doesn't support PSObject.Properties - return as-is
+        }
+
+        return $Obj
+    }
+
+    $ordered = ConvertTo-Ordered $InputObject
+    return $ordered | ConvertTo-Json -Depth $Depth -Compress
+}
+
 function Write-E2EComponentIdsState {
+    <#
+    .SYNOPSIS
+        Persists component ID state to disk with structured result.
+    .DESCRIPTION
+        Returns a hashtable with factual persistence outcome:
+        - Attempted: Always $true when this function is called
+        - Wrote: $true only when file content actually changed
+        - Reason: One of "written", "no_changes", "lock_timeout", "io_error"
+    #>
     param(
         [Parameter(Mandatory)]
         [string]$Path,
@@ -283,6 +364,8 @@ function Write-E2EComponentIdsState {
         [Parameter(Mandatory)]
         [hashtable]$State
     )
+
+    $lockAcquired = $false
 
     try {
         $dir = Split-Path -Parent $Path
@@ -294,9 +377,8 @@ function Write-E2EComponentIdsState {
         }
 
         # Best-effort file lock to reduce concurrent writer clobbering.
-        # Failure to acquire a lock must not break runs; we just return $false.
+        # Failure to acquire a lock returns structured result (does not throw).
         $lockPath = "$Path.lock"
-        $lockAcquired = $false
 
         # Get effective lock policy from shared function
         $lockPolicy = Get-E2EComponentIdsEffectiveLockPolicy
@@ -326,20 +408,43 @@ function Write-E2EComponentIdsState {
         }
 
         if (-not $lockAcquired) {
-            return $false
+            return @{ Attempted = $true; Wrote = $false; Reason = "lock_timeout" }
         }
 
-        $json = $State | ConvertTo-Json -Depth 10
+        # Check if file already has identical content (no_changes detection)
+        # We use ConvertTo-CanonicalJson to normalize key ordering.
+        if (Test-Path -LiteralPath $Path) {
+            try {
+                $existingRaw = Get-Content -LiteralPath $Path -Raw -ErrorAction Stop
+                if (-not [string]::IsNullOrEmpty($existingRaw)) {
+                    $existingObj = $existingRaw | ConvertFrom-Json -ErrorAction Stop
+
+                    # Use internal helper for canonical comparison
+                    $existingJson = script:ConvertTo-CanonicalJson -InputObject $existingObj -Depth 10
+                    $newJson = script:ConvertTo-CanonicalJson -InputObject $State -Depth 10
+
+                    if ($existingJson -eq $newJson) {
+                        return @{ Attempted = $true; Wrote = $false; Reason = "no_changes" }
+                    }
+                }
+            }
+            catch {
+                # If we can't read/parse existing file, proceed with write
+            }
+        }
+
+        # Write with pretty formatting for human readability
+        $prettyJson = $State | ConvertTo-Json -Depth 10
         $tmp = "$Path.tmp"
-        Set-Content -LiteralPath $tmp -Value $json -Encoding UTF8 -NoNewline    
+        Set-Content -LiteralPath $tmp -Value $prettyJson -Encoding UTF8 -NoNewline
 
         Move-Item -LiteralPath $tmp -Destination $Path -Force
-        return $true
+        return @{ Attempted = $true; Wrote = $true; Reason = "written" }
     }
     catch {
         # Best-effort: a state persistence failure must never break the E2E run.
         try { Remove-Item -LiteralPath "$Path.tmp" -Force -ErrorAction SilentlyContinue } catch { }
-        return $false
+        return @{ Attempted = $true; Wrote = $false; Reason = "io_error" }
     }
     finally {
         if ($lockAcquired) {

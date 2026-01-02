@@ -527,6 +527,15 @@ function Get-ComponentResolution {
     # Note: 'updated' is an action outcome, not a selection strategy - excluded intentionally
     $safeStrategies = @('preferredid', 'created', 'implementationname', 'implementation')
 
+    # matchedOn enum: normalized enum derived from strategy
+    # Values: preferredId, implementationName, implementation, created, none
+    $matchedOnEnumMap = @{
+        'preferredid' = 'preferredId'
+        'implementationname' = 'implementationName'
+        'implementation' = 'implementation'
+        'created' = 'created'
+    }
+
     # Helper: coerce value to integer if possible (type stability)
     function CoerceToInt($value) {
         if ($null -eq $value) { return $null }
@@ -537,6 +546,27 @@ function Get-ComponentResolution {
     function NormalizeStrategy($raw) {
         if ([string]::IsNullOrWhiteSpace($raw)) { return 'none' }
         return $raw.ToString().Trim()
+    }
+
+    # Helper: derive matchedOn enum from strategy
+    # Returns lowerCamelCase enum value: preferredId, implementationName, implementation, created, none
+    function DeriveMatchedOn($strategy, $selectedId) {
+        # If no selectedId, always return 'none'
+        if ($null -eq $selectedId) { return 'none' }
+
+        # If strategy starts with 'ambiguous', return 'none'
+        if ($strategy -match '(?i)^ambiguous') { return 'none' }
+
+        # Normalize to lowercase for lookup
+        $strategyLower = $strategy.ToLowerInvariant()
+
+        # Map to canonical enum value if it's a known safe strategy
+        if ($matchedOnEnumMap.ContainsKey($strategyLower)) {
+            return $matchedOnEnumMap[$strategyLower]
+        }
+
+        # Unknown strategy (including 'updated', 'fuzzy', 'none', etc.) → 'none'
+        return 'none'
     }
 
     $result = [ordered]@{}
@@ -603,9 +633,13 @@ function Get-ComponentResolution {
               $candidateMatchesSelected = ($candidateIds.Count -eq 0) -or
                   ($hasSelectedId -and $candidateIds.Count -eq 1 -and $candidateIds[0] -eq $selectedId)
 
+              # Derive matchedOn enum value
+              $matchedOn = DeriveMatchedOn -strategy $strategy -selectedId $selectedId
+
               $result[$outputKey] = [ordered]@{
                   selectedId = $selectedId
                   strategy = $strategy
+                  matchedOn = $matchedOn
                   candidateIds = $candidateIds
                   safeToPersist = ($isSafe -and -not $isAmbiguous -and $hasSelectedId -and $hasAtMostOneCandidate -and $candidateMatchesSelected)
               }
@@ -700,6 +734,11 @@ function ConvertTo-E2ERunManifest {
         $componentResolution = Get-ComponentResolution -Details $details
         if ($componentResolution) {
             $details['componentResolution'] = $componentResolution
+        }
+
+        # Remove legacy persistedIdsUpdated from details if present (moved to componentIds block)
+        if ($details.Contains('persistedIdsUpdated')) {
+            $details.Remove('persistedIdsUpdated')
         }
 
         $jsonResults += [ordered]@{
@@ -892,6 +931,50 @@ function ConvertTo-E2ERunManifest {
         if ($null -ne $persistenceEnabled) {
             $componentIdsBlock['persistenceEnabled'] = [bool]$persistenceEnabled
         }
+
+        # Add factual persistence outcome fields from ComponentIdsPersistence
+        # These reflect what ACTUALLY happened, not what was eligible to happen
+        $persistenceResult = Get-SafeProperty -Object $Context -PropertyName 'ComponentIdsPersistence'
+
+        # Defaults when no persistence result provided
+        $eligible = $false
+        $attempted = $false
+        $updated = $false
+        $reason = "unknown"
+        $hasExplicitResult = $false
+
+        if ($persistenceResult) {
+            $hasExplicitResult = $true
+            $eligible = [bool](Get-SafeProperty -Object $persistenceResult -PropertyName 'Eligible')
+            $attempted = [bool](Get-SafeProperty -Object $persistenceResult -PropertyName 'Attempted')
+            $updated = [bool](Get-SafeProperty -Object $persistenceResult -PropertyName 'Wrote')
+            $reason = (Get-SafeProperty -Object $persistenceResult -PropertyName 'Reason')
+            if (-not $reason) { $reason = "unknown" }
+        }
+
+        # Apply invariants:
+        # 1. If persistence disabled → attempted=false, updated=false, reason="disabled"
+        if ($persistenceEnabled -eq $false) {
+            $attempted = $false
+            $updated = $false
+            $reason = "disabled"
+        }
+        # 2. If not eligible AND we have explicit result → attempted=false, updated=false, reason="not_eligible"
+        #    (only override if we got an actual result saying not eligible; missing result stays "unknown")
+        elseif ($hasExplicitResult -and -not $eligible) {
+            $attempted = $false
+            $updated = $false
+            $reason = "not_eligible"
+        }
+        # 3. If updated=true → attempted must also be true (invariant)
+        if ($updated) {
+            $attempted = $true
+        }
+
+        $componentIdsBlock['persistenceEligible'] = $eligible
+        $componentIdsBlock['persistedIdsUpdateAttempted'] = $attempted
+        $componentIdsBlock['persistedIdsUpdated'] = $updated
+        $componentIdsBlock['persistedIdsUpdateReason'] = $reason
 
         if ($componentIdsBlock.Count -gt 0) {
             $manifest['componentIds'] = $componentIdsBlock
