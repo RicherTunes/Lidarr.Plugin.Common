@@ -337,8 +337,13 @@ jobs:
         id: cache-host-override
         uses: actions/cache@v4
         with:
-          path: _host_override_Lidarr.Common.dll
-          key: host-override-${{ inputs.lidarr_override_ref || '1e741479fad766584e196187c61bea302085704a' }}-${{ runner.os }}
+          # Cache includes both DLL and its SHA256 checksum for verification
+          path: |
+            _host_override_Lidarr.Common.dll
+            _host_override_Lidarr.Common.dll.sha256
+          # Key includes: ref (source), OS, and .NET SDK version (build environment)
+          # This prevents cache poisoning from SDK version changes
+          key: host-override-${{ inputs.lidarr_override_ref || '1e741479fad766584e196187c61bea302085704a' }}-${{ runner.os }}-dotnet${{ env.DOTNET_VERSION || '8.0' }}
 
       - name: Checkout patched Lidarr host
         if: steps.host-override.outputs.use_override == 'true' && steps.cache-host-override.outputs.cache-hit != 'true'
@@ -399,6 +404,11 @@ jobs:
           # Copy to workspace root for container mount (and caching)
           cp "$OVERRIDE_DLL" "$GITHUB_WORKSPACE/_host_override_Lidarr.Common.dll"
 
+          # Generate SHA256 checksum file for cache integrity verification
+          DLL_SHA256=$(sha256sum "$GITHUB_WORKSPACE/_host_override_Lidarr.Common.dll" | cut -d' ' -f1)
+          echo "$DLL_SHA256" > "$GITHUB_WORKSPACE/_host_override_Lidarr.Common.dll.sha256"
+          echo "Generated checksum: $DLL_SHA256"
+
           echo "::endgroup::"
           echo "::notice::Patched Lidarr.Common.dll built successfully from $OVERRIDE_SHA"
 
@@ -409,6 +419,7 @@ jobs:
           set -euo pipefail
 
           DLL_PATH="$GITHUB_WORKSPACE/_host_override_Lidarr.Common.dll"
+          CHECKSUM_PATH="$GITHUB_WORKSPACE/_host_override_Lidarr.Common.dll.sha256"
 
           if [ ! -f "$DLL_PATH" ]; then
             echo "::error::Host override DLL not found at $DLL_PATH"
@@ -421,6 +432,20 @@ jobs:
           DLL_SHA256=$(sha256sum "$DLL_PATH" | cut -d' ' -f1)
           echo "HOST_OVERRIDE_DLL_SHA256=$DLL_SHA256" >> $GITHUB_ENV
 
+          # Verify checksum integrity for cached builds
+          CACHE_HIT="${{ steps.cache-host-override.outputs.cache-hit }}"
+          if [ "$CACHE_HIT" = "true" ] && [ -f "$CHECKSUM_PATH" ]; then
+            EXPECTED_SHA256=$(cat "$CHECKSUM_PATH" | tr -d '[:space:]')
+            if [ "$DLL_SHA256" != "$EXPECTED_SHA256" ]; then
+              echo "::error::Cache integrity check FAILED!"
+              echo "::error::Expected: $EXPECTED_SHA256"
+              echo "::error::Got:      $DLL_SHA256"
+              echo "::error::This may indicate cache poisoning. Failing build."
+              exit 1
+            fi
+            echo "✓ Cache integrity verified (sha256 matches)"
+          fi
+
           # Set override SHA (from build or from input ref for cached builds)
           if [ -z "${HOST_OVERRIDE_SHA:-}" ]; then
             # Cached build - use the input ref as the SHA identifier
@@ -432,6 +457,7 @@ jobs:
           fi
 
       - name: Pull Lidarr Docker image
+        id: pull-image
         shell: bash
         run: |
           set -euo pipefail
@@ -450,12 +476,29 @@ jobs:
             exit 1
           fi
 
+          # Extract immutable image digest for cache keying (tags are mutable!)
+          # Format: ghcr.io/hotio/lidarr@sha256:abc123...
+          IMAGE_DIGEST=$(docker inspect --format='{{index .RepoDigests 0}}' "$IMAGE" 2>/dev/null || echo "")
+          if [ -n "$IMAGE_DIGEST" ]; then
+            # Extract just the sha256 hash for cache key (shorter, still unique)
+            DIGEST_HASH=$(echo "$IMAGE_DIGEST" | sed 's/.*@sha256://')
+            echo "LIDARR_IMAGE_DIGEST=$DIGEST_HASH" >> $GITHUB_ENV
+            echo "image_digest=$DIGEST_HASH" >> $GITHUB_OUTPUT
+            echo "::notice::Image digest: ${DIGEST_HASH:0:12}..."
+          else
+            # Fallback to tag if digest unavailable (local builds, etc)
+            echo "LIDARR_IMAGE_DIGEST=$INPUT_LIDARR_TAG" >> $GITHUB_ENV
+            echo "image_digest=$INPUT_LIDARR_TAG" >> $GITHUB_OUTPUT
+            echo "::warning::Could not extract image digest, using tag as fallback"
+          fi
+
       - name: Cache Lidarr assemblies
         id: cache-lidarr-assemblies
         uses: actions/cache@v4
         with:
           path: _lidarr_assemblies
-          key: lidarr-assemblies-${{ inputs.lidarr_tag }}-${{ runner.os }}
+          # Use image digest (immutable) instead of tag (mutable) to prevent cache poisoning
+          key: lidarr-assemblies-${{ steps.pull-image.outputs.image_digest }}-${{ runner.os }}
 
       - name: Extract Lidarr assemblies
         if: steps.cache-lidarr-assemblies.outputs.cache-hit != 'true'
@@ -757,6 +800,44 @@ jobs:
             docker logs "$CONTAINER_NAME" --tail 50 || true
             exit 1
           fi
+
+      - name: Verify host override DLL in container
+        if: env.E2E_HOST_OVERRIDE_MOUNTED == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::group::Verifying host override DLL inside container"
+
+          # Compute SHA256 of the DLL as seen inside the container
+          CONTAINER_SHA256=$(docker exec "$CONTAINER_NAME" sha256sum /app/bin/Lidarr.Common.dll 2>/dev/null | cut -d' ' -f1 || echo "")
+
+          if [ -z "$CONTAINER_SHA256" ]; then
+            echo "::warning::Could not compute SHA256 inside container (sha256sum may not exist)"
+            echo "::endgroup::"
+            exit 0
+          fi
+
+          EXPECTED_SHA256="${HOST_OVERRIDE_DLL_SHA256:-}"
+
+          if [ -z "$EXPECTED_SHA256" ]; then
+            echo "::warning::No expected SHA256 available for comparison"
+            echo "Container DLL SHA256: $CONTAINER_SHA256"
+            echo "::endgroup::"
+            exit 0
+          fi
+
+          if [ "$CONTAINER_SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "::error::Host override DLL verification FAILED!"
+            echo "::error::Expected (host):    $EXPECTED_SHA256"
+            echo "::error::Got (container):    $CONTAINER_SHA256"
+            echo "::error::This may indicate a mount failure or path mismatch."
+            echo "::endgroup::"
+            exit 1
+          fi
+
+          echo "✓ Host override DLL verified inside container"
+          echo "  SHA256: ${CONTAINER_SHA256:0:16}..."
+          echo "::endgroup::"
 
       - name: Extract API key
         id: api-key
@@ -1861,31 +1942,122 @@ jobs:
               [void]$sb.AppendLine("| Host Override | ``disabled`` (canary always runs without override) |")
 
               if ($m.summary.overallSuccess) {
+                # === CANARY PASSED: Override may no longer be needed ===
                 [void]$sb.AppendLine("")
                 [void]$sb.AppendLine("### :mag: Override Necessity Signal")
                 [void]$sb.AppendLine("")
                 [void]$sb.AppendLine(":white_check_mark: **Multi-plugin loading works WITHOUT patched DLL.**")
                 [void]$sb.AppendLine("")
                 [void]$sb.AppendLine("This suggests the upstream ALC bug may be fixed. Consider testing main workflow with ``use_host_override=never``.")
-              } elseif ($m.hostBugSuspected -and $m.hostBugSuspected.detected) {
+              } else {
+                # === CANARY FAILED: Classify the failure ===
                 [void]$sb.AppendLine("")
-                [void]$sb.AppendLine("### :rotating_light: Host Issue Detected")
-                [void]$sb.AppendLine("- Classification: ``$($m.hostBugSuspected.classification)``")
-                [void]$sb.AppendLine("- Severity: ``$($m.hostBugSuspected.severity)``")
-                if ($m.hostBugSuspected.description) {
-                  [void]$sb.AppendLine("- Description: $($m.hostBugSuspected.description)")
+
+                # Known failure classifications (expected = ALC bug still present)
+                $knownALCClassifications = @("ALC", "ALC_MISMATCH", "ASSEMBLY_LOAD_CONTEXT")
+                $knownDiscoveryClassifications = @("DISCOVERY_DISABLED", "PLUGIN_NOT_LOADED")
+                $knownABIClassifications = @("ABI_MISMATCH", "VERSION_CONFLICT", "DEPENDENCY_DRIFT")
+
+                $classification = $m.hostBugSuspected.classification
+                $isKnownALC = $knownALCClassifications -contains $classification
+                $isKnownDiscovery = $knownDiscoveryClassifications -contains $classification
+                $isKnownABI = $knownABIClassifications -contains $classification
+                $isKnown = $isKnownALC -or $isKnownDiscovery -or $isKnownABI
+
+                if ($m.hostBugSuspected -and $m.hostBugSuspected.detected) {
+                  if ($isKnownALC) {
+                    # Expected failure: ALC bug still present
+                    [void]$sb.AppendLine("### :rotating_light: Expected Failure: ALC Bug Still Present")
+                    [void]$sb.AppendLine("")
+                    [void]$sb.AppendLine("| Classification | ``$classification`` |")
+                    [void]$sb.AppendLine("|----------------|---------------------|")
+                    [void]$sb.AppendLine("| Severity | ``$($m.hostBugSuspected.severity)`` |")
+                    [void]$sb.AppendLine("| Status | **Expected** - host override is still required |")
+                    [void]$sb.AppendLine("")
+                    [void]$sb.AppendLine(":information_source: This is the expected failure mode. The ALC bug in upstream Lidarr has not been fixed yet.")
+                  } elseif ($isKnownDiscovery) {
+                    # Discovery disabled - different issue
+                    [void]$sb.AppendLine("### :warning: DIFFERENT FAILURE: Plugin Discovery Disabled")
+                    [void]$sb.AppendLine("")
+                    [void]$sb.AppendLine("| Classification | ``$classification`` |")
+                    [void]$sb.AppendLine("|----------------|---------------------|")
+                    [void]$sb.AppendLine("| Severity | ``$($m.hostBugSuspected.severity)`` |")
+                    [void]$sb.AppendLine("| Status | **Unexpected** - not the usual ALC bug |")
+                    [void]$sb.AppendLine("")
+                    [void]$sb.AppendLine(":rotating_light: **This is NOT the expected ALC failure!** Plugin discovery may be disabled in this Lidarr build.")
+                  } elseif ($isKnownABI) {
+                    # ABI mismatch - needs rebuild
+                    [void]$sb.AppendLine("### :warning: DIFFERENT FAILURE: ABI Mismatch")
+                    [void]$sb.AppendLine("")
+                    [void]$sb.AppendLine("| Classification | ``$classification`` |")
+                    [void]$sb.AppendLine("|----------------|---------------------|")
+                    [void]$sb.AppendLine("| Severity | ``$($m.hostBugSuspected.severity)`` |")
+                    [void]$sb.AppendLine("| Status | **Unexpected** - plugins may need rebuild |")
+                    [void]$sb.AppendLine("")
+                    [void]$sb.AppendLine(":rotating_light: **This is NOT the expected ALC failure!** Plugins may need to be rebuilt against the new Lidarr version.")
+                  } else {
+                    # UNKNOWN classification - LOUD WARNING
+                    [void]$sb.AppendLine("### :boom: UNKNOWN FAILURE CLASS - INVESTIGATE IMMEDIATELY")
+                    [void]$sb.AppendLine("")
+                    [void]$sb.AppendLine("| Classification | ``$($classification ?? 'UNCLASSIFIED')`` |")
+                    [void]$sb.AppendLine("|----------------|---------------------|")
+                    [void]$sb.AppendLine("| Severity | ``$($m.hostBugSuspected.severity ?? 'unknown')`` |")
+                    [void]$sb.AppendLine("| Status | **UNKNOWN** - new failure mode detected |")
+                    [void]$sb.AppendLine("")
+                    [void]$sb.AppendLine(":rotating_light::rotating_light::rotating_light: **THIS IS A NEW/UNKNOWN FAILURE CLASS!** :rotating_light::rotating_light::rotating_light:")
+                    [void]$sb.AppendLine("")
+                    [void]$sb.AppendLine("The canary failed for a reason we haven't seen before. Check the diagnostics bundle immediately.")
+                    if ($m.hostBugSuspected.matchedLine) {
+                      [void]$sb.AppendLine("")
+                      [void]$sb.AppendLine("Matched error line:")
+                      [void]$sb.AppendLine("``````")
+                      [void]$sb.AppendLine($m.hostBugSuspected.matchedLine)
+                      [void]$sb.AppendLine("``````")
+                    }
+                  }
+                } else {
+                  # Failed but no hostBugSuspected - also needs investigation
+                  [void]$sb.AppendLine("### :boom: CANARY FAILED WITHOUT HOST BUG DETECTION")
+                  [void]$sb.AppendLine("")
+                  [void]$sb.AppendLine(":rotating_light::rotating_light::rotating_light: **UNEXPECTED FAILURE MODE!** :rotating_light::rotating_light::rotating_light:")
+                  [void]$sb.AppendLine("")
+                  [void]$sb.AppendLine("The canary failed but no known host bug pattern was detected. This is unusual and requires investigation.")
+                  [void]$sb.AppendLine("")
+                  [void]$sb.AppendLine("Possible causes:")
+                  [void]$sb.AppendLine("- Gate logic error (not a host bug)")
+                  [void]$sb.AppendLine("- New failure pattern not yet classified")
+                  [void]$sb.AppendLine("- Infrastructure issue (network, container, etc)")
+                  [void]$sb.AppendLine("")
+                  # Show first error from results if available
+                  if ($m.results) {
+                    $failedGate = $m.results | Where-Object { $_.outcome -eq 'failed' } | Select-Object -First 1
+                    if ($failedGate -and $failedGate.errors) {
+                      [void]$sb.AppendLine("First failed gate: ``$($failedGate.gate)`` for ``$($failedGate.plugin)``")
+                      [void]$sb.AppendLine("")
+                      [void]$sb.AppendLine("Error(s):")
+                      foreach ($err in ($failedGate.errors | Select-Object -First 3)) {
+                        [void]$sb.AppendLine("- $err")
+                      }
+                    }
+                  }
                 }
-                [void]$sb.AppendLine("")
-                [void]$sb.AppendLine(":x: **Host override is still required.** The ALC bug is still present in upstream.")
               }
             } catch {
               [void]$sb.AppendLine("| Result | :question: Parse error |")
+              [void]$sb.AppendLine("")
+              [void]$sb.AppendLine("### :warning: Failed to parse manifest")
+              [void]$sb.AppendLine("Error: $_")
             }
           } else {
             [void]$sb.AppendLine("| Result | :x: No manifest |")
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine("### :boom: NO MANIFEST GENERATED")
+            [void]$sb.AppendLine("")
+            [void]$sb.AppendLine(":rotating_light: The canary runner did not produce a manifest. This usually means a catastrophic failure before gates could run.")
           }
 
           [void]$sb.AppendLine("")
+          [void]$sb.AppendLine("---")
           [void]$sb.AppendLine("*Canary tests the latest plugins branch WITHOUT host override. When it passes, the ALC bug is fixed upstream.*")
 
           $sb.ToString() | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
