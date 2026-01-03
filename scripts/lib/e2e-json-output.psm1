@@ -841,6 +841,7 @@ function ConvertTo-E2ERunManifest {
                 sourceRepo = if ($env:INPUT_LIDARR_OVERRIDE_REPO) { $env:INPUT_LIDARR_OVERRIDE_REPO } else { $null }
                 sourceRef = if ($env:INPUT_LIDARR_OVERRIDE_REF) { $env:INPUT_LIDARR_OVERRIDE_REF } else { $null }
                 sha = if ($env:HOST_OVERRIDE_SHA) { $env:HOST_OVERRIDE_SHA } else { $null }
+                dllSha256 = if ($env:HOST_OVERRIDE_DLL_SHA256) { $env:HOST_OVERRIDE_DLL_SHA256 } else { $null }
             }
         }
         request = [ordered]@{

@@ -150,6 +150,11 @@
             "sha": {
               "type": ["string", "null"],
               "description": "Resolved Git commit SHA used to build the override binary."
+            },
+            "dllSha256": {
+              "type": ["string", "null"],
+              "pattern": "^[a-f0-9]{64}$",
+              "description": "SHA256 hash of the mounted Lidarr.Common.dll for forensics and reproducibility."
             }
           }
         }
