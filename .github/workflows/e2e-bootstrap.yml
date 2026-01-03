@@ -1097,6 +1097,22 @@ jobs:
           exit $LASTEXITCODE
 
       # =========================================================================
+      # CREDENTIALED GATE ASSERTIONS: Prevent "green-by-skip"
+      # When Search/Grab/ImportList gates are requested, they must actually run.
+      # =========================================================================
+      - name: Validate credentialed gates ran
+        if: inputs.run_search_gate || inputs.run_grab_gate || inputs.run_importlist_gate
+        shell: pwsh
+        run: |
+          & ./scripts/ci/assert-credentialed-gates.ps1 `
+            -ManifestPath ".e2e-bootstrap/diagnostics/run-manifest.json" `
+            -Plugins "$env:INPUT_PLUGINS" `
+            -RunSearchGate "$env:INPUT_RUN_SEARCH_GATE" `
+            -RunGrabGate "$env:INPUT_RUN_GRAB_GATE" `
+            -RunImportListGate "$env:INPUT_RUN_IMPORTLIST_GATE"
+          exit $LASTEXITCODE
+
+      # =========================================================================
       # WARM-RUN ASSERTION: Prefer stored component IDs
       # Proves the second Configure run uses preferred IDs after state persistence.
       # =========================================================================
