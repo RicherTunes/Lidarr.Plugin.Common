@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Common.Services.Authentication;
@@ -84,9 +84,10 @@ namespace Lidarr.Plugin.Common.Tests
             // The proactive refresh logic only acts on an in-memory session.
             // Load a persisted session that is initially valid, but will enter the refresh buffer shortly.
             // Use 5 seconds lifetime with 3 second buffer to give enough margin for CI timing variance and Windows timer resolution.
+            var initialExpiry = DateTime.UtcNow.AddSeconds(5);
             await store.SaveAsync(new TokenEnvelope<TestSession>(
                 new TestSession("persisted"),
-                DateTime.UtcNow.AddSeconds(5)));
+                initialExpiry));
 
             var authService = new FakeAuthService();
             using var manager = CreateManager(
@@ -96,7 +97,8 @@ namespace Lidarr.Plugin.Common.Tests
                 refreshBuffer: TimeSpan.FromSeconds(3));
 
             // Ensure the persisted session is loaded into memory so the background timer can act.
-            _ = await manager.GetValidSessionAsync();
+            var initialSession = await manager.GetValidSessionAsync();
+            Assert.Equal("persisted", initialSession.Id);
 
             // Wait for proactive refresh to trigger. Give generous timeout for CI timing variance.
             var deadline = DateTime.UtcNow.AddSeconds(20);
@@ -105,12 +107,22 @@ namespace Lidarr.Plugin.Common.Tests
                 await Task.Delay(50);
             }
 
-            Assert.True(authService.AuthenticateCalls >= 1, "Expected proactive refresh to authenticate at least once.");
+            // PRIMARY ASSERTION: AuthenticateAsync was called (explicit side effect)
+            Assert.True(authService.AuthenticateCalls >= 1, "Expected proactive refresh to call AuthenticateAsync at least once.");
+
+            // SECONDARY ASSERTIONS: Verify the refresh actually did something useful
+            // 1. Credentials used were the proactive ones (not fallback)
             Assert.Equal(new TestCredentials("proactive"), authService.LastCredentials);
 
+            // 2. A new session was persisted (different from original)
             var envelope = await store.LoadAsync();
             Assert.NotNull(envelope);
-            Assert.Equal(authService.LastIssuedSession?.Id, envelope!.Session.Id);
+            Assert.NotEqual("persisted", envelope!.Session.Id); // Session ID changed
+            Assert.Equal(authService.LastIssuedSession?.Id, envelope.Session.Id);
+
+            // 3. The new session has a later expiry than the original (session was actually refreshed)
+            Assert.True(envelope.ExpiresAt > initialExpiry,
+                $"Expected new expiry ({envelope.ExpiresAt:O}) to be later than original ({initialExpiry:O})");
         }
 
         private static StreamingTokenManager<TestSession, TestCredentials> CreateManager(
