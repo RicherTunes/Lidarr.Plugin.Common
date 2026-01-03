@@ -1341,6 +1341,14 @@ jobs:
             docker exec "$CONTAINER_NAME" find /config/plugins -maxdepth 4 -type f -printf '%p\n' 2>/dev/null | tee .e2e-bootstrap/diagnostics/plugin-files.txt || echo "Could not list plugin files"
             echo "::endgroup::"
 
+            # Clean up cold-start config from INSIDE container (files are root-owned)
+            # This must happen before container removal to avoid permission errors on host
+            if [[ "${E2E_COLD_START:-false}" == "true" ]]; then
+              echo "::group::Cleanup cold-start config (in-container)"
+              docker exec "$CONTAINER_NAME" sh -c "rm -rf /config/* 2>/dev/null" || true
+              echo "::endgroup::"
+            fi
+
             # Stop and remove container
             docker rm -f "$CONTAINER_NAME" || true
           fi
@@ -1384,13 +1392,19 @@ jobs:
         shell: bash
         run: |
           # Remove this run's cold-start config directory (logs already in diagnostics artifact)
+          # NOTE: Container cleanup happens in "Collect container diagnostics" step via docker exec
+          # This step handles any remaining host-side cleanup
           # SAFETY: Only delete if path is anchored to .e2e-bootstrap/ AND contains config-cold-
           CONFIG_DIR="${E2E_CONFIG_DIR:-}"
           if [ -n "$CONFIG_DIR" ] && [ -d "$CONFIG_DIR" ]; then
             # Validate path structure before deletion
             if [[ "$CONFIG_DIR" == .e2e-bootstrap/config-cold-* ]]; then
               echo "Cleaning up cold-start config: $CONFIG_DIR"
-              rm -rf "$CONFIG_DIR"
+              # Files should already be removed by docker exec; this cleans empty dirs
+              rm -rf "$CONFIG_DIR" 2>/dev/null || {
+                echo "::warning::Could not fully remove $CONFIG_DIR (likely root-owned files remain)"
+                ls -la "$CONFIG_DIR" 2>/dev/null || true
+              }
             else
               echo "::warning::Skipping cleanup - path does not match expected pattern: $CONFIG_DIR"
             fi
