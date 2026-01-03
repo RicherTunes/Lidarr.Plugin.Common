@@ -78,6 +78,7 @@
     "accesstoken",
     "clientsecret",
     "creds",
+    "prereq",
     "prereqs",
     "pluginloader",
     "parallelizable"
