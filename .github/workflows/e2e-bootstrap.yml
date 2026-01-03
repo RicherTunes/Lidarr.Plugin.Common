@@ -75,6 +75,15 @@ on:
         type: number
         required: false
         default: 12
+      tidal_tokens_overwrite:
+        description: Token overwrite behavior - auto (overwrite if expired), always (force overwrite), never (skip if exists)
+        type: choice
+        required: false
+        default: auto
+        options:
+          - auto
+          - always
+          - never
       run_canary:
         description: Run canary job against latest pr-plugins tag (non-blocking, catches host regressions)
         type: boolean
@@ -129,6 +138,7 @@ env:
   INPUT_COLD_START: ${{ inputs.cold_start }}
   INPUT_POST_RESTART_GRAB: ${{ inputs.post_restart_grab }}
   INPUT_POST_RESTART_GRAB_TIMEOUT_MIN: ${{ inputs.post_restart_grab_timeout_min }}
+  INPUT_TIDAL_TOKENS_OVERWRITE: ${{ inputs.tidal_tokens_overwrite }}
   INPUT_CANARY_LEVEL: ${{ inputs.canary_level }}
   INPUT_USE_HOST_OVERRIDE: ${{ inputs.use_host_override }}
   INPUT_LIDARR_OVERRIDE_REPO: ${{ inputs.lidarr_override_repo }}
@@ -193,6 +203,7 @@ jobs:
           # Tidalarr credentials
           TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
           TIDALARR_CONFIG_PATH: ${{ secrets.TIDALARR_CONFIG_PATH }}
+          TIDALARR_TOKENS_JSON_B64: ${{ secrets.TIDALARR_TOKENS_JSON_B64 }}
           TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
           # Brainarr credentials
           BRAINARR_LLM_BASE_URL: ${{ secrets.BRAINARR_LLM_BASE_URL }}
@@ -206,6 +217,7 @@ jobs:
           echo "::add-mask::${QOBUZ_AUTH_TOKEN:-}"
           echo "::add-mask::${TIDALARR_REDIRECT_URL:-}"
           echo "::add-mask::${TIDAL_REDIRECT_URL:-}"
+          echo "::add-mask::${TIDALARR_TOKENS_JSON_B64:-}"
           echo "::add-mask::${BRAINARR_LLM_BASE_URL:-}"
           echo "::add-mask::${CROSS_REPO_PAT:-}"
 
@@ -231,7 +243,11 @@ jobs:
             # Check Tidalarr credentials
             if [[ "$INPUT_PLUGINS" == *"Tidalarr"* ]]; then
               has_tidal=false
-              if [[ -n "${TIDALARR_REDIRECT_URL:-}" || -n "${TIDAL_REDIRECT_URL:-}" || -n "${TIDALARR_CONFIG_PATH:-}" ]]; then
+              # Seeded tokens (TIDALARR_TOKENS_JSON_B64) OR OAuth redirect URL allows gates to run
+              if [[ -n "${TIDALARR_TOKENS_JSON_B64:-}" ]]; then
+                has_tidal=true
+                echo "::notice::Tidalarr using seeded tokens (TIDALARR_TOKENS_JSON_B64)"
+              elif [[ -n "${TIDALARR_REDIRECT_URL:-}" || -n "${TIDAL_REDIRECT_URL:-}" || -n "${TIDALARR_CONFIG_PATH:-}" ]]; then
                 has_tidal=true
               fi
               if [[ "$has_tidal" != "true" ]]; then
@@ -669,6 +685,85 @@ jobs:
             fi
           fi
 
+      # =========================================================================
+      # TIDAL SEEDED TOKENS: Decode to staging area (actual deploy is after CONFIG_DIR is set)
+      # This runs BEFORE container start to validate B64 early. The staging file is copied
+      # to the correct CONFIG_DIR path in the container start step (supports cold-start mode).
+      # Uses PowerShell for cross-platform base64 decode (works on Linux, Windows, macOS).
+      # =========================================================================
+      - name: Stage Tidal tokens (if provided)
+        if: contains(inputs.plugins, 'Tidalarr')
+        shell: pwsh
+        env:
+          TIDALARR_TOKENS_JSON_B64: ${{ secrets.TIDALARR_TOKENS_JSON_B64 }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $stagingFile = ".e2e-bootstrap/tidal_tokens_staging.json"
+
+          # Record overwrite mode for manifest
+          $overwriteMode = if ($env:INPUT_TIDAL_TOKENS_OVERWRITE) { $env:INPUT_TIDAL_TOKENS_OVERWRITE } else { "auto" }
+          "TIDAL_TOKEN_SEED_OVERWRITE_MODE=$overwriteMode" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          # No tokens provided - record reason and explicit error code
+          if ([string]::IsNullOrEmpty($env:TIDALARR_TOKENS_JSON_B64)) {
+            "TIDAL_TOKEN_SEED_STATUS=skipped" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_REASON=no_secret_provided" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_MISSING_SECRET" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::notice::Tidal token seeding skipped (TIDALARR_TOKENS_JSON_B64 not set)"
+            exit 0
+          }
+
+          # Mask the B64 string (GitHub should already do this, but belt-and-suspenders)
+          Write-Host "::add-mask::$($env:TIDALARR_TOKENS_JSON_B64)"
+
+          # Ensure directory exists
+          $stagingDir = Split-Path $stagingFile -Parent
+          if (-not (Test-Path $stagingDir)) {
+            New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+          }
+
+          # Decode base64 using cross-platform .NET method - NEVER echo decoded content
+          try {
+            $decodedBytes = [System.Convert]::FromBase64String($env:TIDALARR_TOKENS_JSON_B64)
+            $decodedJson = [System.Text.Encoding]::UTF8.GetString($decodedBytes)
+          } catch {
+            "TIDAL_TOKEN_SEED_STATUS=failed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_REASON=invalid_base64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_INVALID_BASE64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::error::TIDALARR_TOKENS_JSON_B64 contains invalid base64: $_"
+            exit 1
+          }
+
+          # Validate it's valid JSON (basic sanity check)
+          try {
+            $null = $decodedJson | ConvertFrom-Json -ErrorAction Stop
+          } catch {
+            "TIDAL_TOKEN_SEED_STATUS=failed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_REASON=invalid_json" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_INVALID_JSON" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::error::Decoded TIDALARR_TOKENS_JSON_B64 is not valid JSON: $_"
+            exit 1
+          }
+
+          # Write to staging file (UTF8 without BOM for JSON compatibility)
+          try {
+            [System.IO.File]::WriteAllText($stagingFile, $decodedJson, [System.Text.UTF8Encoding]::new($false))
+          } catch {
+            "TIDAL_TOKEN_SEED_STATUS=failed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_REASON=io_error" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_IO_ERROR" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::error::Failed to write staging file: $_"
+            exit 1
+          }
+
+          # Report success without revealing content
+          $bytes = (Get-Item $stagingFile).Length
+          "TIDAL_TOKEN_SEED_STATUS=staged" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TIDAL_TOKEN_SEED_STAGING_PATH=$stagingFile" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TIDAL_TOKEN_SEED_BYTES=$bytes" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "::notice::Tidal tokens staged ($bytes bytes), will deploy after CONFIG_DIR is set"
+
       - name: Start Lidarr container
         id: start-container
         shell: bash
@@ -725,6 +820,165 @@ jobs:
             fi
           done
           echo "::endgroup::"
+
+          # ============================================================================
+          # DEPLOY TIDAL TOKENS: Copy staged tokens to correct CONFIG_DIR path
+          # This happens AFTER CONFIG_DIR is determined, so cold-start works correctly.
+          # Overwrite modes: auto (if expired), always (force), never (skip if exists)
+          # ============================================================================
+          if [[ "${TIDAL_TOKEN_SEED_STATUS:-}" == "staged" ]]; then
+            STAGING_FILE="${TIDAL_TOKEN_SEED_STAGING_PATH:-.e2e-bootstrap/tidal_tokens_staging.json}"
+            TARGET_DIR="$CONFIG_DIR/plugins/RicherTunes/Tidalarr"
+            TARGET_FILE="$TARGET_DIR/tidal_tokens.json"
+            OVERWRITE_MODE="${INPUT_TIDAL_TOKENS_OVERWRITE:-auto}"
+
+            mkdir -p "$TARGET_DIR"
+
+            # Determine if we should deploy based on overwrite mode
+            SHOULD_DEPLOY="false"
+            DEPLOY_REASON=""
+
+            if [[ ! -f "$TARGET_FILE" ]]; then
+              # No existing file - always deploy
+              SHOULD_DEPLOY="true"
+              DEPLOY_REASON="no_existing_file"
+            elif [[ "$OVERWRITE_MODE" == "always" ]]; then
+              # Force overwrite mode
+              SHOULD_DEPLOY="true"
+              DEPLOY_REASON="force_overwrite"
+              echo "::notice::Overwriting existing tokens (mode=always)"
+            elif [[ "$OVERWRITE_MODE" == "never" ]]; then
+              # Never overwrite mode
+              SHOULD_DEPLOY="false"
+              echo "::notice::Tidal tokens already exist, skipping (mode=never)"
+              echo "TIDAL_TOKEN_SEED_STATUS=skipped" >> $GITHUB_ENV
+              echo "TIDAL_TOKEN_SEED_REASON=file_exists" >> $GITHUB_ENV
+              rm -f "$STAGING_FILE"
+            else
+              # Auto mode: check token freshness
+              # Try to extract expires_at or expiresAt from existing tokens
+              # Handles both epoch seconds (int) and ISO 8601 strings (UTC)
+              EXPIRY_RESULT=""
+              if command -v python3 &>/dev/null; then
+                EXPIRY_RESULT=$(python3 -c "
+import json, sys
+from datetime import datetime, timezone
+try:
+    with open('$TARGET_FILE') as f:
+        tokens = json.load(f)
+    # Try common expiry field names
+    exp = tokens.get('expires_at') or tokens.get('expiresAt') or tokens.get('expiry') or tokens.get('expires')
+    if exp is None:
+        print('no_field')
+        sys.exit(0)
+
+    now_utc = datetime.now(timezone.utc).timestamp()
+    buffer = 3600  # 1 hour
+
+    # Handle epoch (seconds or milliseconds)
+    # Guard: if value > 10^12, treat as milliseconds (otherwise year ~55000)
+    try:
+        exp_epoch = int(exp)
+        if exp_epoch > 1_000_000_000_000:
+            exp_epoch = exp_epoch // 1000  # Convert ms to seconds
+        if exp_epoch <= (now_utc + buffer):
+            print('expired')
+        else:
+            print('valid')
+        sys.exit(0)
+    except (ValueError, TypeError):
+        pass
+
+    # Handle ISO 8601 string (assume UTC if no timezone)
+    try:
+        # Try parsing ISO format
+        if isinstance(exp, str):
+            # Handle both 'Z' suffix and '+00:00'
+            exp_str = exp.replace('Z', '+00:00')
+            if '+' not in exp_str and '-' not in exp_str[10:]:
+                # No timezone - assume UTC
+                exp_str += '+00:00'
+            exp_dt = datetime.fromisoformat(exp_str)
+            exp_epoch = exp_dt.timestamp()
+            if exp_epoch <= (now_utc + buffer):
+                print('expired')
+            else:
+                print('valid')
+            sys.exit(0)
+    except (ValueError, TypeError):
+        pass
+
+    # Could not parse
+    print('parse_error')
+except Exception as e:
+    print(f'error:{e}')
+" 2>/dev/null || echo "error:python_failed")
+              else
+                EXPIRY_RESULT="error:no_python"
+              fi
+
+              case "$EXPIRY_RESULT" in
+                expired)
+                  SHOULD_DEPLOY="true"
+                  DEPLOY_REASON="token_expired"
+                  echo "::warning::Existing tokens expired or near expiry, overwriting"
+                  ;;
+                valid)
+                  SHOULD_DEPLOY="false"
+                  echo "::notice::Existing tokens still valid, skipping"
+                  echo "TIDAL_TOKEN_SEED_STATUS=skipped" >> $GITHUB_ENV
+                  echo "TIDAL_TOKEN_SEED_REASON=token_still_valid" >> $GITHUB_ENV
+                  rm -f "$STAGING_FILE"
+                  ;;
+                no_field)
+                  SHOULD_DEPLOY="true"
+                  DEPLOY_REASON="no_expiry_field"
+                  echo "::notice::No expiry field in existing tokens, overwriting to be safe"
+                  ;;
+                parse_error)
+                  SHOULD_DEPLOY="true"
+                  DEPLOY_REASON="expiry_unknown"
+                  echo "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_EXPIRY_PARSE_ERROR" >> $GITHUB_ENV
+                  echo "::warning::Could not parse token expiry format, overwriting to be safe"
+                  ;;
+                *)
+                  # Any error - be safe and overwrite
+                  SHOULD_DEPLOY="true"
+                  DEPLOY_REASON="expiry_unknown"
+                  echo "::notice::Could not determine token expiry ($EXPIRY_RESULT), overwriting to be safe"
+                  ;;
+              esac
+            fi
+
+            if [[ "$SHOULD_DEPLOY" == "true" ]]; then
+              # Copy from staging to final location
+              if ! cp "$STAGING_FILE" "$TARGET_FILE" 2>/dev/null; then
+                echo "TIDAL_TOKEN_SEED_STATUS=failed" >> $GITHUB_ENV
+                echo "TIDAL_TOKEN_SEED_REASON=io_error" >> $GITHUB_ENV
+                echo "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_IO_ERROR" >> $GITHUB_ENV
+                echo "::error::Failed to copy tokens to target location"
+                exit 1
+              fi
+              chmod 600 "$TARGET_FILE"
+              rm -f "$STAGING_FILE"
+
+              # Record seededAtUtc timestamp (ISO 8601)
+              SEEDED_AT_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+              BYTES=$(wc -c < "$TARGET_FILE")
+              echo "TIDAL_TOKEN_SEED_STATUS=deployed" >> $GITHUB_ENV
+              echo "TIDAL_TOKEN_SEED_REASON=$DEPLOY_REASON" >> $GITHUB_ENV
+              echo "TIDALARR_SEEDED_TOKENS_PATH=$TARGET_FILE" >> $GITHUB_ENV
+              echo "TIDAL_TOKEN_SEED_TARGET_PATH_KIND=configPath" >> $GITHUB_ENV
+              echo "TIDAL_TOKEN_SEED_SEEDED_AT_UTC=$SEEDED_AT_UTC" >> $GITHUB_ENV
+              echo "::notice::Tidal tokens deployed to $TARGET_FILE ($BYTES bytes, reason=$DEPLOY_REASON)"
+            fi
+          elif [[ "${TIDAL_TOKEN_SEED_STATUS:-}" == "skipped" ]]; then
+            echo "Tidal token seeding was skipped: ${TIDAL_TOKEN_SEED_REASON:-unknown}"
+          elif [[ "${TIDAL_TOKEN_SEED_STATUS:-}" == "failed" ]]; then
+            echo "::error::Tidal token seeding failed: ${TIDAL_TOKEN_SEED_REASON:-unknown}"
+            exit 1
+          fi
 
           # Verify plugins exist before startup (hard check)
           echo "::group::Verify pre-seeded plugins"
@@ -955,6 +1209,7 @@ jobs:
           # Tidalarr credentials
           TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
           TIDALARR_CONFIG_PATH: ${{ secrets.TIDALARR_CONFIG_PATH }}
+          TIDALARR_TOKENS_JSON_B64: ${{ secrets.TIDALARR_TOKENS_JSON_B64 }}
           TIDALARR_MARKET: ${{ secrets.TIDALARR_MARKET }}
           TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
           TIDAL_MARKET: ${{ secrets.TIDAL_MARKET }}
