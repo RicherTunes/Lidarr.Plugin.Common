@@ -332,8 +332,16 @@ jobs:
             echo "Host override disabled: $override_reason"
           fi
 
-      - name: Checkout patched Lidarr host
+      - name: Cache host override DLL
         if: steps.host-override.outputs.use_override == 'true'
+        id: cache-host-override
+        uses: actions/cache@v4
+        with:
+          path: _host_override_Lidarr.Common.dll
+          key: host-override-${{ inputs.lidarr_override_ref || '1e741479fad766584e196187c61bea302085704a' }}-${{ runner.os }}
+
+      - name: Checkout patched Lidarr host
+        if: steps.host-override.outputs.use_override == 'true' && steps.cache-host-override.outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.lidarr_override_repo || 'RicherTunes/Lidarr' }}
@@ -342,7 +350,7 @@ jobs:
           token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
       - name: Build patched Lidarr.Common.dll
-        if: steps.host-override.outputs.use_override == 'true'
+        if: steps.host-override.outputs.use_override == 'true' && steps.cache-host-override.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -388,12 +396,40 @@ jobs:
           echo "Built DLL: $OVERRIDE_DLL"
           ls -la "$OVERRIDE_DLL"
 
-          # Copy to workspace root for container mount
+          # Copy to workspace root for container mount (and caching)
           cp "$OVERRIDE_DLL" "$GITHUB_WORKSPACE/_host_override_Lidarr.Common.dll"
-          echo "HOST_OVERRIDE_DLL_PATH=$GITHUB_WORKSPACE/_host_override_Lidarr.Common.dll" >> $GITHUB_ENV
 
           echo "::endgroup::"
           echo "::notice::Patched Lidarr.Common.dll built successfully from $OVERRIDE_SHA"
+
+      - name: Configure host override DLL
+        if: steps.host-override.outputs.use_override == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DLL_PATH="$GITHUB_WORKSPACE/_host_override_Lidarr.Common.dll"
+
+          if [ ! -f "$DLL_PATH" ]; then
+            echo "::error::Host override DLL not found at $DLL_PATH"
+            exit 1
+          fi
+
+          echo "HOST_OVERRIDE_DLL_PATH=$DLL_PATH" >> $GITHUB_ENV
+
+          # Calculate SHA256 for forensics and reproducibility
+          DLL_SHA256=$(sha256sum "$DLL_PATH" | cut -d' ' -f1)
+          echo "HOST_OVERRIDE_DLL_SHA256=$DLL_SHA256" >> $GITHUB_ENV
+
+          # Set override SHA (from build or from input ref for cached builds)
+          if [ -z "${HOST_OVERRIDE_SHA:-}" ]; then
+            # Cached build - use the input ref as the SHA identifier
+            OVERRIDE_REF="${{ inputs.lidarr_override_ref || '1e741479fad766584e196187c61bea302085704a' }}"
+            echo "HOST_OVERRIDE_SHA=$OVERRIDE_REF" >> $GITHUB_ENV
+            echo "::notice::Using cached host override DLL (ref: $OVERRIDE_REF, sha256: ${DLL_SHA256:0:16}...)"
+          else
+            echo "::notice::Built host override DLL (sha: $HOST_OVERRIDE_SHA, sha256: ${DLL_SHA256:0:16}...)"
+          fi
 
       - name: Pull Lidarr Docker image
         shell: bash
@@ -414,7 +450,15 @@ jobs:
             exit 1
           fi
 
+      - name: Cache Lidarr assemblies
+        id: cache-lidarr-assemblies
+        uses: actions/cache@v4
+        with:
+          path: _lidarr_assemblies
+          key: lidarr-assemblies-${{ inputs.lidarr_tag }}-${{ runner.os }}
+
       - name: Extract Lidarr assemblies
+        if: steps.cache-lidarr-assemblies.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -432,16 +476,30 @@ jobs:
           }
           docker rm "$cid" >/dev/null
 
+          # Copy extracted DLLs to cache directory
+          mkdir -p _lidarr_assemblies
+          find _lidarr_extracted -type f -name "*.dll" -exec cp {} _lidarr_assemblies/ \;
+          rm -rf _lidarr_extracted
+          echo "Assembly extraction complete ($(ls _lidarr_assemblies | wc -l) DLLs)"
+
+      - name: Copy Lidarr assemblies to plugins
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ ! -d "_lidarr_assemblies" ] || [ -z "$(ls -A _lidarr_assemblies 2>/dev/null)" ]; then
+            echo "::error::Lidarr assemblies directory is empty or missing"
+            exit 1
+          fi
+
           # Copy to plugin ext directories
           for plugin_dir in qobuzarr tidalarr brainarr; do
             if [ -d "$plugin_dir" ]; then
               mkdir -p "$plugin_dir/ext/Lidarr/_output/net8.0"
-              find _lidarr_extracted -type f -name "*.dll" -exec cp {} "$plugin_dir/ext/Lidarr/_output/net8.0/" \;
+              cp _lidarr_assemblies/*.dll "$plugin_dir/ext/Lidarr/_output/net8.0/"
+              echo "Copied assemblies to $plugin_dir/ext/Lidarr/_output/net8.0/"
             fi
           done
-
-          rm -rf _lidarr_extracted
-          echo "Assembly extraction complete"
 
       - name: Sync tools to plugin submodules
         shell: bash
@@ -752,6 +810,41 @@ jobs:
 
           if [ "$n" -ge "$max_retries" ]; then
             echo "::warning::Plugin schemas did not appear after 120 seconds"
+
+            # Check for E2E_HOST_PLUGIN_DISCOVERY_DISABLED condition:
+            # - Plugin files exist in /config/plugins/
+            # - /api/v1/system/plugins returns [] or doesn't include our plugins
+            # - Schemas don't include plugin implementations
+            echo ""
+            echo "::group::Discovery-disabled detection"
+
+            plugin_files_exist="false"
+            if docker exec "$CONTAINER_NAME" find /config/plugins -name "plugin.json" -type f 2>/dev/null | grep -q .; then
+              plugin_files_exist="true"
+              echo "Plugin files found in container:"
+              docker exec "$CONTAINER_NAME" find /config/plugins -name "plugin.json" -type f 2>/dev/null || true
+            fi
+
+            system_plugins=$(curl -s "http://localhost:8686/api/v1/system/plugins" -H "X-Api-Key: $LIDARR_API_KEY" 2>/dev/null || echo "[]")
+            system_plugins_empty="false"
+            if echo "$system_plugins" | grep -q '^\[\]$'; then
+              system_plugins_empty="true"
+            fi
+
+            if [ "$plugin_files_exist" = "true" ] && [ "$system_plugins_empty" = "true" ]; then
+              echo ""
+              echo "::error::E2E_HOST_PLUGIN_DISCOVERY_DISABLED: Plugins exist on disk but host is not loading them"
+              echo "E2E_HOST_PLUGIN_DISCOVERY_DISABLED=true" >> $GITHUB_ENV
+              echo ""
+              echo "REMEDIATION:"
+              echo "  1. Enable host override (use_host_override=always) to mount patched Lidarr.Common.dll"
+              echo "  2. Pin to a known-working Lidarr tag (e.g., pr-plugins-3.1.1.4884)"
+              echo "  3. Check if this Lidarr version requires plugin manager API installation"
+              echo ""
+            fi
+
+            echo "::endgroup::"
+
             echo "Indexer schema response (first 1000 chars):"
             curl -s "http://localhost:8686/api/v1/indexer/schema" \
               -H "X-Api-Key: $LIDARR_API_KEY" 2>/dev/null | head -c 1000 || true
@@ -1186,7 +1279,10 @@ jobs:
             # Show host override status from manifest
             if ($manifest.lidarr.hostOverride -and $manifest.lidarr.hostOverride.used) {
               $overrideSha = if ($manifest.lidarr.hostOverride.sha) { $manifest.lidarr.hostOverride.sha.Substring(0, 7) } else { 'unknown' }
-              [void]$sb.AppendLine("| Host Override | :wrench: **Enabled** (SHA: ``$overrideSha``) |")
+              $dllHash = if ($manifest.lidarr.hostOverride.dllSha256) { $manifest.lidarr.hostOverride.dllSha256.Substring(0, 12) + '...' } else { $null }
+              $overrideInfo = "SHA: ``$overrideSha``"
+              if ($dllHash) { $overrideInfo += ", DLL: ``$dllHash``" }
+              [void]$sb.AppendLine("| Host Override | :wrench: **Enabled** ($overrideInfo) |")
             }
             [void]$sb.AppendLine("")
             [void]$sb.AppendLine("### Gate Results")
@@ -1223,6 +1319,7 @@ jobs:
                   'E2E_DOCKER_UNAVAILABLE'   = ':whale: **Action:** Ensure Docker daemon is running'
                   'E2E_CONFIG_INVALID'       = ':gear: **Action:** Review plugin configuration settings'
                   'E2E_IMPORT_FAILED'        = ':package: **Action:** Check import paths and permissions'
+                  'E2E_HOST_PLUGIN_DISCOVERY_DISABLED' = ':no_entry: **Action:** Enable host override (use_host_override=always) or pin to known-working Lidarr tag'
                 }
 
                 foreach ($failed in $failedGates) {
@@ -1262,6 +1359,21 @@ jobs:
                   [void]$sb.AppendLine("- Severity: ``$($manifest.hostBugSuspected.severity)``")
                   [void]$sb.AppendLine("- $hostHint")
                 }
+              }
+
+              # Discovery-disabled warning (env var set by Wait for plugins to load step)
+              if ($env:E2E_HOST_PLUGIN_DISCOVERY_DISABLED -eq 'true') {
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("### :no_entry: Plugin Discovery Disabled")
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("**Plugins exist on disk but Lidarr is not loading them.**")
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("This Lidarr version may have disabled file-based plugin discovery.")
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("**Remediation:**")
+                [void]$sb.AppendLine("1. Enable host override: ``use_host_override=always``")
+                [void]$sb.AppendLine("2. Pin to known-working tag: ``pr-plugins-3.1.1.4884``")
+                [void]$sb.AppendLine("3. Check if plugins need API-based installation")
               }
 
               # Skipped gates section
@@ -1714,8 +1826,10 @@ jobs:
           if ($exitCode -ne 0) {
             Write-Host "::warning::CANARY FAILED - Latest pr-plugins may have breaking changes"
             Write-Host "::warning::This is non-blocking but should be investigated"
+            Write-Host "::notice::NOTE: Canary runs WITHOUT host override. Failure may indicate ALC bug still present in upstream."
           } else {
             Write-Host "::notice::CANARY PASSED - Plugins compatible with latest pr-plugins"
+            Write-Host "::notice::OVERRIDE SIGNAL: Multi-plugin loading works WITHOUT patched DLL. Consider disabling host override."
           }
 
           exit $exitCode
@@ -1744,13 +1858,25 @@ jobs:
               $status = if ($m.summary.overallSuccess) { ":white_check_mark: PASSED" } else { ":warning: FAILED" }
               [void]$sb.AppendLine("| Result | $status |")
               [void]$sb.AppendLine("| Lidarr Version | ``$($m.lidarr.version ?? 'n/a')`` |")
+              [void]$sb.AppendLine("| Host Override | ``disabled`` (canary always runs without override) |")
 
-              if (-not $m.summary.overallSuccess -and $m.hostBugSuspected) {
+              if ($m.summary.overallSuccess) {
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("### :mag: Override Necessity Signal")
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine(":white_check_mark: **Multi-plugin loading works WITHOUT patched DLL.**")
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine("This suggests the upstream ALC bug may be fixed. Consider testing main workflow with ``use_host_override=never``.")
+              } elseif ($m.hostBugSuspected -and $m.hostBugSuspected.detected) {
                 [void]$sb.AppendLine("")
                 [void]$sb.AppendLine("### :rotating_light: Host Issue Detected")
                 [void]$sb.AppendLine("- Classification: ``$($m.hostBugSuspected.classification)``")
                 [void]$sb.AppendLine("- Severity: ``$($m.hostBugSuspected.severity)``")
-                [void]$sb.AppendLine("- Description: $($m.hostBugSuspected.description)")
+                if ($m.hostBugSuspected.description) {
+                  [void]$sb.AppendLine("- Description: $($m.hostBugSuspected.description)")
+                }
+                [void]$sb.AppendLine("")
+                [void]$sb.AppendLine(":x: **Host override is still required.** The ALC bug is still present in upstream.")
               }
             } catch {
               [void]$sb.AppendLine("| Result | :question: Parse error |")
@@ -1760,7 +1886,7 @@ jobs:
           }
 
           [void]$sb.AppendLine("")
-          [void]$sb.AppendLine("*Canary tests the latest plugins branch build to catch host regressions early.*")
+          [void]$sb.AppendLine("*Canary tests the latest plugins branch WITHOUT host override. When it passes, the ALC bug is fixed upstream.*")
 
           $sb.ToString() | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 
