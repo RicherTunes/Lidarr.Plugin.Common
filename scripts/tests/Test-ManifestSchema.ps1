@@ -123,6 +123,11 @@ if (Test-Path $schemaPath) {
         # Test 17: lidarr is strict
         Assert-True ($schema.properties.lidarr.additionalProperties -eq $false) "lidarr is strict (additionalProperties: false)"
 
+        # Test 17a: lidarr.hostOverride is defined (schema must allow it since lidarr is strict)
+        Assert-True ($schema.properties.lidarr.properties.PSObject.Properties.Name -contains 'hostOverride') "lidarr exposes hostOverride"
+        Assert-True ($schema.properties.lidarr.properties.hostOverride.required -contains 'used') "lidarr.hostOverride requires used"
+        Assert-True ($schema.properties.lidarr.properties.hostOverride.properties.used.type -eq 'boolean') "lidarr.hostOverride.used is boolean"
+
         # Test 18: summary is strict
         Assert-True ($schema.properties.summary.additionalProperties -eq $false) "summary is strict (additionalProperties: false)"
 
