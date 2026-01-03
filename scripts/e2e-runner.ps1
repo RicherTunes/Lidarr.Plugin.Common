@@ -798,25 +798,31 @@ function Get-PluginEnvConfig {
 
         "Tidalarr" {
             # Tidalarr uses OAuth - needs configPath for token persistence
-            # Mode 1: Tokens already exist in configPath (just set configPath)
-            # Mode 2: Fresh OAuth setup (set redirectUrl + configPath for token storage)
+            # Mode 1: Seeded tokens via TIDALARR_TOKENS_JSON_B64 (CI - no manual OAuth)
+            # Mode 2: Tokens already exist in configPath (just set configPath)
+            # Mode 3: Fresh OAuth setup (set redirectUrl + configPath for token storage)
             #
             # Env vars:
+            #   TIDALARR_TOKENS_JSON_B64 - Base64-encoded tidal_tokens.json (CI seeded tokens)
             #   TIDALARR_CONFIG_PATH - Where tokens are stored (default: /config/plugins/RicherTunes/Tidalarr)
-            #   TIDALARR_REDIRECT_URL - OAuth callback URL (only needed for initial setup)
+            #   TIDALARR_REDIRECT_URL - OAuth callback URL (only needed for initial setup, optional if seeded)
             #   TIDALARR_MARKET - Market/region (default: US)
             #   TIDALARR_DOWNLOAD_PATH - Download location (default: /downloads/tidalarr)
 
             $configPath = $env:TIDALARR_CONFIG_PATH
             $redirectUrl = $env:TIDALARR_REDIRECT_URL
+            $seededTokensB64 = $env:TIDALARR_TOKENS_JSON_B64
 
-            # Require at least one of configPath or redirectUrl to proceed
-            if ([string]::IsNullOrWhiteSpace($configPath) -and [string]::IsNullOrWhiteSpace($redirectUrl)) {
-                $config.MissingRequired += "TIDALARR_CONFIG_PATH or TIDALARR_REDIRECT_URL"
+            # Seeded tokens make redirectUrl optional
+            $hasSeededTokens = -not [string]::IsNullOrWhiteSpace($seededTokensB64)
+
+            # Require configPath OR redirectUrl OR seeded tokens to proceed
+            if ([string]::IsNullOrWhiteSpace($configPath) -and [string]::IsNullOrWhiteSpace($redirectUrl) -and -not $hasSeededTokens) {
+                $config.MissingRequired += "TIDALARR_CONFIG_PATH or TIDALARR_REDIRECT_URL or TIDALARR_TOKENS_JSON_B64"
             } else {
                 $config.HasRequiredEnvVars = $true
 
-                # If redirectUrl is set but configPath isn't, use safe default for token storage
+                # Use default configPath if not specified
                 if ([string]::IsNullOrWhiteSpace($configPath)) {
                     $configPath = "/config/plugins/RicherTunes/Tidalarr"
                 }
@@ -824,6 +830,7 @@ function Get-PluginEnvConfig {
                 $config.DownloadClientFields["configPath"] = $configPath
 
                 # Only set redirectUrl if explicitly provided (don't overwrite with empty)
+                # When using seeded tokens, redirectUrl is optional
                 if (-not [string]::IsNullOrWhiteSpace($redirectUrl)) {
                     $config.IndexerFields["redirectUrl"] = $redirectUrl
                     $config.DownloadClientFields["redirectUrl"] = $redirectUrl
@@ -838,6 +845,11 @@ function Get-PluginEnvConfig {
                 $downloadPath = $env:TIDALARR_DOWNLOAD_PATH
                 if ([string]::IsNullOrWhiteSpace($downloadPath)) { $downloadPath = "/downloads/tidalarr" }
                 $config.DownloadClientFields["downloadPath"] = $downloadPath
+
+                # Track that we have seeded tokens (for Configure gate to handle gracefully)
+                if ($hasSeededTokens) {
+                    $config.HasSeededTokens = $true
+                }
             }
         }
 

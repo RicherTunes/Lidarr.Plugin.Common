@@ -193,6 +193,7 @@ jobs:
           # Tidalarr credentials
           TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
           TIDALARR_CONFIG_PATH: ${{ secrets.TIDALARR_CONFIG_PATH }}
+          TIDALARR_TOKENS_JSON_B64: ${{ secrets.TIDALARR_TOKENS_JSON_B64 }}
           TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
           # Brainarr credentials
           BRAINARR_LLM_BASE_URL: ${{ secrets.BRAINARR_LLM_BASE_URL }}
@@ -206,6 +207,7 @@ jobs:
           echo "::add-mask::${QOBUZ_AUTH_TOKEN:-}"
           echo "::add-mask::${TIDALARR_REDIRECT_URL:-}"
           echo "::add-mask::${TIDAL_REDIRECT_URL:-}"
+          echo "::add-mask::${TIDALARR_TOKENS_JSON_B64:-}"
           echo "::add-mask::${BRAINARR_LLM_BASE_URL:-}"
           echo "::add-mask::${CROSS_REPO_PAT:-}"
 
@@ -231,7 +233,11 @@ jobs:
             # Check Tidalarr credentials
             if [[ "$INPUT_PLUGINS" == *"Tidalarr"* ]]; then
               has_tidal=false
-              if [[ -n "${TIDALARR_REDIRECT_URL:-}" || -n "${TIDAL_REDIRECT_URL:-}" || -n "${TIDALARR_CONFIG_PATH:-}" ]]; then
+              # Seeded tokens (TIDALARR_TOKENS_JSON_B64) OR OAuth redirect URL allows gates to run
+              if [[ -n "${TIDALARR_TOKENS_JSON_B64:-}" ]]; then
+                has_tidal=true
+                echo "::notice::Tidalarr using seeded tokens (TIDALARR_TOKENS_JSON_B64)"
+              elif [[ -n "${TIDALARR_REDIRECT_URL:-}" || -n "${TIDAL_REDIRECT_URL:-}" || -n "${TIDALARR_CONFIG_PATH:-}" ]]; then
                 has_tidal=true
               fi
               if [[ "$has_tidal" != "true" ]]; then
@@ -669,6 +675,46 @@ jobs:
             fi
           fi
 
+      # =========================================================================
+      # TIDAL SEEDED TOKENS: Write pre-authorized tokens for CI (no manual OAuth)
+      # =========================================================================
+      - name: Seed Tidal tokens (if provided)
+        if: contains(inputs.plugins, 'Tidalarr') && env.TIDALARR_TOKENS_JSON_B64 != ''
+        shell: bash
+        env:
+          TIDALARR_TOKENS_JSON_B64: ${{ secrets.TIDALARR_TOKENS_JSON_B64 }}
+          TIDALARR_CONFIG_PATH: ${{ secrets.TIDALARR_CONFIG_PATH }}
+        run: |
+          set -euo pipefail
+
+          # Mask the B64 string (GitHub should already do this, but belt-and-suspenders)
+          echo "::add-mask::${TIDALARR_TOKENS_JSON_B64}"
+
+          # Determine config path (use env var or default)
+          CONFIG_PATH="${TIDALARR_CONFIG_PATH:-/config/plugins/RicherTunes/Tidalarr}"
+
+          # For CI, we need to write to the local workspace that will be mounted
+          LOCAL_CONFIG_DIR=".e2e-bootstrap/config/plugins/RicherTunes/Tidalarr"
+          mkdir -p "$LOCAL_CONFIG_DIR"
+
+          TOKEN_FILE="$LOCAL_CONFIG_DIR/tidal_tokens.json"
+
+          # Check if file already exists
+          if [[ -f "$TOKEN_FILE" ]]; then
+            echo "::notice::Tidal tokens file already exists, skipping write"
+          else
+            # Decode and write - NEVER echo the decoded content
+            echo "$TIDALARR_TOKENS_JSON_B64" | base64 -d > "$TOKEN_FILE"
+            chmod 600 "$TOKEN_FILE"
+
+            # Report success without revealing content
+            BYTES=$(wc -c < "$TOKEN_FILE")
+            echo "::notice::Wrote Tidal tokens file ($BYTES bytes)"
+          fi
+
+          # Export path for downstream steps
+          echo "TIDALARR_SEEDED_TOKENS_PATH=$TOKEN_FILE" >> $GITHUB_ENV
+
       - name: Start Lidarr container
         id: start-container
         shell: bash
@@ -955,6 +1001,7 @@ jobs:
           # Tidalarr credentials
           TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
           TIDALARR_CONFIG_PATH: ${{ secrets.TIDALARR_CONFIG_PATH }}
+          TIDALARR_TOKENS_JSON_B64: ${{ secrets.TIDALARR_TOKENS_JSON_B64 }}
           TIDALARR_MARKET: ${{ secrets.TIDALARR_MARKET }}
           TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
           TIDAL_MARKET: ${{ secrets.TIDAL_MARKET }}
