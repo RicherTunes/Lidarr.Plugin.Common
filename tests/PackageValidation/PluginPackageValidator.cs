@@ -7,31 +7,37 @@ using System.Linq;
 namespace Lidarr.Plugin.Common.Tests.PackageValidation;
 
 /// <summary>
+/// Specifies the plugin's packaging policy based on how it interacts with FluentValidation.
+/// </summary>
+public enum PluginPackagingPolicy
+{
+    /// <summary>
+    /// Plugin does NOT override Test(List&lt;ValidationFailure&gt;) methods.
+    /// FluentValidation.dll MUST be shipped for type-identity matching.
+    /// Used by: Qobuzarr, Tidalarr (streaming download clients/indexers).
+    /// </summary>
+    ShipsFluentValidation,
+
+    /// <summary>
+    /// Plugin DOES override Test(List&lt;ValidationFailure&gt;) methods.
+    /// FluentValidation.dll must NOT be shipped - causes "Method 'Test' does not have an implementation" at runtime.
+    /// Used by: AppleMusicarr, Brainarr (ImportLists that override Test).
+    /// </summary>
+    ForbidsFluentValidation
+}
+
+/// <summary>
 /// Shared validation utilities for plugin package correctness.
-/// Use this in plugin test suites to ensure packaging meets Lidarr plugin requirements.
-///
-/// ECOSYSTEM PACKAGING POLICY (empirically validated with working packages):
-/// - SHIP (type-identity assemblies - must be present):
-///   - FluentValidation.dll (required for DownloadClient.Test() signature match)
-///   - Microsoft.Extensions.DependencyInjection.Abstractions.dll
-///   - Microsoft.Extensions.Logging.Abstractions.dll
-///   - Lidarr.Plugin.Abstractions.dll (recommended; some plugins work without it)
-/// - MERGE into plugin DLL (internalized via ILRepack):
-///   - Lidarr.Plugin.Common.dll, Polly*, TagLibSharp*, MS.Ext.DI (impl), etc.
-/// - DO NOT SHIP (host assemblies - causes conflicts):
-///   - Lidarr.Core.dll, Lidarr.Common.dll, Lidarr.Host.dll, Lidarr.Http.dll, etc.
-///   - NzbDrone.*.dll
-///
-/// NOTE: This policy is based on empirical testing - Tidalarr and Qobuzarr both
-/// ship FluentValidation + MS.Extensions.*Abstractions and work correctly.
 /// </summary>
 public static class PluginPackageValidator
 {
-    /// <summary>
-    /// Type-identity assemblies that should be present in plugin packages.
-    /// These ensure method signatures match between plugin and host.
-    /// Missing these is a warning (not error) since some plugins work without all of them.
-    /// </summary>
+    public static readonly string[] CoreTypeIdentityAssemblies =
+    [
+        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+        "Microsoft.Extensions.Logging.Abstractions.dll",
+        "Lidarr.Plugin.Abstractions.dll"
+    ];
+
     public static readonly string[] TypeIdentityAssemblies =
     [
         "FluentValidation.dll",
@@ -40,18 +46,8 @@ public static class PluginPackageValidator
         "Lidarr.Plugin.Abstractions.dll"
     ];
 
-    /// <summary>
-    /// Assemblies required to be present in plugin packages.
-    /// Only the main plugin assembly is strictly required - type-identity assemblies
-    /// are validated separately with warnings.
-    /// </summary>
     public static readonly string[] RequiredPluginAssemblies = [];
 
-    /// <summary>
-    /// Assemblies that must NOT be in the package (host provides them).
-    /// Shipping these causes type-identity conflicts at runtime.
-    /// Finding these is an ERROR.
-    /// </summary>
     public static readonly string[] DisallowedHostAssemblies =
     [
         "Lidarr.Core.dll",
@@ -66,18 +62,18 @@ public static class PluginPackageValidator
         "NzbDrone.Api.dll"
     ];
 
-    /// <summary>
-    /// Validates a plugin package zip file for correctness.
-    /// </summary>
-    /// <param name="packagePath">Path to the .zip package</param>
-    /// <param name="pluginAssemblyName">Expected plugin assembly name (e.g., "Lidarr.Plugin.Tidalarr.dll")</param>
-    /// <param name="strictMode">If true, missing type-identity assemblies are errors. If false, warnings. If null, defaults to IsCI.</param>
-    /// <returns>Validation result with any errors</returns>
     public static PackageValidationResult ValidatePackage(string packagePath, string pluginAssemblyName, bool? strictMode = null)
     {
-        // Default to strict mode in CI environments, but allow explicit override
+        return ValidatePackage(packagePath, pluginAssemblyName, PluginPackagingPolicy.ShipsFluentValidation, strictMode);
+    }
+
+    public static PackageValidationResult ValidatePackage(
+        string packagePath,
+        string pluginAssemblyName,
+        PluginPackagingPolicy policy,
+        bool? strictMode = null)
+    {
         bool isStrict = strictMode ?? IsCI;
-        
         var result = new PackageValidationResult();
 
         if (!File.Exists(packagePath))
@@ -94,58 +90,64 @@ public static class PluginPackageValidator
                 .Select(e => e.Name)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-            // Check plugin assembly exists
             if (!dlls.Contains(pluginAssemblyName))
-            {
                 result.AddError($"Plugin assembly '{pluginAssemblyName}' not found in package");
-            }
 
             foreach (var required in RequiredPluginAssemblies)
             {
                 if (!dlls.Contains(required))
                 {
                     if (isStrict)
-                    {
                         result.AddError($"Required assembly '{required}' missing from package");
-                    }
                     else
-                    {
                         result.AddWarning($"Required assembly '{required}' missing from package");
-                    }
                 }
             }
 
-            // Check for type-identity assemblies (error in CI, warning locally)
-            foreach (var typeIdentity in TypeIdentityAssemblies)
+            foreach (var typeIdentity in CoreTypeIdentityAssemblies)
             {
                 if (!dlls.Contains(typeIdentity))
                 {
                     if (isStrict)
-                    {
-                        result.AddError($"Type-identity assembly '{typeIdentity}' missing - will cause runtime method signature mismatches");
-                    }
+                        result.AddError($"Type-identity assembly '{typeIdentity}' missing");
                     else
-                    {
-                        result.AddWarning($"Type-identity assembly '{typeIdentity}' missing - may cause method signature mismatches");
-                    }
+                        result.AddWarning($"Type-identity assembly '{typeIdentity}' missing");
                 }
             }
 
-            // Check for disallowed host assemblies
-            var foundDisallowed = dlls.Intersect(DisallowedHostAssemblies, StringComparer.OrdinalIgnoreCase).ToList();
-            foreach (var dll in foundDisallowed)
+            bool hasFluentValidation = dlls.Contains("FluentValidation.dll");
+            switch (policy)
             {
-                result.AddError($"Host assembly '{dll}' should not be in package (host provides it)");
+                case PluginPackagingPolicy.ShipsFluentValidation:
+                    if (!hasFluentValidation)
+                    {
+                        if (isStrict)
+                            result.AddError("FluentValidation.dll missing - required for Test() method signature matching");
+                        else
+                            result.AddWarning("FluentValidation.dll missing");
+                    }
+                    break;
+
+                case PluginPackagingPolicy.ForbidsFluentValidation:
+                    if (hasFluentValidation)
+                    {
+                        result.AddError(
+                            "FluentValidation.dll must NOT be shipped - plugin overrides Test() method. " +
+                            "Shipping it causes 'Method does not have an implementation' at runtime.");
+                    }
+                    break;
             }
 
-            // Check for bloat - should only have a few DLLs
+            var foundDisallowed = dlls.Intersect(DisallowedHostAssemblies, StringComparer.OrdinalIgnoreCase).ToList();
+            foreach (var dll in foundDisallowed)
+                result.AddError($"Host assembly '{dll}' should not be in package");
+
             if (dlls.Count > 10)
-            {
-                result.AddWarning($"Package contains {dlls.Count} DLLs - may have excessive dependencies. Expected ~5-6 for a well-merged plugin.");
-            }
+                result.AddWarning($"Package contains {dlls.Count} DLLs - may have excessive dependencies.");
 
             result.AssemblyCount = dlls.Count;
             result.Assemblies = [.. dlls];
+            result.Policy = policy;
         }
         catch (Exception ex)
         {
@@ -155,18 +157,12 @@ public static class PluginPackageValidator
         return result;
     }
 
-    /// <summary>
-    /// Returns true if running in CI environment.
-    /// </summary>
     public static bool IsCI =>
         Environment.GetEnvironmentVariable("CI") == "true" ||
         Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true" ||
         Environment.GetEnvironmentVariable("TF_BUILD") == "True";
 }
 
-/// <summary>
-/// Result of package validation.
-/// </summary>
 public class PackageValidationResult
 {
     private readonly List<string> _errors = [];
@@ -177,6 +173,7 @@ public class PackageValidationResult
     public IReadOnlyList<string> Warnings => _warnings;
     public int AssemblyCount { get; set; }
     public string[] Assemblies { get; set; } = [];
+    public PluginPackagingPolicy Policy { get; set; }
 
     public void AddError(string message) => _errors.Add(message);
     public void AddWarning(string message) => _warnings.Add(message);
@@ -185,20 +182,21 @@ public class PackageValidationResult
     {
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"Package Validation: {(IsValid ? "PASSED" : "FAILED")}");
+        sb.AppendLine($"Policy: {Policy}");
         sb.AppendLine($"Assemblies: {AssemblyCount}");
-        
+
         if (_errors.Count > 0)
         {
             sb.AppendLine("Errors:");
             foreach (var e in _errors) sb.AppendLine($"  - {e}");
         }
-        
+
         if (_warnings.Count > 0)
         {
             sb.AppendLine("Warnings:");
             foreach (var w in _warnings) sb.AppendLine($"  - {w}");
         }
-        
+
         return sb.ToString();
     }
 }
