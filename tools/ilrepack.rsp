@@ -1,5 +1,5 @@
 /wildcards
 /parallel
-/internalize:@$(InternalizeExclude)
+/internalize:$(InternalizeExclude)
 /lib:$(PublishDir)
 /out:$(MergeOut)
