@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft-07/schema#",
+  "$id": "applemusicarr-schema-fields-fixture",
+  "description": "AppleMusicarr schema field names expected by E2E runner. CRITICAL: These MUST match the Lidarr schema field names exactly (lowerCamelCase). If AppleMusicPluginSettings.cs changes field names, this fixture MUST be updated.",
+  "expectedFields": {
+    "importList": {
+      "requiredCredentials": [
+        "teamId",
+        "keyId",
+        "privateKey",
+        "musicUserToken"
+      ],
+      "sensitiveFields": [
+        "privateKey",
+        "musicUserToken"
+      ],
+      "identifierFields": [
+        "teamId",
+        "keyId"
+      ]
+    }
+  },
+  "csharpPropertyMapping": {
+    "TeamId": "teamId",
+    "KeyId": "keyId",
+    "PrivateKey": "privateKey",
+    "MusicUserToken": "musicUserToken"
+  },
+  "envVarMapping": {
+    "APPLEMUSICARR_TEAM_ID": "teamId",
+    "APPLEMUSICARR_KEY_ID": "keyId",
+    "APPLEMUSICARR_PRIVATE_KEY_B64": "privateKey",
+    "APPLEMUSICARR_MUSIC_USER_TOKEN": "musicUserToken"
+  },
+  "notes": {
+    "privateKeyEncoding": "APPLEMUSICARR_PRIVATE_KEY_B64 is base64-encoded PEM (single-line for GitHub Actions masking)",
+    "sensitiveFields": "privateKey and musicUserToken are secrets; teamId and keyId are identifiers",
+    "validationContext": "AppleMusicarr follows the Brainarr FV exception pattern (no FluentValidation.dll)"
+  }
+}
