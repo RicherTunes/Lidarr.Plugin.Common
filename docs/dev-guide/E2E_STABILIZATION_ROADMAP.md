@@ -68,34 +68,74 @@ Mounting a patched `Lidarr.Common.dll` fixes multi-plugin plugin load on `3.1.1.
 - ✅ No `AssemblyLoadContext is unloading` errors
 - ✅ Override is explicit in manifest and job summary
 
-### P1 — Make Failures Actionable
+### P1 — Make Host Override Self-Validating
 
-1. Improve error classification in manifests:
-   - Distinguish `HOST_ALC_BUG` vs `ABI_MISMATCH` vs `DEPENDENCY_DRIFT`.
-2. Add a “plugin discovery mode” diagnostic:
-   - If plugin folders exist but schemas missing, fetch `/api/v1/system/plugins` to determine host mode.
-3. Add a single-page troubleshooting doc:
-   - Common failure signatures → remediation steps.
+Reduce long-term risk by making the override mechanism self-documenting and self-detecting.
 
-### P2 — Remove the Workaround (When Host Fix Lands)
+- [ ] Add `lidarr.hostOverride.dllSha256` to the manifest (forensics + reproducibility)
+- [ ] Add "auto-detect override necessity" probe:
+  - Run a fast multi-plugin Schema check once with override off
+  - If it fails with ALC signature, re-run with override on
+  - Annotate `lidarr.hostOverride.reason="auto-detected-alc-bug"`
+- [ ] Add a canary job that runs `override=never` against the moving `pr-plugins` tag with `continue-on-error`
+  - Signals when upstream is fixed and override can be removed
 
-1. Track upstream Lidarr PR/commit that fixes loader lifecycle.
+### P2 — Speed Up CI Runs
+
+Big win, low risk optimizations.
+
+- [ ] Cache the built `Lidarr.Common.dll` host override artifact keyed by `lidarr_override_ref` (and OS)
+  - Avoids rebuilding every run
+- [ ] Cache extracted Lidarr assemblies keyed by `lidarr_tag` digest (if not already)
+
+### P3 — Hard Fail on "Host Doesn't Discover Plugins" Mode
+
+Detect when the host silently ignores file-based plugins.
+
+- [ ] Add classifier/error code `E2E_HOST_PLUGIN_DISCOVERY_DISABLED` when:
+  - Plugin folders exist in `/config/plugins/...` AND
+  - Schemas are missing AND
+  - Logs show no plugin load attempt
+- [ ] Include "what to do next" in the job summary:
+  - Enable host override
+  - Pin to known-working tag
+  - Install via plugin manager API if Lidarr changes behavior
+
+### P4 — Reduce "Green By Skip" Remaining Holes
+
+Ensure all gates fail explicitly when prerequisites are missing.
+
+- [ ] Ensure strict prereqs apply to canary search-level runs too (if secrets are expected)
+- [ ] Move more gate outcomes from regex inference to explicit structured error codes emitted directly by gates
+
+### P5 — Developer Ergonomics / Polishing
+
+Make local development and debugging easier.
+
+- [ ] Add `scripts/validate-manifest.ps1` as a documented local step in `docs/PERSISTENT_E2E_TESTING.md`
+- [ ] Add a "How to reproduce this CI run locally" section that prints the exact `e2e-runner.ps1` command + inputs used
+
+---
+
+## Parallelizable Work
+
+Non-overlapping tasks that can be delegated:
+
+| Task | Scope | Dependencies |
+|------|-------|--------------|
+| Cache host override build + extracted assemblies | Workflow-only | None |
+| Add `dllSha256` + override auto-detect probe | Manifest + workflow | Minimal runner touch |
+| Add discovery-disabled detection + job-summary hints | Gates/json-output + workflow summary | No plugin repos |
+
+---
+
+## Tracking: Remove Override When Host Fix Lands
+
+1. Track upstream Lidarr PR/commit that fixes loader lifecycle
 2. Once hotio publishes a tag containing the fix:
-   - Pin workflow `lidarr_tag` to the fixed version/digest.
-   - Disable host override by default.
-   - Keep override as an opt-in for bisecting host regressions.
-
-### P3 — Standardization / Polish
-
-1. Ensure all plugins emit zips in consistent locations (already mostly standardized):
-   - Qobuzarr: `qobuzarr/artifacts/packages/*.zip`
-   - Tidalarr: `tidalarr/src/Tidalarr/artifacts/packages/*.zip`
-   - Brainarr: align to `brainarr/artifacts/packages/*.zip` (or document divergence)
-2. Standardize vendor folder and manifest checks:
-   - `/config/plugins/RicherTunes/<PluginName>/plugin.json` must exist.
-3. Add caching where safe:
-   - Lidarr assemblies extraction cache (by image digest)
-   - Plugin package cache (by commit SHA) for workflow_dispatch runs
+   - Pin workflow `lidarr_tag` to the fixed version/digest
+   - Disable host override by default (`use_host_override: never`)
+   - Keep override as opt-in for bisecting host regressions
 
 ## Non-Goals
 
