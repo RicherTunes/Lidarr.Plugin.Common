@@ -1,16 +1,16 @@
 # Ecosystem Parity Roadmap
 
-This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr).
+This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr, AppleMusicarr).
 
 ## Current Status
 
-| Dimension | Tidalarr | Qobuzarr | Brainarr | Common |
-|-----------|----------|----------|----------|--------|
-| **Packaging** | ✅ | ✅ | ✅ | Policy complete |
-| **Naming/Path** | ✅ | ✅ | N/A | FileSystemUtilities |
-| **Concurrency** | ✅ | ✅ | N/A | BaseDownloadOrchestrator |
-| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | Single-authority pattern |
-| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | JSON schema (PR #187) |
+| Dimension | Tidalarr | Qobuzarr | Brainarr | AppleMusicarr | Common |
+|-----------|----------|----------|----------|---------------|--------|
+| **Packaging** | ✅ | ✅ | ✅ | ✅ | Policy complete |
+| **Naming/Path** | ✅ | ✅ | N/A | N/A | FileSystemUtilities |
+| **Concurrency** | ✅ | ✅ | N/A | N/A | BaseDownloadOrchestrator |
+| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | N/A | Single-authority pattern |
+| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | ✅ Schema+ImportList | JSON schema + strict CI |
 
 **Overall Ecosystem Parity: ~97%**
 
@@ -20,7 +20,7 @@ This document tracks progress toward full structural and behavioral parity acros
 
 Full ecosystem parity is achieved when:
 
-- [ ] All three plugins ship the 5-DLL type-identity contract
+- [ ] All plugins comply with the packaging contract for their plugin type (streaming vs import-list)
 - [ ] Both streaming plugins produce identical filename format on multi-disc and edge sanitization
 - [ ] Persistent single-plugin E2E gates pass for Qobuzarr and Tidalarr
 - [ ] Multi-plugin schema gate passes for 2 plugins, then 3 plugins (when host supports)
@@ -32,10 +32,8 @@ Full ecosystem parity is achieved when:
 ## Type-Identity Assembly Policy
 
 ### Required Assemblies (All Plugins)
-Plugins **MUST** ship these assemblies for proper plugin discovery and type identity:
-- `Lidarr.Plugin.Abstractions.dll` - Plugin discovery contract
-- `Microsoft.Extensions.DependencyInjection.Abstractions.dll` - DI type identity
-- `Microsoft.Extensions.Logging.Abstractions.dll` - Logging type identity
+Plugins **MUST** ship these assemblies for proper plugin discovery:
+- `Lidarr.Plugin.Abstractions.dll` - Plugin discovery contract (host does NOT provide this)
 
 ### Forbidden Assemblies (All Plugins)
 Plugins **MUST NOT** ship these assemblies:
@@ -43,12 +41,13 @@ Plugins **MUST NOT** ship these assemblies:
 - `Lidarr.Core.dll`, `Lidarr.Common.dll`, `Lidarr.Host.dll` - Host assemblies
 - `NzbDrone.*.dll` - Legacy host assemblies
 
-### FluentValidation Exception (Brainarr-Specific)
+### FluentValidation Exception (ImportList Override: Brainarr, AppleMusicarr)
 
-**Brainarr MUST NOT ship `FluentValidation.dll`.**
+**ImportList plugins that override `Test(List<ValidationFailure>)` MUST NOT ship `FluentValidation.dll`.**
 
-Unlike streaming plugins (Qobuzarr, Tidalarr) that don't override validation methods,
-Brainarr's `BrainarrImportList` overrides `Test(List<ValidationFailure>)` from `ImportListBase`.
+This applies to:
+- Brainarr: `BrainarrImportList`
+- AppleMusicarr: `LidarrAppleMusicImportList`
 
 When FluentValidation.dll was shipped:
 ```
@@ -60,7 +59,9 @@ Method 'Test' in type 'Lidarr.Plugin.Brainarr.BrainarrImportList' does not have 
 - The override signature doesn't match because return types are technically different types
 - Plugin must use host's FluentValidation for type identity to match
 
-**Guard test**: `brainarr/Brainarr.Tests/Packaging/BrainarrPackagingPolicyTests.cs:Package_Must_Not_Ship_FluentValidation()`
+**Guard tests**:
+- `brainarr/Brainarr.Tests/Packaging/BrainarrPackagingPolicyTests.cs:Package_Must_Not_Ship_FluentValidation()`
+- (TODO) Add equivalent guard in AppleMusicarr packaging tests
 
 ### ⚠️ Policy Warning: Do Not Force Uniformity
 
@@ -79,9 +80,9 @@ signatures against the host.
 
 ### 1.1 Packaging Content Tests
 - [x] **Common**: PluginPackageValidator with TypeIdentityAssemblies
-- [x] **Tidalarr**: PackagingPolicyBaseline updated to 5-DLL contract
-- [x] **Qobuzarr**: PackagingPolicyTests with RequiredTypeIdentityAssemblies
-- [x] **Brainarr**: BrainarrPackagingPolicyTests with 4-DLL contract (no FluentValidation)
+- [x] **Tidalarr**: PackagingPolicyBaseline updated to the canonical contract (merged plugin + Abstractions + plugin.json)
+- [x] **Qobuzarr**: PackagingPolicyTests updated to the canonical contract
+- [x] **Brainarr**: BrainarrPackagingPolicyTests updated (no FluentValidation)
 
 ### 1.2 Naming Contract Tests
 - [ ] Multi-disc: D01Txx/D02Txx format validation
@@ -187,7 +188,7 @@ Features:
 Schema → Configure → Search → AlbumSearch → Grab → Persist → Revalidation
 
 **Optional Gates**:
-- ImportList (Brainarr)
+- ImportList (Brainarr, AppleMusicarr)
 - Metadata (opt-in via `-ValidateMetadata`)
 - PostRestartGrab (opt-in via `-PostRestartGrab`)
 
@@ -202,23 +203,25 @@ Schema → Configure → Search → AlbumSearch → Grab → Persist → Revalid
 |--------|--------|-----------|--------|-------------|------|---------|--------------|
 | Tidalarr | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Qobuzarr | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Brainarr | ✅ | N/A | N/A | N/A | N/A | N/A | N/A |
+| Brainarr | ✅ | ✅ | N/A | N/A | N/A | ✅ | N/A |
+| AppleMusicarr | ✅ | ✅ | N/A | N/A | N/A | ✅ | N/A |
 
 | Plugin | ImportList | BrainarrLLM |
 |--------|------------|-------------|
 | Brainarr | ⏭️/✅ (config-dependent) | ⏭️/✅ (opt-in) |
+| AppleMusicarr | ⏭️/✅ (config-dependent) | N/A |
 
 **3-Plugin Coexistence**: ✅ All three plugins load simultaneously in same Lidarr instance.
 
 ### 3.4 Multi-Plugin E2E Command
 ```bash
 # Schema gate (no credentials required):
-./e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr' -Gate schema \
+./e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr,AppleMusicarr' -Gate schema \     
     -LidarrUrl 'http://localhost:8691' \
     -ExtractApiKeyFromContainer -ContainerName 'lidarr-multi-plugin-persist'
 
 # All gates (skips gracefully when creds missing):
-./e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr' -Gate all \
+./e2e-runner.ps1 -Plugins 'Qobuzarr,Tidalarr,Brainarr,AppleMusicarr' -Gate all \        
     -LidarrUrl 'http://localhost:8691' \
     -ApiKey '<key>'
 ```
@@ -305,6 +308,6 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 | 2025-12-27 | Tidalarr PR #104: sanitization consolidation with 4 unit tests |
 | 2025-12-27 | Tidalarr PR #105: chunk delay configurability with clamping (0-2000ms) |
 | 2025-12-27 | Common PRs #167/#168 merged - packaging policy complete |
-| 2025-12-27 | Tidalarr packaging baseline updated to 5-DLL contract |
+| 2025-12-27 | Tidalarr packaging baseline updated to canonical contract |
 | 2025-12-27 | Qobuzarr TrackFileNameBuilder delegated to Common |
 | 2025-12-27 | Initial roadmap created |
