@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-03T00:00:00Z",
+  "runId": "alcbug123456",
+  "runner": {
+    "name": "e2e-runner",
+    "version": "abc1234",
+    "args": ["-Gate", "configure", "-Plugins", "Qobuzarr,Tidalarr"]
+  },
+  "lidarr": {
+    "url": "http://localhost:8686",
+    "containerName": "lidarr-e2e-test",
+    "containerId": "abc123def456",
+    "version": "3.1.1.4884",
+    "branch": "plugins"
+  },
+  "request": {
+    "gate": "configure",
+    "plugins": ["Qobuzarr", "Tidalarr"]
+  },
+  "effective": {
+    "gates": ["Schema", "Configure"],
+    "plugins": ["Qobuzarr", "Tidalarr"],
+    "stopReason": "host_bug_detected"
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 15
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Qobuzarr",
+      "outcome": "failed",
+      "errorCode": null,
+      "outcomeReason": "Plugin schema not found in indexer/schema response",
+      "startedAt": "2026-01-03T00:00:01Z",
+      "endedAt": "2026-01-03T00:00:02Z",
+      "durationMs": 1000,
+      "errors": ["Plugin 'Qobuzarr' not found in indexer schema - host may have assembly loading issues"],
+      "details": {}
+    },
+    {
+      "gate": "Schema",
+      "plugin": "Tidalarr",
+      "outcome": "failed",
+      "errorCode": null,
+      "outcomeReason": "Plugin schema not found in indexer/schema response",
+      "startedAt": "2026-01-03T00:00:02Z",
+      "endedAt": "2026-01-03T00:00:03Z",
+      "durationMs": 1000,
+      "errors": ["Plugin 'Tidalarr' not found in indexer schema - host may have assembly loading issues"],
+      "details": {}
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 2,
+    "passed": 0,
+    "failed": 2,
+    "skipped": 0,
+    "totalDurationMs": 2000
+  },
+  "diagnostics": {
+    "bundleCreated": true,
+    "bundlePath": ".e2e-bootstrap/diagnostics/bundle.zip",
+    "redactionApplied": true
+  },
+  "hostBugSuspected": {
+    "detected": true,
+    "classification": "ALC",
+    "severity": "host_bug",
+    "matchedLine": "System.IO.FileNotFoundException: Could not load file or assembly 'Lidarr.Plugin.Common'"
+  }
+}
