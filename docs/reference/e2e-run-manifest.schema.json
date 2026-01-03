@@ -160,6 +160,34 @@
         }
       }
     },
+    "tokenSeeding": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "description": "Status of pre-authorized token seeding for CI (avoids manual OAuth).",
+      "properties": {
+        "tidal": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "description": "Tidal token seeding status.",
+          "properties": {
+            "status": {
+              "type": ["string", "null"],
+              "enum": ["deployed", "skipped", "staged", "failed", null],
+              "description": "Token seeding status: deployed (written to config), skipped (not needed or file exists), staged (validated but not yet deployed), failed (error occurred)."
+            },
+            "reason": {
+              "type": ["string", "null"],
+              "enum": ["no_secret_provided", "invalid_base64", "invalid_json", "file_exists", null],
+              "description": "Reason for skip or failure."
+            },
+            "deployed": {
+              "type": "boolean",
+              "description": "Whether tokens were successfully written to the config directory."
+            }
+          }
+        }
+      }
+    },
     "request": {
       "type": "object",
       "additionalProperties": false,

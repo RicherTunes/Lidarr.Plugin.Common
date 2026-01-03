@@ -676,44 +676,68 @@ jobs:
           fi
 
       # =========================================================================
-      # TIDAL SEEDED TOKENS: Write pre-authorized tokens for CI (no manual OAuth)
+      # TIDAL SEEDED TOKENS: Decode to staging area (actual deploy is after CONFIG_DIR is set)
+      # This runs BEFORE container start to validate B64 early. The staging file is copied
+      # to the correct CONFIG_DIR path in the container start step (supports cold-start mode).
+      # Uses PowerShell for cross-platform base64 decode (works on Linux, Windows, macOS).
       # =========================================================================
-      - name: Seed Tidal tokens (if provided)
-        if: contains(inputs.plugins, 'Tidalarr') && env.TIDALARR_TOKENS_JSON_B64 != ''
-        shell: bash
+      - name: Stage Tidal tokens (if provided)
+        if: contains(inputs.plugins, 'Tidalarr')
+        shell: pwsh
         env:
           TIDALARR_TOKENS_JSON_B64: ${{ secrets.TIDALARR_TOKENS_JSON_B64 }}
-          TIDALARR_CONFIG_PATH: ${{ secrets.TIDALARR_CONFIG_PATH }}
         run: |
-          set -euo pipefail
+          $ErrorActionPreference = 'Stop'
+
+          $stagingFile = ".e2e-bootstrap/tidal_tokens_staging.json"
+
+          # No tokens provided - record reason and exit cleanly
+          if ([string]::IsNullOrEmpty($env:TIDALARR_TOKENS_JSON_B64)) {
+            "TIDAL_TOKEN_SEED_STATUS=skipped" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_REASON=no_secret_provided" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::notice::Tidal token seeding skipped (TIDALARR_TOKENS_JSON_B64 not set)"
+            exit 0
+          }
 
           # Mask the B64 string (GitHub should already do this, but belt-and-suspenders)
-          echo "::add-mask::${TIDALARR_TOKENS_JSON_B64}"
+          Write-Host "::add-mask::$($env:TIDALARR_TOKENS_JSON_B64)"
 
-          # Determine config path (use env var or default)
-          CONFIG_PATH="${TIDALARR_CONFIG_PATH:-/config/plugins/RicherTunes/Tidalarr}"
+          # Ensure directory exists
+          $stagingDir = Split-Path $stagingFile -Parent
+          if (-not (Test-Path $stagingDir)) {
+            New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+          }
 
-          # For CI, we need to write to the local workspace that will be mounted
-          LOCAL_CONFIG_DIR=".e2e-bootstrap/config/plugins/RicherTunes/Tidalarr"
-          mkdir -p "$LOCAL_CONFIG_DIR"
+          # Decode base64 using cross-platform .NET method - NEVER echo decoded content
+          try {
+            $decodedBytes = [System.Convert]::FromBase64String($env:TIDALARR_TOKENS_JSON_B64)
+            $decodedJson = [System.Text.Encoding]::UTF8.GetString($decodedBytes)
+          } catch {
+            "TIDAL_TOKEN_SEED_STATUS=failed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_REASON=invalid_base64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::error::TIDALARR_TOKENS_JSON_B64 contains invalid base64: $_"
+            exit 1
+          }
 
-          TOKEN_FILE="$LOCAL_CONFIG_DIR/tidal_tokens.json"
+          # Validate it's valid JSON (basic sanity check)
+          try {
+            $null = $decodedJson | ConvertFrom-Json -ErrorAction Stop
+          } catch {
+            "TIDAL_TOKEN_SEED_STATUS=failed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_REASON=invalid_json" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::error::Decoded TIDALARR_TOKENS_JSON_B64 is not valid JSON: $_"
+            exit 1
+          }
 
-          # Check if file already exists
-          if [[ -f "$TOKEN_FILE" ]]; then
-            echo "::notice::Tidal tokens file already exists, skipping write"
-          else
-            # Decode and write - NEVER echo the decoded content
-            echo "$TIDALARR_TOKENS_JSON_B64" | base64 -d > "$TOKEN_FILE"
-            chmod 600 "$TOKEN_FILE"
+          # Write to staging file (UTF8 without BOM for JSON compatibility)
+          [System.IO.File]::WriteAllText($stagingFile, $decodedJson, [System.Text.UTF8Encoding]::new($false))
 
-            # Report success without revealing content
-            BYTES=$(wc -c < "$TOKEN_FILE")
-            echo "::notice::Wrote Tidal tokens file ($BYTES bytes)"
-          fi
-
-          # Export path for downstream steps
-          echo "TIDALARR_SEEDED_TOKENS_PATH=$TOKEN_FILE" >> $GITHUB_ENV
+          # Report success without revealing content
+          $bytes = (Get-Item $stagingFile).Length
+          "TIDAL_TOKEN_SEED_STATUS=staged" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TIDAL_TOKEN_SEED_STAGING_PATH=$stagingFile" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "TIDAL_TOKEN_SEED_BYTES=$bytes" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "::notice::Tidal tokens staged ($bytes bytes), will deploy after CONFIG_DIR is set"
 
       - name: Start Lidarr container
         id: start-container
@@ -771,6 +795,41 @@ jobs:
             fi
           done
           echo "::endgroup::"
+
+          # ============================================================================
+          # DEPLOY TIDAL TOKENS: Copy staged tokens to correct CONFIG_DIR path
+          # This happens AFTER CONFIG_DIR is determined, so cold-start works correctly.
+          # ============================================================================
+          if [[ "${TIDAL_TOKEN_SEED_STATUS:-}" == "staged" ]]; then
+            STAGING_FILE="${TIDAL_TOKEN_SEED_STAGING_PATH:-.e2e-bootstrap/tidal_tokens_staging.json}"
+            TARGET_DIR="$CONFIG_DIR/plugins/RicherTunes/Tidalarr"
+            TARGET_FILE="$TARGET_DIR/tidal_tokens.json"
+
+            mkdir -p "$TARGET_DIR"
+
+            # No-overwrite by default: skip if tokens already exist
+            if [[ -f "$TARGET_FILE" ]]; then
+              echo "::notice::Tidal tokens already exist at $TARGET_FILE, skipping deploy (no-overwrite)"
+              echo "TIDAL_TOKEN_SEED_STATUS=skipped" >> $GITHUB_ENV
+              echo "TIDAL_TOKEN_SEED_REASON=file_exists" >> $GITHUB_ENV
+              rm -f "$STAGING_FILE"
+            else
+              # Copy from staging to final location
+              cp "$STAGING_FILE" "$TARGET_FILE"
+              chmod 600 "$TARGET_FILE"
+              rm -f "$STAGING_FILE"
+
+              BYTES=$(wc -c < "$TARGET_FILE")
+              echo "TIDAL_TOKEN_SEED_STATUS=deployed" >> $GITHUB_ENV
+              echo "TIDALARR_SEEDED_TOKENS_PATH=$TARGET_FILE" >> $GITHUB_ENV
+              echo "::notice::Tidal tokens deployed to $TARGET_FILE ($BYTES bytes)"
+            fi
+          elif [[ "${TIDAL_TOKEN_SEED_STATUS:-}" == "skipped" ]]; then
+            echo "Tidal token seeding was skipped: ${TIDAL_TOKEN_SEED_REASON:-unknown}"
+          elif [[ "${TIDAL_TOKEN_SEED_STATUS:-}" == "failed" ]]; then
+            echo "::error::Tidal token seeding failed: ${TIDAL_TOKEN_SEED_REASON:-unknown}"
+            exit 1
+          fi
 
           # Verify plugins exist before startup (hard check)
           echo "::group::Verify pre-seeded plugins"

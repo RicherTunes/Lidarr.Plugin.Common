@@ -2,16 +2,23 @@
 # Collects logs, config, and state on failure for AI-assisted triage
 
 # Sensitive field patterns to redact (comprehensive list)
+# Note: These are regex patterns matched against field names with -match (substring match)
+# Be specific to avoid false positives (e.g., 'token' would match 'token_type')
 $script:SensitivePatterns = @(
     'password',
     'secret',
-    'token',
-    'key',
+    # 'token' alone is too broad - matches token_type, etc. Use specific patterns instead.
+    # Match: exactly "token", or *_token, or token (at word boundary)
+    '^token$',
+    '(?:access|refresh|bearer|auth|user|id|session|csrf|xsrf)_?token',
+    'key(?!id)',    # 'key' but not 'keyId' (identifiers are not secrets)
     'apikey',
     'api_key',
     'bearer',
     'credential',
-    'auth',
+    # 'auth' alone matches too much - use specific patterns
+    '^auth$',
+    'authori[sz]ation',
     'redirect',
     'accesstoken',
     'access_token',
@@ -29,7 +36,9 @@ $script:SensitivePatterns = @(
     'pkce',
     # Brainarr LLM endpoint (may contain internal IPs)
     'configurationurl',
-    'configuration_url'
+    'configuration_url',
+    # Tidal specific
+    'music_?user_?token'
 )
 
 # Private/internal endpoint patterns for value-based redaction
@@ -389,6 +398,43 @@ function Test-SecretRedaction {
             Field = 'mixedCase'
             Expected = 'https://api.com?Access_Token=[REDACTED]&TYPE=bearer'
         }
+        # =====================================================================
+        # Tidal Tokens (tidal_tokens.json) Redaction Tests
+        # These patterns match the structure of seeded Tidal OAuth tokens
+        # =====================================================================
+        @{
+            Input = @{ access_token = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.fake' }
+            Field = 'tidal_access_token'
+        }
+        @{
+            Input = @{ refresh_token = 'rt_abc123xyz789' }
+            Field = 'tidal_refresh_token'
+        }
+        @{
+            Input = @{ refreshToken = 'rt_abc123xyz789' }
+            Field = 'tidal_refreshToken_camel'
+        }
+        @{
+            # Full tidal_tokens.json structure
+            Input = @{
+                access_token = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.access'
+                refresh_token = 'rt_refresh123'
+                token_type = 'Bearer'
+                expires_in = 604800
+            }
+            Field = 'tidal_tokens_full'
+        }
+        @{
+            # Nested token structure (as might appear in logs/diagnostics)
+            Input = @{
+                plugin = 'Tidalarr'
+                tokens = @{
+                    access_token = 'eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.nested'
+                    refresh_token = 'rt_nested456'
+                }
+            }
+            Field = 'tidal_tokens_nested'
+        }
     )
 
     foreach ($case in $testCases) {
@@ -473,6 +519,41 @@ function Test-SecretRedaction {
             }
             if ($result.fields[1].value -ne 'https://api.public.com') {
                 throw "Nested public URL was incorrectly modified: $($result.fields[1].value)"
+            }
+        }
+        elseif ($case.Field -match '^tidal_access_token$|^tidal_refresh_token$|^tidal_refreshToken_camel$') {
+            # Simple Tidal token fields should be fully redacted
+            $fieldName = ($case.Input.Keys | Select-Object -First 1)
+            if ($result.$fieldName -ne '[REDACTED]') {
+                throw "Tidal token redaction failed for $($case.Field): expected '[REDACTED]', got '$($result.$fieldName)'"
+            }
+        }
+        elseif ($case.Field -eq 'tidal_tokens_full') {
+            # Full tidal_tokens.json structure: tokens redacted, metadata preserved
+            if ($result.access_token -ne '[REDACTED]') {
+                throw "Tidal access_token redaction failed: $($result.access_token)"
+            }
+            if ($result.refresh_token -ne '[REDACTED]') {
+                throw "Tidal refresh_token redaction failed: $($result.refresh_token)"
+            }
+            # Non-sensitive fields should NOT be redacted
+            if ($result.token_type -eq '[REDACTED]') {
+                throw "Tidal token_type was incorrectly redacted (should be preserved)"
+            }
+            if ($result.expires_in -eq '[REDACTED]') {
+                throw "Tidal expires_in was incorrectly redacted (should be preserved)"
+            }
+        }
+        elseif ($case.Field -eq 'tidal_tokens_nested') {
+            # Nested tokens structure
+            if ($result.plugin -eq '[REDACTED]') {
+                throw "Tidal plugin name was incorrectly redacted (should be preserved)"
+            }
+            if ($result.tokens.access_token -ne '[REDACTED]') {
+                throw "Nested Tidal access_token redaction failed: $($result.tokens.access_token)"
+            }
+            if ($result.tokens.refresh_token -ne '[REDACTED]') {
+                throw "Nested Tidal refresh_token redaction failed: $($result.tokens.refresh_token)"
             }
         }
         else {

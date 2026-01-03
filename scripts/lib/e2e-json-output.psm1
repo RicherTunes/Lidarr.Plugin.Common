@@ -844,6 +844,17 @@ function ConvertTo-E2ERunManifest {
                 dllSha256 = if ($env:HOST_OVERRIDE_DLL_SHA256) { $env:HOST_OVERRIDE_DLL_SHA256 } else { $null }
             }
         }
+        # Token seeding status (for pre-authorized CI tokens)
+        tokenSeeding = [ordered]@{
+            tidal = [ordered]@{
+                # Status: deployed, skipped, failed, or null (not applicable)
+                status = if ($env:TIDAL_TOKEN_SEED_STATUS) { $env:TIDAL_TOKEN_SEED_STATUS } else { $null }
+                # Reason: no_secret_provided, invalid_base64, invalid_json, file_exists, or null
+                reason = if ($env:TIDAL_TOKEN_SEED_REASON) { $env:TIDAL_TOKEN_SEED_REASON } else { $null }
+                # Path is redacted (just indicates whether seeding wrote a file)
+                deployed = ($env:TIDALARR_SEEDED_TOKENS_PATH -ne $null -and $env:TIDALARR_SEEDED_TOKENS_PATH -ne '')
+            }
+        }
         request = [ordered]@{
             gate = $requestedGate
             plugins = if ($plugins) { @($plugins) } else { @() }
