@@ -124,6 +124,34 @@
         "branch": {
           "type": ["string", "null"],
           "description": "Lidarr branch if queryable."
+        },
+        "hostOverride": {
+          "type": ["object", "null"],
+          "additionalProperties": false,
+          "required": ["used"],
+          "description": "Optional host binary override used to work around Lidarr multi-plugin loader bugs.",
+          "properties": {
+            "used": {
+              "type": "boolean",
+              "description": "True if a host override DLL was mounted into the container."
+            },
+            "reason": {
+              "type": ["string", "null"],
+              "description": "Human-readable reason for enabling/disabling the override."
+            },
+            "sourceRepo": {
+              "type": ["string", "null"],
+              "description": "GitHub repository used to build the override binary."
+            },
+            "sourceRef": {
+              "type": ["string", "null"],
+              "description": "Git ref (branch/tag/SHA) used to build the override binary."
+            },
+            "sha": {
+              "type": ["string", "null"],
+              "description": "Resolved Git commit SHA used to build the override binary."
+            }
+          }
         }
       }
     },
