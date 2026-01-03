@@ -177,12 +177,29 @@
             },
             "reason": {
               "type": ["string", "null"],
-              "enum": ["no_secret_provided", "invalid_base64", "invalid_json", "file_exists", null],
-              "description": "Reason for skip or failure."
+              "enum": [
+                "no_secret_provided",
+                "invalid_base64",
+                "invalid_json",
+                "file_exists",
+                "token_still_valid",
+                "token_expired",
+                "no_expiry_field",
+                "expiry_unknown",
+                "force_overwrite",
+                "no_existing_file",
+                null
+              ],
+              "description": "Reason for deploy/skip/failure. Freshness reasons: token_expired (overwritten), token_still_valid (skipped), no_expiry_field/expiry_unknown (overwritten to be safe)."
             },
             "deployed": {
               "type": "boolean",
               "description": "Whether tokens were successfully written to the config directory."
+            },
+            "targetPathKind": {
+              "type": ["string", "null"],
+              "enum": ["configPath", null],
+              "description": "Kind of path where tokens were deployed (redacted for security). configPath = /config/plugins/..."
             }
           }
         }

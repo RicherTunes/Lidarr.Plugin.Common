@@ -849,10 +849,12 @@ function ConvertTo-E2ERunManifest {
             tidal = [ordered]@{
                 # Status: deployed, skipped, failed, or null (not applicable)
                 status = if ($env:TIDAL_TOKEN_SEED_STATUS) { $env:TIDAL_TOKEN_SEED_STATUS } else { $null }
-                # Reason: no_secret_provided, invalid_base64, invalid_json, file_exists, or null
+                # Reason: freshness/deploy/skip reasons (see schema for full enum)
                 reason = if ($env:TIDAL_TOKEN_SEED_REASON) { $env:TIDAL_TOKEN_SEED_REASON } else { $null }
                 # Path is redacted (just indicates whether seeding wrote a file)
                 deployed = ($env:TIDALARR_SEEDED_TOKENS_PATH -ne $null -and $env:TIDALARR_SEEDED_TOKENS_PATH -ne '')
+                # Path kind for debugging (actual path redacted)
+                targetPathKind = if ($env:TIDAL_TOKEN_SEED_TARGET_PATH_KIND) { $env:TIDAL_TOKEN_SEED_TARGET_PATH_KIND } else { $null }
             }
         }
         request = [ordered]@{

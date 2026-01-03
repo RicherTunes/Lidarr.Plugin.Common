@@ -435,6 +435,25 @@ function Test-SecretRedaction {
             }
             Field = 'tidal_tokens_nested'
         }
+        # =====================================================================
+        # Case-Variant Token Tests (verify redaction is case-insensitive)
+        # =====================================================================
+        @{
+            Input = @{ Access_Token = 'secret_mixed_case' }
+            Field = 'tidal_Access_Token'
+        }
+        @{
+            Input = @{ refreshToken = 'rt_camelCase' }
+            Field = 'tidal_refreshToken_camel'
+        }
+        @{
+            Input = @{ REFRESH_TOKEN = 'RT_UPPERCASE' }
+            Field = 'tidal_REFRESH_TOKEN_upper'
+        }
+        @{
+            Input = @{ AccessToken = 'AccessTokenPascal' }
+            Field = 'tidal_AccessToken_pascal'
+        }
     )
 
     foreach ($case in $testCases) {
@@ -521,8 +540,8 @@ function Test-SecretRedaction {
                 throw "Nested public URL was incorrectly modified: $($result.fields[1].value)"
             }
         }
-        elseif ($case.Field -match '^tidal_access_token$|^tidal_refresh_token$|^tidal_refreshToken_camel$') {
-            # Simple Tidal token fields should be fully redacted
+        elseif ($case.Field -match '^tidal_access_token$|^tidal_refresh_token$|^tidal_refreshToken_camel$|^tidal_Access_Token$|^tidal_REFRESH_TOKEN_upper$|^tidal_AccessToken_pascal$') {
+            # Simple Tidal token fields should be fully redacted (case variants)
             $fieldName = ($case.Input.Keys | Select-Object -First 1)
             if ($result.$fieldName -ne '[REDACTED]') {
                 throw "Tidal token redaction failed for $($case.Field): expected '[REDACTED]', got '$($result.$fieldName)'"

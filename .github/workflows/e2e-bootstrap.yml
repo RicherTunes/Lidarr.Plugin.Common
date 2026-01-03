@@ -75,6 +75,15 @@ on:
         type: number
         required: false
         default: 12
+      tidal_tokens_overwrite:
+        description: Token overwrite behavior - auto (overwrite if expired), always (force overwrite), never (skip if exists)
+        type: choice
+        required: false
+        default: auto
+        options:
+          - auto
+          - always
+          - never
       run_canary:
         description: Run canary job against latest pr-plugins tag (non-blocking, catches host regressions)
         type: boolean
@@ -129,6 +138,7 @@ env:
   INPUT_COLD_START: ${{ inputs.cold_start }}
   INPUT_POST_RESTART_GRAB: ${{ inputs.post_restart_grab }}
   INPUT_POST_RESTART_GRAB_TIMEOUT_MIN: ${{ inputs.post_restart_grab_timeout_min }}
+  INPUT_TIDAL_TOKENS_OVERWRITE: ${{ inputs.tidal_tokens_overwrite }}
   INPUT_CANARY_LEVEL: ${{ inputs.canary_level }}
   INPUT_USE_HOST_OVERRIDE: ${{ inputs.use_host_override }}
   INPUT_LIDARR_OVERRIDE_REPO: ${{ inputs.lidarr_override_repo }}
@@ -799,21 +809,95 @@ jobs:
           # ============================================================================
           # DEPLOY TIDAL TOKENS: Copy staged tokens to correct CONFIG_DIR path
           # This happens AFTER CONFIG_DIR is determined, so cold-start works correctly.
+          # Overwrite modes: auto (if expired), always (force), never (skip if exists)
           # ============================================================================
           if [[ "${TIDAL_TOKEN_SEED_STATUS:-}" == "staged" ]]; then
             STAGING_FILE="${TIDAL_TOKEN_SEED_STAGING_PATH:-.e2e-bootstrap/tidal_tokens_staging.json}"
             TARGET_DIR="$CONFIG_DIR/plugins/RicherTunes/Tidalarr"
             TARGET_FILE="$TARGET_DIR/tidal_tokens.json"
+            OVERWRITE_MODE="${INPUT_TIDAL_TOKENS_OVERWRITE:-auto}"
 
             mkdir -p "$TARGET_DIR"
 
-            # No-overwrite by default: skip if tokens already exist
-            if [[ -f "$TARGET_FILE" ]]; then
-              echo "::notice::Tidal tokens already exist at $TARGET_FILE, skipping deploy (no-overwrite)"
+            # Determine if we should deploy based on overwrite mode
+            SHOULD_DEPLOY="false"
+            DEPLOY_REASON=""
+
+            if [[ ! -f "$TARGET_FILE" ]]; then
+              # No existing file - always deploy
+              SHOULD_DEPLOY="true"
+              DEPLOY_REASON="no_existing_file"
+            elif [[ "$OVERWRITE_MODE" == "always" ]]; then
+              # Force overwrite mode
+              SHOULD_DEPLOY="true"
+              DEPLOY_REASON="force_overwrite"
+              echo "::notice::Overwriting existing tokens (mode=always)"
+            elif [[ "$OVERWRITE_MODE" == "never" ]]; then
+              # Never overwrite mode
+              SHOULD_DEPLOY="false"
+              echo "::notice::Tidal tokens already exist, skipping (mode=never)"
               echo "TIDAL_TOKEN_SEED_STATUS=skipped" >> $GITHUB_ENV
               echo "TIDAL_TOKEN_SEED_REASON=file_exists" >> $GITHUB_ENV
               rm -f "$STAGING_FILE"
             else
+              # Auto mode: check token freshness
+              # Try to extract expires_at or expiresAt from existing tokens
+              EXPIRES_AT=""
+              if command -v python3 &>/dev/null; then
+                EXPIRES_AT=$(python3 -c "
+import json, sys
+try:
+    with open('$TARGET_FILE') as f:
+        tokens = json.load(f)
+    # Try common expiry field names
+    exp = tokens.get('expires_at') or tokens.get('expiresAt') or tokens.get('expiry') or ''
+    print(exp)
+except:
+    print('')
+" 2>/dev/null || echo "")
+              fi
+
+              if [[ -n "$EXPIRES_AT" ]]; then
+                # Parse expiry and compare to current time (with 1-hour buffer)
+                NOW=$(date +%s)
+                BUFFER=3600  # 1 hour
+                IS_EXPIRED=$(python3 -c "
+import sys
+try:
+    expires_at = int('$EXPIRES_AT')
+    now = int('$NOW')
+    buffer = int('$BUFFER')
+    # Expired or within buffer
+    print('true' if expires_at <= (now + buffer) else 'false')
+except:
+    print('unknown')
+" 2>/dev/null || echo "unknown")
+
+                if [[ "$IS_EXPIRED" == "true" ]]; then
+                  SHOULD_DEPLOY="true"
+                  DEPLOY_REASON="token_expired"
+                  echo "::warning::Existing tokens expired or near expiry, overwriting"
+                elif [[ "$IS_EXPIRED" == "false" ]]; then
+                  SHOULD_DEPLOY="false"
+                  echo "::notice::Existing tokens still valid (expires_at=$EXPIRES_AT), skipping"
+                  echo "TIDAL_TOKEN_SEED_STATUS=skipped" >> $GITHUB_ENV
+                  echo "TIDAL_TOKEN_SEED_REASON=token_still_valid" >> $GITHUB_ENV
+                  rm -f "$STAGING_FILE"
+                else
+                  # Can't determine expiry - be safe and overwrite
+                  SHOULD_DEPLOY="true"
+                  DEPLOY_REASON="expiry_unknown"
+                  echo "::notice::Could not determine token expiry, overwriting to be safe"
+                fi
+              else
+                # No expiry field found - be safe and overwrite
+                SHOULD_DEPLOY="true"
+                DEPLOY_REASON="no_expiry_field"
+                echo "::notice::No expiry field in existing tokens, overwriting to be safe"
+              fi
+            fi
+
+            if [[ "$SHOULD_DEPLOY" == "true" ]]; then
               # Copy from staging to final location
               cp "$STAGING_FILE" "$TARGET_FILE"
               chmod 600 "$TARGET_FILE"
@@ -821,8 +905,10 @@ jobs:
 
               BYTES=$(wc -c < "$TARGET_FILE")
               echo "TIDAL_TOKEN_SEED_STATUS=deployed" >> $GITHUB_ENV
+              echo "TIDAL_TOKEN_SEED_REASON=$DEPLOY_REASON" >> $GITHUB_ENV
               echo "TIDALARR_SEEDED_TOKENS_PATH=$TARGET_FILE" >> $GITHUB_ENV
-              echo "::notice::Tidal tokens deployed to $TARGET_FILE ($BYTES bytes)"
+              echo "TIDAL_TOKEN_SEED_TARGET_PATH_KIND=configPath" >> $GITHUB_ENV
+              echo "::notice::Tidal tokens deployed to $TARGET_FILE ($BYTES bytes, reason=$DEPLOY_REASON)"
             fi
           elif [[ "${TIDAL_TOKEN_SEED_STATUS:-}" == "skipped" ]]; then
             echo "Tidal token seeding was skipped: ${TIDAL_TOKEN_SEED_REASON:-unknown}"
