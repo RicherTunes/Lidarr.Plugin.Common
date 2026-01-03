@@ -1,0 +1,86 @@
+{
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-03T00:00:00Z",
+  "runId": "auth123fail00",
+  "runner": {
+    "name": "e2e-runner",
+    "version": "abc1234",
+    "args": ["-Gate", "search", "-Plugins", "Qobuzarr"]
+  },
+  "lidarr": {
+    "url": "http://localhost:8686",
+    "containerName": "lidarr-e2e-test",
+    "containerId": "abc123def456",
+    "version": "3.1.1.4884",
+    "branch": "plugins"
+  },
+  "request": {
+    "gate": "search",
+    "plugins": ["Qobuzarr"]
+  },
+  "effective": {
+    "gates": ["Schema", "Configure", "Search"],
+    "plugins": ["Qobuzarr"],
+    "stopReason": "gate_failed"
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 15
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Qobuzarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-03T00:00:01Z",
+      "endedAt": "2026-01-03T00:00:02Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Configure",
+      "plugin": "Qobuzarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-03T00:00:02Z",
+      "endedAt": "2026-01-03T00:00:03Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Search",
+      "plugin": "Qobuzarr",
+      "outcome": "failed",
+      "errorCode": "E2E_AUTH_MISSING",
+      "outcomeReason": "Indexer credentials not configured - missing env vars QOBUZARR_AUTH_TOKEN",
+      "startedAt": "2026-01-03T00:00:03Z",
+      "endedAt": "2026-01-03T00:00:04Z",
+      "durationMs": 1000,
+      "errors": ["Indexer credentials not configured - missing env vars QOBUZARR_AUTH_TOKEN"],
+      "details": {}
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 3,
+    "passed": 2,
+    "failed": 1,
+    "skipped": 0,
+    "totalDurationMs": 3000
+  },
+  "diagnostics": {
+    "bundleCreated": true,
+    "bundlePath": ".e2e-bootstrap/diagnostics/bundle.zip",
+    "redactionApplied": true
+  },
+  "hostBugSuspected": {
+    "detected": false
+  }
+}
