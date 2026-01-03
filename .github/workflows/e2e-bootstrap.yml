@@ -14,7 +14,7 @@ on:
       plugins:
         description: Comma-separated plugins to test
         required: true
-        default: Qobuzarr,Tidalarr,Brainarr
+        default: Qobuzarr,Tidalarr,Brainarr,AppleMusicarr
       run_search_gate:
         description: Run Search + AlbumSearch gates (requires indexer credentials)
         type: boolean
@@ -196,6 +196,11 @@ jobs:
           TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
           # Brainarr credentials
           BRAINARR_LLM_BASE_URL: ${{ secrets.BRAINARR_LLM_BASE_URL }}
+          # AppleMusicarr credentials (base64-encoded private key - never multi-line PEM)
+          APPLEMUSICARR_TEAM_ID: ${{ secrets.APPLEMUSICARR_TEAM_ID }}
+          APPLEMUSICARR_KEY_ID: ${{ secrets.APPLEMUSICARR_KEY_ID }}
+          APPLEMUSICARR_PRIVATE_KEY_B64: ${{ secrets.APPLEMUSICARR_PRIVATE_KEY_B64 }}
+          APPLEMUSICARR_MUSIC_USER_TOKEN: ${{ secrets.APPLEMUSICARR_MUSIC_USER_TOKEN }}
           # Cross-repo PAT for private plugin repos
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
         run: |
@@ -207,6 +212,8 @@ jobs:
           echo "::add-mask::${TIDALARR_REDIRECT_URL:-}"
           echo "::add-mask::${TIDAL_REDIRECT_URL:-}"
           echo "::add-mask::${BRAINARR_LLM_BASE_URL:-}"
+          echo "::add-mask::${APPLEMUSICARR_PRIVATE_KEY_B64:-}"
+          echo "::add-mask::${APPLEMUSICARR_MUSIC_USER_TOKEN:-}"
           echo "::add-mask::${CROSS_REPO_PAT:-}"
 
           # Check CROSS_REPO_PAT (required for private plugin repos)
@@ -247,6 +254,17 @@ jobs:
             fi
           fi
 
+          # Check AppleMusicarr credentials for ImportList gate
+          if [[ "$INPUT_RUN_IMPORTLIST_GATE" == "true" && "$INPUT_PLUGINS" == *"AppleMusicarr"* ]]; then
+            has_apple=false
+            if [[ -n "${APPLEMUSICARR_TEAM_ID:-}" && -n "${APPLEMUSICARR_KEY_ID:-}" && -n "${APPLEMUSICARR_PRIVATE_KEY_B64:-}" && -n "${APPLEMUSICARR_MUSIC_USER_TOKEN:-}" ]]; then
+              has_apple=true
+            fi
+            if [[ "$has_apple" != "true" ]]; then
+              echo "::warning::AppleMusicarr credentials incomplete - AppleMusicarr ImportList gate will SKIP"
+            fi
+          fi
+
           echo "Secret validation complete"
 
       - name: Setup .NET SDK
@@ -281,6 +299,16 @@ jobs:
           repository: RicherTunes/Brainarr
           ref: main
           path: brainarr
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          submodules: recursive
+
+      - name: Checkout AppleMusicarr
+        if: contains(inputs.plugins, 'AppleMusicarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/AppleMusicarr
+          ref: main
+          path: applemusicarr
           token: ${{ secrets.CROSS_REPO_PAT }}
           submodules: recursive
 
@@ -963,6 +991,11 @@ jobs:
           BRAINARR_MODEL_ID: ${{ secrets.BRAINARR_MODEL_ID }}
           BRAINARR_MODEL: ${{ secrets.BRAINARR_MODEL }}
           BRAINARR_PROVIDER: ${{ secrets.BRAINARR_PROVIDER }}
+          # AppleMusicarr credentials
+          APPLEMUSICARR_TEAM_ID: ${{ secrets.APPLEMUSICARR_TEAM_ID }}
+          APPLEMUSICARR_KEY_ID: ${{ secrets.APPLEMUSICARR_KEY_ID }}
+          APPLEMUSICARR_PRIVATE_KEY_B64: ${{ secrets.APPLEMUSICARR_PRIVATE_KEY_B64 }}
+          APPLEMUSICARR_MUSIC_USER_TOKEN: ${{ secrets.APPLEMUSICARR_MUSIC_USER_TOKEN }}
         run: |
           # Set gate configuration from inputs
           if ($env:INPUT_VALIDATE_METADATA -eq "true") {
