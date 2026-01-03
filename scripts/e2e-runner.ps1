@@ -745,7 +745,7 @@ function Find-ConfiguredComponent {
 function Get-PluginEnvConfig {
     param(
         [Parameter(Mandatory)]
-        [ValidateSet("Qobuzarr", "Tidalarr", "Brainarr")]
+        [ValidateSet("Qobuzarr", "Tidalarr", "Brainarr", "AppleMusicarr")]
         [string]$PluginName
     )
 
@@ -874,6 +874,49 @@ function Get-PluginEnvConfig {
                 } else {
                     $config.ImportListFields["autoDetectModel"] = $true
                 }
+            }
+        }
+        "AppleMusicarr" {
+            # AppleMusicarr import list uses Apple Music API for library sync
+            # Env vars:
+            #   APPLEMUSICARR_TEAM_ID          - Apple Developer Team ID - REQUIRED
+            #   APPLEMUSICARR_KEY_ID           - MusicKit Key ID - REQUIRED
+            #   APPLEMUSICARR_PRIVATE_KEY_B64  - MusicKit Private Key (base64-encoded PEM) - REQUIRED
+            #   APPLEMUSICARR_MUSIC_USER_TOKEN - Music User Token - REQUIRED
+            #
+            # IMPORTANT: APPLEMUSICARR_PRIVATE_KEY_B64 must be a SINGLE-LINE base64 encoding.
+            # Never use multi-line PEM directly - GitHub Actions masking fails on multi-line secrets.
+
+            $teamId = $env:APPLEMUSICARR_TEAM_ID
+            $keyId = $env:APPLEMUSICARR_KEY_ID
+            $privateKeyB64 = $env:APPLEMUSICARR_PRIVATE_KEY_B64
+            $musicUserToken = $env:APPLEMUSICARR_MUSIC_USER_TOKEN
+
+            $missingFields = @()
+            if ([string]::IsNullOrWhiteSpace($teamId)) { $missingFields += "APPLEMUSICARR_TEAM_ID" }
+            if ([string]::IsNullOrWhiteSpace($keyId)) { $missingFields += "APPLEMUSICARR_KEY_ID" }
+            if ([string]::IsNullOrWhiteSpace($privateKeyB64)) { $missingFields += "APPLEMUSICARR_PRIVATE_KEY_B64" }
+            if ([string]::IsNullOrWhiteSpace($musicUserToken)) { $missingFields += "APPLEMUSICARR_MUSIC_USER_TOKEN" }
+
+            if ($missingFields.Count -gt 0) {
+                $config.MissingRequired = $missingFields
+            } else {
+                $config.HasRequiredEnvVars = $true
+
+                # Decode base64 private key to PEM content
+                try {
+                    $privateKeyPem = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($privateKeyB64))
+                } catch {
+                    # If decode fails, treat as missing/invalid
+                    $config.HasRequiredEnvVars = $false
+                    $config.MissingRequired += "APPLEMUSICARR_PRIVATE_KEY_B64 (invalid base64)"
+                    return $config
+                }
+
+                $config.ImportListFields["teamId"] = $teamId
+                $config.ImportListFields["keyId"] = $keyId
+                $config.ImportListFields["privateKey"] = $privateKeyPem
+                $config.ImportListFields["musicUserToken"] = $musicUserToken
             }
         }
     }
@@ -1706,6 +1749,21 @@ $pluginConfigs = @{
         # - Gate SKIPs if configurationUrl is empty (no LLM = can't sync recommendations)
         # - This is Brainarr-specific; other import list plugins may have different credential fields
         ImportListCredentialAllOfFieldNames = @("configurationUrl")
+        ImportListCredentialAnyOfFieldNames = @()
+    }
+    'AppleMusicarr' = @{
+        ExpectIndexer = $false
+        ExpectDownloadClient = $false
+        ExpectImportList = $true
+        # No search for import lists
+        SearchQuery = $null
+        ExpectedMinResults = 0
+        CredentialAllOfFieldNames = @()
+        CredentialAnyOfFieldNames = @()
+        SkipIndexerTest = $true
+        # ImportList gate settings for AppleMusicarr:
+        # All four fields are required for Apple Music API access
+        ImportListCredentialAllOfFieldNames = @("teamId", "keyId", "privateKey", "musicUserToken")
         ImportListCredentialAnyOfFieldNames = @()
     }
 }
