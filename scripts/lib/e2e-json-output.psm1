@@ -182,6 +182,10 @@ $script:SensitiveDetailFields = @(
     'authtoken', 'auth_token', 'accesstoken', 'access_token',
     'refreshtoken', 'refresh_token', 'clientsecret', 'client_secret',
     'privatekey', 'private_key', 'bearer', 'credentials',
+    # Apple Music (AppleMusicarr)
+    'teamid', 'keyid', 'musicusertoken', 'music_user_token',
+    # AppleMusicarr optional base URL (may contain internal hostnames)
+    'baseurl', 'base_url',
     # Common single-word credential fields
     'token', 'key'
 )
@@ -759,6 +763,7 @@ function ConvertTo-E2ERunManifest {
     $qobuzarrSha = Get-SafeProperty -Object $sourceShas -PropertyName 'Qobuzarr'
     $tidalarrSha = Get-SafeProperty -Object $sourceShas -PropertyName 'Tidalarr'
     $brainarrSha = Get-SafeProperty -Object $sourceShas -PropertyName 'Brainarr'
+    $applemusicarrSha = Get-SafeProperty -Object $sourceShas -PropertyName 'AppleMusicarr'
 
     $sources = [ordered]@{
         common = [ordered]@{
@@ -776,6 +781,10 @@ function ConvertTo-E2ERunManifest {
         brainarr = [ordered]@{
             sha = $brainarrSha
             source = if ($prov -and (Get-SafeProperty $prov 'Brainarr')) { (Get-SafeProperty $prov 'Brainarr') } elseif ($brainarrSha) { 'git' } else { 'unknown' }
+        }
+        applemusicarr = [ordered]@{
+            sha = $applemusicarrSha
+            source = if ($prov -and (Get-SafeProperty $prov 'AppleMusicarr')) { (Get-SafeProperty $prov 'AppleMusicarr') } elseif ($applemusicarrSha) { 'git' } else { 'unknown' }
         }
     }
 
@@ -806,6 +815,7 @@ function ConvertTo-E2ERunManifest {
     } elseif ($effectivePlugins -isnot [array]) {
         $effectivePlugins = @($effectivePlugins)
     }
+    $requestPlugins = if ($plugins) { @($plugins) } else { @() }
     $stopReason = Get-SafeProperty -Object $Context -PropertyName 'StopReason'
     $redactionSelfTestExecuted = Get-SafeProperty -Object $Context -PropertyName 'RedactionSelfTestExecuted'
     $redactionSelfTestPassed = Get-SafeProperty -Object $Context -PropertyName 'RedactionSelfTestPassed'
@@ -846,7 +856,8 @@ function ConvertTo-E2ERunManifest {
         }
         request = [ordered]@{
             gate = $requestedGate
-            plugins = if ($plugins) { @($plugins) } else { @() }
+            # CRITICAL: Cast to Object[] prevents ConvertTo-Json from unwrapping single-element arrays
+            plugins = [object[]]$requestPlugins
         }
         effective = [ordered]@{
             # CRITICAL: Cast to Object[] prevents ConvertTo-Json from unwrapping single-element arrays

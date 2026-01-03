@@ -21,6 +21,12 @@ $script:SensitivePatterns = @(
     'client_secret',
     'privatekey',
     'private_key',
+    # Apple Music
+    'teamid',
+    'keyid',
+    'key_id',
+    'musicusertoken',
+    'music_user_token',
     # OAuth/PKCE specific
     'code_verifier',
     'codeverifier',

@@ -745,7 +745,7 @@ function Find-ConfiguredComponent {
 function Get-PluginEnvConfig {
     param(
         [Parameter(Mandatory)]
-        [ValidateSet("Qobuzarr", "Tidalarr", "Brainarr")]
+        [ValidateSet("Qobuzarr", "Tidalarr", "Brainarr", "AppleMusicarr")]
         [string]$PluginName
     )
 
@@ -838,6 +838,41 @@ function Get-PluginEnvConfig {
                 $downloadPath = $env:TIDALARR_DOWNLOAD_PATH
                 if ([string]::IsNullOrWhiteSpace($downloadPath)) { $downloadPath = "/downloads/tidalarr" }
                 $config.DownloadClientFields["downloadPath"] = $downloadPath
+            }
+        }
+
+        "AppleMusicarr" {
+            # AppleMusicarr is an ImportList plugin; it requires Apple Music developer credentials.
+            # Env vars:
+            #   APPLEMUSICARR_TEAM_ID
+            #   APPLEMUSICARR_KEY_ID
+            #   APPLEMUSICARR_PRIVATE_KEY
+            #   APPLEMUSICARR_MUSIC_USER_TOKEN
+            # Optional:
+            #   APPLEMUSICARR_BASE_URL
+            $teamId = $env:APPLEMUSICARR_TEAM_ID
+            $keyId = $env:APPLEMUSICARR_KEY_ID
+            $privateKey = $env:APPLEMUSICARR_PRIVATE_KEY
+            $musicUserToken = $env:APPLEMUSICARR_MUSIC_USER_TOKEN
+
+            if ([string]::IsNullOrWhiteSpace($teamId)) { $config.MissingRequired += "APPLEMUSICARR_TEAM_ID" }
+            if ([string]::IsNullOrWhiteSpace($keyId)) { $config.MissingRequired += "APPLEMUSICARR_KEY_ID" }
+            if ([string]::IsNullOrWhiteSpace($privateKey)) { $config.MissingRequired += "APPLEMUSICARR_PRIVATE_KEY" }
+            if ([string]::IsNullOrWhiteSpace($musicUserToken)) { $config.MissingRequired += "APPLEMUSICARR_MUSIC_USER_TOKEN" }
+
+            if ($config.MissingRequired.Count -eq 0) {
+                $config.HasRequiredEnvVars = $true
+
+                # Import list fields are schema-driven; these keys match AppleMusicPluginSettings properties.
+                $config.ImportListFields["teamId"] = $teamId
+                $config.ImportListFields["keyId"] = $keyId
+                $config.ImportListFields["privateKey"] = $privateKey
+                $config.ImportListFields["musicUserToken"] = $musicUserToken
+
+                $baseUrl = $env:APPLEMUSICARR_BASE_URL
+                if (-not [string]::IsNullOrWhiteSpace($baseUrl)) {
+                    $config.ImportListFields["baseUrl"] = $baseUrl
+                }
             }
         }
 
@@ -992,7 +1027,9 @@ function Update-ComponentAuthFields {
         # Tidalarr auth
         "configPath", "redirectUrl", "tidalMarket",
         # Brainarr
-        "configurationUrl", "manualModelId", "autoDetectModel", "provider",
+        "configurationUrl", "manualModelId", "autoDetectModel", "provider",     
+        # AppleMusicarr import list credentials
+        "teamId", "keyId", "privateKey", "musicUserToken", "baseUrl",
         # Common safe fields (not user-tuned)
         "downloadPath"
     )
@@ -1021,7 +1058,11 @@ function Update-ComponentAuthFields {
             # PII (not masked by Lidarr but should be redacted in logs)
             "userId", "email", "username",
             # Internal URLs (may reveal infrastructure)
-            "configurationUrl"
+            "configurationUrl",
+            # Apple Music credentials
+            "teamId", "keyId", "privateKey", "musicUserToken",
+            # AppleMusicarr optional base URL (may contain internal hostnames)
+            "baseUrl"
         )
 
         # Only update if value differs (idempotency)
@@ -1112,7 +1153,7 @@ function Test-ConfigureGateForPlugin {
     # ==========================================================================
     # Step 1: Check if plugin is supported for env-var configuration
     # ==========================================================================
-    $supportedPlugins = @("Qobuzarr", "Tidalarr", "Brainarr")
+    $supportedPlugins = @("Qobuzarr", "Tidalarr", "Brainarr", "AppleMusicarr")
     if ($PluginName -notin $supportedPlugins) {
         $result.Outcome = "success"
         $result.Success = $true
@@ -1706,6 +1747,21 @@ $pluginConfigs = @{
         # - Gate SKIPs if configurationUrl is empty (no LLM = can't sync recommendations)
         # - This is Brainarr-specific; other import list plugins may have different credential fields
         ImportListCredentialAllOfFieldNames = @("configurationUrl")
+        ImportListCredentialAnyOfFieldNames = @()
+    }
+    'AppleMusicarr' = @{
+        ExpectIndexer = $false
+        ExpectDownloadClient = $false
+        ExpectImportList = $true
+        # No search/grab for import lists
+        SearchQuery = $null
+        ExpectedMinResults = 0
+        CredentialAllOfFieldNames = @()
+        CredentialAnyOfFieldNames = @()
+        SkipIndexerTest = $true
+        # ImportList gate settings for AppleMusicarr:
+        # - Requires Apple developer credentials and a Music User Token for library imports.
+        ImportListCredentialAllOfFieldNames = @("teamId", "keyId", "privateKey", "musicUserToken")
         ImportListCredentialAnyOfFieldNames = @()
     }
 }

@@ -58,7 +58,9 @@ $expectedFields = @(
     # PII fields
     "userId", "email", "username",
     # Internal URLs
-    "configurationUrl"
+    "configurationUrl",
+    # Apple Music credentials
+    "teamId", "keyId", "privateKey", "musicUserToken", "baseUrl"
 )
 
 # Find the sensitiveFields block - it starts with $sensitiveFields = @( and ends with the closing )
@@ -88,6 +90,14 @@ $originalToken = $env:QOBUZARR_AUTH_TOKEN
 $originalQobuzToken = $env:QOBUZ_AUTH_TOKEN
 $env:QOBUZARR_AUTH_TOKEN = $null
 $env:QOBUZ_AUTH_TOKEN = $null
+$originalAppleTeamId = $env:APPLEMUSICARR_TEAM_ID
+$originalAppleKeyId = $env:APPLEMUSICARR_KEY_ID
+$originalApplePrivateKey = $env:APPLEMUSICARR_PRIVATE_KEY
+$originalAppleMusicUserToken = $env:APPLEMUSICARR_MUSIC_USER_TOKEN
+$env:APPLEMUSICARR_TEAM_ID = $null
+$env:APPLEMUSICARR_KEY_ID = $null
+$env:APPLEMUSICARR_PRIVATE_KEY = $null
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = $null
 
 # Source the function definitions (import module pattern)
 # We'll parse and execute just the Get-PluginEnvConfig function
@@ -111,6 +121,21 @@ function Set-LidarrFieldValue { param([AllowNull()]`$Fields, [string]`$Name, `$V
 
     Write-TestResult -TestName "IndexerFields is empty hashtable" `
         -Passed ($config.IndexerFields.Count -eq 0)
+
+    $appleConfig = Get-PluginEnvConfig -PluginName "AppleMusicarr"
+
+    Write-TestResult -TestName "AppleMusicarr HasRequiredEnvVars is false when required env vars missing" `
+        -Passed ($appleConfig.HasRequiredEnvVars -eq $false)
+
+    foreach ($missing in @(
+        "APPLEMUSICARR_TEAM_ID",
+        "APPLEMUSICARR_KEY_ID",
+        "APPLEMUSICARR_PRIVATE_KEY",
+        "APPLEMUSICARR_MUSIC_USER_TOKEN"
+    )) {
+        Write-TestResult -TestName "AppleMusicarr MissingRequired contains $missing" `
+            -Passed ($appleConfig.MissingRequired -contains $missing)
+    }
 } else {
     Write-TestResult -TestName "Parse Get-PluginEnvConfig function" -Passed $false
 }
@@ -118,6 +143,10 @@ function Set-LidarrFieldValue { param([AllowNull()]`$Fields, [string]`$Name, `$V
 # Restore env vars
 $env:QOBUZARR_AUTH_TOKEN = $originalToken
 $env:QOBUZ_AUTH_TOKEN = $originalQobuzToken
+$env:APPLEMUSICARR_TEAM_ID = $originalAppleTeamId
+$env:APPLEMUSICARR_KEY_ID = $originalAppleKeyId
+$env:APPLEMUSICARR_PRIVATE_KEY = $originalApplePrivateKey
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = $originalAppleMusicUserToken
 
 Write-Host ""
 
@@ -129,6 +158,10 @@ Write-Host "Test Group: Get-PluginEnvConfig With Env Vars" -ForegroundColor Yell
 $env:QOBUZARR_AUTH_TOKEN = "test-token-12345"
 $env:QOBUZARR_USER_ID = "999"
 $env:QOBUZARR_COUNTRY_CODE = "GB"
+$env:APPLEMUSICARR_TEAM_ID = "TEAMID12345"
+$env:APPLEMUSICARR_KEY_ID = "KEYID12345"
+$env:APPLEMUSICARR_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = "music-user-token-abc"
 
 if ($functionMatch.Success) {
     $config = Get-PluginEnvConfig -PluginName "Qobuzarr"
@@ -153,12 +186,26 @@ if ($functionMatch.Success) {
 
     Write-TestResult -TestName "DownloadClientFields contains downloadPath" `
         -Passed ($config.DownloadClientFields.ContainsKey("downloadPath"))
+
+    $appleConfig = Get-PluginEnvConfig -PluginName "AppleMusicarr"
+
+    Write-TestResult -TestName "AppleMusicarr HasRequiredEnvVars is true when all required env vars set" `
+        -Passed ($appleConfig.HasRequiredEnvVars -eq $true)
+
+    foreach ($field in @("teamId", "keyId", "privateKey", "musicUserToken")) {
+        Write-TestResult -TestName "AppleMusicarr ImportListFields contains $field" `
+            -Passed ($appleConfig.ImportListFields.ContainsKey($field))
+    }
 }
 
 # Clean up
 $env:QOBUZARR_AUTH_TOKEN = $originalToken
 $env:QOBUZARR_USER_ID = $null
 $env:QOBUZARR_COUNTRY_CODE = $null
+$env:APPLEMUSICARR_TEAM_ID = $originalAppleTeamId
+$env:APPLEMUSICARR_KEY_ID = $originalAppleKeyId
+$env:APPLEMUSICARR_PRIVATE_KEY = $originalApplePrivateKey
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = $originalAppleMusicUserToken
 
 Write-Host ""
 
@@ -173,7 +220,8 @@ $sensitiveFields = @(
     "refreshToken", "accessToken", "clientSecret",
     "apiKey", "secret", "token",
     "userId", "email", "username",
-    "configurationUrl"
+    "configurationUrl",
+    "teamId", "keyId", "privateKey", "musicUserToken", "baseUrl"
 )
 
 # Scenario: masked value + no ForceUpdate = skip
@@ -236,7 +284,7 @@ Write-Host "Test Group: Redaction Consistency" -ForegroundColor Yellow
 
 $changedFieldNames = @()
 
-foreach ($testField in @("authToken", "password", "redirectUrl", "refreshToken", "accessToken", "clientSecret", "apiKey", "secret", "token", "appSecret", "userId", "email", "username", "configurationUrl")) {
+foreach ($testField in @("authToken", "password", "redirectUrl", "refreshToken", "accessToken", "clientSecret", "apiKey", "secret", "token", "appSecret", "userId", "email", "username", "configurationUrl", "teamId", "keyId", "privateKey", "musicUserToken", "baseUrl")) {
     $changedFieldNames = @()
     if ($testField -in $sensitiveFields) {
         $changedFieldNames += "$testField=[REDACTED]"

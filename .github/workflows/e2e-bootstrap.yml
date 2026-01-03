@@ -14,7 +14,7 @@ on:
       plugins:
         description: Comma-separated plugins to test
         required: true
-        default: Qobuzarr,Tidalarr,Brainarr
+        default: Qobuzarr,Tidalarr,Brainarr,AppleMusicarr
       run_search_gate:
         description: Run Search + AlbumSearch gates (requires indexer credentials)
         type: boolean
@@ -26,7 +26,7 @@ on:
         required: true
         default: false
       run_importlist_gate:
-        description: Run ImportList gate (Brainarr LLM sync)
+        description: Run ImportList gate (ImportList plugins like Brainarr/AppleMusicarr)
         type: boolean
         required: true
         default: false
@@ -196,6 +196,11 @@ jobs:
           TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
           # Brainarr credentials
           BRAINARR_LLM_BASE_URL: ${{ secrets.BRAINARR_LLM_BASE_URL }}
+          # AppleMusicarr credentials (Apple Music developer creds)
+          APPLEMUSICARR_TEAM_ID: ${{ secrets.APPLEMUSICARR_TEAM_ID }}
+          APPLEMUSICARR_KEY_ID: ${{ secrets.APPLEMUSICARR_KEY_ID }}
+          APPLEMUSICARR_PRIVATE_KEY: ${{ secrets.APPLEMUSICARR_PRIVATE_KEY }}
+          APPLEMUSICARR_MUSIC_USER_TOKEN: ${{ secrets.APPLEMUSICARR_MUSIC_USER_TOKEN }}
           # Cross-repo PAT for private plugin repos
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
         run: |
@@ -207,6 +212,10 @@ jobs:
           echo "::add-mask::${TIDALARR_REDIRECT_URL:-}"
           echo "::add-mask::${TIDAL_REDIRECT_URL:-}"
           echo "::add-mask::${BRAINARR_LLM_BASE_URL:-}"
+          echo "::add-mask::${APPLEMUSICARR_TEAM_ID:-}"
+          echo "::add-mask::${APPLEMUSICARR_KEY_ID:-}"
+          echo "::add-mask::${APPLEMUSICARR_PRIVATE_KEY:-}"
+          echo "::add-mask::${APPLEMUSICARR_MUSIC_USER_TOKEN:-}"
           echo "::add-mask::${CROSS_REPO_PAT:-}"
 
           # Check CROSS_REPO_PAT (required for private plugin repos)
@@ -247,6 +256,15 @@ jobs:
             fi
           fi
 
+          # Check AppleMusicarr credentials for ImportList gate
+          if [[ "$INPUT_RUN_IMPORTLIST_GATE" == "true" && "$INPUT_PLUGINS" == *"AppleMusicarr"* ]]; then
+            missing=0
+            if [[ -z "${APPLEMUSICARR_TEAM_ID:-}" ]]; then echo "::warning::APPLEMUSICARR_TEAM_ID missing - AppleMusicarr ImportList gate will SKIP"; missing=1; fi
+            if [[ -z "${APPLEMUSICARR_KEY_ID:-}" ]]; then echo "::warning::APPLEMUSICARR_KEY_ID missing - AppleMusicarr ImportList gate will SKIP"; missing=1; fi
+            if [[ -z "${APPLEMUSICARR_PRIVATE_KEY:-}" ]]; then echo "::warning::APPLEMUSICARR_PRIVATE_KEY missing - AppleMusicarr ImportList gate will SKIP"; missing=1; fi
+            if [[ -z "${APPLEMUSICARR_MUSIC_USER_TOKEN:-}" ]]; then echo "::warning::APPLEMUSICARR_MUSIC_USER_TOKEN missing - AppleMusicarr ImportList gate will SKIP"; missing=1; fi
+          fi
+
           echo "Secret validation complete"
 
       - name: Setup .NET SDK
@@ -281,6 +299,16 @@ jobs:
           repository: RicherTunes/Brainarr
           ref: main
           path: brainarr
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          submodules: recursive
+
+      - name: Checkout AppleMusicarr
+        if: contains(inputs.plugins, 'AppleMusicarr')
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/AppleMusicarr
+          ref: main
+          path: applemusicarr
           token: ${{ secrets.CROSS_REPO_PAT }}
           submodules: recursive
 
@@ -536,7 +564,7 @@ jobs:
           fi
 
           # Copy to plugin ext directories
-          for plugin_dir in qobuzarr tidalarr brainarr; do
+          for plugin_dir in qobuzarr tidalarr brainarr applemusicarr; do
             if [ -d "$plugin_dir" ]; then
               mkdir -p "$plugin_dir/ext/Lidarr/_output/net8.0"
               cp _lidarr_assemblies/*.dll "$plugin_dir/ext/Lidarr/_output/net8.0/"
@@ -548,7 +576,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for plugin_dir in qobuzarr tidalarr brainarr; do
+          for plugin_dir in qobuzarr tidalarr brainarr applemusicarr; do
             submod="$plugin_dir/ext/Lidarr.Plugin.Common"
             if [ -d "$submod" ]; then
               echo "Syncing tools to $submod..."
@@ -963,6 +991,12 @@ jobs:
           BRAINARR_MODEL_ID: ${{ secrets.BRAINARR_MODEL_ID }}
           BRAINARR_MODEL: ${{ secrets.BRAINARR_MODEL }}
           BRAINARR_PROVIDER: ${{ secrets.BRAINARR_PROVIDER }}
+          # AppleMusicarr credentials (ImportList)
+          APPLEMUSICARR_TEAM_ID: ${{ secrets.APPLEMUSICARR_TEAM_ID }}
+          APPLEMUSICARR_KEY_ID: ${{ secrets.APPLEMUSICARR_KEY_ID }}
+          APPLEMUSICARR_PRIVATE_KEY: ${{ secrets.APPLEMUSICARR_PRIVATE_KEY }}
+          APPLEMUSICARR_MUSIC_USER_TOKEN: ${{ secrets.APPLEMUSICARR_MUSIC_USER_TOKEN }}
+          APPLEMUSICARR_BASE_URL: ${{ secrets.APPLEMUSICARR_BASE_URL }}
         run: |
           # Set gate configuration from inputs
           if ($env:INPUT_VALIDATE_METADATA -eq "true") {
@@ -1708,7 +1742,7 @@ jobs:
           }
           docker rm "$cid" >/dev/null
 
-          for plugin_dir in qobuzarr tidalarr brainarr; do
+          for plugin_dir in qobuzarr tidalarr brainarr applemusicarr; do
             if [ -d "$plugin_dir" ]; then
               mkdir -p "$plugin_dir/ext/Lidarr/_output/net8.0"
               find _lidarr_extracted -type f -name "*.dll" -exec cp {} "$plugin_dir/ext/Lidarr/_output/net8.0/" \;
@@ -1719,7 +1753,7 @@ jobs:
       - name: Sync tools to plugin submodules
         shell: bash
         run: |
-          for plugin_dir in qobuzarr tidalarr brainarr; do
+          for plugin_dir in qobuzarr tidalarr brainarr applemusicarr; do
             submod="$plugin_dir/ext/Lidarr.Plugin.Common"
             if [ -d "$submod" ]; then
               [ -d "tools" ] && rm -rf "$submod/tools" && cp -r tools "$submod/tools"

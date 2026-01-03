@@ -28,6 +28,25 @@ $testResults = @(
         StartTime = [DateTime]::UtcNow.AddSeconds(-1)
         EndTime = [DateTime]::UtcNow
     }
+    ,
+    [PSCustomObject]@{
+        Gate = 'ImportList'
+        PluginName = 'AppleMusicarr'
+        Outcome = 'skipped'
+        Success = $false
+        Errors = @()
+        Details = @{
+            SkipReason = 'Missing env vars: privateKey'
+            CredentialAllOf = @('teamId', 'keyId', 'privateKey', 'musicUserToken')
+            teamId = 'TEAMID12345'
+            keyId = 'KEYID12345'
+            privateKey = '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----'
+            musicUserToken = 'music-user-token-abc'
+            baseUrl = 'http://internal.example.local:1234'
+        }
+        StartTime = [DateTime]::UtcNow.AddSeconds(-1)
+        EndTime = [DateTime]::UtcNow
+    }
 )
 
 $testContext = @{
@@ -39,9 +58,9 @@ $testContext = @{
     ImageId = 'sha256:img123'
     ImageDigest = 'sha256:abc'
     RequestedGate = 'search'
-    Plugins = @('Qobuzarr')
+    Plugins = @('Qobuzarr', 'AppleMusicarr')
     EffectiveGates = @('Search')
-    EffectivePlugins = @('Qobuzarr')
+    EffectivePlugins = @('Qobuzarr', 'AppleMusicarr')
     StopReason = $null
     RedactionSelfTestExecuted = $true
     RedactionSelfTestPassed = $true
@@ -50,8 +69,8 @@ $testContext = @{
     DiagnosticsIncludedFiles = @()
     LidarrVersion = '2.9.6'
     LidarrBranch = 'plugins'
-    SourceShas = @{ Common = 'abc'; Qobuzarr = $null; Tidalarr = $null; Brainarr = $null }
-    SourceProvenance = @{ Common = 'git'; Qobuzarr = 'unknown'; Tidalarr = 'unknown'; Brainarr = 'unknown' }
+    SourceShas = @{ Common = 'abc'; Qobuzarr = $null; Tidalarr = $null; Brainarr = $null; AppleMusicarr = $null }
+    SourceProvenance = @{ Common = 'git'; Qobuzarr = 'unknown'; Tidalarr = 'unknown'; Brainarr = 'unknown'; AppleMusicarr = 'unknown' }
 }
 
 $json = ConvertTo-E2ERunManifest -Results $testResults -Context $testContext
@@ -78,6 +97,11 @@ Test-Assertion ($json -notmatch 'secret123abc') "authToken value not leaked"
 Test-Assertion ($json -notmatch 'mypassword') "password value not leaked"
 Test-Assertion ($json -notmatch 'abcd1234567890abcd1234567890ab') "API key not leaked in raw form"
 Test-Assertion ($json -notmatch '192\.168\.1\.100') "Private IP not leaked"
+Test-Assertion ($json -notmatch 'TEAMID12345') "Apple Music teamId not leaked"
+Test-Assertion ($json -notmatch 'KEYID12345') "Apple Music keyId not leaked"
+Test-Assertion ($json -notmatch 'music-user-token-abc') "Apple Music user token not leaked"
+Test-Assertion ($json -notmatch 'BEGIN PRIVATE KEY') "Apple Music private key PEM not leaked"
+Test-Assertion ($json -notmatch 'internal\\.example\\.local') "Apple Music baseUrl not leaked"
 
 Write-Host ""
 Write-Host "Test Group: Redaction Applied" -ForegroundColor Yellow
