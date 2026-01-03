@@ -78,7 +78,9 @@
     "accesstoken",
     "clientsecret",
     "creds",
-    "prereqs"
+    "prereqs",
+    "pluginloader",
+    "parallelizable"
   ],
   "ignorePaths": [
     "**/bin",
