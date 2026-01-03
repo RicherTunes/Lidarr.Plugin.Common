@@ -192,6 +192,18 @@
               ],
               "description": "Reason for deploy/skip/failure. Freshness reasons: token_expired (overwritten), token_still_valid (skipped), no_expiry_field/expiry_unknown (overwritten to be safe)."
             },
+            "errorCode": {
+              "type": ["string", "null"],
+              "enum": [
+                "E2E_TOKEN_SEED_INVALID_BASE64",
+                "E2E_TOKEN_SEED_INVALID_JSON",
+                "E2E_TOKEN_SEED_MISSING_SECRET",
+                "E2E_TOKEN_SEED_IO_ERROR",
+                "E2E_TOKEN_SEED_EXPIRY_PARSE_ERROR",
+                null
+              ],
+              "description": "Explicit error code for seeding failures. Emitted directly from seeding step, not inferred by classifier."
+            },
             "deployed": {
               "type": "boolean",
               "description": "Whether tokens were successfully written to the config directory."
@@ -200,6 +212,16 @@
               "type": ["string", "null"],
               "enum": ["configPath", null],
               "description": "Kind of path where tokens were deployed (redacted for security). configPath = /config/plugins/..."
+            },
+            "seededAtUtc": {
+              "type": ["string", "null"],
+              "format": "date-time",
+              "description": "ISO 8601 timestamp when tokens were seeded (for postmortem debugging)."
+            },
+            "overwriteMode": {
+              "type": ["string", "null"],
+              "enum": ["auto", "always", "never", null],
+              "description": "Overwrite mode that was in effect during seeding."
             }
           }
         }

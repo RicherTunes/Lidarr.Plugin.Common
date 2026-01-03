@@ -851,10 +851,16 @@ function ConvertTo-E2ERunManifest {
                 status = if ($env:TIDAL_TOKEN_SEED_STATUS) { $env:TIDAL_TOKEN_SEED_STATUS } else { $null }
                 # Reason: freshness/deploy/skip reasons (see schema for full enum)
                 reason = if ($env:TIDAL_TOKEN_SEED_REASON) { $env:TIDAL_TOKEN_SEED_REASON } else { $null }
+                # Explicit error code for seeding failures (not inferred from classifier)
+                errorCode = if ($env:TIDAL_TOKEN_SEED_ERROR_CODE) { $env:TIDAL_TOKEN_SEED_ERROR_CODE } else { $null }
                 # Path is redacted (just indicates whether seeding wrote a file)
                 deployed = ($env:TIDALARR_SEEDED_TOKENS_PATH -ne $null -and $env:TIDALARR_SEEDED_TOKENS_PATH -ne '')
                 # Path kind for debugging (actual path redacted)
                 targetPathKind = if ($env:TIDAL_TOKEN_SEED_TARGET_PATH_KIND) { $env:TIDAL_TOKEN_SEED_TARGET_PATH_KIND } else { $null }
+                # UTC timestamp when tokens were seeded (ISO 8601)
+                seededAtUtc = if ($env:TIDAL_TOKEN_SEED_SEEDED_AT_UTC) { $env:TIDAL_TOKEN_SEED_SEEDED_AT_UTC } else { $null }
+                # Overwrite mode used: auto, always, or never
+                overwriteMode = if ($env:TIDAL_TOKEN_SEED_OVERWRITE_MODE) { $env:TIDAL_TOKEN_SEED_OVERWRITE_MODE } else { $null }
             }
         }
         request = [ordered]@{

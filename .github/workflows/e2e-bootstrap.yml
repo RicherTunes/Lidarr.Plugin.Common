@@ -701,10 +701,15 @@ jobs:
 
           $stagingFile = ".e2e-bootstrap/tidal_tokens_staging.json"
 
-          # No tokens provided - record reason and exit cleanly
+          # Record overwrite mode for manifest
+          $overwriteMode = if ($env:INPUT_TIDAL_TOKENS_OVERWRITE) { $env:INPUT_TIDAL_TOKENS_OVERWRITE } else { "auto" }
+          "TIDAL_TOKEN_SEED_OVERWRITE_MODE=$overwriteMode" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+          # No tokens provided - record reason and explicit error code
           if ([string]::IsNullOrEmpty($env:TIDALARR_TOKENS_JSON_B64)) {
             "TIDAL_TOKEN_SEED_STATUS=skipped" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             "TIDAL_TOKEN_SEED_REASON=no_secret_provided" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_MISSING_SECRET" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             Write-Host "::notice::Tidal token seeding skipped (TIDALARR_TOKENS_JSON_B64 not set)"
             exit 0
           }
@@ -725,6 +730,7 @@ jobs:
           } catch {
             "TIDAL_TOKEN_SEED_STATUS=failed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             "TIDAL_TOKEN_SEED_REASON=invalid_base64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_INVALID_BASE64" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             Write-Host "::error::TIDALARR_TOKENS_JSON_B64 contains invalid base64: $_"
             exit 1
           }
@@ -735,12 +741,21 @@ jobs:
           } catch {
             "TIDAL_TOKEN_SEED_STATUS=failed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             "TIDAL_TOKEN_SEED_REASON=invalid_json" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_INVALID_JSON" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
             Write-Host "::error::Decoded TIDALARR_TOKENS_JSON_B64 is not valid JSON: $_"
             exit 1
           }
 
           # Write to staging file (UTF8 without BOM for JSON compatibility)
-          [System.IO.File]::WriteAllText($stagingFile, $decodedJson, [System.Text.UTF8Encoding]::new($false))
+          try {
+            [System.IO.File]::WriteAllText($stagingFile, $decodedJson, [System.Text.UTF8Encoding]::new($false))
+          } catch {
+            "TIDAL_TOKEN_SEED_STATUS=failed" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_REASON=io_error" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_IO_ERROR" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+            Write-Host "::error::Failed to write staging file: $_"
+            exit 1
+          }
 
           # Report success without revealing content
           $bytes = (Get-Item $stagingFile).Length
@@ -842,72 +857,117 @@ jobs:
             else
               # Auto mode: check token freshness
               # Try to extract expires_at or expiresAt from existing tokens
-              EXPIRES_AT=""
+              # Handles both epoch seconds (int) and ISO 8601 strings (UTC)
+              EXPIRY_RESULT=""
               if command -v python3 &>/dev/null; then
-                EXPIRES_AT=$(python3 -c "
+                EXPIRY_RESULT=$(python3 -c "
 import json, sys
+from datetime import datetime, timezone
 try:
     with open('$TARGET_FILE') as f:
         tokens = json.load(f)
     # Try common expiry field names
-    exp = tokens.get('expires_at') or tokens.get('expiresAt') or tokens.get('expiry') or ''
-    print(exp)
-except:
-    print('')
-" 2>/dev/null || echo "")
+    exp = tokens.get('expires_at') or tokens.get('expiresAt') or tokens.get('expiry') or tokens.get('expires')
+    if exp is None:
+        print('no_field')
+        sys.exit(0)
+
+    now_utc = datetime.now(timezone.utc).timestamp()
+    buffer = 3600  # 1 hour
+
+    # Handle epoch seconds (int or numeric string)
+    try:
+        exp_epoch = int(exp)
+        if exp_epoch <= (now_utc + buffer):
+            print('expired')
+        else:
+            print('valid')
+        sys.exit(0)
+    except (ValueError, TypeError):
+        pass
+
+    # Handle ISO 8601 string (assume UTC if no timezone)
+    try:
+        # Try parsing ISO format
+        if isinstance(exp, str):
+            # Handle both 'Z' suffix and '+00:00'
+            exp_str = exp.replace('Z', '+00:00')
+            if '+' not in exp_str and '-' not in exp_str[10:]:
+                # No timezone - assume UTC
+                exp_str += '+00:00'
+            exp_dt = datetime.fromisoformat(exp_str)
+            exp_epoch = exp_dt.timestamp()
+            if exp_epoch <= (now_utc + buffer):
+                print('expired')
+            else:
+                print('valid')
+            sys.exit(0)
+    except (ValueError, TypeError):
+        pass
+
+    # Could not parse
+    print('parse_error')
+except Exception as e:
+    print(f'error:{e}')
+" 2>/dev/null || echo "error:python_failed")
+              else
+                EXPIRY_RESULT="error:no_python"
               fi
 
-              if [[ -n "$EXPIRES_AT" ]]; then
-                # Parse expiry and compare to current time (with 1-hour buffer)
-                NOW=$(date +%s)
-                BUFFER=3600  # 1 hour
-                IS_EXPIRED=$(python3 -c "
-import sys
-try:
-    expires_at = int('$EXPIRES_AT')
-    now = int('$NOW')
-    buffer = int('$BUFFER')
-    # Expired or within buffer
-    print('true' if expires_at <= (now + buffer) else 'false')
-except:
-    print('unknown')
-" 2>/dev/null || echo "unknown")
-
-                if [[ "$IS_EXPIRED" == "true" ]]; then
+              case "$EXPIRY_RESULT" in
+                expired)
                   SHOULD_DEPLOY="true"
                   DEPLOY_REASON="token_expired"
                   echo "::warning::Existing tokens expired or near expiry, overwriting"
-                elif [[ "$IS_EXPIRED" == "false" ]]; then
+                  ;;
+                valid)
                   SHOULD_DEPLOY="false"
-                  echo "::notice::Existing tokens still valid (expires_at=$EXPIRES_AT), skipping"
+                  echo "::notice::Existing tokens still valid, skipping"
                   echo "TIDAL_TOKEN_SEED_STATUS=skipped" >> $GITHUB_ENV
                   echo "TIDAL_TOKEN_SEED_REASON=token_still_valid" >> $GITHUB_ENV
                   rm -f "$STAGING_FILE"
-                else
-                  # Can't determine expiry - be safe and overwrite
+                  ;;
+                no_field)
+                  SHOULD_DEPLOY="true"
+                  DEPLOY_REASON="no_expiry_field"
+                  echo "::notice::No expiry field in existing tokens, overwriting to be safe"
+                  ;;
+                parse_error)
                   SHOULD_DEPLOY="true"
                   DEPLOY_REASON="expiry_unknown"
-                  echo "::notice::Could not determine token expiry, overwriting to be safe"
-                fi
-              else
-                # No expiry field found - be safe and overwrite
-                SHOULD_DEPLOY="true"
-                DEPLOY_REASON="no_expiry_field"
-                echo "::notice::No expiry field in existing tokens, overwriting to be safe"
-              fi
+                  echo "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_EXPIRY_PARSE_ERROR" >> $GITHUB_ENV
+                  echo "::warning::Could not parse token expiry format, overwriting to be safe"
+                  ;;
+                *)
+                  # Any error - be safe and overwrite
+                  SHOULD_DEPLOY="true"
+                  DEPLOY_REASON="expiry_unknown"
+                  echo "::notice::Could not determine token expiry ($EXPIRY_RESULT), overwriting to be safe"
+                  ;;
+              esac
             fi
 
             if [[ "$SHOULD_DEPLOY" == "true" ]]; then
               # Copy from staging to final location
-              cp "$STAGING_FILE" "$TARGET_FILE"
+              if ! cp "$STAGING_FILE" "$TARGET_FILE" 2>/dev/null; then
+                echo "TIDAL_TOKEN_SEED_STATUS=failed" >> $GITHUB_ENV
+                echo "TIDAL_TOKEN_SEED_REASON=io_error" >> $GITHUB_ENV
+                echo "TIDAL_TOKEN_SEED_ERROR_CODE=E2E_TOKEN_SEED_IO_ERROR" >> $GITHUB_ENV
+                echo "::error::Failed to copy tokens to target location"
+                exit 1
+              fi
               chmod 600 "$TARGET_FILE"
               rm -f "$STAGING_FILE"
+
+              # Record seededAtUtc timestamp (ISO 8601)
+              SEEDED_AT_UTC=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 
               BYTES=$(wc -c < "$TARGET_FILE")
               echo "TIDAL_TOKEN_SEED_STATUS=deployed" >> $GITHUB_ENV
               echo "TIDAL_TOKEN_SEED_REASON=$DEPLOY_REASON" >> $GITHUB_ENV
               echo "TIDALARR_SEEDED_TOKENS_PATH=$TARGET_FILE" >> $GITHUB_ENV
               echo "TIDAL_TOKEN_SEED_TARGET_PATH_KIND=configPath" >> $GITHUB_ENV
+              echo "TIDAL_TOKEN_SEED_SEEDED_AT_UTC=$SEEDED_AT_UTC" >> $GITHUB_ENV
               echo "::notice::Tidal tokens deployed to $TARGET_FILE ($BYTES bytes, reason=$DEPLOY_REASON)"
             fi
           elif [[ "${TIDAL_TOKEN_SEED_STATUS:-}" == "skipped" ]]; then
