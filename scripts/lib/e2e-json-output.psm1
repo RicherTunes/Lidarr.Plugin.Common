@@ -183,7 +183,7 @@ $script:SensitiveDetailFields = @(
     'refreshtoken', 'refresh_token', 'clientsecret', 'client_secret',
     'privatekey', 'private_key', 'bearer', 'credentials',
     # Apple Music (AppleMusicarr)
-    'teamid', 'keyid', 'musicusertoken', 'music_user_token',
+    'teamid', 'keyid', 'privatekeyb64', 'private_key_b64', 'musicusertoken', 'music_user_token',
     # AppleMusicarr optional base URL (may contain internal hostnames)
     'baseurl', 'base_url',
     # Common single-word credential fields

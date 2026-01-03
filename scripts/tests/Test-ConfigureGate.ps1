@@ -93,10 +93,12 @@ $env:QOBUZ_AUTH_TOKEN = $null
 $originalAppleTeamId = $env:APPLEMUSICARR_TEAM_ID
 $originalAppleKeyId = $env:APPLEMUSICARR_KEY_ID
 $originalApplePrivateKey = $env:APPLEMUSICARR_PRIVATE_KEY
-$originalAppleMusicUserToken = $env:APPLEMUSICARR_MUSIC_USER_TOKEN
+$originalApplePrivateKeyB64 = $env:APPLEMUSICARR_PRIVATE_KEY_B64
+$originalAppleMusicUserToken = $env:APPLEMUSICARR_MUSIC_USER_TOKEN        
 $env:APPLEMUSICARR_TEAM_ID = $null
 $env:APPLEMUSICARR_KEY_ID = $null
 $env:APPLEMUSICARR_PRIVATE_KEY = $null
+$env:APPLEMUSICARR_PRIVATE_KEY_B64 = $null
 $env:APPLEMUSICARR_MUSIC_USER_TOKEN = $null
 
 # Source the function definitions (import module pattern)
@@ -130,11 +132,11 @@ function Set-LidarrFieldValue { param([AllowNull()]`$Fields, [string]`$Name, `$V
     foreach ($missing in @(
         "APPLEMUSICARR_TEAM_ID",
         "APPLEMUSICARR_KEY_ID",
-        "APPLEMUSICARR_PRIVATE_KEY",
+        "APPLEMUSICARR_PRIVATE_KEY(_B64)",
         "APPLEMUSICARR_MUSIC_USER_TOKEN"
     )) {
         Write-TestResult -TestName "AppleMusicarr MissingRequired contains $missing" `
-            -Passed ($appleConfig.MissingRequired -contains $missing)
+            -Passed ($appleConfig.MissingRequired -contains $missing)     
     }
 } else {
     Write-TestResult -TestName "Parse Get-PluginEnvConfig function" -Passed $false
@@ -146,7 +148,8 @@ $env:QOBUZ_AUTH_TOKEN = $originalQobuzToken
 $env:APPLEMUSICARR_TEAM_ID = $originalAppleTeamId
 $env:APPLEMUSICARR_KEY_ID = $originalAppleKeyId
 $env:APPLEMUSICARR_PRIVATE_KEY = $originalApplePrivateKey
-$env:APPLEMUSICARR_MUSIC_USER_TOKEN = $originalAppleMusicUserToken
+$env:APPLEMUSICARR_PRIVATE_KEY_B64 = $originalApplePrivateKeyB64
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = $originalAppleMusicUserToken        
 
 Write-Host ""
 
@@ -161,6 +164,7 @@ $env:QOBUZARR_COUNTRY_CODE = "GB"
 $env:APPLEMUSICARR_TEAM_ID = "TEAMID12345"
 $env:APPLEMUSICARR_KEY_ID = "KEYID12345"
 $env:APPLEMUSICARR_PRIVATE_KEY = "-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----"
+$env:APPLEMUSICARR_PRIVATE_KEY_B64 = $null
 $env:APPLEMUSICARR_MUSIC_USER_TOKEN = "music-user-token-abc"
 
 if ($functionMatch.Success) {
@@ -194,8 +198,20 @@ if ($functionMatch.Success) {
 
     foreach ($field in @("teamId", "keyId", "privateKey", "musicUserToken")) {
         Write-TestResult -TestName "AppleMusicarr ImportListFields contains $field" `
-            -Passed ($appleConfig.ImportListFields.ContainsKey($field))
+            -Passed ($appleConfig.ImportListFields.ContainsKey($field))   
     }
+
+    Write-TestResult -TestName "AppleMusicarr privateKey is set from raw env var" `
+        -Passed (-not [string]::IsNullOrWhiteSpace($appleConfig.ImportListFields["privateKey"]))
+
+    # Base64 private key support (preferred for CI; avoids multiline secret handling)
+    $env:APPLEMUSICARR_PRIVATE_KEY = $null
+    $env:APPLEMUSICARR_PRIVATE_KEY_B64 = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes("-----BEGIN PRIVATE KEY-----`nabc`n-----END PRIVATE KEY-----"))
+    $appleConfigB64 = Get-PluginEnvConfig -PluginName "AppleMusicarr"
+    Write-TestResult -TestName "AppleMusicarr HasRequiredEnvVars is true with PRIVATE_KEY_B64 only" `
+        -Passed ($appleConfigB64.HasRequiredEnvVars -eq $true)
+    Write-TestResult -TestName "AppleMusicarr privateKey is decoded from base64" `
+        -Passed ($appleConfigB64.ImportListFields["privateKey"] -match "BEGIN PRIVATE KEY")
 }
 
 # Clean up
@@ -205,7 +221,8 @@ $env:QOBUZARR_COUNTRY_CODE = $null
 $env:APPLEMUSICARR_TEAM_ID = $originalAppleTeamId
 $env:APPLEMUSICARR_KEY_ID = $originalAppleKeyId
 $env:APPLEMUSICARR_PRIVATE_KEY = $originalApplePrivateKey
-$env:APPLEMUSICARR_MUSIC_USER_TOKEN = $originalAppleMusicUserToken
+$env:APPLEMUSICARR_PRIVATE_KEY_B64 = $originalApplePrivateKeyB64
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = $originalAppleMusicUserToken        
 
 Write-Host ""
 

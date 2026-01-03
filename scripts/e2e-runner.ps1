@@ -846,18 +846,28 @@ function Get-PluginEnvConfig {
             # Env vars:
             #   APPLEMUSICARR_TEAM_ID
             #   APPLEMUSICARR_KEY_ID
-            #   APPLEMUSICARR_PRIVATE_KEY
+            #   APPLEMUSICARR_PRIVATE_KEY (PEM, multi-line)
+            #   APPLEMUSICARR_PRIVATE_KEY_B64 (preferred; base64-encoded PEM)
             #   APPLEMUSICARR_MUSIC_USER_TOKEN
             # Optional:
             #   APPLEMUSICARR_BASE_URL
             $teamId = $env:APPLEMUSICARR_TEAM_ID
             $keyId = $env:APPLEMUSICARR_KEY_ID
             $privateKey = $env:APPLEMUSICARR_PRIVATE_KEY
+            $privateKeyB64 = $env:APPLEMUSICARR_PRIVATE_KEY_B64
             $musicUserToken = $env:APPLEMUSICARR_MUSIC_USER_TOKEN
 
             if ([string]::IsNullOrWhiteSpace($teamId)) { $config.MissingRequired += "APPLEMUSICARR_TEAM_ID" }
             if ([string]::IsNullOrWhiteSpace($keyId)) { $config.MissingRequired += "APPLEMUSICARR_KEY_ID" }
-            if ([string]::IsNullOrWhiteSpace($privateKey)) { $config.MissingRequired += "APPLEMUSICARR_PRIVATE_KEY" }
+            if ([string]::IsNullOrWhiteSpace($privateKey) -and -not [string]::IsNullOrWhiteSpace($privateKeyB64)) {
+                try {
+                    $privateKey = [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($privateKeyB64.Trim()))
+                }
+                catch {
+                    $privateKey = $null
+                }
+            }
+            if ([string]::IsNullOrWhiteSpace($privateKey)) { $config.MissingRequired += "APPLEMUSICARR_PRIVATE_KEY(_B64)" }
             if ([string]::IsNullOrWhiteSpace($musicUserToken)) { $config.MissingRequired += "APPLEMUSICARR_MUSIC_USER_TOKEN" }
 
             if ($config.MissingRequired.Count -eq 0) {

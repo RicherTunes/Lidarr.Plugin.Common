@@ -196,10 +196,12 @@ jobs:
           TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
           # Brainarr credentials
           BRAINARR_LLM_BASE_URL: ${{ secrets.BRAINARR_LLM_BASE_URL }}
-          # AppleMusicarr credentials (Apple Music developer creds)
-          APPLEMUSICARR_TEAM_ID: ${{ secrets.APPLEMUSICARR_TEAM_ID }}
-          APPLEMUSICARR_KEY_ID: ${{ secrets.APPLEMUSICARR_KEY_ID }}
+          # AppleMusicarr credentials (Apple Music developer creds)       
+          APPLEMUSICARR_TEAM_ID: ${{ secrets.APPLEMUSICARR_TEAM_ID }}     
+          APPLEMUSICARR_KEY_ID: ${{ secrets.APPLEMUSICARR_KEY_ID }}       
           APPLEMUSICARR_PRIVATE_KEY: ${{ secrets.APPLEMUSICARR_PRIVATE_KEY }}
+          # Preferred: base64-encoded private key (single-line, safer for logs)
+          APPLEMUSICARR_PRIVATE_KEY_B64: ${{ secrets.APPLEMUSICARR_PRIVATE_KEY_B64 }}
           APPLEMUSICARR_MUSIC_USER_TOKEN: ${{ secrets.APPLEMUSICARR_MUSIC_USER_TOKEN }}
           # Cross-repo PAT for private plugin repos
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
@@ -214,7 +216,13 @@ jobs:
           echo "::add-mask::${BRAINARR_LLM_BASE_URL:-}"
           echo "::add-mask::${APPLEMUSICARR_TEAM_ID:-}"
           echo "::add-mask::${APPLEMUSICARR_KEY_ID:-}"
-          echo "::add-mask::${APPLEMUSICARR_PRIVATE_KEY:-}"
+          # Avoid echoing multi-line secrets directly. Prefer base64 secret.
+          echo "::add-mask::${APPLEMUSICARR_PRIVATE_KEY_B64:-}"
+          if [[ -n "${APPLEMUSICARR_PRIVATE_KEY:-}" ]]; then
+            while IFS= read -r line; do
+              if [[ -n "$line" ]]; then echo "::add-mask::$line"; fi
+            done <<< "${APPLEMUSICARR_PRIVATE_KEY}"
+          fi
           echo "::add-mask::${APPLEMUSICARR_MUSIC_USER_TOKEN:-}"
           echo "::add-mask::${CROSS_REPO_PAT:-}"
 
@@ -261,7 +269,7 @@ jobs:
             missing=0
             if [[ -z "${APPLEMUSICARR_TEAM_ID:-}" ]]; then echo "::warning::APPLEMUSICARR_TEAM_ID missing - AppleMusicarr ImportList gate will SKIP"; missing=1; fi
             if [[ -z "${APPLEMUSICARR_KEY_ID:-}" ]]; then echo "::warning::APPLEMUSICARR_KEY_ID missing - AppleMusicarr ImportList gate will SKIP"; missing=1; fi
-            if [[ -z "${APPLEMUSICARR_PRIVATE_KEY:-}" ]]; then echo "::warning::APPLEMUSICARR_PRIVATE_KEY missing - AppleMusicarr ImportList gate will SKIP"; missing=1; fi
+            if [[ -z "${APPLEMUSICARR_PRIVATE_KEY_B64:-}" && -z "${APPLEMUSICARR_PRIVATE_KEY:-}" ]]; then echo "::warning::APPLEMUSICARR_PRIVATE_KEY(_B64) missing - AppleMusicarr ImportList gate will SKIP"; missing=1; fi
             if [[ -z "${APPLEMUSICARR_MUSIC_USER_TOKEN:-}" ]]; then echo "::warning::APPLEMUSICARR_MUSIC_USER_TOKEN missing - AppleMusicarr ImportList gate will SKIP"; missing=1; fi
           fi
 
@@ -992,11 +1000,12 @@ jobs:
           BRAINARR_MODEL: ${{ secrets.BRAINARR_MODEL }}
           BRAINARR_PROVIDER: ${{ secrets.BRAINARR_PROVIDER }}
           # AppleMusicarr credentials (ImportList)
-          APPLEMUSICARR_TEAM_ID: ${{ secrets.APPLEMUSICARR_TEAM_ID }}
-          APPLEMUSICARR_KEY_ID: ${{ secrets.APPLEMUSICARR_KEY_ID }}
+          APPLEMUSICARR_TEAM_ID: ${{ secrets.APPLEMUSICARR_TEAM_ID }}     
+          APPLEMUSICARR_KEY_ID: ${{ secrets.APPLEMUSICARR_KEY_ID }}       
           APPLEMUSICARR_PRIVATE_KEY: ${{ secrets.APPLEMUSICARR_PRIVATE_KEY }}
+          APPLEMUSICARR_PRIVATE_KEY_B64: ${{ secrets.APPLEMUSICARR_PRIVATE_KEY_B64 }}
           APPLEMUSICARR_MUSIC_USER_TOKEN: ${{ secrets.APPLEMUSICARR_MUSIC_USER_TOKEN }}
-          APPLEMUSICARR_BASE_URL: ${{ secrets.APPLEMUSICARR_BASE_URL }}
+          APPLEMUSICARR_BASE_URL: ${{ secrets.APPLEMUSICARR_BASE_URL }}   
         run: |
           # Set gate configuration from inputs
           if ($env:INPUT_VALIDATE_METADATA -eq "true") {

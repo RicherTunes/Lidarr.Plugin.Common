@@ -41,6 +41,7 @@ $testResults = @(
             teamId = 'TEAMID12345'
             keyId = 'KEYID12345'
             privateKey = '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----'
+            privateKeyB64 = 'LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0tCmFiYwotLS0tLUVORCBQUklWQVRFIEtFWS0tLS0t' # base64 of the PEM above
             musicUserToken = 'music-user-token-abc'
             baseUrl = 'http://internal.example.local:1234'
         }
@@ -101,6 +102,7 @@ Test-Assertion ($json -notmatch 'TEAMID12345') "Apple Music teamId not leaked"
 Test-Assertion ($json -notmatch 'KEYID12345') "Apple Music keyId not leaked"
 Test-Assertion ($json -notmatch 'music-user-token-abc') "Apple Music user token not leaked"
 Test-Assertion ($json -notmatch 'BEGIN PRIVATE KEY') "Apple Music private key PEM not leaked"
+Test-Assertion ($json -notmatch 'LS0tLS1CRUdJTiBQUklWQVRFIEtFWS0tLS0t') "Apple Music private key base64 not leaked"
 Test-Assertion ($json -notmatch 'internal\\.example\\.local') "Apple Music baseUrl not leaked"
 
 Write-Host ""

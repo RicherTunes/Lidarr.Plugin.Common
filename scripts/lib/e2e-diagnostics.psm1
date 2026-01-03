@@ -21,6 +21,8 @@ $script:SensitivePatterns = @(
     'client_secret',
     'privatekey',
     'private_key',
+    'privatekeyb64',
+    'private_key_b64',
     # Apple Music
     'teamid',
     'keyid',
