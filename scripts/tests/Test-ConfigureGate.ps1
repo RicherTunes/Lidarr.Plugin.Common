@@ -283,6 +283,32 @@ $script:mockComponents = @{
  $DisableStoredComponentIds = $true
  $DisableComponentIdPersistence = $true
 
+# Mock $pluginConfigs for testing
+$global:pluginConfigs = @{
+    'Qobuzarr' = @{
+        ExpectIndexer = $true
+        ExpectDownloadClient = $true
+        ExpectImportList = $false
+    }
+    'Tidalarr' = @{
+        ExpectIndexer = $true
+        ExpectDownloadClient = $true
+        ExpectImportList = $false
+    }
+    'Brainarr' = @{
+        ExpectIndexer = $false
+        ExpectDownloadClient = $false
+        ExpectImportList = $true
+        ImportListCredentialAllOfFieldNames = @("configurationUrl")
+    }
+    'AppleMusicarr' = @{
+        ExpectIndexer = $false
+        ExpectDownloadClient = $false
+        ExpectImportList = $true
+        ImportListCredentialAllOfFieldNames = @("teamId", "keyId", "privateKey", "musicUserToken")
+    }
+}
+
 function Get-E2EPreferredComponentId {
     param([hashtable]$State, [string]$PluginName, [string]$Type)
     return $null
@@ -633,6 +659,249 @@ catch {
 finally {
     $env:BRAINARR_LLM_BASE_URL = $originalBrainarrUrl
 }
+
+Write-Host ""
+
+
+# =============================================================================
+# Test 11: AppleMusicarr Get-PluginEnvConfig - Missing env vars
+# =============================================================================
+Write-Host "Test Group: AppleMusicarr Get-PluginEnvConfig Missing Env Vars" -ForegroundColor Yellow
+
+# Clear AppleMusicarr env vars
+$originalAppleTeamId = $env:APPLEMUSICARR_TEAM_ID
+$originalAppleKeyId = $env:APPLEMUSICARR_KEY_ID
+$originalApplePrivateKey = $env:APPLEMUSICARR_PRIVATE_KEY_B64
+$originalAppleMusicUserToken = $env:APPLEMUSICARR_MUSIC_USER_TOKEN
+
+$env:APPLEMUSICARR_TEAM_ID = $null
+$env:APPLEMUSICARR_KEY_ID = $null
+$env:APPLEMUSICARR_PRIVATE_KEY_B64 = $null
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = $null
+
+try {
+    if ($functionMatch.Success) {
+        $config = Get-PluginEnvConfig -PluginName "AppleMusicarr"
+
+        Write-TestResult -TestName "AppleMusicarr: HasRequiredEnvVars is false when all env vars missing" `
+            -Passed ($config.HasRequiredEnvVars -eq $false)
+
+        Write-TestResult -TestName "AppleMusicarr: MissingRequired contains APPLEMUSICARR_TEAM_ID" `
+            -Passed ($config.MissingRequired -contains "APPLEMUSICARR_TEAM_ID")
+
+        Write-TestResult -TestName "AppleMusicarr: MissingRequired contains APPLEMUSICARR_KEY_ID" `
+            -Passed ($config.MissingRequired -contains "APPLEMUSICARR_KEY_ID")
+
+        Write-TestResult -TestName "AppleMusicarr: MissingRequired contains APPLEMUSICARR_PRIVATE_KEY_B64" `
+            -Passed ($config.MissingRequired -contains "APPLEMUSICARR_PRIVATE_KEY_B64")
+
+        Write-TestResult -TestName "AppleMusicarr: MissingRequired contains APPLEMUSICARR_MUSIC_USER_TOKEN" `
+            -Passed ($config.MissingRequired -contains "APPLEMUSICARR_MUSIC_USER_TOKEN")
+
+        Write-TestResult -TestName "AppleMusicarr: ImportListFields is empty hashtable" `
+            -Passed ($config.ImportListFields.Count -eq 0)
+    }
+} catch {
+    Write-TestResult -TestName "AppleMusicarr missing env vars test" -Passed $false -Message $_.Exception.Message
+}
+
+Write-Host ""
+
+# =============================================================================
+# Test 12: AppleMusicarr Get-PluginEnvConfig - With valid env vars (base64 decode)
+# =============================================================================
+Write-Host "Test Group: AppleMusicarr Get-PluginEnvConfig With Valid Env Vars" -ForegroundColor Yellow
+
+# Set valid AppleMusicarr env vars
+# privateKey is base64 encoded: "-----BEGIN PRIVATE KEY-----\ntest-key-content\n-----END PRIVATE KEY-----"
+$testPrivateKeyPem = "-----BEGIN PRIVATE KEY-----`ntest-key-content`n-----END PRIVATE KEY-----"
+$testPrivateKeyB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($testPrivateKeyPem))
+
+$env:APPLEMUSICARR_TEAM_ID = "TEAM123"
+$env:APPLEMUSICARR_KEY_ID = "KEY456"
+$env:APPLEMUSICARR_PRIVATE_KEY_B64 = $testPrivateKeyB64
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = "music-user-token-789"
+
+try {
+    if ($functionMatch.Success) {
+        $config = Get-PluginEnvConfig -PluginName "AppleMusicarr"
+
+        Write-TestResult -TestName "AppleMusicarr: HasRequiredEnvVars is true when all env vars set" `
+            -Passed ($config.HasRequiredEnvVars -eq $true)
+
+        Write-TestResult -TestName "AppleMusicarr: MissingRequired is empty" `
+            -Passed ($config.MissingRequired.Count -eq 0)
+
+        Write-TestResult -TestName "AppleMusicarr: ImportListFields contains teamId" `
+            -Passed ($config.ImportListFields.ContainsKey("teamId"))
+
+        Write-TestResult -TestName "AppleMusicarr: ImportListFields.teamId matches env var" `
+            -Passed ($config.ImportListFields["teamId"] -eq "TEAM123")
+
+        Write-TestResult -TestName "AppleMusicarr: ImportListFields contains keyId" `
+            -Passed ($config.ImportListFields.ContainsKey("keyId"))
+
+        Write-TestResult -TestName "AppleMusicarr: ImportListFields.keyId matches env var" `
+            -Passed ($config.ImportListFields["keyId"] -eq "KEY456")
+
+        Write-TestResult -TestName "AppleMusicarr: ImportListFields contains privateKey (decoded)" `
+            -Passed ($config.ImportListFields.ContainsKey("privateKey"))
+
+        # Verify base64 was decoded correctly
+        $decodedKey = $config.ImportListFields["privateKey"]
+        $expectedKeyContent = $decodedKey -like "*BEGIN PRIVATE KEY*" -and $decodedKey -like "*test-key-content*"
+        Write-TestResult -TestName "AppleMusicarr: privateKey is base64-decoded PEM content" `
+            -Passed $expectedKeyContent
+
+        Write-TestResult -TestName "AppleMusicarr: ImportListFields contains musicUserToken" `
+            -Passed ($config.ImportListFields.ContainsKey("musicUserToken"))
+
+        Write-TestResult -TestName "AppleMusicarr: ImportListFields.musicUserToken matches env var" `
+            -Passed ($config.ImportListFields["musicUserToken"] -eq "music-user-token-789")
+
+        # Verify IndexerFields and DownloadClientFields are empty (AppleMusicarr is import list only)
+        Write-TestResult -TestName "AppleMusicarr: IndexerFields is empty (import list only)" `
+            -Passed ($config.IndexerFields.Count -eq 0)
+
+        Write-TestResult -TestName "AppleMusicarr: DownloadClientFields is empty (import list only)" `
+            -Passed ($config.DownloadClientFields.Count -eq 0)
+    }
+} catch {
+    Write-TestResult -TestName "AppleMusicarr valid env vars test" -Passed $false -Message $_.Exception.Message
+}
+
+Write-Host ""
+
+# =============================================================================
+# Test 13: AppleMusicarr Get-PluginEnvConfig - Invalid base64 handling
+# =============================================================================
+Write-Host "Test Group: AppleMusicarr Invalid Base64 Handling" -ForegroundColor Yellow
+
+# Set env vars with invalid base64 for private key
+$env:APPLEMUSICARR_TEAM_ID = "TEAM123"
+$env:APPLEMUSICARR_KEY_ID = "KEY456"
+$env:APPLEMUSICARR_PRIVATE_KEY_B64 = "not-valid-base64!!!"  # Invalid base64
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = "music-user-token-789"
+
+try {
+    if ($functionMatch.Success) {
+        $config = Get-PluginEnvConfig -PluginName "AppleMusicarr"
+
+        Write-TestResult -TestName "AppleMusicarr: Invalid base64 -> HasRequiredEnvVars is false" `
+            -Passed ($config.HasRequiredEnvVars -eq $false)
+
+        $hasInvalidB64Error = $config.MissingRequired | Where-Object { $_ -like "*APPLEMUSICARR_PRIVATE_KEY_B64*invalid*" }
+        Write-TestResult -TestName "AppleMusicarr: Invalid base64 -> MissingRequired mentions invalid base64" `
+            -Passed ([bool]$hasInvalidB64Error)
+    }
+} catch {
+    Write-TestResult -TestName "AppleMusicarr invalid base64 test" -Passed $false -Message $_.Exception.Message
+}
+
+Write-Host ""
+
+# =============================================================================
+# Test 14: AppleMusicarr PassIfAlreadyConfigured
+# =============================================================================
+Write-Host "Test Group: AppleMusicarr PassIfAlreadyConfigured" -ForegroundColor Yellow
+
+try {
+    # Update mock to return AppleMusicarr import list
+    $script:mockComponents = @{
+        indexer = @()
+        downloadclient = @()
+        importlist = @(
+            [PSCustomObject]@{ id = 401; implementation = "AppleMusicarr"; name = "AppleMusicarr" }
+        )
+    }
+
+    # Clear env vars to test PassIfAlreadyConfigured path
+    $env:APPLEMUSICARR_TEAM_ID = $null
+    $env:APPLEMUSICARR_KEY_ID = $null
+    $env:APPLEMUSICARR_PRIVATE_KEY_B64 = $null
+    $env:APPLEMUSICARR_MUSIC_USER_TOKEN = $null
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "AppleMusicarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "AppleMusicarr + PassIfAlreadyConfigured + import list exists: Outcome=success" `
+            -Passed ($result.Outcome -eq "success")
+
+        Write-TestResult -TestName "AppleMusicarr + PassIfAlreadyConfigured: importListId populated" `
+            -Passed ($result.Details.componentIds["importListId"] -eq 401)
+
+        Write-TestResult -TestName "AppleMusicarr + PassIfAlreadyConfigured: alreadyConfigured=true" `
+            -Passed ($result.Details.alreadyConfigured -eq $true)
+    }
+
+    # Test with missing import list
+    $script:mockComponents.importlist = @()
+
+    if ($testConfigureFunctionMatch.Success) {
+        $result = Test-ConfigureGateForPlugin -PluginName "AppleMusicarr" -PassIfAlreadyConfigured
+
+        Write-TestResult -TestName "AppleMusicarr + no import list: Outcome=skipped" `
+            -Passed ($result.Outcome -eq "skipped")
+
+        Write-TestResult -TestName "AppleMusicarr + no import list: SkipReason mentions missing env vars" `
+            -Passed ($result.SkipReason -like "*Missing env vars*")
+    }
+} catch {
+    Write-TestResult -TestName "AppleMusicarr PassIfAlreadyConfigured test" -Passed $false -Message $_.Exception.Message
+}
+
+# Restore env vars
+$env:APPLEMUSICARR_TEAM_ID = $originalAppleTeamId
+$env:APPLEMUSICARR_KEY_ID = $originalAppleKeyId
+$env:APPLEMUSICARR_PRIVATE_KEY_B64 = $originalApplePrivateKey
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = $originalAppleMusicUserToken
+
+Write-Host ""
+
+# =============================================================================
+# Test 15: AppleMusicarr Idempotent Configure (same config -> no changes)
+# =============================================================================
+Write-Host "Test Group: AppleMusicarr Idempotent Configure" -ForegroundColor Yellow
+
+# Set valid env vars
+$testPrivateKeyPem = "-----BEGIN PRIVATE KEY-----`ntest-key-content`n-----END PRIVATE KEY-----"
+$testPrivateKeyB64 = [Convert]::ToBase64String([System.Text.Encoding]::UTF8.GetBytes($testPrivateKeyPem))
+
+$env:APPLEMUSICARR_TEAM_ID = "TEAM123"
+$env:APPLEMUSICARR_KEY_ID = "KEY456"
+$env:APPLEMUSICARR_PRIVATE_KEY_B64 = $testPrivateKeyB64
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = "music-user-token-789"
+
+try {
+    if ($functionMatch.Success) {
+        # Call Get-PluginEnvConfig twice and verify identical output
+        $config1 = Get-PluginEnvConfig -PluginName "AppleMusicarr"
+        $config2 = Get-PluginEnvConfig -PluginName "AppleMusicarr"
+
+        Write-TestResult -TestName "AppleMusicarr: Idempotent - HasRequiredEnvVars matches" `
+            -Passed ($config1.HasRequiredEnvVars -eq $config2.HasRequiredEnvVars)
+
+        Write-TestResult -TestName "AppleMusicarr: Idempotent - teamId matches" `
+            -Passed ($config1.ImportListFields["teamId"] -eq $config2.ImportListFields["teamId"])
+
+        Write-TestResult -TestName "AppleMusicarr: Idempotent - keyId matches" `
+            -Passed ($config1.ImportListFields["keyId"] -eq $config2.ImportListFields["keyId"])
+
+        Write-TestResult -TestName "AppleMusicarr: Idempotent - privateKey matches" `
+            -Passed ($config1.ImportListFields["privateKey"] -eq $config2.ImportListFields["privateKey"])
+
+        Write-TestResult -TestName "AppleMusicarr: Idempotent - musicUserToken matches" `
+            -Passed ($config1.ImportListFields["musicUserToken"] -eq $config2.ImportListFields["musicUserToken"])
+    }
+} catch {
+    Write-TestResult -TestName "AppleMusicarr idempotent test" -Passed $false -Message $_.Exception.Message
+}
+
+# Restore env vars
+$env:APPLEMUSICARR_TEAM_ID = $originalAppleTeamId
+$env:APPLEMUSICARR_KEY_ID = $originalAppleKeyId
+$env:APPLEMUSICARR_PRIVATE_KEY_B64 = $originalApplePrivateKey
+$env:APPLEMUSICARR_MUSIC_USER_TOKEN = $originalAppleMusicUserToken
 
 Write-Host ""
 

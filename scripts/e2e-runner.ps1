@@ -1155,7 +1155,7 @@ function Test-ConfigureGateForPlugin {
     # ==========================================================================
     # Step 1: Check if plugin is supported for env-var configuration
     # ==========================================================================
-    $supportedPlugins = @("Qobuzarr", "Tidalarr", "Brainarr")
+    $supportedPlugins = @("Qobuzarr", "Tidalarr", "Brainarr", "AppleMusicarr")
     if ($PluginName -notin $supportedPlugins) {
         $result.Outcome = "success"
         $result.Success = $true
@@ -1216,7 +1216,7 @@ function Test-ConfigureGateForPlugin {
                         $allRequiredExist = $false
                     }
                 }
-                elseif ($PluginName -eq "Brainarr") {
+                elseif ($PluginName -in @("Brainarr", "AppleMusicarr")) {
                     $importList = Find-ConfiguredComponent -Type "importlist" -PluginName $PluginName
 
                     if (-not $importList) {
@@ -1247,7 +1247,7 @@ function Test-ConfigureGateForPlugin {
                         $result.Details.resolution["indexer"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "indexer|$PluginName" -DefaultValue "unknown"
                         $result.Details.resolution["downloadclient"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "downloadclient|$PluginName" -DefaultValue "unknown"
                     }
-                    elseif ($PluginName -eq "Brainarr") {
+                    elseif ($PluginName -in @("Brainarr", "AppleMusicarr")) {
                         $result.Details.resolution["importlist"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "importlist|$PluginName" -DefaultValue "unknown"
                     }
                     $result.Details.preferredIdUsed = ($result.Details.resolution.Values -contains "preferredId")
@@ -1373,7 +1373,7 @@ function Test-ConfigureGateForPlugin {
         # ==========================================================================
         # Step 5: Configure Import List (Brainarr only)
         # ==========================================================================
-        if ($PluginName -eq "Brainarr") {
+        if ($PluginName -in @("Brainarr", "AppleMusicarr")) {
             $importList = Find-ConfiguredComponent -Type "importlist" -PluginName $PluginName
 
             if (-not $importList) {
