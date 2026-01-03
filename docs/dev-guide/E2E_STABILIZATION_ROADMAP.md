@@ -10,11 +10,18 @@ Make the GitHub Actions workflow `E2E Bootstrap (Headless)` deterministic and gr
 
 ## Known Host Behaviors (Important)
 
+> **Note:** These observations are point-in-time snapshots. The **canary job** (`override=never` against
+> `pr-plugins`) is the authoritative source for current host behavior.
+
 1. **File-based plugin discovery works on** `ghcr.io/hotio/lidarr:pr-plugins-3.1.1.4884`
    - Plugins placed at `/config/plugins/<Vendor>/<PluginName>/` are loaded.
-2. **File-based plugin discovery does not work on** `ghcr.io/hotio/lidarr:pr-plugins` (current moving tag, observed `3.1.1.4901`)
+   - *Observed: 2025-01-02, Run #20669121388*
+2. **File-based plugin discovery does not work on** `ghcr.io/hotio/lidarr:pr-plugins` (moving tag, observed `3.1.1.4901`)
    - `/api/v1/system/plugins` returns `[]` and indexer/download client schemas do not include plugins.
    - Treat this as a host behavior change; do not assume folder scanning.
+   - *Observed: 2025-01-01, Run #20654789xxx (approximate)*
+
+**When these observations become stale:** Check the latest canary job results or run `override=never` manually.
 
 ## Current Blocker (P0) — RESOLVED
 
