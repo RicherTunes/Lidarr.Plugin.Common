@@ -875,9 +875,12 @@ try:
     now_utc = datetime.now(timezone.utc).timestamp()
     buffer = 3600  # 1 hour
 
-    # Handle epoch seconds (int or numeric string)
+    # Handle epoch (seconds or milliseconds)
+    # Guard: if value > 10^12, treat as milliseconds (otherwise year ~55000)
     try:
         exp_epoch = int(exp)
+        if exp_epoch > 1_000_000_000_000:
+            exp_epoch = exp_epoch // 1000  # Convert ms to seconds
         if exp_epoch <= (now_utc + buffer):
             print('expired')
         else:
