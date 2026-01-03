@@ -174,7 +174,7 @@ $sensitiveFields = @(
     "apiKey", "secret", "token",
     "userId", "email", "username",
     "configurationUrl",
-    "privateKey", "musicUserToken", "teamId", "keyId"
+    "privateKey", "musicUserToken"
 )
 
 # Scenario: masked value + no ForceUpdate = skip

@@ -1065,8 +1065,8 @@ function Update-ComponentAuthFields {
             "userId", "email", "username",
             # Internal URLs (may reveal infrastructure)
             "configurationUrl",
-            # AppleMusicarr secrets (must never appear in logs/diagnostics)
-            "privateKey", "musicUserToken", "teamId", "keyId"
+            # AppleMusicarr secrets (Lidarr masks these - treat as configured if masked)
+            "privateKey", "musicUserToken"
         )
 
         # Only update if value differs (idempotency)
