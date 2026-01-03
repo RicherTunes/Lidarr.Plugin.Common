@@ -834,6 +834,14 @@ function ConvertTo-E2ERunManifest {
             imageDigest = $imageDigest
             version = $lidarrVersion
             branch = $lidarrBranch
+            # Host override info (for multi-plugin ALC bug workaround)
+            hostOverride = [ordered]@{
+                used = ($env:E2E_HOST_OVERRIDE_MOUNTED -eq 'true')
+                reason = if ($env:HOST_OVERRIDE_REASON) { $env:HOST_OVERRIDE_REASON } else { $null }
+                sourceRepo = if ($env:INPUT_LIDARR_OVERRIDE_REPO) { $env:INPUT_LIDARR_OVERRIDE_REPO } else { $null }
+                sourceRef = if ($env:INPUT_LIDARR_OVERRIDE_REF) { $env:INPUT_LIDARR_OVERRIDE_REF } else { $null }
+                sha = if ($env:HOST_OVERRIDE_SHA) { $env:HOST_OVERRIDE_SHA } else { $null }
+            }
         }
         request = [ordered]@{
             gate = $requestedGate

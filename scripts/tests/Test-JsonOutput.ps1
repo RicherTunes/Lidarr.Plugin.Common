@@ -241,6 +241,14 @@ $hostFingerprintTests = @(
         Test = { param($obj) -not [string]::IsNullOrWhiteSpace($obj.lidarr.containerName) }
     }
     @{
+        Name = "lidarr.hostOverride is present"
+        Test = { param($obj) $obj.lidarr.PSObject.Properties.Name -contains 'hostOverride' }
+    }
+    @{
+        Name = "lidarr.hostOverride.used is boolean"
+        Test = { param($obj) $obj.lidarr.hostOverride.used -is [bool] }
+    }
+    @{
         Name = "lidarr.imageTag is present when available"
         Test = { param($obj) $obj.lidarr.PSObject.Properties.Name -contains 'imageTag' }
     }
