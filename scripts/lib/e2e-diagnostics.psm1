@@ -29,7 +29,14 @@ $script:SensitivePatterns = @(
     'pkce',
     # Brainarr LLM endpoint (may contain internal IPs)
     'configurationurl',
-    'configuration_url'
+    'configuration_url',
+    # AppleMusicarr (all four fields are sensitive)
+    'musicusertoken',
+    'music_user_token',
+    'teamid',
+    'team_id',
+    'keyid',
+    'key_id'
 )
 
 # Private/internal endpoint patterns for value-based redaction
