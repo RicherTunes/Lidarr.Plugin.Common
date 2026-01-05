@@ -106,7 +106,7 @@ jobs:
           echo "CROSS_REPO_PAT secret is configured"
 
       - name: Checkout Lidarr.Plugin.Common
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup .NET SDKs
         uses: actions/setup-dotnet@v4
@@ -116,7 +116,7 @@ jobs:
             8.0.x
 
       - name: Checkout Qobuzarr
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: RicherTunes/Qobuzarr
           ref: ${{ inputs.qobuzarr_ref }}
@@ -125,7 +125,7 @@ jobs:
           submodules: recursive
 
       - name: Checkout Tidalarr
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           repository: RicherTunes/Tidalarr
           ref: ${{ inputs.tidalarr_ref }}
