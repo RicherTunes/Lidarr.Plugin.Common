@@ -404,9 +404,27 @@ function Normalize-PluginAbstractions {
 
     $uniqueHashes = @($hashes | Group-Object Hash)
     if ($uniqueHashes.Count -gt 1) {
-        Write-Host "Multiple Lidarr.Plugin.Abstractions.dll copies with the same identity but different bytes detected ($($abstractionDlls.Count)). This is usually OK (the host should unify by assembly identity), but consider standardizing how Abstractions is produced to reduce risk." -ForegroundColor Yellow
+        # E2E_ABSTRACTIONS_SHA_MISMATCH: Different SHA256 across plugins causes type identity issues
+        # at runtime even if assembly FullName matches (deterministic multi-plugin load failure).
+        $details = $uniqueHashes | ForEach-Object {
+            $paths = ($_.Group | ForEach-Object { "    - $($_.Path)" }) -join "`n"
+            "  SHA256: $($_.Name.Substring(0, 16))...`n$paths"
+        } | Out-String
+
+        $errorMsg = @"
+E2E_ABSTRACTIONS_SHA_MISMATCH: Multiple Lidarr.Plugin.Abstractions.dll copies with DIFFERENT SHA256 hashes detected.
+
+All plugins must ship byte-identical Abstractions.dll to avoid type identity conflicts at runtime.
+This typically happens when plugins are built from different Lidarr.Plugin.Common commits.
+
+FIX: Rebuild all plugins from the same Common submodule SHA.
+
+Details:
+$details
+"@
+        throw $errorMsg
     } else {
-        Write-Host "Multiple identical Lidarr.Plugin.Abstractions.dll copies detected ($($abstractionDlls.Count)); leaving as-is." -ForegroundColor Yellow
+        Write-Host "Multiple identical Lidarr.Plugin.Abstractions.dll copies detected ($($abstractionDlls.Count)); OK." -ForegroundColor Green
     }
 }
 
