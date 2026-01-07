@@ -26,82 +26,52 @@ function Assert-True {
     }
 }
 
-function Assert-Throws {
-    param(
-        [Parameter(Mandatory)] [scriptblock]$ScriptBlock,
-        [Parameter(Mandatory)] [string]$ExpectedPattern,
-        [Parameter(Mandatory)] [string]$Description
-    )
-
-    $threw = $false
-    $errorMessage = ""
-    try {
-        & $ScriptBlock
-    } catch {
-        $threw = $true
-        $errorMessage = $_.Exception.Message
-    }
-
-    if ($threw -and $errorMessage -match $ExpectedPattern) {
-        Write-Host "  [PASS] $Description" -ForegroundColor Green
-        $script:passed++
-    } elseif (-not $threw) {
-        Write-Host "  [FAIL] $Description (no exception thrown)" -ForegroundColor Red
-        $script:failed++
-    } else {
-        Write-Host "  [FAIL] $Description (wrong error: $errorMessage)" -ForegroundColor Red
-        $script:failed++
-    }
-}
-
 $scriptDir = Split-Path $PSScriptRoot -Parent
-$smokeScript = Join-Path $scriptDir "multi-plugin-docker-smoke-test.ps1"
+$modulePath = Join-Path $scriptDir "lib/e2e-abstractions.psm1"
 
-# Parse out the Normalize-PluginAbstractions function from the smoke test script
-$smokeContent = Get-Content -LiteralPath $smokeScript -Raw
-if ($smokeContent -match '(?s)(function Normalize-PluginAbstractions \{.+?\n\})') {
-    $functionDef = $Matches[1]
-    # Define the function in current scope
-    Invoke-Expression $functionDef
-} else {
-    throw "Could not extract Normalize-PluginAbstractions from $smokeScript"
-}
+# Verify module exists
+Write-Host "`nTest 1: Module exists" -ForegroundColor Yellow
+Assert-True -Condition (Test-Path -LiteralPath $modulePath) -Description "e2e-abstractions.psm1 exists"
 
-# Create temp directory structure for tests
+# Import module
+Import-Module $modulePath -Force
+
+# Verify function is exported
+Write-Host "`nTest 2: Function exported" -ForegroundColor Yellow
+$exportedFunctions = (Get-Module -Name 'e2e-abstractions').ExportedFunctions.Keys
+Assert-True -Condition ($exportedFunctions -contains 'Normalize-PluginAbstractions') -Description "Normalize-PluginAbstractions is exported"
+
+# Read module content for error code verification
+$moduleContent = Get-Content -LiteralPath $modulePath -Raw
+
+Write-Host "`nTest 3: Error code present" -ForegroundColor Yellow
+Assert-True -Condition ($moduleContent -match 'E2E_ABSTRACTIONS_SHA_MISMATCH') -Description "E2E_ABSTRACTIONS_SHA_MISMATCH error code defined"
+
+Write-Host "`nTest 4: SHA mismatch throws exception" -ForegroundColor Yellow
+Assert-True -Condition ($moduleContent -match 'throw \$errorMsg') -Description "SHA mismatch throws errorMsg"
+
+Write-Host "`nTest 5: Identical hashes show OK message" -ForegroundColor Yellow
+Assert-True -Condition ($moduleContent -match 'identical.*OK') -Description "Identical SHA shows OK message"
+
+Write-Host "`nTest 6: Fix instruction present" -ForegroundColor Yellow
+Assert-True -Condition ($moduleContent -match 'FIX:.*Rebuild.*same Common') -Description "Fix instruction mentions rebuilding from same Common"
+
+# Create temp directory structure for functional tests
 $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) "abstractions-sha-test-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
 New-Item -ItemType Directory -Force -Path $testRoot | Out-Null
 
 try {
-    Write-Host "`nTest 1: Identical Abstractions.dll across plugins" -ForegroundColor Yellow
-    $pluginsRoot1 = Join-Path $testRoot "identical"
-    $plugin1Dir = Join-Path $pluginsRoot1 "RicherTunes/PluginA"
-    $plugin2Dir = Join-Path $pluginsRoot1 "RicherTunes/PluginB"
-    New-Item -ItemType Directory -Force -Path $plugin1Dir | Out-Null
-    New-Item -ItemType Directory -Force -Path $plugin2Dir | Out-Null
+    Write-Host "`nTest 7: Throws when no Abstractions.dll found" -ForegroundColor Yellow
+    $emptyPluginsRoot = Join-Path $testRoot "empty"
+    New-Item -ItemType Directory -Force -Path $emptyPluginsRoot | Out-Null
 
-    # Create identical mock DLLs (same content = same SHA256)
-    $mockContent = [byte[]](0x4D, 0x5A, 0x90, 0x00, 0x03, 0x00, 0x00, 0x00)
-    [System.IO.File]::WriteAllBytes((Join-Path $plugin1Dir "Lidarr.Plugin.Abstractions.dll"), $mockContent)
-    [System.IO.File]::WriteAllBytes((Join-Path $plugin2Dir "Lidarr.Plugin.Abstractions.dll"), $mockContent)
-
-    # This test would need real assemblies for GetAssemblyName to work
-    # For now, we test the SHA check path by mocking - skip assembly identity check
-    Write-Host "  [SKIP] Requires real assemblies for GetAssemblyName (integration test)" -ForegroundColor Yellow
-
-    Write-Host "`nTest 2: Error code present in script" -ForegroundColor Yellow
-    Assert-True -Condition ($smokeContent -match 'E2E_ABSTRACTIONS_SHA_MISMATCH') -Description "E2E_ABSTRACTIONS_SHA_MISMATCH error code defined"
-
-    Write-Host "`nTest 3: SHA mismatch throws exception with error variable" -ForegroundColor Yellow
-    # The error code is in $errorMsg which is then thrown via 'throw $errorMsg'
-    $hasThrow = $smokeContent -match 'throw \$errorMsg'
-    $hasErrorVar = $smokeContent -match '(?s)\$errorMsg\s*=\s*@".*E2E_ABSTRACTIONS_SHA_MISMATCH'
-    Assert-True -Condition ($hasThrow -and $hasErrorVar) -Description "SHA mismatch throws errorMsg containing error code"
-
-    Write-Host "`nTest 4: Identical hashes show OK message" -ForegroundColor Yellow
-    Assert-True -Condition ($smokeContent -match 'identical.*OK') -Description "Identical SHA shows OK message"
-
-    Write-Host "`nTest 5: Fix instruction present" -ForegroundColor Yellow
-    Assert-True -Condition ($smokeContent -match 'FIX:.*Rebuild.*same Common') -Description "Fix instruction mentions rebuilding from same Common"
+    $threw = $false
+    try {
+        Normalize-PluginAbstractions -PluginsRoot $emptyPluginsRoot
+    } catch {
+        $threw = $true
+    }
+    Assert-True -Condition $threw -Description "Throws when no Abstractions.dll found"
 
 } finally {
     # Cleanup
