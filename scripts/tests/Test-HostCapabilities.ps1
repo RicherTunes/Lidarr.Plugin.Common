@@ -49,6 +49,8 @@ $moduleContent = Get-Content -LiteralPath $modulePath -Raw
 Assert-True -Condition ($moduleContent -match 'PluginContexts') -Description "Module references PluginContexts field"
 Assert-True -Condition ($moduleContent -match 'PR.*5662') -Description "Module references upstream PR #5662"
 Assert-True -Condition ($moduleContent -match 'strings-probe') -Description "Module uses strings-based detection"
+Assert-True -Condition ($moduleContent -match 'NzbDrone\.Common\.dll') -Description "Module probes NzbDrone.Common.dll"
+Assert-True -Condition ($moduleContent -match 'Lidarr\.Common\.dll') -Description "Module probes Lidarr.Common.dll (dual-path)"
 
 # Test 4: Function signature checks (non-container tests)
 Write-Host "`nTest 4: Function returns correct structure" -ForegroundColor Yellow
@@ -63,7 +65,9 @@ try {
 if ($result) {
     Assert-True -Condition ($null -ne $result.HasFix) -Description "Test-HostALCFix returns HasFix property"
     Assert-True -Condition ($null -ne $result.Method) -Description "Test-HostALCFix returns Method property"
-    Assert-True -Condition ($null -ne $result.Details) -Description "Test-HostALCFix returns Details property"
+    Assert-True -Condition ($null -ne $result.ProbedFiles) -Description "Test-HostALCFix returns ProbedFiles property"
+    Assert-True -Condition ($null -ne $result.MatchedToken) -Description "Test-HostALCFix returns MatchedToken property"
+    Assert-True -Condition ($result.MatchedToken -eq 'PluginContexts') -Description "MatchedToken is 'PluginContexts'"
 } else {
     Write-Host "  [SKIP] Test-HostALCFix requires Docker container (non-blocking)" -ForegroundColor Yellow
 }
@@ -81,6 +85,8 @@ if ($caps) {
     Assert-True -Condition ($null -ne $caps.alcFix) -Description "Get-HostCapabilities returns alcFix section"
     Assert-True -Condition ($null -ne $caps.probeTimestamp) -Description "Get-HostCapabilities returns probeTimestamp"
     Assert-True -Condition ($caps.alcFix.prUrl -match '5662') -Description "alcFix includes PR URL"
+    Assert-True -Condition ($null -ne $caps.alcFix.probedFiles) -Description "alcFix includes probedFiles array"
+    Assert-True -Condition ($null -ne $caps.alcFix.matchedToken) -Description "alcFix includes matchedToken"
 } else {
     Write-Host "  [SKIP] Get-HostCapabilities requires Docker container (non-blocking)" -ForegroundColor Yellow
 }

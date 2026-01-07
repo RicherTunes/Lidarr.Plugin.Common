@@ -10,6 +10,12 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# Assemblies that may contain PluginLoader (varies by Lidarr version/refactoring)
+$script:ProbeTargets = @(
+    '/app/bin/NzbDrone.Common.dll'
+    '/app/bin/Lidarr.Common.dll'
+)
+
 function Test-HostALCFix {
     <#
     .SYNOPSIS
@@ -32,6 +38,9 @@ function Test-HostALCFix {
         - HasFix: bool - Whether the fix is present
         - Method: string - Detection method used
         - Details: string - Additional detection details
+        - ProbedFiles: array - Files that were probed
+        - MatchedFile: string - File where token was found (null if not found)
+        - MatchedToken: string - The token searched for
     #>
     param(
         [Parameter(Mandatory)]
@@ -39,24 +48,61 @@ function Test-HostALCFix {
     )
 
     $result = [PSCustomObject]@{
-        HasFix  = $false
-        Method  = 'unknown'
-        Details = $null
+        HasFix       = $false
+        Method       = 'unknown'
+        Details      = $null
+        ProbedFiles  = @()
+        MatchedFile  = $null
+        MatchedToken = 'PluginContexts'
     }
 
-    try {
-        # Probe for PluginContexts field in NzbDrone.Common.dll using strings
-        # The fix adds: private static readonly List<PluginLoadContext> PluginContexts = new();
-        $probe = docker exec $ContainerName sh -c "strings /app/bin/NzbDrone.Common.dll 2>/dev/null | grep -c PluginContexts" 2>$null
+    $probedFiles = @()
+    $matchedFile = $null
 
-        if ($LASTEXITCODE -eq 0 -and $probe -and [int]$probe -gt 0) {
+    try {
+        # Probe each potential assembly for PluginContexts field
+        # The fix adds: private static readonly List<PluginLoadContext> PluginContexts = new();
+        foreach ($dllPath in $script:ProbeTargets) {
+            $probeResult = [ordered]@{
+                path   = $dllPath
+                exists = $false
+                matches = 0
+            }
+
+            # Check if file exists
+            $existsCheck = docker exec $ContainerName sh -c "test -f '$dllPath' && echo 'exists'" 2>$null
+            if ($existsCheck -eq 'exists') {
+                $probeResult.exists = $true
+
+                # Probe for PluginContexts using strings
+                $matchCount = docker exec $ContainerName sh -c "strings '$dllPath' 2>/dev/null | grep -c PluginContexts || echo 0" 2>$null
+                $probeResult.matches = [int]($matchCount ?? 0)
+
+                if ($probeResult.matches -gt 0 -and -not $matchedFile) {
+                    $matchedFile = $dllPath
+                }
+            }
+
+            $probedFiles += $probeResult
+        }
+
+        $result.ProbedFiles = $probedFiles
+
+        if ($matchedFile) {
             $result.HasFix = $true
             $result.Method = 'strings-probe'
-            $result.Details = "Found PluginContexts field ($probe occurrences)"
+            $result.MatchedFile = $matchedFile
+            $matchInfo = $probedFiles | Where-Object { $_.path -eq $matchedFile } | Select-Object -First 1
+            $result.Details = "Found PluginContexts in $matchedFile ($($matchInfo.matches) occurrences)"
         } else {
             $result.HasFix = $false
             $result.Method = 'strings-probe'
-            $result.Details = 'PluginContexts field not found - host vulnerable to ALC GC bug'
+            $existingFiles = ($probedFiles | Where-Object { $_.exists } | ForEach-Object { $_.path }) -join ', '
+            if ($existingFiles) {
+                $result.Details = "PluginContexts not found in: $existingFiles"
+            } else {
+                $result.Details = "No probe target assemblies found in container"
+            }
         }
     }
     catch {
@@ -106,10 +152,13 @@ function Get-HostCapabilities {
 
     return [ordered]@{
         alcFix = [ordered]@{
-            present = $alcResult.HasFix
-            method  = $alcResult.Method
-            details = $alcResult.Details
-            prUrl   = 'https://github.com/Lidarr/Lidarr/pull/5662'
+            present      = $alcResult.HasFix
+            method       = $alcResult.Method
+            details      = $alcResult.Details
+            probedFiles  = $alcResult.ProbedFiles
+            matchedFile  = $alcResult.MatchedFile
+            matchedToken = $alcResult.MatchedToken
+            prUrl        = 'https://github.com/Lidarr/Lidarr/pull/5662'
         }
         probeTimestamp = (Get-Date -Format 'o')
     }
