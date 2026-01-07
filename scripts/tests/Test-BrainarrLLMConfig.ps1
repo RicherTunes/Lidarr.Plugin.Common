@@ -13,7 +13,7 @@ function Assert-True {
     if (-not $Condition) { throw $Message }
 }
 
-$tempDir = Join-Path $env:TEMP ("brainarr-llm-config-tests-" + [Guid]::NewGuid().ToString("N"))
+$tempDir = Join-Path ([System.IO.Path]::GetTempPath()) ("brainarr-llm-config-tests-" + [Guid]::NewGuid().ToString("N"))
 New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
 
 try {
