@@ -66,6 +66,9 @@ diagnostics/
 .e2e-test-output/
 .e2e-test-run.ps1
 .e2e-bootstrap/
+.e2e-local/
+scripts/e2e-local/*.json
+!scripts/e2e-local/*.example.json
 
 # Local ad-hoc troubleshooting scripts (not part of repo tooling)
 scripts/check-clients-detail.ps1

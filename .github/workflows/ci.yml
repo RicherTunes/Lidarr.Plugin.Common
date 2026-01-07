@@ -41,11 +41,17 @@ jobs:
         with:
           fetch-depth: 0
 
+      # GitHub-hosted runners already have pwsh installed - skip apt install
+      # (kept for local act runs where pwsh may not be present)
       - name: Install PowerShell (pwsh)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "pwsh already installed, skipping"
+            exit 0
+          fi
           . /etc/os-release
           CODENAME=${VERSION_CODENAME:-"jammy"}
           echo "Using Ubuntu codename: $CODENAME"
@@ -85,20 +91,23 @@ jobs:
       - name: Build (Release, warnings as errors)
         run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -m:1
 
+      # GitHub-hosted runners already have pwsh - this step is only for act
       - name: Ensure pwsh (Linux only)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v pwsh >/dev/null 2>&1; then
-            . /etc/os-release || true
-            CODENAME=${VERSION_CODENAME:-"jammy"}
-            curl -fsSL "https://packages.microsoft.com/config/ubuntu/$CODENAME/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb \
-              || curl -fsSL "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb
-            sudo dpkg -i packages-microsoft-prod.deb
-            sudo apt-get update
-            sudo apt-get install -y powershell
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "pwsh already installed"
+            exit 0
           fi
+          . /etc/os-release || true
+          CODENAME=${VERSION_CODENAME:-"jammy"}
+          curl -fsSL "https://packages.microsoft.com/config/ubuntu/$CODENAME/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb \
+            || curl -fsSL "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb
+          sudo dpkg -i packages-microsoft-prod.deb
+          sudo apt-get update
+          sudo apt-get install -y powershell
 
       - name: Test (all TFMs) + coverage
         run: >

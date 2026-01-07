@@ -100,8 +100,28 @@
     Can also be set via BRAINARR_LLM_BASE_URL environment variable.
 
 .PARAMETER BrainarrModelId
-    Specific model ID to use (optional - auto-detects if not specified).
+    Specific model ID to use (optional - auto-detects if not specified).        
     Can also be set via BRAINARR_MODEL_ID environment variable.
+
+.PARAMETER BrainarrLLMConfigPath
+    Optional path to a local JSON config file for Brainarr LLM gate settings.
+    This enables local, file-based configuration without committing credentials.
+
+    Example:
+      {
+        "baseUrl": "http://localhost:1234",
+        "expectedModelId": "mistralai/ministral-3-3b"
+      }
+
+    Can also be set via BRAINARR_LLM_CONFIG_PATH environment variable.
+
+.PARAMETER BrainarrExpectedModelId
+    Optional expected model ID to assert is available on the LLM endpoint.
+    When set, the Brainarr LLM gate will FAIL if the endpoint does not report
+    the expected model in its models list.
+
+    Can also be set via BRAINARR_EXPECTED_MODEL_ID environment variable, or via
+    the BrainarrLLMConfigPath JSON file.
 
 .PARAMETER StrictBrainarr
     When set, FAIL instead of SKIP if LLM endpoint is unreachable.
@@ -139,6 +159,8 @@
     Brainarr (import list only):
       - BRAINARR_LLM_BASE_URL (required) - LM Studio endpoint URL
       - BRAINARR_MODEL (optional) - Model name
+      - BRAINARR_LLM_CONFIG_PATH (optional) - Local JSON config file (baseUrl + expectedModelId)
+      - BRAINARR_EXPECTED_MODEL_ID (optional) - Expected model ID to assert is available
 
     If required env vars are missing, Configure gate returns SKIP (not FAIL).
 
@@ -203,6 +225,10 @@ param(
     [string]$BrainarrLLMBaseUrl,
 
     [string]$BrainarrModelId,
+
+    [string]$BrainarrLLMConfigPath,
+
+    [string]$BrainarrExpectedModelId,
 
     [switch]$StrictBrainarr,
 
@@ -271,6 +297,12 @@ if (-not $BrainarrModelId) {
         $BrainarrModelId = $env:BRAINARR_MODEL
     }
 }
+if (-not $BrainarrLLMConfigPath -and $env:BRAINARR_LLM_CONFIG_PATH) {
+    $BrainarrLLMConfigPath = $env:BRAINARR_LLM_CONFIG_PATH
+}
+if (-not $BrainarrExpectedModelId -and $env:BRAINARR_EXPECTED_MODEL_ID) {
+    $BrainarrExpectedModelId = $env:BRAINARR_EXPECTED_MODEL_ID
+}
 
 # Environment variable overrides for preferred component IDs state
 if (-not $ComponentIdsInstanceKey) {
@@ -330,10 +362,34 @@ $ErrorActionPreference = "Stop"
 $scriptRoot = Split-Path -Parent $PSScriptRoot
 
 # Import modules
-Import-Module (Join-Path $PSScriptRoot "lib/e2e-gates.psm1") -Force       
-Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force 
-Import-Module (Join-Path $PSScriptRoot "lib/e2e-json-output.psm1") -Force 
-Import-Module (Join-Path $PSScriptRoot "lib/e2e-component-ids.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-gates.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force       
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-json-output.psm1") -Force       
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-component-ids.psm1") -Force     
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-brainarr-config.psm1") -Force   
+
+# Optional Brainarr LLM file-based config (local convenience; never required)
+$brainarrLLMConfigError = $null
+if ($BrainarrLLMConfigPath) {
+    try {
+        $brainarrCfg = Read-BrainarrLLMConfigFile -Path $BrainarrLLMConfigPath
+        if (-not $BrainarrLLMBaseUrl -and $brainarrCfg.baseUrl) {
+            $BrainarrLLMBaseUrl = $brainarrCfg.baseUrl
+        }
+        if (-not $BrainarrExpectedModelId -and $brainarrCfg.expectedModelId) {
+            $BrainarrExpectedModelId = $brainarrCfg.expectedModelId
+        }
+    }
+    catch {
+        $brainarrLLMConfigError = "$_"
+    }
+}
+
+# If an expected model is specified and no explicit model ID was provided,
+# use it as the configured model so the ImportList is pinned to the same model.
+if (-not $BrainarrModelId -and $BrainarrExpectedModelId) {
+    $BrainarrModelId = $BrainarrExpectedModelId
+}
 
 # Preferred component IDs state (best-effort; never blocks runs)
 if (-not $ComponentIdsPath) {
@@ -2414,9 +2470,14 @@ if ($runBrainarrLLM) {
     Write-Host "  Brainarr LLM..." -ForegroundColor Cyan
 
     try {
+        if ($brainarrLLMConfigError) {
+            throw "E2E_CONFIG_INVALID: Brainarr LLM config file error: $brainarrLLMConfigError"
+        }
+
         $brainarrLLMResult = Test-BrainarrLLMGate `
             -LlmBaseUrl $BrainarrLLMBaseUrl `
             -ModelId $BrainarrModelId `
+            -ExpectedModelId $BrainarrExpectedModelId `
             -StrictMode:$StrictBrainarr `
             -CommandTimeoutSec $BrainarrSyncTimeoutSec
 
@@ -2429,11 +2490,13 @@ if ($runBrainarrLLM) {
                 modelsCount = $brainarrLLMResult.Details.modelsCount
                 firstModelId = $brainarrLLMResult.Details.firstModelId
                 modelIdHash = $brainarrLLMResult.Details.modelIdHash
+                expectedModelFound = $brainarrLLMResult.Details.expectedModelFound
+                expectedModelIdHash = $brainarrLLMResult.Details.expectedModelIdHash
                 endpointRedacted = $brainarrLLMResult.Details.endpointRedacted
                 importListId = $brainarrLLMResult.Details.importListId
                 commandId = $brainarrLLMResult.Details.commandId
-                syncCompleted = $brainarrLLMResult.Details.syncCompleted
-                lastSyncError = $brainarrLLMResult.Details.lastSyncError
+                syncCompleted = $brainarrLLMResult.Details.syncCompleted 
+                lastSyncError = $brainarrLLMResult.Details.lastSyncError 
             })
 
         if ($brainarrLLMOutcome -eq "skipped") {

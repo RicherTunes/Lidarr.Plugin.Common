@@ -2656,6 +2656,37 @@ function Test-LLMEndpoint {
     return $result
 }
 
+function Test-LLMModelAvailability {
+    <#
+    .SYNOPSIS
+        Checks if an expected model ID exists in a probed model list.
+
+    .DESCRIPTION
+        Performs an exact (case-insensitive) match. No substring/wildcard matching.
+
+        If ExpectedModelId is null/empty/whitespace, returns $true (no constraint).
+    #>
+    [CmdletBinding()]
+    param(
+        [string[]]$Models,
+
+        [string]$ExpectedModelId
+    )
+
+    if ([string]::IsNullOrWhiteSpace("$ExpectedModelId")) {
+        return $true
+    }
+
+    $expected = "$ExpectedModelId".Trim()
+    foreach ($model in @($Models)) {
+        if ([string]::Equals("$model", $expected, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
 function Test-BrainarrLLMGate {
     <#
     .SYNOPSIS
@@ -2676,8 +2707,11 @@ function Test-BrainarrLLMGate {
     .PARAMETER ModelId
         Specific model ID to configure (optional - uses auto-detect if not specified)
 
+    .PARAMETER ExpectedModelId
+        If specified, the gate FAILs unless the endpoint reports an exact (case-insensitive) match.
+
     .PARAMETER StrictMode
-        When true, FAIL instead of SKIP if LLM endpoint is unreachable
+        When true, FAIL instead of SKIP if LLM endpoint is unreachable   
 
     .PARAMETER CommandTimeoutSec
         Timeout for ImportListSync command (default: 120)
@@ -2690,6 +2724,8 @@ function Test-BrainarrLLMGate {
         [string]$LlmBaseUrl,
 
         [string]$ModelId = $null,
+
+        [string]$ExpectedModelId = $null,
 
         [switch]$StrictMode,
 
@@ -2708,6 +2744,8 @@ function Test-BrainarrLLMGate {
             modelsCount = 0
             firstModelId = $null
             endpointRedacted = $null
+            expectedModelFound = $null
+            expectedModelIdHash = $null
             importListId = $null
             commandId = $null
             syncCompleted = $false
@@ -2761,6 +2799,33 @@ function Test-BrainarrLLMGate {
         }
         $result.Details.firstModelId = $firstModel
         $result.Details.modelIdHash = $modelIdHash
+
+        $expectedModel = $ExpectedModelId
+        if (-not [string]::IsNullOrWhiteSpace("$expectedModel")) {
+            $expectedModel = "$expectedModel".Trim()
+            $expectedHash = $null
+            try {
+                $sha256Expected = [System.Security.Cryptography.SHA256]::Create()
+                $hashBytesExpected = $sha256Expected.ComputeHash([System.Text.Encoding]::UTF8.GetBytes($expectedModel))
+                $expectedHash = [BitConverter]::ToString($hashBytesExpected).Replace('-', '').ToLower().Substring(0, 12)
+            }
+            catch {
+                $expectedHash = $null
+            }
+            $result.Details.expectedModelIdHash = $expectedHash
+
+            $found = Test-LLMModelAvailability -Models @($llmProbe.Models) -ExpectedModelId $expectedModel
+            $result.Details.expectedModelFound = $found
+
+            if (-not $found) {
+                $result.Errors += "E2E_PROVIDER_UNAVAILABLE: Expected model not found on LLM endpoint (expectedModelIdHash=$expectedHash, modelsCount=$($llmProbe.ModelsCount))."
+                return $result
+            }
+        }
+        else {
+            $result.Details.expectedModelFound = $null
+            $result.Details.expectedModelIdHash = $null
+        }
 
         Write-Host "       LLM endpoint: $($llmProbe.Kind), $($llmProbe.ModelsCount) model(s)" -ForegroundColor Green
         if ($llmProbe.FirstModelId) {
@@ -2994,4 +3059,4 @@ function Test-BrainarrLLMGate {
     return $result
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-BrainarrLLMGate, Invoke-LidarrApi
+Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Invoke-LidarrApi

@@ -157,6 +157,17 @@ The ImportList gate:
 
 **Brainarr credentials**: The ImportList gate validates that `configurationUrl` (LLM base URL) is configured before attempting sync. Set via `BRAINARR_LLM_BASE_URL` env var.
 
+### Brainarr model pinning (LM Studio)
+
+If you want Brainarr E2E to prove it’s using a specific LM Studio model, pin an expected model ID:
+
+- Create a local config file (gitignored): `scripts/e2e-local/brainarr-llm.config.json`
+- Example template: `scripts/e2e-local/brainarr-llm.config.example.json`
+- Run the runner with:
+  - `-RunBrainarrLLMGate -BrainarrLLMConfigPath scripts/e2e-local/brainarr-llm.config.json`
+
+If `expectedModelId` is set and not present in `/v1/models` (OpenAI/LM Studio) or `/api/tags` (Ollama), the Brainarr LLM gate FAILs.
+
 When running `-Gate all` or `-Gate bootstrap`:
 - Plugins with `ExpectImportList = $true` (e.g., Brainarr) will run the ImportList gate
 - Plugins without import lists (e.g., Qobuzarr, Tidalarr) will SKIP the ImportList gate
