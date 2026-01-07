@@ -142,7 +142,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # GitHub-hosted runners already have pwsh - skip apt install entirely
+      # (kept for local act runs where pwsh may not be present)
       - name: Install PowerShell
+        if: env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -1618,7 +1621,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # GitHub-hosted runners already have pwsh - skip apt install entirely
       - name: Install PowerShell
+        if: env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
