@@ -142,7 +142,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # GitHub-hosted runners already have pwsh - skip apt install entirely
+      # (kept for local act runs where pwsh may not be present)
       - name: Install PowerShell
+        if: env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -333,7 +336,7 @@ jobs:
           fi
 
       - name: Cache host override DLL
-        if: steps.host-override.outputs.use_override == 'true'
+        if: steps['host-override'].outputs.use_override == 'true'
         id: cache-host-override
         uses: actions/cache@v4
         with:
@@ -346,7 +349,7 @@ jobs:
           key: host-override-${{ inputs.lidarr_override_ref || '1e741479fad766584e196187c61bea302085704a' }}-${{ runner.os }}-dotnet${{ env.DOTNET_VERSION || '8.0' }}
 
       - name: Checkout patched Lidarr host
-        if: steps.host-override.outputs.use_override == 'true' && steps.cache-host-override.outputs.cache-hit != 'true'
+        if: steps['host-override'].outputs.use_override == 'true' && steps['cache-host-override'].outputs.cache-hit != 'true'
         uses: actions/checkout@v4
         with:
           repository: ${{ inputs.lidarr_override_repo || 'RicherTunes/Lidarr' }}
@@ -355,7 +358,7 @@ jobs:
           token: ${{ secrets.CROSS_REPO_PAT || github.token }}
 
       - name: Build patched Lidarr.Common.dll
-        if: steps.host-override.outputs.use_override == 'true' && steps.cache-host-override.outputs.cache-hit != 'true'
+        if: steps['host-override'].outputs.use_override == 'true' && steps['cache-host-override'].outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -413,7 +416,7 @@ jobs:
           echo "::notice::Patched Lidarr.Common.dll built successfully from $OVERRIDE_SHA"
 
       - name: Configure host override DLL
-        if: steps.host-override.outputs.use_override == 'true'
+        if: steps['host-override'].outputs.use_override == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -433,8 +436,8 @@ jobs:
           echo "HOST_OVERRIDE_DLL_SHA256=$DLL_SHA256" >> $GITHUB_ENV
 
           # Verify checksum integrity for cached builds
-          CACHE_HIT="${{ steps.cache-host-override.outputs.cache-hit }}"
-          if [ "$CACHE_HIT" = "true" ] && [ -f "$CHECKSUM_PATH" ]; then
+          CACHE_HIT="${{ steps['cache-host-override'].outputs.cache-hit }}"
+          if [ "$CACHE_HIT" = "true" ] && [ -f "$CHECKSUM_PATH" ]; then    
             EXPECTED_SHA256=$(cat "$CHECKSUM_PATH" | tr -d '[:space:]')
             if [ "$DLL_SHA256" != "$EXPECTED_SHA256" ]; then
               echo "::error::Cache integrity check FAILED!"
@@ -1618,7 +1621,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      # GitHub-hosted runners already have pwsh - skip apt install entirely
       - name: Install PowerShell
+        if: env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail

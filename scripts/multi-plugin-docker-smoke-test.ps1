@@ -185,6 +185,8 @@ $repoRoot = Split-Path -Parent $scriptDir
 
 # Import e2e-gates module for preflight packaging validation
 Import-Module (Join-Path $scriptDir "lib/e2e-gates.psm1") -Force
+# Import abstractions validation module
+Import-Module (Join-Path $scriptDir "lib/e2e-abstractions.psm1") -Force
 
 $image = if ([string]::IsNullOrWhiteSpace($LidarrImage)) { "ghcr.io/hotio/lidarr:$LidarrTag" } else { $LidarrImage.Trim() }
 
@@ -363,50 +365,6 @@ function Assert-HostSupportsPlugins {
     $requiredMajor = ($pluginMajors | Measure-Object -Maximum).Maximum
     if ($hostMajor -lt $requiredMajor) {
         throw "TFM mismatch: Lidarr host '$LidarrTag' targets '$hostTfm' but plugin(s) require net$requiredMajor.0 ($($pluginTfms -join ', ')). Use a net$requiredMajor host tag (e.g. pr-plugins-3.1.1.4884 for net8) or build net$hostMajor plugins."
-    }
-}
-
-function Normalize-PluginAbstractions {
-    param([Parameter(Mandatory = $true)][string]$PluginsRoot)
-
-    $abstractionDlls = @(Get-ChildItem -LiteralPath $PluginsRoot -Recurse -File -Filter 'Lidarr.Plugin.Abstractions.dll' -ErrorAction SilentlyContinue)
-    if (-not $abstractionDlls -or $abstractionDlls.Count -eq 0) {
-        throw "No Lidarr.Plugin.Abstractions.dll found under '$PluginsRoot'. Plugins must ship it (it is not present in the host image)."
-    }
-
-    if ($abstractionDlls.Count -eq 1) {
-        return
-    }
-
-    $identities = $abstractionDlls | ForEach-Object {
-        [pscustomobject]@{
-            Path = $_.FullName
-            FullName = [System.Reflection.AssemblyName]::GetAssemblyName($_.FullName).FullName
-        }
-    }
-
-    $uniqueIdentities = @($identities | Group-Object FullName)
-    if ($uniqueIdentities.Count -gt 1) {
-        $details = $uniqueIdentities | ForEach-Object {
-            $paths = ($_.Group | Select-Object -ExpandProperty Path) -join "`n  - "
-            "$($_.Name):`n  - $paths"
-        } | Out-String
-
-        throw "Multiple DIFFERENT Lidarr.Plugin.Abstractions identities detected. All plugins must reference the same Abstractions assembly identity to avoid type identity conflicts.`n$details"
-    }
-
-    $hashes = $abstractionDlls | ForEach-Object {
-        [pscustomobject]@{
-            Path = $_.FullName
-            Hash = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash
-        }
-    }
-
-    $uniqueHashes = @($hashes | Group-Object Hash)
-    if ($uniqueHashes.Count -gt 1) {
-        Write-Host "Multiple Lidarr.Plugin.Abstractions.dll copies with the same identity but different bytes detected ($($abstractionDlls.Count)). This is usually OK (the host should unify by assembly identity), but consider standardizing how Abstractions is produced to reduce risk." -ForegroundColor Yellow
-    } else {
-        Write-Host "Multiple identical Lidarr.Plugin.Abstractions.dll copies detected ($($abstractionDlls.Count)); leaving as-is." -ForegroundColor Yellow
     }
 }
 

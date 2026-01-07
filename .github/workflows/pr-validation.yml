@@ -18,11 +18,17 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
+      # GitHub-hosted runners already have pwsh - skip apt install entirely
+      # (kept for local act runs where pwsh may not be present)
       - name: Install PowerShell (pwsh)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "pwsh already installed, skipping"
+            exit 0
+          fi
           . /etc/os-release
           CODENAME=${VERSION_CODENAME:-"jammy"}
           echo "Using Ubuntu codename: $CODENAME"
