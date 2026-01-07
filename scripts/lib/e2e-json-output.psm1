@@ -811,6 +811,7 @@ function ConvertTo-E2ERunManifest {
     $redactionSelfTestPassed = Get-SafeProperty -Object $Context -PropertyName 'RedactionSelfTestPassed'
     $diagBundlePath = Get-SafeProperty -Object $Context -PropertyName 'DiagnosticsBundlePath'
     $diagIncludedFiles = Get-SafeProperty -Object $Context -PropertyName 'DiagnosticsIncludedFiles'
+    $hostCapabilities = Get-SafeProperty -Object $Context -PropertyName 'HostCapabilities'
 
     $manifest = [ordered]@{
         '$schema' = (Get-SchemaUrl)
@@ -843,6 +844,8 @@ function ConvertTo-E2ERunManifest {
                 sha = if ($env:HOST_OVERRIDE_SHA) { $env:HOST_OVERRIDE_SHA } else { $null }
                 dllSha256 = if ($env:HOST_OVERRIDE_DLL_SHA256) { $env:HOST_OVERRIDE_DLL_SHA256 } else { $null }
             }
+            # Host capability detection (ALC fix, etc.)
+            capabilities = if ($hostCapabilities) { $hostCapabilities } else { $null }
         }
         request = [ordered]@{
             gate = $requestedGate

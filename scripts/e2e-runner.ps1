@@ -366,7 +366,8 @@ Import-Module (Join-Path $PSScriptRoot "lib/e2e-gates.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force       
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-json-output.psm1") -Force       
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-component-ids.psm1") -Force     
-Import-Module (Join-Path $PSScriptRoot "lib/e2e-brainarr-config.psm1") -Force   
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-brainarr-config.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-host-capabilities.psm1") -Force
 
 # Optional Brainarr LLM file-based config (local convenience; never required)
 $brainarrLLMConfigError = $null
@@ -1781,6 +1782,22 @@ if (-not $effectiveApiKey -and $ExtractApiKeyFromContainer) {
 if (-not $effectiveApiKey) {
     Write-Host "ERROR: Lidarr API key required. Set LIDARR_API_KEY, pass -ApiKey, or use -ExtractApiKeyFromContainer." -ForegroundColor Red
     exit 1
+}
+
+# Probe host capabilities (ALC fix detection, etc.) if we have a container name
+$script:E2EHostCapabilities = $null
+if (-not [string]::IsNullOrWhiteSpace($ContainerName)) {
+    try {
+        $script:E2EHostCapabilities = Get-HostCapabilities -ContainerName $ContainerName
+        if ($script:E2EHostCapabilities.alcFix.present) {
+            Write-Host "Host ALC fix: PRESENT (multi-plugin safe)" -ForegroundColor Green
+        } else {
+            Write-Host "Host ALC fix: NOT DETECTED - multi-plugin may fail due to ALC GC bug" -ForegroundColor Yellow
+        }
+    }
+    catch {
+        Write-Host "WARNING: Failed to probe host capabilities: $_" -ForegroundColor Yellow
+    }
 }
 
 $redactionSelfTestPassed = $false
@@ -3198,6 +3215,7 @@ if ($EmitJson) {
                 PersistenceEnabled = $script:E2EPersistenceEnabled
             }
             ComponentIdsPersistence = $script:E2EComponentIdsPersistenceResult
+            HostCapabilities = $script:E2EHostCapabilities
         }
 
         New-Item -ItemType Directory -Path (Split-Path $JsonOutputPath -Parent) -Force -ErrorAction SilentlyContinue | Out-Null
