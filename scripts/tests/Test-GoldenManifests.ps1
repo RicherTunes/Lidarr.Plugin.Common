@@ -111,6 +111,15 @@ Assert-True -Name "no-releases-attributed.json has totalReleases" -Condition ($n
 Assert-True -Name "no-releases-attributed.json has attributedReleases" -Condition ($null -ne $noReleasesResult.details.attributedReleases)
 Assert-True -Name "no-releases-attributed.json has expectedIndexerName" -Condition ($null -ne $noReleasesResult.details.expectedIndexerName)
 Assert-True -Name "no-releases-attributed.json has foundIndexerNames" -Condition ($noReleasesResult.details.foundIndexerNames.Count -ge 0)
+# Guardrail: foundIndexerNames must be capped to prevent manifest bloat
+$maxIndexerNames = 10
+if ($noReleasesResult.details.foundIndexerNames.Count -gt $maxIndexerNames) {
+    Write-Host "  [FAIL] no-releases-attributed.json foundIndexerNames exceeds cap ($($noReleasesResult.details.foundIndexerNames.Count) > $maxIndexerNames)" -ForegroundColor Red
+    $script:failed++
+} else {
+    Write-Host "  [PASS] no-releases-attributed.json foundIndexerNames within cap (<= $maxIndexerNames)" -ForegroundColor Green
+    $script:passed++
+}
 
 $metadataMissing = Validate-Fixture -FileName 'metadata-missing.json'
 Assert-True -Name "metadata-missing.json has E2E_METADATA_MISSING" -Condition ($metadataMissing.results.errorCode -contains 'E2E_METADATA_MISSING')
