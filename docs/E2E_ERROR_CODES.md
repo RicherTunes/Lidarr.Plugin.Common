@@ -22,6 +22,28 @@ For diagnostics bundle structure, see `docs/DIAGNOSTICS_BUNDLE_CONTRACT.md`.
 | `E2E_ZERO_AUDIO_FILES` | Download completed but produced zero validated audio files. | Download client bug; output path wrong; partial files only; upstream stream failure; file extension filtering mismatch. | Inspect output directory; check `container-logs.txt` for download errors; verify validator settings and file naming. |
 | `E2E_METADATA_MISSING` | Audio file(s) exist but required tags are missing. | Metadata applier not wired; TagLib limitations for container format; incomplete track model mapping. | Verify `IAudioMetadataApplier` wiring; validate `StreamingTrack` fields; inspect TagLib warnings. |
 | `E2E_IMPORT_FAILED` | ImportListSync completed with errors or post-sync state indicates failure. | Provider unreachable; LLM endpoint down; Brainarr import list misconfigured; auth expired. | Check `lastSyncError`; verify LLM endpoint reachability; rerun with longer timeout. |
+| `E2E_COMPONENT_AMBIGUOUS` | Multiple components match selection criteria for a plugin. | Multiple indexers/download clients configured for same plugin; no preferred ID set. | Use `-ComponentIdsInstanceSalt` or pin preferred IDs via `E2E_COMPONENT_IDS_PATH`. |
+| `E2E_ABSTRACTIONS_SHA_MISMATCH` | Plugins ship non-identical `Lidarr.Plugin.Abstractions.dll` bytes. | Plugins built from different Common submodule commits. | Rebuild all plugins from same Common SHA; rerun packaging preflight. |
+| `E2E_PROVIDER_UNAVAILABLE` | Expected external provider (e.g., LLM model) not found. | LLM endpoint reachable but expected model not loaded. | Load expected model in LM Studio/Ollama; verify `expectedModelId` in config. |
+
+<details>
+<summary>Keeping this table in sync</summary>
+
+To enumerate all `E2E_*` error codes in the codebase:
+
+```bash
+rg -o "E2E_[A-Z0-9_]+" scripts docs | cut -d: -f2 | sort -u
+```
+
+Or in PowerShell:
+```powershell
+Select-String -Path scripts\**\*.ps1,docs\*.md -Pattern 'E2E_[A-Z0-9_]+' -AllMatches |
+  ForEach-Object { $_.Matches.Value } | Sort-Object -Unique
+```
+
+Compare output against this table to find undocumented codes.
+
+</details>
 
 ## Related Runner Toggles
 
