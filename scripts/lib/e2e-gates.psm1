@@ -410,7 +410,7 @@ function Test-SchemaGate {
             }
 
             $result.Details.ErrorCode = $code
-            $result.Errors += "$code: Schema endpoint reachable but '$PluginName' implementation not found. See details.discoveryDiagnosis for diagnosis."
+            $result.Errors += "${code}: Schema endpoint reachable but '$PluginName' implementation not found. See details.discoveryDiagnosis for diagnosis."
         }
 
         $result.Success = ($result.Errors.Count -eq 0)
