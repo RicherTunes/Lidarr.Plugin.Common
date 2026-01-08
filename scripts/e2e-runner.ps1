@@ -2874,12 +2874,17 @@ if ($runPostRestartGrab) {
 
             Write-Host "       Found $($albumSearchResult.PluginReleaseCount) releases, selecting one..." -ForegroundColor Gray
 
-            # Step 4: Get releases and select deterministically (first by title asc)
+            # Step 4: Get releases and select deterministically
+            # Use culture-invariant sorting with normalized keys to ensure consistent selection
             $releases = Invoke-LidarrApi -Endpoint "release?albumId=$($albumSearchResult.AlbumId)"
             $pluginReleases = $releases | Where-Object {
                 $_.indexerId -eq $pluginIndexer.id -or
                 [string]::Equals([string]$_.indexer, $plugin, [StringComparison]::OrdinalIgnoreCase)
-            } | Sort-Object title | Select-Object -First 1
+            } | Sort-Object -Stable `
+                @{Expression = { ($_.title ?? '').ToUpperInvariant() }; Ascending = $true },
+                @{Expression = { ($_.guid ?? '').ToUpperInvariant() }; Ascending = $true },
+                @{Expression = { $_.size ?? 0 }; Descending = $true } |
+                Select-Object -First 1
 
             if (-not $pluginReleases) {
                 Write-Host "       FAIL (no releases from $plugin post-restart)" -ForegroundColor Red
