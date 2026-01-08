@@ -10,6 +10,12 @@ if (Test-Path $classifierPath) {
     Import-Module $classifierPath -Force
 }
 
+# Import shared release selection helper (deterministic, culture-invariant)
+$releaseSelectionPath = Join-Path $PSScriptRoot "e2e-release-selection.psm1"
+if (Test-Path $releaseSelectionPath) {
+    Import-Module $releaseSelectionPath -Force
+}
+
 function Initialize-E2EGates {
     <#
     .SYNOPSIS
@@ -953,12 +959,14 @@ function Test-PluginGrabGate {
             return $result
         }
 
-        # Pick first acceptable release
-        $targetRelease = $pluginReleases | Select-Object -First 1
+        # Pick release deterministically (culture-invariant, stable sort)
+        $selection = Select-DeterministicRelease -Releases $pluginReleases -ReturnSelectionBasis
+        $targetRelease = $selection.release
         $result.ReleaseGuid = $targetRelease.guid
         $result.ReleaseTitle = if ($targetRelease.title.Length -gt 50) { $targetRelease.title.Substring(0,50) + "..." } else { $targetRelease.title }
+        $result.SelectionBasis = $selection.selectionBasis
 
-        Write-Host "       Selected: $($result.ReleaseTitle)" -ForegroundColor Gray
+        Write-Host "       Selected: $($result.ReleaseTitle) (of $($selection.selectionBasis.candidateCount) candidates)" -ForegroundColor Gray
         Write-Host "       Triggering grab..." -ForegroundColor Gray
 
         # Step 3: Grab the release

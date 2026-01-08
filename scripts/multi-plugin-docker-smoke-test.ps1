@@ -1282,7 +1282,12 @@ try {
             }
 
             $candidates = $searchGateReleases | Where-Object { $_.indexer -eq $indexerName -and $_.downloadAllowed -ne $false }
-            $release = $candidates | Sort-Object { if ($_.size) { [long]$_.size } else { [long]::MaxValue } } | Select-Object -First 1
+            # Select smallest release (for faster smoke tests), with deterministic tie-breakers
+            $release = $candidates | Sort-Object -Stable `
+                @{Expression = { $_.size ?? [long]::MaxValue }; Ascending = $true },
+                @{Expression = { ($_.title ?? '').ToUpperInvariant() }; Ascending = $true },
+                @{Expression = { ($_.guid ?? '').ToUpperInvariant() }; Ascending = $true } |
+                Select-Object -First 1
             if (-not $release) {
                 Write-Host "✗ grab gate: no releases attributed to indexer '$indexerName' (plugin=$plugin). Consider a different SearchArtistTerm/SearchAlbumTitle." -ForegroundColor Red
                 $grabFailed = $true

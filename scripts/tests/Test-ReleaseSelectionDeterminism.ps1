@@ -26,16 +26,16 @@ function Assert-True {
     }
 }
 
-# Simulate the release selection logic from e2e-runner.ps1
-function Select-DeterministicRelease {
-    param([array]$Releases)
+# Import the shared module
+$scriptDir = Split-Path $PSScriptRoot -Parent
+$modulePath = Join-Path $scriptDir "lib/e2e-release-selection.psm1"
 
-    return $Releases | Sort-Object -Stable `
-        @{Expression = { ($_.title ?? '').ToUpperInvariant() }; Ascending = $true },
-        @{Expression = { ($_.guid ?? '').ToUpperInvariant() }; Ascending = $true },
-        @{Expression = { $_.size ?? 0 }; Descending = $true } |
-        Select-Object -First 1
-}
+Write-Host "`nTest 0: Module exists and imports" -ForegroundColor Yellow
+Assert-True -Condition (Test-Path -LiteralPath $modulePath) -Description "e2e-release-selection.psm1 exists"
+Import-Module $modulePath -Force
+
+$exportedFunctions = (Get-Module -Name 'e2e-release-selection').ExportedFunctions.Keys
+Assert-True -Condition ($exportedFunctions -contains 'Select-DeterministicRelease') -Description "Select-DeterministicRelease is exported"
 
 function Shuffle-Array {
     param([array]$Array)
@@ -98,6 +98,21 @@ $sameTitleGuid = @(
 )
 $selectedBySize = Select-DeterministicRelease -Releases $sameTitleGuid
 Assert-True -Condition ($selectedBySize.size -eq 300) -Description "Largest size wins as tertiary tie-breaker (got $($selectedBySize.size))"
+
+Write-Host "`nTest 7: ReturnSelectionBasis provides manifest data" -ForegroundColor Yellow
+$result = Select-DeterministicRelease -Releases $testReleases -ReturnSelectionBasis
+Assert-True -Condition ($null -ne $result.release) -Description "ReturnSelectionBasis includes release"
+Assert-True -Condition ($null -ne $result.selectionBasis) -Description "ReturnSelectionBasis includes selectionBasis"
+Assert-True -Condition ($result.selectionBasis.candidateCount -eq 5) -Description "selectionBasis.candidateCount is correct (got $($result.selectionBasis.candidateCount))"
+Assert-True -Condition ($result.selectionBasis.sortKeys -is [array]) -Description "selectionBasis.sortKeys is array"
+
+Write-Host "`nTest 8: Empty releases returns null" -ForegroundColor Yellow
+$emptyResult = Select-DeterministicRelease -Releases @()
+Assert-True -Condition ($null -eq $emptyResult) -Description "Empty releases returns null"
+
+$emptyWithBasis = Select-DeterministicRelease -Releases @() -ReturnSelectionBasis
+Assert-True -Condition ($null -eq $emptyWithBasis.release) -Description "Empty releases with basis returns null release"
+Assert-True -Condition ($emptyWithBasis.selectionBasis.error -eq 'no_releases') -Description "Empty releases with basis sets error"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
