@@ -76,6 +76,9 @@ $hostBug = Validate-Fixture -FileName 'host-bug-alc.json'
 Assert-Equal -Name "host-bug-alc.json hostBugSuspected.detected" -Actual $hostBug.hostBugSuspected.detected -Expected $true
 Assert-Equal -Name "host-bug-alc.json hostBugSuspected.classification" -Actual $hostBug.hostBugSuspected.classification -Expected 'ALC'
 
+$schemaMissing = Validate-Fixture -FileName 'schema-missing-implementation.json'
+Assert-True -Name "schema-missing-implementation.json has E2E_SCHEMA_MISSING_IMPLEMENTATION" -Condition ($schemaMissing.results.errorCode -contains 'E2E_SCHEMA_MISSING_IMPLEMENTATION')
+
 Write-Host ""
 Write-Host "Passed: $passed" -ForegroundColor Green
 Write-Host "Failed: $failed" -ForegroundColor Red
@@ -83,4 +86,3 @@ Write-Host "Failed: $failed" -ForegroundColor Red
 if ($failed -gt 0) {
     throw "Golden manifest fixture tests failed: $failed"
 }
-

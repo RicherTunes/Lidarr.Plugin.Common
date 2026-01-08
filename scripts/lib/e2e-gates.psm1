@@ -226,6 +226,9 @@ function Test-SchemaGate {
         Checks that the plugin's indexer and/or download client schemas
         are present in Lidarr's schema endpoints. Also supports import list schemas.
 
+        When schemas are missing, emits E2E_SCHEMA_MISSING_IMPLEMENTATION with
+        details.discoveryDiagnosis to help distinguish root causes.
+
     .PARAMETER PluginName
         Name of the plugin (e.g., "Qobuzarr", "Tidalarr", "Brainarr")
 
@@ -238,8 +241,14 @@ function Test-SchemaGate {
     .PARAMETER ExpectImportList
         Whether to expect an import list schema.
 
+    .PARAMETER PluginPackagePath
+        Optional path to deployed plugin package (zip or folder) for diagnosis.
+
+    .PARAMETER ContainerName
+        Optional Docker container name for host capability checks.
+
     .OUTPUTS
-        PSCustomObject with Success, IndexerFound, DownloadClientFound, ImportListFound, Errors
+        PSCustomObject with Success, IndexerFound, DownloadClientFound, ImportListFound, Errors, Details
     #>
     param(
         [Parameter(Mandatory)]
@@ -247,8 +256,46 @@ function Test-SchemaGate {
 
         [switch]$ExpectIndexer,
         [switch]$ExpectDownloadClient,
-        [switch]$ExpectImportList
+        [switch]$ExpectImportList,
+
+        [string]$PluginPackagePath,
+        [string]$ContainerName
     )
+
+    function Test-SchemaItemMatchesPlugin {
+        param(
+            [AllowNull()] $SchemaItem,
+            [Parameter(Mandatory)] [string] $ExpectedPluginName
+        )
+
+        if ($null -eq $SchemaItem) { return $false }
+
+        $implementationName = $null
+        if ($SchemaItem -is [hashtable]) { $implementationName = $SchemaItem['implementationName'] }
+        else { $implementationName = $SchemaItem.implementationName }
+
+        if ([string]::IsNullOrWhiteSpace([string]$implementationName)) { return $false }
+
+        return [string]::Equals(
+            [string]$implementationName,
+            $ExpectedPluginName,
+            [StringComparison]::OrdinalIgnoreCase
+        )
+    }
+
+    function Get-HostEnablePluginsFromContainer {
+        param([Parameter(Mandatory)][string]$Name)
+
+        try {
+            $xml = docker exec $Name cat /config/config.xml 2>$null
+            if ([string]::IsNullOrWhiteSpace($xml)) { return $null }
+            $m = [regex]::Match($xml, '<EnablePlugins>\s*(?<v>true|false)\s*</EnablePlugins>', [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if (-not $m.Success) { return $null }
+            return ($m.Groups['v'].Value.Trim().ToLowerInvariant() -eq 'true')
+        } catch {
+            return $null
+        }
+    }
 
     $result = [PSCustomObject]@{
         Gate = 'Schema'
@@ -258,33 +305,62 @@ function Test-SchemaGate {
         DownloadClientFound = $false
         ImportListFound = $false
         Errors = @()
+        Details = @{
+            discoveryDiagnosis = @{
+                schemaEndpointReachable = $false
+                indexerSchemaCount = 0
+                downloadClientSchemaCount = 0
+                importListSchemaCount = 0
+                pluginImplementationFound = $false
+                pluginPackagePresent = $null      # null = not checked, true/false = checked
+                pluginJsonPresent = $null
+                pluginAssemblyPresent = $null
+                hostPluginDiscoveryEnabled = $null # null = unknown, true/false = confirmed
+            }
+        }
     }
 
+    $diagnosis = $result.Details.discoveryDiagnosis
+
     try {
+        # Track schema accessibility and implementation presence
+        $schemasAccessible = $false
+        $pluginMissing = $false
+
+        # Best-effort host plugin discovery check (Docker only)
+        if (-not [string]::IsNullOrWhiteSpace($ContainerName)) {
+            $enablePlugins = Get-HostEnablePluginsFromContainer -Name $ContainerName
+            if ($null -ne $enablePlugins) {
+                $diagnosis.hostPluginDiscoveryEnabled = [bool]$enablePlugins
+            }
+        }
+
         # Check indexer schemas
         if ($ExpectIndexer) {
-            $indexerSchemas = Invoke-LidarrApi -Endpoint 'indexer/schema'       
-            $found = $indexerSchemas | Where-Object {
-                $_.implementation -like "*$PluginName*" -or
-                $_.implementationName -like "*$PluginName*"
-            }
-            $result.IndexerFound = $null -ne $found
+            $indexerSchemas = Invoke-LidarrApi -Endpoint 'indexer/schema'
+            $schemasAccessible = $true
+            $diagnosis.schemaEndpointReachable = $true
+            $diagnosis.indexerSchemaCount = @($indexerSchemas).Count
+
+            $result.IndexerFound = @($indexerSchemas | Where-Object { Test-SchemaItemMatchesPlugin -SchemaItem $_ -ExpectedPluginName $PluginName }).Count -gt 0
 
             if (-not $result.IndexerFound) {
-                $result.Errors += "Indexer schema for '$PluginName' not found"  
+                $pluginMissing = $true
+                $result.Errors += "Indexer schema for '$PluginName' not found"
             }
         }
 
         # Check download client schemas
         if ($ExpectDownloadClient) {
-            $clientSchemas = Invoke-LidarrApi -Endpoint 'downloadclient/schema' 
-            $found = $clientSchemas | Where-Object {
-                $_.implementation -like "*$PluginName*" -or
-                $_.implementationName -like "*$PluginName*"
-            }
-            $result.DownloadClientFound = $null -ne $found
+            $clientSchemas = Invoke-LidarrApi -Endpoint 'downloadclient/schema'
+            $schemasAccessible = $true
+            $diagnosis.schemaEndpointReachable = $true
+            $diagnosis.downloadClientSchemaCount = @($clientSchemas).Count
+
+            $result.DownloadClientFound = @($clientSchemas | Where-Object { Test-SchemaItemMatchesPlugin -SchemaItem $_ -ExpectedPluginName $PluginName }).Count -gt 0
 
             if (-not $result.DownloadClientFound) {
+                $pluginMissing = $true
                 $result.Errors += "DownloadClient schema for '$PluginName' not found"
             }
         }
@@ -292,15 +368,49 @@ function Test-SchemaGate {
         # Check import list schemas
         if ($ExpectImportList) {
             $importListSchemas = Invoke-LidarrApi -Endpoint 'importlist/schema'
-            $found = $importListSchemas | Where-Object {
-                $_.implementation -like "*$PluginName*" -or
-                $_.implementationName -like "*$PluginName*"
-            }
-            $result.ImportListFound = $null -ne $found
+            $schemasAccessible = $true
+            $diagnosis.schemaEndpointReachable = $true
+            $diagnosis.importListSchemaCount = @($importListSchemas).Count
+
+            $result.ImportListFound = @($importListSchemas | Where-Object { Test-SchemaItemMatchesPlugin -SchemaItem $_ -ExpectedPluginName $PluginName }).Count -gt 0
 
             if (-not $result.ImportListFound) {
+                $pluginMissing = $true
                 $result.Errors += "ImportList schema for '$PluginName' not found"
             }
+        }
+
+        # Update diagnosis
+        $diagnosis.pluginImplementationFound = -not $pluginMissing
+
+        # Check plugin package presence if path provided
+        if ($PluginPackagePath) {
+            if (Test-Path $PluginPackagePath) {
+                $diagnosis.pluginPackagePresent = $true
+
+                # Check for plugin.json
+                if (Test-Path $PluginPackagePath -PathType Container) {
+                    $diagnosis.pluginJsonPresent = Test-Path (Join-Path $PluginPackagePath 'plugin.json')
+                    $diagnosis.pluginAssemblyPresent = @(Get-ChildItem $PluginPackagePath -Filter '*.dll' -ErrorAction SilentlyContinue).Count -gt 0
+                } elseif ($PluginPackagePath -match '\.zip$') {
+                    # For zip files, just mark as present (detailed inspection would require extraction)
+                    $diagnosis.pluginJsonPresent = $null
+                    $diagnosis.pluginAssemblyPresent = $null
+                }
+            } else {
+                $diagnosis.pluginPackagePresent = $false
+            }
+        }
+
+        # Emit appropriate error code based on diagnosis
+        if ($schemasAccessible -and $pluginMissing) {
+            $code = 'E2E_SCHEMA_MISSING_IMPLEMENTATION'
+            if ($diagnosis.hostPluginDiscoveryEnabled -eq $false) {
+                $code = 'E2E_HOST_PLUGIN_DISCOVERY_DISABLED'
+            }
+
+            $result.Details.ErrorCode = $code
+            $result.Errors += "$code: Schema endpoint reachable but '$PluginName' implementation not found. See details.discoveryDiagnosis for diagnosis."
         }
 
         $result.Success = ($result.Errors.Count -eq 0)
