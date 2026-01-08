@@ -794,8 +794,13 @@ function ConvertTo-E2ERunManifest {
     $effectiveGates = Get-SafeProperty -Object $Context -PropertyName 'EffectiveGates'
     $effectivePlugins = Get-SafeProperty -Object $Context -PropertyName 'EffectivePlugins'
 
-    # CRITICAL: Ensure effectiveGates/effectivePlugins are always arrays (prevents JSON scalar unwrapping)
+    # CRITICAL: Ensure gates/plugins are always arrays (prevents JSON scalar unwrapping)
     # PowerShell can auto-unwrap single-element arrays in hashtables during ConvertTo-Json
+    if ($null -eq $plugins) {
+        $plugins = @()
+    } elseif ($plugins -isnot [array]) {
+        $plugins = @($plugins)
+    }
     if ($null -eq $effectiveGates) {
         $effectiveGates = @()
     } elseif ($effectiveGates -isnot [array]) {
@@ -849,7 +854,8 @@ function ConvertTo-E2ERunManifest {
         }
         request = [ordered]@{
             gate = $requestedGate
-            plugins = if ($plugins) { @($plugins) } else { @() }
+            # CRITICAL: Cast to Object[] prevents ConvertTo-Json from unwrapping single-element arrays.
+            plugins = [object[]]$plugins
         }
         effective = [ordered]@{
             # CRITICAL: Cast to Object[] prevents ConvertTo-Json from unwrapping single-element arrays

@@ -1862,7 +1862,8 @@ foreach ($plugin in $pluginList) {
     $schemaResult = Test-SchemaGate -PluginName $plugin `
         -ExpectIndexer:$config.ExpectIndexer `
         -ExpectDownloadClient:$config.ExpectDownloadClient `
-        -ExpectImportList:$config.ExpectImportList
+        -ExpectImportList:$config.ExpectImportList `
+        -ContainerName $ContainerName
     $gateEnd = Get-Date
 
     $schemaOutcome = if ($schemaResult.Success) { "success" } else { "failed" }
@@ -1870,6 +1871,8 @@ foreach ($plugin in $pluginList) {
         IndexerFound = $schemaResult.IndexerFound
         DownloadClientFound = $schemaResult.DownloadClientFound
         ImportListFound = $schemaResult.ImportListFound
+        discoveryDiagnosis = $schemaResult.Details.discoveryDiagnosis
+        ErrorCode = $schemaResult.Details.ErrorCode
     }
     $allResults += $schemaRecord
 
