@@ -1,0 +1,103 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/main/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-02T13:00:00.000Z",
+  "runId": "golden-no-releases-attributed",
+  "runner": {
+    "name": "lidarr.plugin.common:e2e-runner.ps1",
+    "version": "deadbeef",
+    "args": ["-Gate", "search", "-Plugins", "Qobuzarr"]
+  },
+  "lidarr": {
+    "url": "http://[LOCALHOST]:8686",
+    "containerName": "lidarr-e2e-test",
+    "imageTag": "pr-plugins-3.1.1.4884",
+    "imageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "version": "3.1.1.4884",
+    "branch": "plugins",
+    "containerId": "000000000000",
+    "startedAt": "2026-01-02T12:59:00.000Z",
+    "imageId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "request": {
+    "gate": "search",
+    "plugins": ["Qobuzarr"]
+  },
+  "effective": {
+    "gates": ["Schema", "Configure", "Search"],
+    "plugins": ["Qobuzarr"],
+    "stopReason": "failed at Search for Qobuzarr"
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 42
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Qobuzarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-02T13:00:01.000Z",
+      "endedAt": "2026-01-02T13:00:02.000Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Configure",
+      "plugin": "Qobuzarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-02T13:00:03.000Z",
+      "endedAt": "2026-01-02T13:00:04.000Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Search",
+      "plugin": "Qobuzarr",
+      "outcome": "failed",
+      "errorCode": "E2E_NO_RELEASES_ATTRIBUTED",
+      "outcomeReason": "AlbumSearch returned releases but none attributed to Qobuzarr",
+      "startedAt": "2026-01-02T13:00:05.000Z",
+      "endedAt": "2026-01-02T13:00:10.000Z",
+      "durationMs": 5000,
+      "errors": [
+        "E2E_NO_RELEASES_ATTRIBUTED: AlbumSearch returned 15 releases but 0 attributed to indexer 'Qobuzarr'"
+      ],
+      "details": {
+        "searchQuery": "Kind of Blue Miles Davis",
+        "totalReleases": 15,
+        "attributedReleases": 0,
+        "expectedIndexerName": "Qobuzarr",
+        "foundIndexerNames": ["Usenet-Indexer", "Torrent-Indexer"],
+        "foundIndexerNameCount": 2,
+        "foundIndexerNamesCapped": false
+      }
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 3,
+    "passed": 2,
+    "failed": 1,
+    "skipped": 0,
+    "totalDurationMs": 7000
+  },
+  "diagnostics": {
+    "bundlePath": null,
+    "bundleCreated": false,
+    "includedFiles": ["run-manifest.json"],
+    "redactionApplied": true,
+    "redactionSelfTestPassed": true
+  },
+  "hostBugSuspected": {
+    "detected": false
+  }
+}

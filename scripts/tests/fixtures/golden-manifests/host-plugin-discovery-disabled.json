@@ -1,0 +1,103 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/main/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-02T12:40:00.000Z",
+  "runId": "golden-host-plugin-discovery-disabled",
+  "runner": {
+    "name": "lidarr.plugin.common:e2e-runner.ps1",
+    "version": "deadbeef",
+    "args": [
+      "-Gate",
+      "schema",
+      "-Plugins",
+      "Qobuzarr"
+    ]
+  },
+  "lidarr": {
+    "url": "http://[LOCALHOST]:8686",
+    "containerName": "lidarr-e2e-test",
+    "imageTag": "pr-plugins-3.1.1.4884",
+    "imageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "version": "3.1.1.4884",
+    "branch": "plugins",
+    "containerId": "000000000000",
+    "startedAt": "2026-01-02T12:39:00.000Z",
+    "imageId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "request": {
+    "gate": "schema",
+    "plugins": [
+      "Qobuzarr"
+    ]
+  },
+  "effective": {
+    "gates": [
+      "Schema"
+    ],
+    "plugins": [
+      "Qobuzarr"
+    ],
+    "stopReason": "failed at Schema for Qobuzarr"
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 42
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Qobuzarr",
+      "outcome": "failed",
+      "errorCode": "E2E_HOST_PLUGIN_DISCOVERY_DISABLED",
+      "outcomeReason": "Host has plugin discovery disabled (confirmed via host capabilities)",
+      "startedAt": "2026-01-02T12:40:01.000Z",
+      "endedAt": "2026-01-02T12:40:02.000Z",
+      "durationMs": 1000,
+      "errors": [
+        "E2E_HOST_PLUGIN_DISCOVERY_DISABLED: Host has plugin discovery disabled. Check config.xml for <EnablePlugins>true</EnablePlugins>."
+      ],
+      "details": {
+        "indexerFound": false,
+        "downloadClientFound": false,
+        "importListFound": false,
+        "discoveryDiagnosis": {
+          "schemaEndpointReachable": true,
+          "indexerSchemaCount": 25,
+          "downloadClientSchemaCount": 8,
+          "importListSchemaCount": 5,
+          "pluginImplementationFound": false,
+          "pluginPackagePresent": true,
+          "pluginJsonPresent": true,
+          "pluginAssemblyPresent": true,
+          "hostPluginDiscoveryEnabled": false,
+          "detectionBasis": "config.xml",
+          "detectionEvidence": "<EnablePlugins>false</EnablePlugins>"
+        }
+      }
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 1,
+    "passed": 0,
+    "failed": 1,
+    "skipped": 0,
+    "totalDurationMs": 1000
+  },
+  "diagnostics": {
+    "bundlePath": "diagnostics-2026-01-02T12-40-00Z.zip",
+    "bundleCreated": true,
+    "includedFiles": [
+      "run-manifest.json",
+      "container.log",
+      "inspect.json"
+    ],
+    "redactionApplied": true,
+    "redactionSelfTestPassed": true
+  },
+  "hostBugSuspected": {
+    "detected": false
+  }
+}
