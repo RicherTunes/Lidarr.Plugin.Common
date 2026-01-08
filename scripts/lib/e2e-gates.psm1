@@ -753,6 +753,7 @@ function Test-GrabGate {
         DownloadClientId = $DownloadClientId
         Success = $false
         QueueItemId = $null
+        Details = @{}
         Errors = @()
     }
 
@@ -796,6 +797,9 @@ function Test-GrabGate {
         }
         else {
             $result.Errors += "Grab succeeded but item not found in queue"
+            $result.Details.ErrorCode = 'E2E_QUEUE_NOT_FOUND'
+            $result.Details.queueTimeoutSec = 2
+            $result.Details.downloadId = $grabResult.downloadId
         }
     }
     catch {
@@ -1169,6 +1173,14 @@ function Test-PluginGrabGate {
             $queueCount = ($queueRecords | Measure-Object).Count
             $result.Errors += "Grab succeeded but item not found in queue (waited ${QueueTimeoutSec}s; queue has $queueCount items)"
             $result.Errors += "downloadId=$($grabResult.downloadId), albumId=$AlbumId, indexer=$($result.IndexerName)"
+
+            # Fail-fast: queue contract failure should be explicit and stable (not inferred from text)
+            $result.Details.ErrorCode = 'E2E_QUEUE_NOT_FOUND'
+            $result.Details.queueTimeoutSec = $QueueTimeoutSec
+            $result.Details.queueCount = $queueCount
+            $result.Details.downloadId = $grabResult.downloadId
+            $result.Details.albumId = $AlbumId
+            $result.Details.indexerName = $result.IndexerName
             return $result
         }
 
@@ -2177,8 +2189,10 @@ function Test-MetadataGate {
         TotalFilesChecked = 0
         FilesWithTags = 0
         MissingTags = @()
+        SampleFile = $null
         Errors = @()
         SkipReason = $null
+        Details = @{}
     }
 
     try {
@@ -2447,6 +2461,7 @@ if __name__ == "__main__":
 
             if ($missing.Count -gt 0) {
                 $missingTags += "${fileName}: Missing tags: $($missing -join ', ')"
+                if (-not $result.SampleFile) { $result.SampleFile = $fileName }
             }
             else {
                 $filesWithTags++
@@ -2475,6 +2490,7 @@ if __name__ == "__main__":
         }
         elseif ($filesWithTags -gt 0 -and $missingTags.Count -gt 0) {
             # Partial success - some files ok, some missing
+            $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
             $result.Errors += "Metadata validation failed for $($missingTags.Count) of $($audioFiles.Count) files"
             foreach ($m in $missingTags) {
                 $result.Errors += "  FAIL: $m"
@@ -2483,6 +2499,7 @@ if __name__ == "__main__":
         }
         else {
             # All files failed
+            $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
             $result.Errors += "No files passed metadata validation"
             foreach ($m in $missingTags) {
                 $result.Errors += "  FAIL: $m"

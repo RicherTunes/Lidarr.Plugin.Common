@@ -2303,21 +2303,22 @@ foreach ($plugin in $pluginList) {
                 $gateEnd = Get-Date
 
                 $outcome = if ($grabResult.Outcome) { $grabResult.Outcome } elseif ($grabResult.Success) { "success" } else { "failed" }
-                $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome $outcome -Errors $grabResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details @{
-                    IndexerId = $lastPluginIndexer.id
-                    AlbumId = $lastAlbumSearchResult.AlbumId
-                    ReleaseTitle = $grabResult.ReleaseTitle
-                    QueueItemId = $grabResult.QueueItemId
-                    DownloadId = $grabResult.DownloadId
-                    OutputPath = $grabResult.OutputPath
-                    QueueStatus = $grabResult.QueueStatus
-                    TrackedDownloadStatus = $grabResult.TrackedDownloadStatus
-                    TrackedDownloadState = $grabResult.TrackedDownloadState
-                    SampleFile = $grabResult.SampleFile
-                    TotalFilesFound = $grabResult.TotalFilesFound
-                    ValidatedFiles = $grabResult.ValidatedFiles
-                    SkipReason = $grabResult.SkipReason
-                }
+                 $allResults += New-OutcomeResult -Gate "Grab" -PluginName $plugin -Outcome $outcome -Errors $grabResult.Errors -StartTime $gateStart -EndTime $gateEnd -Details @{
+                     IndexerId = $lastPluginIndexer.id
+                     AlbumId = $lastAlbumSearchResult.AlbumId
+                     ReleaseTitle = $grabResult.ReleaseTitle
+                     QueueItemId = $grabResult.QueueItemId
+                     DownloadId = $grabResult.DownloadId
+                     OutputPath = $grabResult.OutputPath
+                     QueueStatus = $grabResult.QueueStatus
+                     TrackedDownloadStatus = $grabResult.TrackedDownloadStatus
+                     TrackedDownloadState = $grabResult.TrackedDownloadState
+                     SampleFile = $grabResult.SampleFile
+                     TotalFilesFound = $grabResult.TotalFilesFound
+                     ValidatedFiles = $grabResult.ValidatedFiles
+                     ErrorCode = $grabResult.Details.ErrorCode
+                     SkipReason = $grabResult.SkipReason
+                 }
 
                 if ($outcome -eq "skipped") {
                     $reason = $grabResult.SkipReason
@@ -2347,14 +2348,16 @@ foreach ($plugin in $pluginList) {
                             -MaxFilesToCheck $MetadataFilesToCheck
 
                         $metaOutcome = if ($metadataResult.Outcome) { $metadataResult.Outcome } elseif ($metadataResult.Success) { "success" } else { "failed" }
-                        $allResults += New-OutcomeResult -Gate "Metadata" -PluginName $plugin -Outcome $metaOutcome -Errors $metadataResult.Errors -Details @{
-                            OutputPath = $metadataResult.OutputPath
-                            TotalFilesChecked = $metadataResult.TotalFilesChecked
-                            FilesWithTags = $metadataResult.FilesWithTags
-                            ValidatedFiles = $metadataResult.ValidatedFiles | ForEach-Object { $_.Name }
-                            MissingTags = $metadataResult.MissingTags
-                            SkipReason = $metadataResult.SkipReason
-                        }
+                         $allResults += New-OutcomeResult -Gate "Metadata" -PluginName $plugin -Outcome $metaOutcome -Errors $metadataResult.Errors -Details @{
+                             OutputPath = $metadataResult.OutputPath
+                             TotalFilesChecked = $metadataResult.TotalFilesChecked
+                             FilesWithTags = $metadataResult.FilesWithTags
+                             ValidatedFiles = $metadataResult.ValidatedFiles | ForEach-Object { $_.Name }
+                             MissingTags = $metadataResult.MissingTags
+                             SampleFile = $metadataResult.SampleFile
+                             ErrorCode = $metadataResult.Details.ErrorCode
+                             SkipReason = $metadataResult.SkipReason
+                         }
 
                         if ($metaOutcome -eq "skipped") {
                             $reason = $metadataResult.SkipReason
