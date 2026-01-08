@@ -187,6 +187,8 @@ $repoRoot = Split-Path -Parent $scriptDir
 Import-Module (Join-Path $scriptDir "lib/e2e-gates.psm1") -Force
 # Import abstractions validation module
 Import-Module (Join-Path $scriptDir "lib/e2e-abstractions.psm1") -Force
+# Import release selection module for deterministic release selection
+Import-Module (Join-Path $scriptDir "lib/e2e-release-selection.psm1") -Force
 
 $image = if ([string]::IsNullOrWhiteSpace($LidarrImage)) { "ghcr.io/hotio/lidarr:$LidarrTag" } else { $LidarrImage.Trim() }
 
@@ -1281,13 +1283,9 @@ try {
                 continue
             }
 
-            $candidates = $searchGateReleases | Where-Object { $_.indexer -eq $indexerName -and $_.downloadAllowed -ne $false }
-            # Select smallest release (for faster smoke tests), with deterministic tie-breakers
-            $release = $candidates | Sort-Object -Stable `
-                @{Expression = { $_.size ?? [long]::MaxValue }; Ascending = $true },
-                @{Expression = { ($_.title ?? '').ToUpperInvariant() }; Ascending = $true },
-                @{Expression = { ($_.guid ?? '').ToUpperInvariant() }; Ascending = $true } |
-                Select-Object -First 1
+            $candidates = @($searchGateReleases | Where-Object { $_.indexer -eq $indexerName -and $_.downloadAllowed -ne $false })
+            # Select smallest release (for faster smoke tests) using shared deterministic helper
+            $release = Select-DeterministicRelease -Releases $candidates -SizeAscending
             if (-not $release) {
                 Write-Host "✗ grab gate: no releases attributed to indexer '$indexerName' (plugin=$plugin). Consider a different SearchArtistTerm/SearchAlbumTitle." -ForegroundColor Red
                 $grabFailed = $true

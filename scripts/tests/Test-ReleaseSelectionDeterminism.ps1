@@ -90,7 +90,7 @@ if ($selectedFromNulls) {
     Assert-True -Condition ($null -eq $selectedFromNulls.title -or $selectedFromNulls.title -eq '') -Description "Null/empty title sorts first"
 }
 
-Write-Host "`nTest 6: Size is tertiary tie-breaker (descending)" -ForegroundColor Yellow
+Write-Host "`nTest 6: Size is tertiary tie-breaker (descending by default)" -ForegroundColor Yellow
 $sameTitleGuid = @(
     [PSCustomObject]@{ title = "Same"; guid = "same-guid"; size = 100 }
     [PSCustomObject]@{ title = "Same"; guid = "same-guid"; size = 300 }
@@ -113,6 +113,89 @@ Assert-True -Condition ($null -eq $emptyResult) -Description "Empty releases ret
 $emptyWithBasis = Select-DeterministicRelease -Releases @() -ReturnSelectionBasis
 Assert-True -Condition ($null -eq $emptyWithBasis.release) -Description "Empty releases with basis returns null release"
 Assert-True -Condition ($emptyWithBasis.selectionBasis.error -eq 'no_releases') -Description "Empty releases with basis sets error"
+
+Write-Host "`nTest 9: Null/empty guid determinism (50 shuffles)" -ForegroundColor Yellow
+# Mix of null, empty, and valid guids - all with same title
+# After guid normalization: null→"", ""→"", "valid-guid"→"VALID-GUID"
+# Empty strings sort before "VALID-GUID", so the 4 with empty guid compete
+# Among those 4, size (desc) decides: 300 > 250 > 150 > 100
+$mixedGuidReleases = @(
+    [PSCustomObject]@{ title = "Same"; guid = $null; size = 100 }
+    [PSCustomObject]@{ title = "Same"; guid = ""; size = 150 }
+    [PSCustomObject]@{ title = "Same"; guid = "valid-guid"; size = 200 }
+    [PSCustomObject]@{ title = "Same"; guid = $null; size = 250 }
+    [PSCustomObject]@{ title = "Same"; guid = ""; size = 300 }     # Should win (empty guid sorts first, largest size)
+)
+$nullGuidSelections = @()
+for ($i = 0; $i -lt 50; $i++) {
+    $shuffled = Shuffle-Array -Array $mixedGuidReleases
+    $sel = Select-DeterministicRelease -Releases $shuffled -ReturnSelectionBasis
+    # Track by actual release properties, not originalIndex (which changes with shuffle)
+    $nullGuidSelections += "$($sel.release.guid ?? 'null'):$($sel.release.size)"
+}
+$uniqueNullGuidSelections = @($nullGuidSelections | Select-Object -Unique)
+Assert-True -Condition ($uniqueNullGuidSelections.Count -eq 1) -Description "50 shuffles with null/empty guid select same release (got $($uniqueNullGuidSelections.Count) unique)"
+
+# Verify the winner has empty guid and size 300
+$mixedResult = Select-DeterministicRelease -Releases $mixedGuidReleases -ReturnSelectionBasis
+Assert-True -Condition ($mixedResult.release.size -eq 300) -Description "Largest size with empty guid wins (got size $($mixedResult.release.size))"
+Assert-True -Condition ([string]::IsNullOrEmpty($mixedResult.release.guid)) -Description "Winner has null/empty guid"
+
+Write-Host "`nTest 10: SelectionBasis contains no sensitive fields" -ForegroundColor Yellow
+$sensitivePatterns = @('http:', 'https:', 'token', 'apikey', 'api_key', 'password', 'secret')
+$basisJson = $result.selectionBasis | ConvertTo-Json -Depth 5
+$hasSensitive = $false
+foreach ($pattern in $sensitivePatterns) {
+    if ($basisJson -match $pattern) {
+        $hasSensitive = $true
+        Write-Host "    Found sensitive pattern: $pattern" -ForegroundColor Red
+    }
+}
+Assert-True -Condition (-not $hasSensitive) -Description "selectionBasis contains no sensitive patterns"
+
+Write-Host "`nTest 11: SizeAscending mode selects smallest" -ForegroundColor Yellow
+# All have same title and guid, so size is the deciding factor
+$sizeTestReleases = @(
+    [PSCustomObject]@{ title = "Album"; guid = "same"; size = 500 }
+    [PSCustomObject]@{ title = "Album"; guid = "same"; size = 100 }
+    [PSCustomObject]@{ title = "Album"; guid = "same"; size = 300 }
+)
+$smallestFirst = Select-DeterministicRelease -Releases $sizeTestReleases -SizeAscending
+Assert-True -Condition ($smallestFirst.size -eq 100) -Description "SizeAscending selects smallest (got $($smallestFirst.size))"
+
+$largestFirst = Select-DeterministicRelease -Releases $sizeTestReleases
+Assert-True -Condition ($largestFirst.size -eq 500) -Description "Default (desc) selects largest (got $($largestFirst.size))"
+
+Write-Host "`nTest 12: SizeAscending puts null size last" -ForegroundColor Yellow
+# All have same title and guid, so size is the deciding factor
+# In SizeAscending mode, null sizes become MaxValue (sort last)
+$nullSizeReleases = @(
+    [PSCustomObject]@{ title = "Album"; guid = "same"; size = $null }
+    [PSCustomObject]@{ title = "Album"; guid = "same"; size = 100 }
+    [PSCustomObject]@{ title = "Album"; guid = "same"; size = 50 }
+)
+$ascWithNull = Select-DeterministicRelease -Releases $nullSizeReleases -SizeAscending
+Assert-True -Condition ($ascWithNull.size -eq 50) -Description "SizeAscending with null size selects smallest non-null (got $($ascWithNull.size))"
+
+Write-Host "`nTest 13: originalIndex ensures stability" -ForegroundColor Yellow
+# All keys identical - only originalIndex differs
+$identicalReleases = @(
+    [PSCustomObject]@{ title = "Same"; guid = "same"; size = 100 }
+    [PSCustomObject]@{ title = "Same"; guid = "same"; size = 100 }
+    [PSCustomObject]@{ title = "Same"; guid = "same"; size = 100 }
+)
+$stabilitySelections = @()
+for ($i = 0; $i -lt 20; $i++) {
+    $shuffled = Shuffle-Array -Array $identicalReleases
+    $sel = Select-DeterministicRelease -Releases $shuffled -ReturnSelectionBasis
+    $stabilitySelections += $sel.selectionBasis.selectedOriginalIndex
+}
+# After shuffling, selectedOriginalIndex should always be 0 (first in shuffled array)
+$uniqueStability = @($stabilitySelections | Select-Object -Unique)
+Assert-True -Condition ($uniqueStability.Count -eq 1 -and $uniqueStability[0] -eq 0) -Description "originalIndex ensures stable selection (always picks index 0)"
+
+$stableResult = Select-DeterministicRelease -Releases $identicalReleases -ReturnSelectionBasis
+Assert-True -Condition ($stableResult.selectionBasis.tieBreaker -eq 'originalIndex') -Description "tieBreaker reports 'originalIndex' for identical releases"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
