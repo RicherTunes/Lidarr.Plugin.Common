@@ -234,6 +234,100 @@ Assert-True -Condition ($result3.release.guid -eq 'guid-a') -Description "Order 
 Assert-True -Condition ($result1.selectionBasis.selectedIntrinsicHash -eq $result2.selectionBasis.selectedIntrinsicHash) -Description "IntrinsicHash consistent between order 1 and 2"
 Assert-True -Condition ($result2.selectionBasis.selectedIntrinsicHash -eq $result3.selectionBasis.selectedIntrinsicHash) -Description "IntrinsicHash consistent between order 2 and 3"
 
+Write-Host "`nTest 15: Size as string vs int selects same (canonicalization)" -ForegroundColor Yellow
+# Critical: JSON parsing may yield size as string "123" vs int 123
+# Both must hash to the same value
+$sizeAsInt = @(
+    [PSCustomObject]@{ title = "Album"; guid = "guid-1"; size = 500 }
+    [PSCustomObject]@{ title = "Album"; guid = "guid-2"; size = 300 }
+)
+$sizeAsString = @(
+    [PSCustomObject]@{ title = "Album"; guid = "guid-1"; size = "500" }
+    [PSCustomObject]@{ title = "Album"; guid = "guid-2"; size = "300" }
+)
+$intResult = Select-DeterministicRelease -Releases $sizeAsInt -ReturnSelectionBasis
+$strResult = Select-DeterministicRelease -Releases $sizeAsString -ReturnSelectionBasis
+Assert-True -Condition ($intResult.release.guid -eq $strResult.release.guid) -Description "Size as int vs string selects same release"
+Assert-True -Condition ($intResult.selectionBasis.selectedIntrinsicHash -eq $strResult.selectionBasis.selectedIntrinsicHash) -Description "Size as int vs string produces same intrinsicHash"
+
+# Also test indexerId as string vs int
+$indexerAsInt = @(
+    [PSCustomObject]@{ title = "Album"; guid = "same"; size = 100; indexerId = 5 }
+    [PSCustomObject]@{ title = "Album"; guid = "same"; size = 100; indexerId = 3 }
+)
+$indexerAsString = @(
+    [PSCustomObject]@{ title = "Album"; guid = "same"; size = 100; indexerId = "5" }
+    [PSCustomObject]@{ title = "Album"; guid = "same"; size = 100; indexerId = "3" }
+)
+$intIdxResult = Select-DeterministicRelease -Releases $indexerAsInt -ReturnSelectionBasis
+$strIdxResult = Select-DeterministicRelease -Releases $indexerAsString -ReturnSelectionBasis
+Assert-True -Condition ($intIdxResult.selectionBasis.selectedIntrinsicHash -eq $strIdxResult.selectionBasis.selectedIntrinsicHash) -Description "IndexerId as int vs string produces same intrinsicHash"
+
+Write-Host "`nTest 16: All-null fields use collision fallback" -ForegroundColor Yellow
+# When title, guid, size, indexerId are all missing/null, collision fallback kicks in
+# Uses downloadUrl hash, infoUrl hash, id, or JSON hash
+$allNullWithUrls = @(
+    [PSCustomObject]@{ downloadUrl = "https://example.com/release1.torrent" }
+    [PSCustomObject]@{ downloadUrl = "https://example.com/release2.torrent" }
+)
+$nullUrlResult = $null
+try {
+    $nullUrlResult = Select-DeterministicRelease -Releases $allNullWithUrls -ReturnSelectionBasis
+    Assert-True -Condition ($null -ne $nullUrlResult.release) -Description "All-null with downloadUrl selects a release"
+} catch {
+    Assert-True -Condition $false -Description "All-null with downloadUrl should not throw (threw: $_)"
+}
+
+# Verify determinism with shuffled all-null releases
+$allNullSelections = @()
+for ($i = 0; $i -lt 20; $i++) {
+    $shuffled = $allNullWithUrls | Get-Random -Count $allNullWithUrls.Count
+    $sel = Select-DeterministicRelease -Releases $shuffled -ReturnSelectionBasis
+    # Track by downloadUrl since that's the only differentiator
+    $allNullSelections += $sel.release.downloadUrl
+}
+$uniqueNullSelections = @($allNullSelections | Select-Object -Unique)
+Assert-True -Condition ($uniqueNullSelections.Count -eq 1) -Description "20 shuffles of all-null releases select same (got $($uniqueNullSelections.Count) unique)"
+
+# Test with id fallback (no URLs)
+$allNullWithIds = @(
+    [PSCustomObject]@{ id = 123 }
+    [PSCustomObject]@{ id = 456 }
+)
+$idResult = Select-DeterministicRelease -Releases $allNullWithIds -ReturnSelectionBasis
+Assert-True -Condition ($null -ne $idResult.release) -Description "All-null with id selects a release"
+
+# Test with JSON fallback (truly empty objects with only arbitrary property)
+$trulyMinimal = @(
+    [PSCustomObject]@{ customProp = "value1" }
+    [PSCustomObject]@{ customProp = "value2" }
+)
+$minimalResult = Select-DeterministicRelease -Releases $trulyMinimal -ReturnSelectionBasis
+Assert-True -Condition ($null -ne $minimalResult.release) -Description "Truly minimal objects use JSON fallback"
+
+Write-Host "`nTest 17: SelectionBasis contains no sensitive patterns (comprehensive)" -ForegroundColor Yellow
+# Test with a release that has sensitive fields to ensure they're not leaked
+$sensitiveRelease = @(
+    [PSCustomObject]@{
+        title = "Album"
+        guid = "guid-1"
+        size = 100
+        downloadUrl = "https://secret.indexer.com/download?token=abc123&apikey=xyz789"
+        infoUrl = "https://secret.indexer.com/info?password=hunter2"
+        indexerId = 1
+    }
+)
+$sensitiveResult = Select-DeterministicRelease -Releases $sensitiveRelease -ReturnSelectionBasis
+$basisJson = $sensitiveResult.selectionBasis | ConvertTo-Json -Depth 10
+$sensitivePatterns = @('http:', 'https:', 'token', 'apikey', 'api_key', 'password', 'secret', 'download', 'indexer.com')
+$foundSensitive = @()
+foreach ($pattern in $sensitivePatterns) {
+    if ($basisJson -match $pattern) {
+        $foundSensitive += $pattern
+    }
+}
+Assert-True -Condition ($foundSensitive.Count -eq 0) -Description "selectionBasis contains no sensitive patterns (found: $($foundSensitive -join ', '))"
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Summary: $passed passed, $failed failed" -ForegroundColor Cyan
