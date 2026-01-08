@@ -78,6 +78,55 @@ Assert-Equal -Name "host-bug-alc.json hostBugSuspected.classification" -Actual $
 
 $schemaMissing = Validate-Fixture -FileName 'schema-missing-implementation.json'
 Assert-True -Name "schema-missing-implementation.json has E2E_SCHEMA_MISSING_IMPLEMENTATION" -Condition ($schemaMissing.results.errorCode -contains 'E2E_SCHEMA_MISSING_IMPLEMENTATION')
+$schemaMissingResult = $schemaMissing.results | Where-Object { $_.errorCode -eq 'E2E_SCHEMA_MISSING_IMPLEMENTATION' }
+Assert-True -Name "schema-missing-implementation.json has discoveryDiagnosis" -Condition ($null -ne $schemaMissingResult.details.discoveryDiagnosis)
+Assert-True -Name "schema-missing-implementation.json discoveryDiagnosis.schemaEndpointReachable" -Condition ($schemaMissingResult.details.discoveryDiagnosis.schemaEndpointReachable -eq $true)
+
+$abstractionsMismatch = Validate-Fixture -FileName 'abstractions-sha-mismatch.json'
+Assert-True -Name "abstractions-sha-mismatch.json has E2E_ABSTRACTIONS_SHA_MISMATCH" -Condition ($abstractionsMismatch.results.errorCode -contains 'E2E_ABSTRACTIONS_SHA_MISMATCH')
+$abstractionsResult = $abstractionsMismatch.results | Where-Object { $_.errorCode -eq 'E2E_ABSTRACTIONS_SHA_MISMATCH' }
+Assert-True -Name "abstractions-sha-mismatch.json has fixInstructions" -Condition ($null -ne $abstractionsResult.details.fixInstructions)
+Assert-True -Name "abstractions-sha-mismatch.json has abstractionsShas" -Condition ($null -ne $abstractionsResult.details.abstractionsShas)
+Assert-True -Name "abstractions-sha-mismatch.json has mismatchedPlugins" -Condition ($abstractionsResult.details.mismatchedPlugins.Count -gt 0)
+# Verify no secrets in errors array (should only contain fix instructions, not credentials)
+$hasSecretPattern = $abstractionsResult.errors | Where-Object { $_ -match '(password|token|secret|key=)' }
+Assert-True -Name "abstractions-sha-mismatch.json errors contain no secrets" -Condition ($null -eq $hasSecretPattern)
+
+$discoveryDisabled = Validate-Fixture -FileName 'host-plugin-discovery-disabled.json'
+Assert-True -Name "host-plugin-discovery-disabled.json has E2E_HOST_PLUGIN_DISCOVERY_DISABLED" -Condition ($discoveryDisabled.results.errorCode -contains 'E2E_HOST_PLUGIN_DISCOVERY_DISABLED')
+$discoveryResult = $discoveryDisabled.results | Where-Object { $_.errorCode -eq 'E2E_HOST_PLUGIN_DISCOVERY_DISABLED' }
+Assert-True -Name "host-plugin-discovery-disabled.json has discoveryDiagnosis" -Condition ($null -ne $discoveryResult.details.discoveryDiagnosis)
+# Key contract: schemas reachable but plugin not loaded, with affirmative host evidence
+Assert-True -Name "host-plugin-discovery-disabled.json discoveryDiagnosis.schemaEndpointReachable=true" -Condition ($discoveryResult.details.discoveryDiagnosis.schemaEndpointReachable -eq $true)
+Assert-True -Name "host-plugin-discovery-disabled.json discoveryDiagnosis.pluginPackagePresent=true" -Condition ($discoveryResult.details.discoveryDiagnosis.pluginPackagePresent -eq $true)
+Assert-True -Name "host-plugin-discovery-disabled.json discoveryDiagnosis.hostPluginDiscoveryEnabled=false" -Condition ($discoveryResult.details.discoveryDiagnosis.hostPluginDiscoveryEnabled -eq $false)
+# Affirmative evidence required when hostPluginDiscoveryEnabled is false
+Assert-True -Name "host-plugin-discovery-disabled.json has detectionBasis" -Condition ($null -ne $discoveryResult.details.discoveryDiagnosis.detectionBasis)
+
+$noReleases = Validate-Fixture -FileName 'no-releases-attributed.json'
+Assert-True -Name "no-releases-attributed.json has E2E_NO_RELEASES_ATTRIBUTED" -Condition ($noReleases.results.errorCode -contains 'E2E_NO_RELEASES_ATTRIBUTED')
+$noReleasesResult = $noReleases.results | Where-Object { $_.errorCode -eq 'E2E_NO_RELEASES_ATTRIBUTED' }
+# Contract: must include counts for debugging
+Assert-True -Name "no-releases-attributed.json has totalReleases" -Condition ($null -ne $noReleasesResult.details.totalReleases)
+Assert-True -Name "no-releases-attributed.json has attributedReleases" -Condition ($null -ne $noReleasesResult.details.attributedReleases)
+Assert-True -Name "no-releases-attributed.json has expectedIndexerName" -Condition ($null -ne $noReleasesResult.details.expectedIndexerName)
+Assert-True -Name "no-releases-attributed.json has foundIndexerNames" -Condition ($noReleasesResult.details.foundIndexerNames.Count -ge 0)
+# Guardrail: foundIndexerNames must be capped to prevent manifest bloat
+$maxIndexerNames = 10
+if ($noReleasesResult.details.foundIndexerNames.Count -gt $maxIndexerNames) {
+    Write-Host "  [FAIL] no-releases-attributed.json foundIndexerNames exceeds cap ($($noReleasesResult.details.foundIndexerNames.Count) > $maxIndexerNames)" -ForegroundColor Red
+    $script:failed++
+} else {
+    Write-Host "  [PASS] no-releases-attributed.json foundIndexerNames within cap (<= $maxIndexerNames)" -ForegroundColor Green
+    $script:passed++
+}
+
+$metadataMissing = Validate-Fixture -FileName 'metadata-missing.json'
+Assert-True -Name "metadata-missing.json has E2E_METADATA_MISSING" -Condition ($metadataMissing.results.errorCode -contains 'E2E_METADATA_MISSING')
+$metadataResult = $metadataMissing.results | Where-Object { $_.errorCode -eq 'E2E_METADATA_MISSING' }
+# Contract: must include actionable list of missing tags
+Assert-True -Name "metadata-missing.json has missingTags array" -Condition ($metadataResult.details.missingTags.Count -gt 0)
+Assert-True -Name "metadata-missing.json has sampleFile" -Condition ($null -ne $metadataResult.details.sampleFile)
 
 Write-Host ""
 Write-Host "Passed: $passed" -ForegroundColor Green
