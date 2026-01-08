@@ -24,6 +24,7 @@ For diagnostics bundle structure, see `docs/DIAGNOSTICS_BUNDLE_CONTRACT.md`.
 | `E2E_IMPORT_FAILED` | ImportListSync completed with errors or post-sync state indicates failure. | Provider unreachable; LLM endpoint down; Brainarr import list misconfigured; auth expired. | Check `lastSyncError`; verify LLM endpoint reachability; rerun with longer timeout. |
 | `E2E_COMPONENT_AMBIGUOUS` | Multiple components match selection criteria for a plugin. | Multiple indexers/download clients configured for same plugin; no preferred ID set. | Use `-ComponentIdsInstanceSalt` or pin preferred IDs via `E2E_COMPONENT_IDS_PATH`. |
 | `E2E_ABSTRACTIONS_SHA_MISMATCH` | Plugins ship non-identical `Lidarr.Plugin.Abstractions.dll` bytes. | Plugins built from different Common submodule commits. | Rebuild all plugins from same Common SHA; rerun packaging preflight. |
+| `E2E_HOST_PLUGIN_DISCOVERY_DISABLED` | Plugins exist on disk but host is not loading them. | Host `EnablePlugins` setting is `false`; plugin directory path mismatch; permissions issue. | Check `config.xml` for `<EnablePlugins>true</EnablePlugins>`; verify plugin path; check container logs for discovery errors. |
 | `E2E_PROVIDER_UNAVAILABLE` | Expected external provider (e.g., LLM model) not found. | LLM endpoint reachable but expected model not loaded. | Load expected model in LM Studio/Ollama; verify `expectedModelId` in config. |
 
 <details>
@@ -42,6 +43,12 @@ Select-String -Path scripts\**\*.ps1,docs\*.md -Pattern 'E2E_[A-Z0-9_]+' -AllMat
 ```
 
 Compare output against this table to find undocumented codes.
+
+**Note**: The enumeration will find both:
+- **Manifest `errorCode` values** (appear in `run-manifest.json`, validated by schema)
+- **Gate-local error strings** (appear in `result.Errors` arrays, human-readable context)
+
+Both use the `E2E_*` prefix for grep-ability, but only manifest codes are machine-parsed by CI.
 
 </details>
 
