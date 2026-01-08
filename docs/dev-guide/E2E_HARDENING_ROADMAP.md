@@ -119,9 +119,33 @@ Mapping rules (minimal):
 - `safeToPersist` is true only for: `preferredId`, `created`, `implementationName`, `implementation`.
 - Note: `updated` is an action outcome, not a selection strategy — excluded from safe strategies.
 
+### P0.2 (deterministic release selection)
+- [x] Shared release selection module (`scripts/lib/e2e-release-selection.psm1`) — PR #226
+- [x] Culture-invariant sorting (title/guid/size) with canonicalized inputs
+- [x] Intrinsic hash tiebreaker (SHA256 of release properties) for input-order independence
+- [x] Collision fallbacks for all-null releases (downloadUrl hash → id → props hash)
+- [x] `selectionBasis` in manifest (hashes only, no sensitive data)
+- [x] 40+ hermetic tests covering shuffle determinism, type canonicalization, collision fallbacks
+
+### P0.3 (explicit errorCode at source sweep)
+
+#### Done
+- [ ] `E2E_QUEUE_NOT_FOUND` — PR #232
+- [ ] `E2E_METADATA_MISSING` — PR #232
+
+#### Pending
+- [ ] `E2E_ZERO_AUDIO_FILES` — set at "0 audio files found" site + hermetic test
+- [ ] `SampleFile` guaranteed for all `E2E_METADATA_MISSING` paths + hermetic test
+- [ ] Sweep remaining inference-by-string failures in `e2e-gates.psm1`
+
+#### Contract
+- Every hard failure sets `Details.ErrorCode` at the exact failure site
+- `Errors[]` is human context only, never used for classification
+- Each new explicit code gets a hermetic manifest test
+
 ### P1 (correctness hardening)
 - [x] Record Lidarr host fingerprint (`lidarrVersion`, `branch`, `imageTag`, `imageDigest`, `containerId`, `containerStartedAt`) into the preferred-ID state entries (diagnostics only; no effect on selection).
-- [x] Reduce/disable fuzzy fallback in `Select-ConfiguredComponent` (flag-gated), and add explicit tests for “no accidental selection”.
+- [x] Reduce/disable fuzzy fallback in `Select-ConfiguredComponent` (flag-gated), and add explicit tests for "no accidental selection".
 
 ### P2 (concurrency + usability)
 - [x] Add state-write lock backoff tuning via env var (still best-effort).      
