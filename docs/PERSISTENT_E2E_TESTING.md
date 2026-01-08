@@ -276,6 +276,18 @@ Implementation:
 
 If neither mutagen nor the host fallback is available, metadata validation is skipped with a clear reason.
 
+## Deterministic Release Selection
+
+The E2E test framework uses **deterministic release selection** (`scripts/lib/e2e-release-selection.psm1`) to ensure reproducible test results regardless of API response order, system locale, or PowerShell version.
+
+**Selection contract** (DO NOT "simplify" this logic—it exists to prevent flaky tests):
+1. Releases are sorted by canonicalized keys: `title` (uppercase, trimmed), `guid` (lowercase, trimmed), `size` (parsed as int64), `indexerId` (parsed as int)
+2. An **intrinsic hash** (SHA256 of canonicalized properties) is computed for each release, ensuring the same release is selected even when the API returns candidates in a different order
+3. Collision fallbacks (`downloadUrl` hash → `infoUrl` hash → `id` → JSON hash) handle edge cases where all primary fields are missing/null
+4. `originalIndex` is the absolute last resort, only used if intrinsic hashes collide (practically impossible)
+
+The selection basis is included in the E2E manifest (`details.selectionBasis`) for debugging, containing only hashes—never raw URLs or tokens.
+
 ## Notes
 
 - If you see `Bind for 0.0.0.0:<port> failed: port is already allocated`, change `-Port` and/or `-ContainerName`.

@@ -368,6 +368,7 @@ Import-Module (Join-Path $PSScriptRoot "lib/e2e-json-output.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-component-ids.psm1") -Force     
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-brainarr-config.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-host-capabilities.psm1") -Force
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-release-selection.psm1") -Force
 
 # Optional Brainarr LLM file-based config (local convenience; never required)
 $brainarrLLMConfigError = $null
@@ -2874,29 +2875,27 @@ if ($runPostRestartGrab) {
 
             Write-Host "       Found $($albumSearchResult.PluginReleaseCount) releases, selecting one..." -ForegroundColor Gray
 
-            # Step 4: Get releases and select deterministically
-            # Use culture-invariant sorting with normalized keys to ensure consistent selection
+            # Step 4: Get releases and select deterministically using shared helper
             $releases = Invoke-LidarrApi -Endpoint "release?albumId=$($albumSearchResult.AlbumId)"
-            $pluginReleases = $releases | Where-Object {
+            $pluginReleaseCandidates = @($releases | Where-Object {
                 $_.indexerId -eq $pluginIndexer.id -or
                 [string]::Equals([string]$_.indexer, $plugin, [StringComparison]::OrdinalIgnoreCase)
-            } | Sort-Object -Stable `
-                @{Expression = { ($_.title ?? '').ToUpperInvariant() }; Ascending = $true },
-                @{Expression = { ($_.guid ?? '').ToUpperInvariant() }; Ascending = $true },
-                @{Expression = { $_.size ?? 0 }; Descending = $true } |
-                Select-Object -First 1
+            })
 
-            if (-not $pluginReleases) {
+            $selection = Select-DeterministicRelease -Releases $pluginReleaseCandidates -ReturnSelectionBasis
+            $selectedRelease = $selection.release
+            $selectionBasis = $selection.selectionBasis
+
+            if (-not $selectedRelease) {
                 Write-Host "       FAIL (no releases from $plugin post-restart)" -ForegroundColor Red
                 $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors @("No releases from $plugin after AlbumSearch post-restart")
                 $overallSuccess = $false
                 continue
             }
 
-            $selectedRelease = $pluginReleases
             $releaseTitle = if ($selectedRelease.title.Length -gt 50) { $selectedRelease.title.Substring(0,50) + "..." } else { $selectedRelease.title }
 
-            Write-Host "       Selected: $releaseTitle" -ForegroundColor Gray
+            Write-Host "       Selected: $releaseTitle (of $($selectionBasis.candidateCount) candidates)" -ForegroundColor Gray
             Write-Host "       Triggering grab..." -ForegroundColor Gray
 
             # Step 5: Grab the release
@@ -3058,6 +3057,7 @@ if ($runPostRestartGrab) {
 
             $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "success" -Details @{
                 SelectedReleaseTitle = $releaseTitle
+                SelectionBasis = $selectionBasis
                 DownloadId = $grabResult.downloadId
                 OutputPath = $outputPath
                 ValidatedFiles = $validatedFileNames
