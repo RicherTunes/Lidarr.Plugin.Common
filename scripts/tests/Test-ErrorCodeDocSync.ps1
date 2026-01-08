@@ -164,6 +164,43 @@ if ($stale.Count -gt 0) {
     }
 }
 
+# ============================================================================
+# Verify golden manifest error codes are in canonical list
+# ============================================================================
+
+Write-Host ""
+Write-Host "Verifying golden manifest error codes are canonical..." -ForegroundColor Cyan
+
+$fixturesDir = Join-Path $repoRoot "scripts/tests/fixtures/golden-manifests"
+if (Test-Path $fixturesDir) {
+    $goldenCodes = @()
+    Get-ChildItem $fixturesDir -Filter '*.json' | ForEach-Object {
+        $content = Get-Content $_.FullName -Raw | ConvertFrom-Json
+        $content.results | Where-Object { $null -ne $_.errorCode } | ForEach-Object {
+            $goldenCodes += $_.errorCode
+        }
+    }
+    $goldenCodes = $goldenCodes | Sort-Object -Unique
+
+    $missingFromCanonical = @()
+    foreach ($code in $goldenCodes) {
+        if ($code -notin $canonicalCodes) {
+            $missingFromCanonical += $code
+            Write-Host "  [FAIL] Golden fixture uses $code but NOT in canonical list" -ForegroundColor Red
+            $failed++
+        } else {
+            Write-Host "  [PASS] $code (golden fixture)" -ForegroundColor Green
+            $passed++
+        }
+    }
+
+    if ($missingFromCanonical.Count -eq 0) {
+        Write-Host "  [OK] All golden manifest codes are canonical" -ForegroundColor Green
+    }
+} else {
+    Write-Host "  [SKIP] Fixtures dir not found" -ForegroundColor Yellow
+}
+
 if ($failed -gt 0) {
     throw "E2E error code doc-sync failed: $failed issues found"
 }
