@@ -143,11 +143,16 @@ function Select-DeterministicRelease {
             elseif ($r.PSObject.Properties['id'] -and $r.id) {
                 $hashInput += "|id:$([string]$r.id)"
             }
-            # Last resort: hash the entire object JSON
+            # Last resort: hash properties with stable key ordering
+            # (ConvertTo-Json doesn't guarantee stable key order in PowerShell)
             else {
-                $jsonBytes = [System.Text.Encoding]::UTF8.GetBytes(($r | ConvertTo-Json -Compress -Depth 1))
-                $jsonHash = [BitConverter]::ToString($sha.ComputeHash($jsonBytes)).Replace('-', '').Substring(0, 16)
-                $hashInput += "|json:$jsonHash"
+                $sortedProps = $r.PSObject.Properties |
+                    Sort-Object Name |
+                    ForEach-Object { "$($_.Name)=$($_.Value)" }
+                $stableString = $sortedProps -join ';'
+                $stableBytes = [System.Text.Encoding]::UTF8.GetBytes($stableString)
+                $stableHash = [BitConverter]::ToString($sha.ComputeHash($stableBytes)).Replace('-', '').Substring(0, 16)
+                $hashInput += "|props:$stableHash"
             }
         }
 
