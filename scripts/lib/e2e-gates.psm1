@@ -897,6 +897,7 @@ function Test-PluginGrabGate {
         ValidationFailures = @()
         SampleFile = $null  # Kept for backward compat (first validated file)
         Errors = @()
+        Details = @{}
         SkipReason = $null
     }
 
@@ -1038,11 +1039,28 @@ function Test-PluginGrabGate {
             # Releases exist but none attributed to plugin - this is a FAIL (attribution regression)
             # Same diagnostics style as AlbumSearch gate
             $indexerContext = "name='$($result.IndexerName)' impl='$($result.IndexerImplementation)' id=$IndexerId"
-            $otherIndexers = $releases | ForEach-Object { "$($_.indexer):$($_.indexerId)" } | Select-Object -Unique
-            $indexerList = if ($otherIndexers) { $otherIndexers -join ', ' } else { '(none)' }
+            $summary = Get-FoundIndexerNamesDetails -Releases $releases
+            $foundDisplay = if ($summary.foundIndexerNameCount -eq 0) {
+                '(none)'
+            } else {
+                ($summary.foundIndexerNames -join ', ')
+            }
+            if ($summary.foundIndexerNamesCapped) {
+                $more = $summary.foundIndexerNameCount - $summary.foundIndexerNames.Count
+                if ($more -gt 0) { $foundDisplay += " (+$more more)" }
+            }
 
             Write-Host "       FAIL: No releases attributed to plugin!" -ForegroundColor Red
-            $result.Errors += "No releases from configured indexer [$indexerContext]. Total: $totalReleases. Found: $indexerList"
+            $result.Errors += "No releases from configured indexer [$indexerContext]. Total: $totalReleases. Found indexers: $foundDisplay"
+
+            # Structured details for E2E_NO_RELEASES_ATTRIBUTED (bounded + machine-readable)
+            $result.Details.ErrorCode = 'E2E_NO_RELEASES_ATTRIBUTED'
+            $result.Details.totalReleases = $totalReleases
+            $result.Details.attributedReleases = $pluginReleaseCount
+            $result.Details.expectedIndexerName = $PluginName
+            $result.Details.foundIndexerNames = @($summary.foundIndexerNames)
+            $result.Details.foundIndexerNameCount = $summary.foundIndexerNameCount
+            $result.Details.foundIndexerNamesCapped = [bool]$summary.foundIndexerNamesCapped
 
             # Check for null-indexer releases (same as AlbumSearch gate)
             $nullIndexerReleases = $releases | Where-Object {
@@ -1459,6 +1477,7 @@ function Test-AlbumSearchGate {
         ReleaseCount = 0
         PluginReleaseCount = 0
         Errors = @()
+        Details = @{}
         SkipReason = $null
     }
 
@@ -1716,12 +1735,29 @@ function Test-AlbumSearchGate {
         else {
             # Zero releases from plugin - gather diagnostics
             $totalReleases = ($releases | Measure-Object).Count
-            $otherIndexers = $releases | ForEach-Object { "$($_.indexer):$($_.indexerId)" } | Select-Object -Unique
-            $indexerList = if ($otherIndexers) { $otherIndexers -join ', ' } else { '(none)' }
+            $summary = Get-FoundIndexerNamesDetails -Releases $releases
+            $foundDisplay = if ($summary.foundIndexerNameCount -eq 0) {
+                '(none)'
+            } else {
+                ($summary.foundIndexerNames -join ', ')
+            }
+            if ($summary.foundIndexerNamesCapped) {
+                $more = $summary.foundIndexerNameCount - $summary.foundIndexerNames.Count
+                if ($more -gt 0) { $foundDisplay += " (+$more more)" }
+            }
 
             # Include full indexer context for triage (no extra API call needed)
             $indexerContext = "name='$($result.IndexerName)' impl='$($result.IndexerImplementation)' id=$IndexerId"
-            $result.Errors += "No releases from configured indexer [$indexerContext]. Total: $totalReleases. Found: $indexerList"
+            $result.Errors += "No releases from configured indexer [$indexerContext]. Total: $totalReleases. Found indexers: $foundDisplay"
+
+            # Structured details for E2E_NO_RELEASES_ATTRIBUTED (bounded + machine-readable)
+            $result.Details.ErrorCode = 'E2E_NO_RELEASES_ATTRIBUTED'
+            $result.Details.totalReleases = $totalReleases
+            $result.Details.attributedReleases = $result.PluginReleaseCount
+            $result.Details.expectedIndexerName = $PluginName
+            $result.Details.foundIndexerNames = @($summary.foundIndexerNames)
+            $result.Details.foundIndexerNameCount = $summary.foundIndexerNameCount
+            $result.Details.foundIndexerNamesCapped = [bool]$summary.foundIndexerNamesCapped
 
             # Check for null-indexer releases - likely parser/attribution regression
             $nullIndexerReleases = $releases | Where-Object {
@@ -3177,4 +3213,60 @@ function Test-BrainarrLLMGate {
     return $result
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Invoke-LidarrApi
+function Get-FoundIndexerNamesDetails {
+    <#
+    .SYNOPSIS
+        Produces a capped, deterministic summary of indexer names present in a Lidarr release list.
+
+    .DESCRIPTION
+        Used for E2E_NO_RELEASES_ATTRIBUTED diagnostics to prevent unbounded output/log growth.
+        - Dedupe is case-insensitive (OrdinalIgnoreCase)
+        - Sort is culture-invariant (ToUpperInvariant)
+        - Output is capped to MaxNames, and includes pre-cap count + capped flag
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [object[]]$Releases,
+        [int]$MaxNames = 10
+    )
+
+    if ($MaxNames -lt 1) { $MaxNames = 1 }
+
+    $set = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::OrdinalIgnoreCase)
+    $names = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($item in @($Releases)) {
+        $name = $null
+
+        if ($item -is [string]) {
+            $name = $item
+        }
+        elseif ($item -is [hashtable]) {
+            $name = $item['indexer']
+        }
+        else {
+            try { $name = $item.indexer } catch { $name = $null }
+        }
+
+        $name = ([string]$name).Trim()
+        if ([string]::IsNullOrWhiteSpace($name)) { continue }
+
+        if ($set.Add($name)) {
+            $names.Add($name)
+        }
+    }
+
+    $sorted = @($names | Sort-Object { $_.ToUpperInvariant() })
+    $totalUnique = $sorted.Count
+    $capped = $totalUnique -gt $MaxNames
+
+    $cappedNames = if ($capped) { @($sorted | Select-Object -First $MaxNames) } else { $sorted }
+
+    return [PSCustomObject]@{
+        foundIndexerNames = @($cappedNames)
+        foundIndexerNameCount = $totalUnique
+        foundIndexerNamesCapped = $capped
+    }
+}
+
+Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Get-FoundIndexerNamesDetails, Invoke-LidarrApi
