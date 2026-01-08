@@ -105,6 +105,9 @@ Assert-True -Condition ($null -ne $result.release) -Description "ReturnSelection
 Assert-True -Condition ($null -ne $result.selectionBasis) -Description "ReturnSelectionBasis includes selectionBasis"
 Assert-True -Condition ($result.selectionBasis.candidateCount -eq 5) -Description "selectionBasis.candidateCount is correct (got $($result.selectionBasis.candidateCount))"
 Assert-True -Condition ($result.selectionBasis.sortKeys -is [array]) -Description "selectionBasis.sortKeys is array"
+Assert-True -Condition ($result.selectionBasis.sortKeys -contains 'intrinsicHash:asc') -Description "sortKeys includes intrinsicHash"
+Assert-True -Condition ($null -ne $result.selectionBasis.selectedGuidHash) -Description "selectionBasis includes selectedGuidHash (not raw guid)"
+Assert-True -Condition ($null -ne $result.selectionBasis.selectedIntrinsicHash) -Description "selectionBasis includes selectedIntrinsicHash"
 
 Write-Host "`nTest 8: Empty releases returns null" -ForegroundColor Yellow
 $emptyResult = Select-DeterministicRelease -Releases @()
@@ -196,6 +199,40 @@ Assert-True -Condition ($uniqueStability.Count -eq 1 -and $uniqueStability[0] -e
 
 $stableResult = Select-DeterministicRelease -Releases $identicalReleases -ReturnSelectionBasis
 Assert-True -Condition ($stableResult.selectionBasis.tieBreaker -eq 'originalIndex') -Description "tieBreaker reports 'originalIndex' for identical releases"
+
+Write-Host "`nTest 14: Different initial order selects same item (intrinsic key)" -ForegroundColor Yellow
+# Critical test: same candidates in deliberately different orders must select same release
+# This verifies selection is based on intrinsic properties, not input order
+$distinctReleases = @(
+    [PSCustomObject]@{ title = "Album"; guid = "guid-c"; size = 100; indexerId = 1 }
+    [PSCustomObject]@{ title = "Album"; guid = "guid-a"; size = 200; indexerId = 2 }
+    [PSCustomObject]@{ title = "Album"; guid = "guid-b"; size = 150; indexerId = 3 }
+)
+# Reverse order
+$reversedReleases = @(
+    [PSCustomObject]@{ title = "Album"; guid = "guid-b"; size = 150; indexerId = 3 }
+    [PSCustomObject]@{ title = "Album"; guid = "guid-a"; size = 200; indexerId = 2 }
+    [PSCustomObject]@{ title = "Album"; guid = "guid-c"; size = 100; indexerId = 1 }
+)
+# Random middle order
+$middleOrderReleases = @(
+    [PSCustomObject]@{ title = "Album"; guid = "guid-a"; size = 200; indexerId = 2 }
+    [PSCustomObject]@{ title = "Album"; guid = "guid-c"; size = 100; indexerId = 1 }
+    [PSCustomObject]@{ title = "Album"; guid = "guid-b"; size = 150; indexerId = 3 }
+)
+
+$result1 = Select-DeterministicRelease -Releases $distinctReleases -ReturnSelectionBasis
+$result2 = Select-DeterministicRelease -Releases $reversedReleases -ReturnSelectionBasis
+$result3 = Select-DeterministicRelease -Releases $middleOrderReleases -ReturnSelectionBasis
+
+# All three must select the same release (guid-a, which is alphabetically first)
+Assert-True -Condition ($result1.release.guid -eq 'guid-a') -Description "Order 1 selects guid-a (got '$($result1.release.guid)')"
+Assert-True -Condition ($result2.release.guid -eq 'guid-a') -Description "Order 2 (reversed) selects guid-a (got '$($result2.release.guid)')"
+Assert-True -Condition ($result3.release.guid -eq 'guid-a') -Description "Order 3 (middle) selects guid-a (got '$($result3.release.guid)')"
+
+# Verify intrinsicHash is consistent across all three (same release properties = same hash)
+Assert-True -Condition ($result1.selectionBasis.selectedIntrinsicHash -eq $result2.selectionBasis.selectedIntrinsicHash) -Description "IntrinsicHash consistent between order 1 and 2"
+Assert-True -Condition ($result2.selectionBasis.selectedIntrinsicHash -eq $result3.selectionBasis.selectedIntrinsicHash) -Description "IntrinsicHash consistent between order 2 and 3"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan

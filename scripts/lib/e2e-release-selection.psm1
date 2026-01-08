@@ -75,43 +75,64 @@ function Select-DeterministicRelease {
         return $null
     }
 
-    # Add originalIndex for stable sorting without -Stable flag (works on PS 5.1+)
     # For SizeAscending mode, use MaxValue for nulls so they sort last
     $sizeDefault = if ($SizeAscending) { [long]::MaxValue } else { 0 }
 
+    # Build indexed array with intrinsic hash as final tiebreaker
+    # IntrinsicHash is based on release properties, not input order, ensuring
+    # determinism even when input order is non-deterministic (e.g., from API)
     $indexed = for ($i = 0; $i -lt $Releases.Count; $i++) {
+        $r = $Releases[$i]
+        # Use PSObject.Properties to safely access potentially missing properties
+        $titleKey = if ($r.PSObject.Properties['title']) { ($r.title ?? '').ToUpperInvariant() } else { '' }
+        $guidKey = if ($r.PSObject.Properties['guid']) { ($r.guid ?? '').ToUpperInvariant() } else { '' }
+        $sizeKey = if ($r.PSObject.Properties['size']) { [long]($r.size ?? $sizeDefault) } else { $sizeDefault }
+        $indexerId = if ($r.PSObject.Properties['indexerId']) { [string]($r.indexerId ?? '') } else { '' }
+
+        # Compute intrinsic hash from release properties (not input order)
+        # This ensures same release is selected regardless of input array order
+        $hashInput = "$titleKey|$guidKey|$sizeKey|$indexerId"
+        $hashBytes = [System.Text.Encoding]::UTF8.GetBytes($hashInput)
+        $sha = [System.Security.Cryptography.SHA256]::Create()
+        $hashResult = $sha.ComputeHash($hashBytes)
+        $intrinsicHash = [BitConverter]::ToString($hashResult).Replace('-', '').Substring(0, 16)
+
         [PSCustomObject]@{
-            Release = $Releases[$i]
+            Release = $r
             OriginalIndex = $i
-            # Pre-compute normalized keys for consistent comparison
-            TitleKey = ($Releases[$i].title ?? '').ToUpperInvariant()
-            GuidKey = ($Releases[$i].guid ?? '').ToUpperInvariant()
-            SizeKey = [long]($Releases[$i].size ?? $sizeDefault)
+            TitleKey = $titleKey
+            GuidKey = $guidKey
+            SizeKey = $sizeKey
+            IntrinsicHash = $intrinsicHash
         }
     }
 
-    # Sort with culture-invariant keys; originalIndex guarantees stability
+    # Sort with culture-invariant keys; IntrinsicHash ensures determinism regardless of input order
+    # OriginalIndex is absolute last resort (only matters if intrinsicHash collides, ~impossible)
     $sizeDescending = -not $SizeAscending
-    $sorted = $indexed | Sort-Object TitleKey, GuidKey, @{Expression = 'SizeKey'; Descending = $sizeDescending}, OriginalIndex
+    $sorted = $indexed | Sort-Object TitleKey, GuidKey, @{Expression = 'SizeKey'; Descending = $sizeDescending}, IntrinsicHash, OriginalIndex
 
     $winner = $sorted | Select-Object -First 1
     $selected = $winner.Release
 
     if ($ReturnSelectionBasis) {
         # Build selection basis for manifest (no sensitive fields)
-        # Truncate guid to first 16 chars for safety (in case it contains embedded data)
-        $safeGuid = if ($selected.guid) {
-            $g = [string]$selected.guid
-            if ($g.Length -gt 16) { $g.Substring(0, 16) + '...' } else { $g }
+        # Use sha256 hash of guid for safety (never expose raw guid which may contain embedded data)
+        $guidHash = if ($selected.guid) {
+            $guidBytes = [System.Text.Encoding]::UTF8.GetBytes([string]$selected.guid)
+            $sha = [System.Security.Cryptography.SHA256]::Create()
+            $hashResult = $sha.ComputeHash($guidBytes)
+            [BitConverter]::ToString($hashResult).Replace('-', '').Substring(0, 16)
         } else { $null }
 
         $sizeDir = if ($SizeAscending) { 'asc' } else { 'desc' }
         $basis = [ordered]@{
-            sortKeys = @('title:asc:invariant', 'guid:asc:invariant', "size:$sizeDir", 'originalIndex:asc')
+            sortKeys = @('title:asc:invariant', 'guid:asc:invariant', "size:$sizeDir", 'intrinsicHash:asc', 'originalIndex:asc')
             candidateCount = $Releases.Count
             selectedTitle = $selected.title
-            selectedGuidPrefix = $safeGuid
+            selectedGuidHash = $guidHash
             selectedSize = $selected.size
+            selectedIntrinsicHash = $winner.IntrinsicHash
             selectedOriginalIndex = $winner.OriginalIndex
         }
 
@@ -128,7 +149,13 @@ function Select-DeterministicRelease {
             if ($sameTitleAndGuid.Count -gt 1) {
                 $sameTitleGuidSize = @($sameTitleAndGuid | Where-Object { $_.SizeKey -eq $winner.SizeKey })
                 if ($sameTitleGuidSize.Count -gt 1) {
-                    $basis.tieBreaker = 'originalIndex'
+                    # Same title, guid, and size - check intrinsicHash
+                    $sameTitleGuidSizeHash = @($sameTitleGuidSize | Where-Object { $_.IntrinsicHash -eq $winner.IntrinsicHash })
+                    if ($sameTitleGuidSizeHash.Count -gt 1) {
+                        $basis.tieBreaker = 'originalIndex'
+                    } else {
+                        $basis.tieBreaker = 'intrinsicHash'
+                    }
                 } else {
                     $basis.tieBreaker = 'size'
                 }
