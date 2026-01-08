@@ -45,6 +45,15 @@ Scope: determinism, safety, and debuggability of E2E runs across multiple plugin
 - [x] Make ambiguity loud: if multiple configured components match a plugin, fail the gate and include candidate IDs for debugging.
 - [ ] Consider tightening “safe persistence” further: drop `implementation` if it proves unnecessary in practice (keep `created` + `preferredId` + `implementationName`).
 
+### P0.2 (error codes at the source)
+These are **hard-failure** modes that must not depend on free-form error-message wording. Gates should set `Details.ErrorCode` directly so the manifest `results[].errorCode` is stable.
+
+- [x] Queue contract failures set `E2E_QUEUE_NOT_FOUND` at the point of failure (not inferred).
+- [x] Metadata validation failures set `E2E_METADATA_MISSING` and include `sampleFile` + `missingTags` in manifest details.
+
+Acceptance (hermetic):
+- `scripts/tests/Test-ExplicitErrorCodes.ps1` verifies `Details.ErrorCode` becomes top-level `errorCode` and is removed from `details`.
+
 ### P0.1 (manifest provenance)
 - [x] Emit `results[].details.componentResolution` in the JSON manifest (v1.2+) so failures are diagnosable without reading runner logs.
 - [x] Add `matchedOn` enum to make resolution strategy unambiguous for diagnostics.
