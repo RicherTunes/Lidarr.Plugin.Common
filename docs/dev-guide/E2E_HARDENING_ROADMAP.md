@@ -50,9 +50,18 @@ These are **hard-failure** modes that must not depend on free-form error-message
 
 - [x] Queue contract failures set `E2E_QUEUE_NOT_FOUND` at the point of failure (not inferred).
 - [x] Metadata validation failures set `E2E_METADATA_MISSING` and include `sampleFile` + `missingTags` in manifest details.
+- [x] Zero audio files failures set `E2E_ZERO_AUDIO_FILES` at all failure sites (Grab, PostRestartGrab, Metadata gates) with `totalFilesFound=0`, `outputPath`, and `validationPhase`.
 
 Acceptance (hermetic):
 - `scripts/tests/Test-ExplicitErrorCodes.ps1` verifies `Details.ErrorCode` becomes top-level `errorCode` and is removed from `details`.
+
+### P0.3 (SampleFile guarantee + determinism)
+- [x] Guarantee `sampleFile` is set for all `E2E_METADATA_MISSING` paths (including exception paths).
+- [x] Function-level `$currentCandidateFile` tracking ensures `sampleFile` is set even if IO/parsing throws.
+- [x] Deterministic file enumeration: `LC_ALL=C sort` ensures consistent ordering across GNU/BusyBox sort implementations.
+
+Acceptance (hermetic):
+- `scripts/tests/Test-ExplicitErrorCodes.ps1` includes SampleFile invariant tests: `missingTags > 0` implies `sampleFile` non-empty.
 
 ### P0.1 (manifest provenance)
 - [x] Emit `results[].details.componentResolution` in the JSON manifest (v1.2+) so failures are diagnosable without reading runner logs.
