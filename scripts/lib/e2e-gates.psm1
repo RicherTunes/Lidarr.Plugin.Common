@@ -1041,62 +1041,43 @@ function Test-PluginGrabGate {
 
         if ($pluginReleaseCount -eq 0) {
             # Releases exist but none attributed to plugin - this is a FAIL (attribution regression)
-            # Same diagnostics style as AlbumSearch gate
+            # Use shared helper to ensure identical structure with AlbumSearch gate
+            $attrDetails = New-NoReleasesAttributedDetails `
+                -Releases $releases `
+                -ExpectedIndexerName $PluginName `
+                -ExpectedIndexerId $IndexerId `
+                -TotalReleases $totalReleases `
+                -AttributedReleases $pluginReleaseCount
+
+            # Copy all structured details to result
+            foreach ($key in $attrDetails.Keys) {
+                $result.Details[$key] = $attrDetails[$key]
+            }
+
+            # Human-readable console output and Errors[]
             $indexerContext = "name='$($result.IndexerName)' impl='$($result.IndexerImplementation)' id=$IndexerId"
-            $summary = Get-FoundIndexerNamesDetails -Releases $releases
-            $foundDisplay = if ($summary.foundIndexerNameCount -eq 0) {
+            $foundDisplay = if ($attrDetails.foundIndexerNameCount -eq 0) {
                 '(none)'
             } else {
-                ($summary.foundIndexerNames -join ', ')
+                ($attrDetails.foundIndexerNames -join ', ')
             }
-            if ($summary.foundIndexerNamesCapped) {
-                $more = $summary.foundIndexerNameCount - $summary.foundIndexerNames.Count
+            if ($attrDetails.foundIndexerNamesCapped) {
+                $more = $attrDetails.foundIndexerNameCount - $attrDetails.foundIndexerNames.Count
                 if ($more -gt 0) { $foundDisplay += " (+$more more)" }
             }
 
             Write-Host "       FAIL: No releases attributed to plugin!" -ForegroundColor Red
             $result.Errors += "No releases from configured indexer [$indexerContext]. Total: $totalReleases. Found indexers: $foundDisplay"
 
-            # Structured details for E2E_NO_RELEASES_ATTRIBUTED (bounded + machine-readable)
-            $result.Details.ErrorCode = 'E2E_NO_RELEASES_ATTRIBUTED'
-            $result.Details.totalReleases = $totalReleases
-            $result.Details.attributedReleases = $pluginReleaseCount
-            $result.Details.expectedIndexerName = $PluginName
-            $result.Details.expectedIndexerId = $IndexerId
-            $result.Details.foundIndexerNames = @($summary.foundIndexerNames)
-            $result.Details.foundIndexerNameCount = $summary.foundIndexerNameCount
-            $result.Details.foundIndexerNamesCapped = [bool]$summary.foundIndexerNamesCapped
+            if ($attrDetails.nullIndexerReleaseCount -gt 0) {
+                Write-Host "       WARNING: $($attrDetails.nullIndexerReleaseCount) releases have null/empty indexer or indexerId=0!" -ForegroundColor Red
+                $result.Errors += "ATTRIBUTION WARNING: $($attrDetails.nullIndexerReleaseCount) of $totalReleases releases have null/empty indexer or indexerId=0"
 
-            # Check for null-indexer releases (same as AlbumSearch gate)
-            $nullIndexerReleases = $releases | Where-Object {
-                [string]::IsNullOrWhiteSpace($_.indexer) -or $_.indexerId -eq 0
-            }
-            $nullIndexerCount = ($nullIndexerReleases | Measure-Object).Count
-            $result.Details.nullIndexerReleaseCount = $nullIndexerCount
-
-            if ($nullIndexerCount -gt 0) {
-                Write-Host "       WARNING: $nullIndexerCount releases have null/empty indexer or indexerId=0!" -ForegroundColor Red
-                $result.Errors += "ATTRIBUTION WARNING: $nullIndexerCount of $totalReleases releases have null/empty indexer or indexerId=0"
-
-                # Structured samples (up to 3) for machine-readable diagnostics
-                $result.Details.nullIndexerSamples = @($nullIndexerReleases | Select-Object -First 3 | ForEach-Object {
-                    $title = if ($_.title -and $_.title.Length -gt 40) { $_.title.Substring(0,40) + "..." } else { $_.title }
-                    @{
-                        title = $title
-                        indexer = $_.indexer
-                        indexerId = $_.indexerId
-                    }
-                })
-
-                # Human-readable samples in Errors[]
-                foreach ($sample in $result.Details.nullIndexerSamples) {
+                foreach ($sample in $attrDetails.nullIndexerSamples) {
                     $sampleStr = "indexer='$($sample.indexer)' indexerId=$($sample.indexerId) title='$($sample.title)'"
                     $result.Errors += "  Null-indexer sample: $sampleStr"
                     Write-Host "       - $sampleStr" -ForegroundColor Yellow
                 }
-            }
-            else {
-                $result.Details.nullIndexerSamples = @()
             }
 
             # Outcome is FAIL, not SKIP - this is a regression
@@ -1757,66 +1738,45 @@ function Test-AlbumSearchGate {
             $result.Outcome = 'success'
         }
         else {
-            # Zero releases from plugin - gather diagnostics
+            # Zero releases from plugin - use shared helper to ensure identical structure with Grab gate
             $totalReleases = ($releases | Measure-Object).Count
-            $summary = Get-FoundIndexerNamesDetails -Releases $releases
-            $foundDisplay = if ($summary.foundIndexerNameCount -eq 0) {
+            $attrDetails = New-NoReleasesAttributedDetails `
+                -Releases $releases `
+                -ExpectedIndexerName $PluginName `
+                -ExpectedIndexerId $IndexerId `
+                -TotalReleases $totalReleases `
+                -AttributedReleases $result.PluginReleaseCount
+
+            # Copy all structured details to result
+            foreach ($key in $attrDetails.Keys) {
+                $result.Details[$key] = $attrDetails[$key]
+            }
+
+            # Human-readable console output and Errors[]
+            $foundDisplay = if ($attrDetails.foundIndexerNameCount -eq 0) {
                 '(none)'
             } else {
-                ($summary.foundIndexerNames -join ', ')
+                ($attrDetails.foundIndexerNames -join ', ')
             }
-            if ($summary.foundIndexerNamesCapped) {
-                $more = $summary.foundIndexerNameCount - $summary.foundIndexerNames.Count
+            if ($attrDetails.foundIndexerNamesCapped) {
+                $more = $attrDetails.foundIndexerNameCount - $attrDetails.foundIndexerNames.Count
                 if ($more -gt 0) { $foundDisplay += " (+$more more)" }
             }
 
-            # Include full indexer context for triage (no extra API call needed)
             $indexerContext = "name='$($result.IndexerName)' impl='$($result.IndexerImplementation)' id=$IndexerId"
             $result.Errors += "No releases from configured indexer [$indexerContext]. Total: $totalReleases. Found indexers: $foundDisplay"
 
-            # Structured details for E2E_NO_RELEASES_ATTRIBUTED (bounded + machine-readable)
-            $result.Details.ErrorCode = 'E2E_NO_RELEASES_ATTRIBUTED'
-            $result.Details.totalReleases = $totalReleases
-            $result.Details.attributedReleases = $result.PluginReleaseCount
-            $result.Details.expectedIndexerName = $PluginName
-            $result.Details.expectedIndexerId = $IndexerId
-            $result.Details.foundIndexerNames = @($summary.foundIndexerNames)
-            $result.Details.foundIndexerNameCount = $summary.foundIndexerNameCount
-            $result.Details.foundIndexerNamesCapped = [bool]$summary.foundIndexerNamesCapped
-
-            # Check for null-indexer releases - likely parser/attribution regression
-            $nullIndexerReleases = $releases | Where-Object {
-                [string]::IsNullOrWhiteSpace($_.indexer) -or $_.indexerId -eq 0
-            }
-            $nullIndexerCount = ($nullIndexerReleases | Measure-Object).Count
-            $result.Details.nullIndexerReleaseCount = $nullIndexerCount
-
-            if ($nullIndexerCount -gt 0) {
-                # LOUD warning - this is almost always a parser bug
-                Write-Host "       WARNING: $nullIndexerCount releases have null/empty indexer or indexerId=0!" -ForegroundColor Red
+            if ($attrDetails.nullIndexerReleaseCount -gt 0) {
+                Write-Host "       WARNING: $($attrDetails.nullIndexerReleaseCount) releases have null/empty indexer or indexerId=0!" -ForegroundColor Red
                 Write-Host "       This likely indicates a parser attribution regression." -ForegroundColor Red
 
-                $result.Errors += "ATTRIBUTION WARNING: $nullIndexerCount of $totalReleases releases have null/empty indexer or indexerId=0"
+                $result.Errors += "ATTRIBUTION WARNING: $($attrDetails.nullIndexerReleaseCount) of $totalReleases releases have null/empty indexer or indexerId=0"
 
-                # Structured samples (up to 3) for machine-readable diagnostics
-                $result.Details.nullIndexerSamples = @($nullIndexerReleases | Select-Object -First 3 | ForEach-Object {
-                    $title = if ($_.title -and $_.title.Length -gt 40) { $_.title.Substring(0,40) + "..." } else { $_.title }
-                    @{
-                        title = $title
-                        indexer = $_.indexer
-                        indexerId = $_.indexerId
-                    }
-                })
-
-                # Human-readable samples in Errors[]
-                foreach ($sample in $result.Details.nullIndexerSamples) {
+                foreach ($sample in $attrDetails.nullIndexerSamples) {
                     $sampleStr = "indexer='$($sample.indexer)' indexerId=$($sample.indexerId) title='$($sample.title)'"
                     $result.Errors += "  Null-indexer sample: $sampleStr"
                     Write-Host "       - $sampleStr" -ForegroundColor Yellow
                 }
-            }
-            else {
-                $result.Details.nullIndexerSamples = @()
             }
 
             # Sample of properly-attributed releases for comparison (redacted)
@@ -1825,7 +1785,6 @@ function Test-AlbumSearchGate {
             } | Select-Object -First 1
             if ($attributedReleases) {
                 $title = if ($attributedReleases.title -and $attributedReleases.title.Length -gt 40) { $attributedReleases.title.Substring(0,40) + "..." } else { $attributedReleases.title }
-                # Only include safe fields (no guid/downloadUrl/infoUrl)
                 $result.Errors += "Sample attributed release: indexer='$($attributedReleases.indexer)' indexerId=$($attributedReleases.indexerId) title='$title'"
             }
         }
@@ -3280,6 +3239,71 @@ function Test-BrainarrLLMGate {
     return $result
 }
 
+function New-NoReleasesAttributedDetails {
+    <#
+    .SYNOPSIS
+        Creates structured details for E2E_NO_RELEASES_ATTRIBUTED error code.
+
+    .DESCRIPTION
+        Single source of truth for the NO_RELEASES_ATTRIBUTED details structure.
+        Both AlbumSearch and Grab gates must call this to prevent drift.
+        All caps are enforced here (foundIndexerNames: 10, nullIndexerSamples: 3).
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [object[]]$Releases,
+        [Parameter(Mandatory)]
+        [string]$ExpectedIndexerName,
+        [Parameter(Mandatory)]
+        [int]$ExpectedIndexerId,
+        [Parameter(Mandatory)]
+        [int]$TotalReleases,
+        [Parameter(Mandatory)]
+        [int]$AttributedReleases,
+        [int]$MaxIndexerNames = 10,
+        [int]$MaxNullSamples = 3
+    )
+
+    # Get capped indexer names summary
+    $indexerSummary = Get-FoundIndexerNamesDetails -Releases $Releases -MaxNames $MaxIndexerNames
+
+    # Find null-indexer releases (empty indexer or indexerId=0)
+    $nullIndexerReleases = @($Releases | Where-Object {
+        [string]::IsNullOrWhiteSpace($_.indexer) -or $_.indexerId -eq 0
+    })
+    $nullIndexerCount = $nullIndexerReleases.Count
+
+    # Build capped null-indexer samples (up to MaxNullSamples)
+    $nullSamples = @()
+    if ($nullIndexerCount -gt 0) {
+        $nullSamples = @($nullIndexerReleases | Select-Object -First $MaxNullSamples | ForEach-Object {
+            $title = if ($_.title -and $_.title.Length -gt 40) {
+                $_.title.Substring(0, 40) + "..."
+            } else {
+                $_.title
+            }
+            @{
+                title = $title
+                indexer = $_.indexer
+                indexerId = $_.indexerId
+            }
+        })
+    }
+
+    return @{
+        ErrorCode = 'E2E_NO_RELEASES_ATTRIBUTED'
+        totalReleases = $TotalReleases
+        attributedReleases = $AttributedReleases
+        expectedIndexerName = $ExpectedIndexerName
+        expectedIndexerId = $ExpectedIndexerId
+        foundIndexerNames = $indexerSummary.foundIndexerNames
+        foundIndexerNameCount = $indexerSummary.foundIndexerNameCount
+        foundIndexerNamesCapped = $indexerSummary.foundIndexerNamesCapped
+        nullIndexerReleaseCount = $nullIndexerCount
+        nullIndexerSamples = $nullSamples
+    }
+}
+
 function Get-FoundIndexerNamesDetails {
     <#
     .SYNOPSIS
@@ -3336,4 +3360,4 @@ function Get-FoundIndexerNamesDetails {
     }
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Get-FoundIndexerNamesDetails, Invoke-LidarrApi
+Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Get-FoundIndexerNamesDetails, New-NoReleasesAttributedDetails, Invoke-LidarrApi
