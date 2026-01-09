@@ -2195,6 +2195,8 @@ function Test-MetadataGate {
         Details = @{}
     }
 
+    $currentCandidateFile = $null  # Track current file being processed for exception safety (function-level)
+
     try {
         # Check if docker is available
         if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
@@ -2234,7 +2236,7 @@ function Test-MetadataGate {
 
             try {
                 # Get audio files from output path (filter common audio extensions)
-                $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | sort | head -n $MaxFilesToCheck"
+                $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | LC_ALL=C sort | head -n $MaxFilesToCheck"
                 $audioFilesRaw = docker exec $ContainerName sh -c $findCmd 2>$null
                 $audioFiles = @($audioFilesRaw) -split "`n" | Where-Object { $_.Trim() }
 
@@ -2284,9 +2286,11 @@ function Test-MetadataGate {
 
                 foreach ($probe in $probeResults) {
                     $fileName = [string]$probe.Name
+                    $currentCandidateFile = $fileName  # Set BEFORE any checks for exception safety
 
                     if ($probe.Error) {
                         $missingTags += "${fileName}: Error reading tags: $($probe.Error)"
+                        if (-not $result.SampleFile) { $result.SampleFile = $fileName }
                         continue
                     }
 
@@ -2299,6 +2303,7 @@ function Test-MetadataGate {
 
                     if ($missing.Count -gt 0) {
                         $missingTags += "${fileName}: Missing tags: $($missing -join ', ')"
+                        if (-not $result.SampleFile) { $result.SampleFile = $fileName }
                         continue
                     }
 
@@ -2324,6 +2329,8 @@ function Test-MetadataGate {
                     Write-Host "       PASS: All $filesWithTags files have valid metadata tags" -ForegroundColor Green
                 }
                 elseif ($filesWithTags -gt 0 -and $missingTags.Count -gt 0) {
+                    # Partial success - some files ok, some missing
+                    $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
                     $result.Errors += "Metadata validation failed for $($missingTags.Count) of $($result.TotalFilesChecked) files"
                     foreach ($m in $missingTags) {
                         $result.Errors += "  FAIL: $m"
@@ -2331,6 +2338,8 @@ function Test-MetadataGate {
                     }
                 }
                 else {
+                    # All files failed
+                    $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
                     $result.Errors += "No files passed metadata validation"
                     foreach ($m in $missingTags) {
                         $result.Errors += "  FAIL: $m"
@@ -2346,7 +2355,7 @@ function Test-MetadataGate {
         }
 
         # Get audio files from output path (filter common audio extensions)
-        $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | sort | head -n $MaxFilesToCheck"
+        $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | LC_ALL=C sort | head -n $MaxFilesToCheck"
         $audioFilesRaw = docker exec $ContainerName sh -c $findCmd 2>$null
         $audioFiles = @($audioFilesRaw) -split "`n" | Where-Object { $_.Trim() }
 
@@ -2427,6 +2436,7 @@ if __name__ == "__main__":
 
         foreach ($file in $audioFiles) {
             $fileName = Split-Path -Leaf $file
+            $currentCandidateFile = $fileName  # Set BEFORE any IO for exception safety
             Write-Host "       Checking: $fileName" -ForegroundColor DarkGray
 
             # Run python script in container
@@ -2435,6 +2445,7 @@ if __name__ == "__main__":
 
             if (-not $jsonStr) {
                 $missingTags += "${fileName}: Failed to read tags (no output)"
+                if (-not $result.SampleFile) { $result.SampleFile = $fileName }
                 continue
             }
 
@@ -2443,11 +2454,13 @@ if __name__ == "__main__":
             }
             catch {
                 $missingTags += "${fileName}: Failed to parse tag JSON: $jsonStr"
+                if (-not $result.SampleFile) { $result.SampleFile = $fileName }
                 continue
             }
 
             if ($tags.error) {
                 $missingTags += "${fileName}: Error reading tags: $($tags.error)"
+                if (-not $result.SampleFile) { $result.SampleFile = $fileName }
                 continue
             }
 
@@ -2515,6 +2528,10 @@ if __name__ == "__main__":
     }
     catch {
         $result.Errors += "Metadata gate failed: $_"
+        # Ensure SampleFile is set even if exception occurred during processing
+        if (-not $result.SampleFile -and $currentCandidateFile) {
+            $result.SampleFile = $currentCandidateFile
+        }
     }
 
     return $result
@@ -2566,7 +2583,7 @@ function Test-AudioFileValidation {
 
     try {
         # Find audio files in output path
-        $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | sort | head -n $MaxFilesToCheck"
+        $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | LC_ALL=C sort | head -n $MaxFilesToCheck"
         $audioFilesRaw = docker exec $ContainerName sh -c $findCmd 2>$null
         $audioFiles = @($audioFilesRaw) -split "`n" | Where-Object { $_.Trim() }
 
