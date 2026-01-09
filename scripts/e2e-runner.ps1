@@ -3035,20 +3035,24 @@ if ($runPostRestartGrab) {
 
             if (-not $fileValidation.Success) {
                 $fileErrors = $fileValidation.Errors
-                if ($fileValidation.TotalFilesFound -eq 0) {
-                    $fileErrors = @("E2E_ZERO_AUDIO_FILES: No audio files found in $outputPath")
-                }
                 Write-Host "       FAIL (file validation)" -ForegroundColor Red
                 foreach ($err in $fileErrors) {
                     Write-Host "       - $err" -ForegroundColor Red
                 }
-                $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors $fileErrors -Details @{
+                $details = @{
                     SelectedReleaseTitle = $releaseTitle
                     DownloadId = $grabResult.downloadId
                     OutputPath = $outputPath
                     ValidatedFiles = $validatedFileNames
                     TotalFilesFound = $fileValidation.TotalFilesFound
                 }
+                if ($fileValidation.ErrorCode) {
+                    $details['ErrorCode'] = $fileValidation.ErrorCode
+                }
+                if ($fileValidation.ValidationPhase) {
+                    $details['ValidationPhase'] = $fileValidation.ValidationPhase
+                }
+                $allResults += New-OutcomeResult -Gate "PostRestartGrab" -PluginName $plugin -Outcome "failed" -Errors $fileErrors -Details $details
                 $overallSuccess = $false
                 continue
             }
