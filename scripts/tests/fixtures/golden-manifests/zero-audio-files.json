@@ -1,0 +1,123 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/main/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-02T13:20:00.000Z",
+  "runId": "golden-zero-audio-files",
+  "runner": {
+    "name": "lidarr.plugin.common:e2e-runner.ps1",
+    "version": "deadbeef",
+    "args": ["-Gate", "grab", "-Plugins", "Tidalarr", "-SkipPersist"]
+  },
+  "lidarr": {
+    "url": "http://[LOCALHOST]:8686",
+    "containerName": "lidarr-e2e-test",
+    "imageTag": "pr-plugins-3.1.1.4884",
+    "imageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "version": "3.1.1.4884",
+    "branch": "plugins",
+    "containerId": "000000000000",
+    "startedAt": "2026-01-02T13:19:00.000Z",
+    "imageId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "request": {
+    "gate": "grab",
+    "plugins": ["Tidalarr"]
+  },
+  "effective": {
+    "gates": ["Schema", "Configure", "Search", "Grab", "PostRestartGrab"],
+    "plugins": ["Tidalarr"],
+    "stopReason": "failed at PostRestartGrab for Tidalarr"
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 42
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Tidalarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-02T13:20:01.000Z",
+      "endedAt": "2026-01-02T13:20:02.000Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Configure",
+      "plugin": "Tidalarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-02T13:20:03.000Z",
+      "endedAt": "2026-01-02T13:20:04.000Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Search",
+      "plugin": "Tidalarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-02T13:20:05.000Z",
+      "endedAt": "2026-01-02T13:20:10.000Z",
+      "durationMs": 5000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Grab",
+      "plugin": "Tidalarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-02T13:20:11.000Z",
+      "endedAt": "2026-01-02T13:20:30.000Z",
+      "durationMs": 19000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "PostRestartGrab",
+      "plugin": "Tidalarr",
+      "outcome": "failed",
+      "errorCode": "E2E_ZERO_AUDIO_FILES",
+      "outcomeReason": "Download completed but no audio files found in output path",
+      "startedAt": "2026-01-02T13:20:31.000Z",
+      "endedAt": "2026-01-02T13:20:35.000Z",
+      "durationMs": 4000,
+      "errors": [
+        "E2E_ZERO_AUDIO_FILES: No audio files found in: /downloads/tidalarr"
+      ],
+      "details": {
+        "outputPath": "/downloads/tidalarr",
+        "totalFilesFound": 0,
+        "validatedFiles": []
+      }
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 5,
+    "passed": 4,
+    "failed": 1,
+    "skipped": 0,
+    "totalDurationMs": 30000
+  },
+  "diagnostics": {
+    "bundlePath": null,
+    "bundleCreated": false,
+    "includedFiles": ["run-manifest.json"],
+    "redactionApplied": true,
+    "redactionSelfTestPassed": true
+  },
+  "hostBugSuspected": {
+    "detected": false
+  }
+}

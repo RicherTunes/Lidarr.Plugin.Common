@@ -128,6 +128,13 @@ $metadataResult = $metadataMissing.results | Where-Object { $_.errorCode -eq 'E2
 Assert-True -Name "metadata-missing.json has missingTags array" -Condition ($metadataResult.details.missingTags.Count -gt 0)
 Assert-True -Name "metadata-missing.json has sampleFile" -Condition ($null -ne $metadataResult.details.sampleFile)
 
+$zeroAudioFiles = Validate-Fixture -FileName 'zero-audio-files.json'
+Assert-True -Name "zero-audio-files.json has E2E_ZERO_AUDIO_FILES" -Condition ($zeroAudioFiles.results.errorCode -contains 'E2E_ZERO_AUDIO_FILES')
+$zeroAudioResult = $zeroAudioFiles.results | Where-Object { $_.errorCode -eq 'E2E_ZERO_AUDIO_FILES' }
+# Contract: must include outputPath and totalFilesFound=0
+Assert-True -Name "zero-audio-files.json has outputPath" -Condition ($null -ne $zeroAudioResult.details.outputPath)
+Assert-Equal -Name "zero-audio-files.json totalFilesFound is 0" -Actual $zeroAudioResult.details.totalFilesFound -Expected 0
+
 Write-Host ""
 Write-Host "Passed: $passed" -ForegroundColor Green
 Write-Host "Failed: $failed" -ForegroundColor Red

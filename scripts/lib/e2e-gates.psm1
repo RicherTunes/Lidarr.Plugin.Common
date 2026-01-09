@@ -2239,7 +2239,9 @@ function Test-MetadataGate {
                 $audioFiles = @($audioFilesRaw) -split "`n" | Where-Object { $_.Trim() }
 
                 if ($audioFiles.Count -eq 0) {
-                    $result.Errors += "No audio files found in output path: $OutputPath"
+                    $result.Details.ErrorCode = 'E2E_ZERO_AUDIO_FILES'
+                    $result.Details.ValidationPhase = 'metadata:containerScan'
+                    $result.Errors += "E2E_ZERO_AUDIO_FILES: No audio files found in output path: $OutputPath"
                     return $result
                 }
 
@@ -2262,7 +2264,9 @@ function Test-MetadataGate {
                 }
 
                 if ($localFiles.Count -eq 0) {
-                    $result.Errors += "No files could be copied from container for metadata validation."
+                    $result.Details.ErrorCode = 'E2E_ZERO_AUDIO_FILES'
+                    $result.Details.ValidationPhase = 'metadata:copiedFilesScan'
+                    $result.Errors += "E2E_ZERO_AUDIO_FILES: No files could be copied from container for metadata validation."
                     return $result
                 }
 
@@ -2347,7 +2351,9 @@ function Test-MetadataGate {
         $audioFiles = @($audioFilesRaw) -split "`n" | Where-Object { $_.Trim() }
 
         if ($audioFiles.Count -eq 0) {
-            $result.Errors += "No audio files found in output path: $OutputPath"
+            $result.Details.ErrorCode = 'E2E_ZERO_AUDIO_FILES'
+            $result.Details.ValidationPhase = 'metadata:containerScan'
+            $result.Errors += "E2E_ZERO_AUDIO_FILES: No audio files found in output path: $OutputPath"
             return $result
         }
 
@@ -2554,6 +2560,8 @@ function Test-AudioFileValidation {
         ValidatedFiles = @()
         FailedFiles = @()
         Errors = @()
+        ErrorCode = $null
+        ValidationPhase = $null
     }
 
     try {
@@ -2563,7 +2571,9 @@ function Test-AudioFileValidation {
         $audioFiles = @($audioFilesRaw) -split "`n" | Where-Object { $_.Trim() }
 
         if ($audioFiles.Count -eq 0) {
-            $result.Errors += "No audio files found in: $OutputPath"
+            $result.ErrorCode = 'E2E_ZERO_AUDIO_FILES'
+            $result.ValidationPhase = 'grab:fileValidation'
+            $result.Errors += "E2E_ZERO_AUDIO_FILES: No audio files found in: $OutputPath"
             return $result
         }
 
