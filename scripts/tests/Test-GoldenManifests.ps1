@@ -110,7 +110,12 @@ $noReleasesResult = $noReleases.results | Where-Object { $_.errorCode -eq 'E2E_N
 Assert-True -Name "no-releases-attributed.json has totalReleases" -Condition ($null -ne $noReleasesResult.details.totalReleases)
 Assert-True -Name "no-releases-attributed.json has attributedReleases" -Condition ($null -ne $noReleasesResult.details.attributedReleases)
 Assert-True -Name "no-releases-attributed.json has expectedIndexerName" -Condition ($null -ne $noReleasesResult.details.expectedIndexerName)
+Assert-True -Name "no-releases-attributed.json has expectedIndexerId" -Condition ($null -ne $noReleasesResult.details.expectedIndexerId)
 Assert-True -Name "no-releases-attributed.json has foundIndexerNames" -Condition ($noReleasesResult.details.foundIndexerNames.Count -ge 0)
+Assert-True -Name "no-releases-attributed.json has foundIndexerNameCount" -Condition ($null -ne $noReleasesResult.details.foundIndexerNameCount)
+Assert-True -Name "no-releases-attributed.json has foundIndexerNamesCapped" -Condition ($null -ne $noReleasesResult.details.foundIndexerNamesCapped)
+Assert-True -Name "no-releases-attributed.json has nullIndexerReleaseCount" -Condition ($null -ne $noReleasesResult.details.nullIndexerReleaseCount)
+Assert-True -Name "no-releases-attributed.json has nullIndexerSamples" -Condition ($null -ne $noReleasesResult.details.nullIndexerSamples)
 # Guardrail: foundIndexerNames must be capped to prevent manifest bloat
 $maxIndexerNames = 10
 if ($noReleasesResult.details.foundIndexerNames.Count -gt $maxIndexerNames) {
@@ -118,6 +123,15 @@ if ($noReleasesResult.details.foundIndexerNames.Count -gt $maxIndexerNames) {
     $script:failed++
 } else {
     Write-Host "  [PASS] no-releases-attributed.json foundIndexerNames within cap (<= $maxIndexerNames)" -ForegroundColor Green
+    $script:passed++
+}
+# Guardrail: nullIndexerSamples must be capped to prevent manifest bloat
+$maxNullSamples = 3
+if ($noReleasesResult.details.nullIndexerSamples.Count -gt $maxNullSamples) {
+    Write-Host "  [FAIL] no-releases-attributed.json nullIndexerSamples exceeds cap ($($noReleasesResult.details.nullIndexerSamples.Count) > $maxNullSamples)" -ForegroundColor Red
+    $script:failed++
+} else {
+    Write-Host "  [PASS] no-releases-attributed.json nullIndexerSamples within cap (<= $maxNullSamples)" -ForegroundColor Green
     $script:passed++
 }
 
