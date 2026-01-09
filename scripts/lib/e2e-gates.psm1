@@ -1062,6 +1062,7 @@ function Test-PluginGrabGate {
             $result.Details.totalReleases = $totalReleases
             $result.Details.attributedReleases = $pluginReleaseCount
             $result.Details.expectedIndexerName = $PluginName
+            $result.Details.expectedIndexerId = $IndexerId
             $result.Details.foundIndexerNames = @($summary.foundIndexerNames)
             $result.Details.foundIndexerNameCount = $summary.foundIndexerNameCount
             $result.Details.foundIndexerNamesCapped = [bool]$summary.foundIndexerNamesCapped
@@ -1071,20 +1072,31 @@ function Test-PluginGrabGate {
                 [string]::IsNullOrWhiteSpace($_.indexer) -or $_.indexerId -eq 0
             }
             $nullIndexerCount = ($nullIndexerReleases | Measure-Object).Count
+            $result.Details.nullIndexerReleaseCount = $nullIndexerCount
 
             if ($nullIndexerCount -gt 0) {
                 Write-Host "       WARNING: $nullIndexerCount releases have null/empty indexer or indexerId=0!" -ForegroundColor Red
                 $result.Errors += "ATTRIBUTION WARNING: $nullIndexerCount of $totalReleases releases have null/empty indexer or indexerId=0"
 
-                # Sample first 3 suspicious releases (redacted)
-                $suspiciousSamples = $nullIndexerReleases | Select-Object -First 3 | ForEach-Object {
+                # Structured samples (up to 3) for machine-readable diagnostics
+                $result.Details.nullIndexerSamples = @($nullIndexerReleases | Select-Object -First 3 | ForEach-Object {
                     $title = if ($_.title -and $_.title.Length -gt 40) { $_.title.Substring(0,40) + "..." } else { $_.title }
-                    "indexer='$($_.indexer)' indexerId=$($_.indexerId) title='$title'"
+                    @{
+                        title = $title
+                        indexer = $_.indexer
+                        indexerId = $_.indexerId
+                    }
+                })
+
+                # Human-readable samples in Errors[]
+                foreach ($sample in $result.Details.nullIndexerSamples) {
+                    $sampleStr = "indexer='$($sample.indexer)' indexerId=$($sample.indexerId) title='$($sample.title)'"
+                    $result.Errors += "  Null-indexer sample: $sampleStr"
+                    Write-Host "       - $sampleStr" -ForegroundColor Yellow
                 }
-                foreach ($sample in $suspiciousSamples) {
-                    $result.Errors += "  Null-indexer sample: $sample"
-                    Write-Host "       - $sample" -ForegroundColor Yellow
-                }
+            }
+            else {
+                $result.Details.nullIndexerSamples = @()
             }
 
             # Outcome is FAIL, not SKIP - this is a regression
@@ -1767,6 +1779,7 @@ function Test-AlbumSearchGate {
             $result.Details.totalReleases = $totalReleases
             $result.Details.attributedReleases = $result.PluginReleaseCount
             $result.Details.expectedIndexerName = $PluginName
+            $result.Details.expectedIndexerId = $IndexerId
             $result.Details.foundIndexerNames = @($summary.foundIndexerNames)
             $result.Details.foundIndexerNameCount = $summary.foundIndexerNameCount
             $result.Details.foundIndexerNamesCapped = [bool]$summary.foundIndexerNamesCapped
@@ -1776,6 +1789,7 @@ function Test-AlbumSearchGate {
                 [string]::IsNullOrWhiteSpace($_.indexer) -or $_.indexerId -eq 0
             }
             $nullIndexerCount = ($nullIndexerReleases | Measure-Object).Count
+            $result.Details.nullIndexerReleaseCount = $nullIndexerCount
 
             if ($nullIndexerCount -gt 0) {
                 # LOUD warning - this is almost always a parser bug
@@ -1784,16 +1798,25 @@ function Test-AlbumSearchGate {
 
                 $result.Errors += "ATTRIBUTION WARNING: $nullIndexerCount of $totalReleases releases have null/empty indexer or indexerId=0"
 
-                # Sample first 3 suspicious releases (redact sensitive fields)
-                $suspiciousSamples = $nullIndexerReleases | Select-Object -First 3 | ForEach-Object {
+                # Structured samples (up to 3) for machine-readable diagnostics
+                $result.Details.nullIndexerSamples = @($nullIndexerReleases | Select-Object -First 3 | ForEach-Object {
                     $title = if ($_.title -and $_.title.Length -gt 40) { $_.title.Substring(0,40) + "..." } else { $_.title }
-                    # Only include safe fields: indexer, indexerId, title (no guid/downloadUrl/infoUrl)
-                    "indexer='$($_.indexer)' indexerId=$($_.indexerId) title='$title'"
+                    @{
+                        title = $title
+                        indexer = $_.indexer
+                        indexerId = $_.indexerId
+                    }
+                })
+
+                # Human-readable samples in Errors[]
+                foreach ($sample in $result.Details.nullIndexerSamples) {
+                    $sampleStr = "indexer='$($sample.indexer)' indexerId=$($sample.indexerId) title='$($sample.title)'"
+                    $result.Errors += "  Null-indexer sample: $sampleStr"
+                    Write-Host "       - $sampleStr" -ForegroundColor Yellow
                 }
-                foreach ($sample in $suspiciousSamples) {
-                    $result.Errors += "  Null-indexer sample: $sample"
-                    Write-Host "       - $sample" -ForegroundColor Yellow
-                }
+            }
+            else {
+                $result.Details.nullIndexerSamples = @()
             }
 
             # Sample of properly-attributed releases for comparison (redacted)

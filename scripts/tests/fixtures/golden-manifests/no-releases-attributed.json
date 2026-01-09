@@ -76,9 +76,23 @@
         "totalReleases": 15,
         "attributedReleases": 0,
         "expectedIndexerName": "Qobuzarr",
+        "expectedIndexerId": 101,
         "foundIndexerNames": ["Usenet-Indexer", "Torrent-Indexer"],
         "foundIndexerNameCount": 2,
-        "foundIndexerNamesCapped": false
+        "foundIndexerNamesCapped": false,
+        "nullIndexerReleaseCount": 3,
+        "nullIndexerSamples": [
+          {
+            "title": "Kind of Blue - Miles Davis (FLAC)",
+            "indexer": "",
+            "indexerId": 0
+          },
+          {
+            "title": "Miles Davis - Kind of Blue (2019 R...",
+            "indexer": null,
+            "indexerId": 0
+          }
+        ]
       }
     }
   ],
