@@ -48,6 +48,9 @@ main() {
         file="${file%"${file##*[![:space:]]}"}"  # trim trailing
         [[ -z "$file" ]] && continue
 
+        # Normalize: strip leading ./ prefix
+        file="${file#./}"
+
         has_files=true
 
         if ! is_docs_only_file "$file"; then
