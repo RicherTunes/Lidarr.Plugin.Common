@@ -127,6 +127,40 @@ Assert-Equal "MetadataZeroFiles details.totalFilesChecked is 0" $metadataZeroFil
 Assert-Equal "MetadataZeroFiles details.validationPhase is metadata:containerScan" $metadataZeroFilesResult.details.validationPhase 'metadata:containerScan'
 Assert-True "MetadataZeroFiles details has no errorCode key (moved to top-level)" (-not ($metadataZeroFilesResult.details.PSObject.Properties.Name -contains 'errorCode'))
 
+Write-Host "`nTest Group: SampleFile Guarantee (P0.3)" -ForegroundColor Yellow
+
+# INVARIANT: If MissingTags.Count > 0, SampleFile must be non-empty
+# Test that metadata result with missing tags has sampleFile set
+$metaWithMissing = $m.results | Where-Object { $_.gate -eq 'Metadata' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+$hasMissingTags = @($metaWithMissing.details.missingTags).Count -gt 0
+$hasSampleFile = -not [string]::IsNullOrWhiteSpace($metaWithMissing.details.sampleFile)
+
+Assert-True "Metadata with missingTags has sampleFile set" ($hasMissingTags -and $hasSampleFile)
+Assert-True "SampleFile invariant: missingTags > 0 implies sampleFile non-empty" (-not $hasMissingTags -or $hasSampleFile)
+
+# Test case: error reading tags should also set sampleFile
+$metaErrorReading = [PSCustomObject]@{
+    Gate = 'Metadata'
+    PluginName = 'Brainarr'
+    Outcome = 'failed'
+    Errors = @("E2E_METADATA_MISSING: Audio file 'track01.flac' error reading tags")
+    Details = @{
+        ErrorCode = 'E2E_METADATA_MISSING'
+        MissingTags = @('track01.flac: Error reading tags: Cannot read file')
+        SampleFile = 'track01.flac'  # MUST be set even for read errors
+    }
+}
+
+$jsonWithError = ConvertTo-E2ERunManifest -Results @($metaErrorReading) -Context @{
+    LidarrUrl = 'http://localhost:1234'
+    ContainerName = 'lidarr-e2e-test'
+}
+$mError = $jsonWithError | ConvertFrom-Json
+$errorResult = $mError.results | Where-Object { $_.gate -eq 'Metadata' -and $_.plugin -eq 'Brainarr' } | Select-Object -First 1
+
+Assert-True "Error reading tags: sampleFile is set" (-not [string]::IsNullOrWhiteSpace($errorResult.details.sampleFile))
+Assert-Equal "Error reading tags: sampleFile matches first failing file" $errorResult.details.sampleFile 'track01.flac'
+
 Write-Host "`nSummary: $passed passed, $failed failed" -ForegroundColor Cyan
 if ($failed -gt 0) {
     throw "$failed assertions failed"
