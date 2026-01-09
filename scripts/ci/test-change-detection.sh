@@ -135,6 +135,12 @@ assert_case "C8: Whitespace-only line ignored" "false" \
 docs/a.md
 	" || true
 
+assert_case "C9: ./ prefix stripped (docs)" "false" "./docs/README.md" || true
+
+assert_case "C10: ./ prefix stripped (code)" "true" "./scripts/e2e-runner.ps1" || true
+
+assert_case "C11: ./ prefix stripped (root md)" "false" "./README.md" || true
+
 # ============================================
 # Summary
 # ============================================
