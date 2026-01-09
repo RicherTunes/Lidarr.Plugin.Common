@@ -3,15 +3,10 @@ name: CI
 on:
   pull_request:
     branches: [ main, develop ]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
+    # No paths-ignore: we always run to satisfy branch protection
+    # Docs-only PRs skip expensive steps but still report success
   push:
     branches: [ main ]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
 
 concurrency:
   group: ci-${{ github.ref }}-${{ github.workflow }}
@@ -41,10 +36,44 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Check for code changes
+        id: changes
+        shell: bash
+        run: |
+          # Detect if this is a docs-only change (skip expensive build steps if so)
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch origin ${{ github.base_ref }} --depth=1
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
+            if [ -z "$CHANGED" ]; then
+              echo "code_changed=true" >> $GITHUB_OUTPUT
+              exit 0
+            fi
+            CODE_CHANGED=false
+            while IFS= read -r file; do
+              [ -z "$file" ] && continue
+              # Skip markdown, docs/, and issue templates
+              if [[ ! "$file" =~ \.md$ ]] && [[ ! "$file" =~ ^docs/ ]] && [[ ! "$file" =~ ^\.github/ISSUE_TEMPLATE/ ]]; then
+                CODE_CHANGED=true
+                break
+              fi
+            done <<< "$CHANGED"
+            echo "code_changed=$CODE_CHANGED" >> $GITHUB_OUTPUT
+            if [ "$CODE_CHANGED" = "false" ]; then
+              echo "::notice::Docs-only PR detected - skipping build & test steps"
+            fi
+          else
+            # Push events always build
+            echo "code_changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip notice (docs-only)
+        if: steps.changes.outputs.code_changed == 'false'
+        run: echo "## Docs-only PR - Build & Test Skipped" >> $GITHUB_STEP_SUMMARY
+
       # GitHub-hosted runners already have pwsh installed - skip apt install
       # (kept for local act runs where pwsh may not be present)
       - name: Install PowerShell (pwsh)
-        if: runner.os == 'Linux' && env.ACT == 'true'
+        if: steps.changes.outputs.code_changed == 'true' && runner.os == 'Linux' && env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -62,14 +91,17 @@ jobs:
           sudo apt-get install -y powershell
 
       - name: Setup .NET SDK
+        if: steps.changes.outputs.code_changed == 'true'
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
       - name: Show dotnet info
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet --info
 
       - name: Cache NuGet
+        if: steps.changes.outputs.code_changed == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.nuget/packages
@@ -78,22 +110,28 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Restore (including CLI framework)
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet restore -p:IncludeCLIFramework=true
+
       - name: Build (Release, all TFMs)
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -p:GeneratePackageOnBuild=false -m:1
 
       - name: Dotnet format (verify - style only)
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet format style --verify-no-changes
 
       - name: Public API drift
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0
 
       - name: Build (Release, warnings as errors)
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -m:1
 
       # GitHub-hosted runners already have pwsh - this step is only for act
       - name: Ensure pwsh (Linux only)
-        if: runner.os == 'Linux' && env.ACT == 'true'
+        if: steps.changes.outputs.code_changed == 'true' && runner.os == 'Linux' && env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -110,18 +148,21 @@ jobs:
           sudo apt-get install -y powershell
 
       - name: Test (all TFMs) + coverage
+        if: steps.changes.outputs.code_changed == 'true'
         run: >
           dotnet test -c Release --no-build
           --collect:"XPlat Code Coverage"
           --logger "trx;LogFileName=test_results.trx"
 
       - name: Install ReportGenerator
+        if: steps.changes.outputs.code_changed == 'true'
         shell: bash
         run: |
           dotnet tool update -g dotnet-reportgenerator-globaltool
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
       - name: Generate coverage summary
+        if: steps.changes.outputs.code_changed == 'true'
         shell: bash
         run: |
           reportgenerator \
@@ -132,7 +173,7 @@ jobs:
           cat coverage-report/Summary.md >> $GITHUB_STEP_SUMMARY || true
 
       - name: Upload test & coverage artifacts
-        if: always()
+        if: always() && steps.changes.outputs.code_changed == 'true'
         uses: actions/upload-artifact@v5
         with:
           name: test-and-coverage-${{ matrix.os }}
