@@ -16,6 +16,17 @@ permissions:
   contents: read
 
 jobs:
+  # Self-test for change detection classifier (prevents regression)
+  change_detection_test:
+    name: Change Detection Self-Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run classifier self-test
+        run: bash scripts/ci/test-change-detection.sh
+
   build_and_test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -40,23 +51,12 @@ jobs:
         id: changes
         shell: bash
         run: |
-          # Detect if this is a docs-only change (skip expensive build steps if so)
+          # Use the testable classifier script for consistency
+          # See scripts/ci/is-code-changed.sh for rules and scripts/ci/test-change-detection.sh for tests
           if [ "${{ github.event_name }}" = "pull_request" ]; then
             git fetch origin ${{ github.base_ref }} --depth=1
             CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
-            if [ -z "$CHANGED" ]; then
-              echo "code_changed=true" >> $GITHUB_OUTPUT
-              exit 0
-            fi
-            CODE_CHANGED=false
-            while IFS= read -r file; do
-              [ -z "$file" ] && continue
-              # Skip markdown, docs/, and issue templates
-              if [[ ! "$file" =~ \.md$ ]] && [[ ! "$file" =~ ^docs/ ]] && [[ ! "$file" =~ ^\.github/ISSUE_TEMPLATE/ ]]; then
-                CODE_CHANGED=true
-                break
-              fi
-            done <<< "$CHANGED"
+            CODE_CHANGED=$(printf '%s' "$CHANGED" | bash scripts/ci/is-code-changed.sh)
             echo "code_changed=$CODE_CHANGED" >> $GITHUB_OUTPUT
             if [ "$CODE_CHANGED" = "false" ]; then
               echo "::notice::Docs-only PR detected - skipping build & test steps"
