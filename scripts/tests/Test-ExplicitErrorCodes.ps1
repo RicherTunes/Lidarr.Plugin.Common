@@ -14,6 +14,12 @@ if (-not (Test-Path $jsonModule)) {
 
 Import-Module $jsonModule -Force
 
+$gatesModule = Join-Path $repoRoot 'scripts/lib/e2e-gates.psm1'
+if (-not (Test-Path $gatesModule)) {
+    throw "Module not found: $gatesModule"
+}
+Import-Module $gatesModule -Force
+
 $passed = 0
 $failed = 0
 
