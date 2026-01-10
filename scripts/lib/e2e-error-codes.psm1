@@ -80,6 +80,14 @@ $script:E2EErrorCodes = [ordered]@{
         Category = 'plugin'
     }
 
+    'E2E_INTERNAL_ERROR' = @{
+        Description = 'Internal runner error (should not occur in normal operation)'
+        Severity = 'blocking'
+        Category = 'runner'
+        # Note: Used for edge cases like hash computation failure
+        # Reason field should be enum-ish (e.g., ExpectedModelHashComputationFailed)
+    }
+
     'E2E_ABSTRACTIONS_SHA_MISMATCH' = @{
         Description = 'Plugins ship non-identical Lidarr.Plugin.Abstractions.dll bytes'
         Severity = 'blocking'
