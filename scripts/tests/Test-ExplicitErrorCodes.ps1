@@ -7,12 +7,17 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $jsonModule = Join-Path $repoRoot 'scripts/lib/e2e-json-output.psm1'
+$gatesModule = Join-Path $repoRoot 'scripts/lib/e2e-gates.psm1'
 
 if (-not (Test-Path $jsonModule)) {
     throw "Module not found: $jsonModule"
 }
+if (-not (Test-Path $gatesModule)) {
+    throw "Module not found: $gatesModule"
+}
 
 Import-Module $jsonModule -Force
+Import-Module $gatesModule -Force
 
 $passed = 0
 $failed = 0
@@ -370,6 +375,7 @@ $importFailedCmd = [PSCustomObject]@{
         commandId = 123
         commandStatus = 'failed'
         postSyncVerified = $false
+        preSyncImportListFound = $true
     }
 }
 
@@ -387,6 +393,7 @@ Assert-Equal "ImportFailed details.phase is ImportList:PollCommand" $importFaile
 Assert-Equal "ImportFailed details.operation is ImportListSync" $importFailedResult.details.operation 'ImportListSync'
 Assert-True "ImportFailed details.endpoint starts with /" ($importFailedResult.details.endpoint -match '^/')
 Assert-Equal "ImportFailed details.commandStatus is failed" $importFailedResult.details.commandStatus 'failed'
+Assert-Equal "ImportFailed details.preSyncImportListFound is true" $importFailedResult.details.preSyncImportListFound $true
 
 # Test post-sync verification with lastSyncError
 $postSyncFailed = [PSCustomObject]@{
@@ -405,6 +412,7 @@ $postSyncFailed = [PSCustomObject]@{
         commandStatus = 'completed'
         lastSyncError = 'LLM API returned error'
         postSyncVerified = $true
+        preSyncImportListFound = $true
     }
 }
 

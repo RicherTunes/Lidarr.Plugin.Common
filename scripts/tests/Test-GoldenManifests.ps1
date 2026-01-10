@@ -173,6 +173,7 @@ Assert-True -Name "import-failed.json has operation" -Condition ($null -ne $impo
 Assert-True -Name "import-failed.json endpoint starts with /api/" -Condition ($importFailedResult.details.endpoint -match '^/api/')
 Assert-True -Name "import-failed.json has pluginName" -Condition ($null -ne $importFailedResult.details.pluginName)
 Assert-Equal -Name "import-failed.json operation is ImportListSync" -Actual $importFailedResult.details.operation -Expected 'ImportListSync'
+Assert-True -Name "import-failed.json has preSyncImportListFound" -Condition ($null -ne $importFailedResult.details.preSyncImportListFound)
 
 Write-Host ""
 Write-Host "Passed: $passed" -ForegroundColor Green

@@ -80,7 +80,8 @@
         "endpoint": "/api/v1/command/789",
         "commandId": 789,
         "commandStatus": "failed",
-        "postSyncVerified": false
+        "postSyncVerified": false,
+        "preSyncImportListFound": true
       }
     }
   ],

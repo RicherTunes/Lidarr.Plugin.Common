@@ -2087,8 +2087,10 @@ function Test-ImportListGate {
 
         # Step 4: Capture baseline state before sync
         $preSync = $null
+        $preSyncImportListFound = $false
         try {
             $preSync = Invoke-LidarrApi -Endpoint "importlist/$($configuredList.id)"
+            $preSyncImportListFound = ($null -ne $preSync)
         }
         catch { }
 
@@ -2224,6 +2226,7 @@ function Test-ImportListGate {
             $result.Errors += "Import list $($configuredList.id) not accessible after sync: $_"
 
             # Site C: Structured import failed details (explicit at source)
+            # Include preSyncImportListFound to distinguish "disappeared" from "never existed"
             $failedDetails = New-ImportFailedDetails `
                 -PluginName $PluginName `
                 -ImportListId $configuredList.id `
@@ -2232,7 +2235,8 @@ function Test-ImportListGate {
                 -ImportListName $configuredList.name `
                 -CommandId $command.id `
                 -CommandStatus 'completed' `
-                -PostSyncVerified $false
+                -PostSyncVerified $false `
+                -PreSyncImportListFound $preSyncImportListFound
             foreach ($key in $failedDetails.Keys) {
                 $result.Details[$key] = $failedDetails[$key]
             }
@@ -2259,7 +2263,8 @@ function Test-ImportListGate {
                 -CommandId $command.id `
                 -CommandStatus 'completed' `
                 -LastSyncError $postSyncError `
-                -PostSyncVerified $true
+                -PostSyncVerified $true `
+                -PreSyncImportListFound $preSyncImportListFound
             foreach ($key in $failedDetails.Keys) {
                 $result.Details[$key] = $failedDetails[$key]
             }
@@ -3548,6 +3553,7 @@ function New-ImportFailedDetails {
         [string]$CommandStatus,
         [string]$LastSyncError,
         [bool]$PostSyncVerified = $false,
+        [bool]$PreSyncImportListFound = $true,
         [int]$ElapsedMs,
         [int]$Attempts
     )
@@ -3582,6 +3588,7 @@ function New-ImportFailedDetails {
         phase = $Phase
         endpoint = $normalizedEndpoint
         postSyncVerified = $PostSyncVerified
+        preSyncImportListFound = $PreSyncImportListFound
     }
 
     # Add optional fields only when provided
