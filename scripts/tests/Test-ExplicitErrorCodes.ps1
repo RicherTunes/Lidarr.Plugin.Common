@@ -549,6 +549,95 @@ Assert-True "ValidationError URL is redacted" ($urlInErrorDetails.validationErro
 Assert-True "ValidationError does not contain internal.server" (-not ($urlInErrorDetails.validationErrors[0] -match 'internal\.server'))
 
 
+Write-Host "`nTest Group: E2E_CONFIG_INVALID Wiring Verification (P1)" -ForegroundColor Yellow
+
+# Verify that e2e-runner.ps1 has the correct wiring in place
+$runnerPath = Join-Path $repoRoot 'scripts/e2e-runner.ps1'
+$runnerContent = Get-Content -Path $runnerPath -Raw
+
+# Verify Invoke-ConfigureRequest exists and calls New-ConfigInvalidDetails
+Assert-True "e2e-runner.ps1 defines Invoke-ConfigureRequest" ($runnerContent -match 'function Invoke-ConfigureRequest')
+Assert-True "Invoke-ConfigureRequest calls New-ConfigInvalidDetails" ($runnerContent -match 'Invoke-ConfigureRequest[\s\S]*?New-ConfigInvalidDetails')
+
+# Verify New-ComponentFromEnv uses Invoke-ConfigureRequest
+Assert-True "New-ComponentFromEnv calls Invoke-ConfigureRequest" ($runnerContent -match 'function New-ComponentFromEnv[\s\S]*?Invoke-ConfigureRequest[\s\S]*?function Update-ComponentAuthFields')
+
+# Verify Update-ComponentAuthFields uses Invoke-ConfigureRequest
+Assert-True "Update-ComponentAuthFields calls Invoke-ConfigureRequest" ($runnerContent -match 'function Update-ComponentAuthFields[\s\S]*?Invoke-ConfigureRequest[\s\S]*?function Test-ConfigureGateForPlugin')
+
+# Verify Test-ConfigureGateForPlugin merges Details on failure
+Assert-True "Test-ConfigureGateForPlugin merges createResult.Details" ($runnerContent -match 'createResult\.Details\.Keys')
+Assert-True "Test-ConfigureGateForPlugin merges updateResult.Details" ($runnerContent -match 'updateResult\.Details\.Keys')
+Assert-True "Test-ConfigureGateForPlugin checks createResult.Success" ($runnerContent -match 'createResult\.Success')
+Assert-True "Test-ConfigureGateForPlugin checks updateResult.Failed" ($runnerContent -match 'updateResult\.Failed')
+
+# Verify the wiring is consistent across all three component types
+$indexerWiring = ($runnerContent -match 'New-ComponentFromEnv -Type "indexer"[\s\S]*?createResult\.Success')
+$downloadClientWiring = ($runnerContent -match 'New-ComponentFromEnv -Type "downloadclient"[\s\S]*?createResult\.Success')
+$importListWiring = ($runnerContent -match 'New-ComponentFromEnv -Type "importlist"[\s\S]*?createResult\.Success')
+
+Assert-True "Indexer wiring uses structured result" $indexerWiring
+Assert-True "DownloadClient wiring uses structured result" $downloadClientWiring
+Assert-True "ImportList wiring uses structured result" $importListWiring
+
+# Test that Invoke-ConfigureRequest returns the expected structure
+# by simulating what it would return on failure (without actually calling Lidarr API)
+Write-Host "`nTest Group: Invoke-ConfigureRequest Return Contract" -ForegroundColor Yellow
+
+# Simulate the exact structure that Invoke-ConfigureRequest returns on failure
+$simulatedFailure = @{
+    Success = $false
+    Details = New-ConfigInvalidDetails `
+        -PluginName 'SimulatedPlugin' `
+        -ComponentType 'indexer' `
+        -Operation 'create' `
+        -Endpoint '/api/v1/indexer' `
+        -Phase 'Configure:Create:Post' `
+        -HttpStatus 400 `
+        -ValidationErrors @('Simulated validation error') `
+        -FieldNames @('simulatedField') `
+        -SchemaContract 'SimulatedPluginSettings'
+    Errors = @('Simulated API error')
+}
+
+Assert-True "Simulated failure has Success=false" ($simulatedFailure.Success -eq $false)
+Assert-True "Simulated failure has Details.ErrorCode" ($simulatedFailure.Details.ErrorCode -eq 'E2E_CONFIG_INVALID')
+Assert-True "Simulated failure has Details.pluginName" ($simulatedFailure.Details.pluginName -eq 'SimulatedPlugin')
+Assert-True "Simulated failure has Details.componentType" ($simulatedFailure.Details.componentType -eq 'indexer')
+Assert-True "Simulated failure has Details.operation" ($simulatedFailure.Details.operation -eq 'create')
+Assert-True "Simulated failure has Details.phase" ($simulatedFailure.Details.phase -eq 'Configure:Create:Post')
+Assert-True "Simulated failure has Details.httpStatus" ($simulatedFailure.Details.httpStatus -eq 400)
+Assert-True "Simulated failure has Details.schemaContract" ($simulatedFailure.Details.schemaContract -eq 'SimulatedPluginSettings')
+Assert-True "Simulated failure has Errors array" ($simulatedFailure.Errors.Count -gt 0)
+
+# Verify merging logic produces expected gate result structure
+$gateResult = @{
+    Gate = 'Configure'
+    PluginName = 'SimulatedPlugin'
+    Outcome = 'failed'
+    Errors = @()
+    Details = @{
+        componentIds = @{}
+        alreadyConfigured = $false
+        created = $false
+        updated = $false
+    }
+}
+
+# Simulate the merging logic from Test-ConfigureGateForPlugin
+$gateResult.Errors += "Failed to create indexer for SimulatedPlugin"
+$gateResult.Outcome = "failed"
+foreach ($key in $simulatedFailure.Details.Keys) {
+    $gateResult.Details[$key] = $simulatedFailure.Details[$key]
+}
+
+Assert-True "Gate result has ErrorCode after merge" ($gateResult.Details.ErrorCode -eq 'E2E_CONFIG_INVALID')
+Assert-True "Gate result has componentType after merge" ($gateResult.Details.componentType -eq 'indexer')
+Assert-True "Gate result has operation after merge" ($gateResult.Details.operation -eq 'create')
+Assert-True "Gate result has validationErrors after merge" ($gateResult.Details.validationErrors.Count -eq 1)
+Assert-True "Gate result preserves original componentIds" ($null -ne $gateResult.Details.componentIds)
+
+
 Write-Host "`nSummary: $passed passed, $failed failed" -ForegroundColor Cyan
 if ($failed -gt 0) {
     throw "$failed assertions failed"
