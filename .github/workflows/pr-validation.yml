@@ -67,7 +67,24 @@ jobs:
       - name: Test
         run: dotnet test -c Release --no-build
 
+      - name: Check for contract doc changes
+        id: contract_check
+        shell: bash
+        run: |
+          # Detect if PR touches contract docs (requires tripwire test execution)
+          git fetch origin ${{ github.base_ref }} --depth=1
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
+
+          # Check for contract files specifically
+          CONTRACT_CHANGED="false"
+          if echo "$CHANGED" | grep -qE '^docs/E2E_ERROR_CODES\.md$|^docs/reference/e2e-run-manifest\.schema\.json$'; then
+            CONTRACT_CHANGED="true"
+            echo "::notice::Contract docs changed - tripwire test MUST execute"
+          fi
+          echo "contract_changed=$CONTRACT_CHANGED" >> $GITHUB_OUTPUT
+
       - name: Script tests (E2E runner)
+        id: script_tests
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
@@ -75,7 +92,34 @@ jobs:
           if (-not $tests) {
             throw "No script tests found under ./scripts/tests"
           }
+
+          # Track executed tests for verification
+          $executed = @()
           foreach ($test in $tests) {
             Write-Host "Running $($test.Name)..." -ForegroundColor Cyan
             & $test.FullName
+            $executed += $test.Name
           }
+
+          # Output executed tests for tripwire verification
+          $executedList = $executed -join ','
+          "executed_tests=$executedList" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Append
+          Write-Host "Executed tests: $executedList"
+
+      - name: Verify tripwire execution (contract docs)
+        if: steps.contract_check.outputs.contract_changed == 'true'
+        shell: bash
+        run: |
+          # CRITICAL: If contract docs changed, tripwire test MUST have executed
+          EXECUTED="${{ steps.script_tests.outputs.executed_tests }}"
+
+          if [[ "$EXECUTED" != *"Test-ErrorCodeDetailsContract.ps1"* ]]; then
+            echo "::error::TRIPWIRE BYPASS DETECTED: Contract docs changed but Test-ErrorCodeDetailsContract.ps1 did not execute!"
+            echo "This indicates workflow wiring drift. The tripwire test protects doc/code consistency."
+            echo ""
+            echo "Executed tests: $EXECUTED"
+            echo "Required test: Test-ErrorCodeDetailsContract.ps1"
+            exit 1
+          fi
+
+          echo "Tripwire verification passed: Test-ErrorCodeDetailsContract.ps1 executed for contract doc changes"
