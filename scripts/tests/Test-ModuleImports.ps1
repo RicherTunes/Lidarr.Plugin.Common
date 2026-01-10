@@ -20,4 +20,29 @@ foreach ($moduleFile in $moduleFiles) {
     Import-Module $path -Force
 }
 
+# CRITICAL: Verify explicit error code helpers are exported from e2e-gates.psm1
+# This prevents the PR #243 regression where New-ApiTimeoutDetails wasn't discoverable
+# because Test-ExplicitErrorCodes.ps1 didn't import e2e-gates.psm1
+
+$requiredGatesExports = @(
+    'New-ApiTimeoutDetails',
+    'New-ImportFailedDetails',
+    'Get-FoundIndexerNamesDetails'
+)
+
+$failed = 0
+foreach ($fn in $requiredGatesExports) {
+    $cmd = Get-Command -Name $fn -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        Write-Host "  [FAIL] e2e-gates.psm1 must export: $fn" -ForegroundColor Red
+        $failed++
+    } else {
+        Write-Host "  [PASS] e2e-gates.psm1 exports: $fn" -ForegroundColor Green
+    }
+}
+
+if ($failed -gt 0) {
+    throw "Module export validation failed: $failed required functions not exported"
+}
+
 Write-Host 'PASS: Test-ModuleImports'
