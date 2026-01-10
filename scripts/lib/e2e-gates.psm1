@@ -3238,8 +3238,26 @@ function Test-BrainarrLLMGate {
             $found = Test-LLMModelAvailability -Models @($llmProbe.Models) -ExpectedModelId $expectedModel
             $result.Details.expectedModelFound = $found
 
+            # Config validation: if we have an expectedModel but failed to compute hash, that is a config issue
+            if ([string]::IsNullOrWhiteSpace($expectedHash)) {
+                # Note: Rare edge case (SHA256 should not fail for valid UTF-8). No explicit code emitted.
+                # Removed: ErrorCode not emitted (E2E_CONFIG_INVALID contract requires HTTP validation fields)
+                $result.Details.llmKind = $llmProbe.Kind ?? 'unknown'
+                $result.Details.modelsCount = [int]($llmProbe.ModelsCount ?? 0)
+                $result.Details.expectedModelFound = $false
+                $result.Errors += "Expected model ID provided but hash computation failed - verify model ID configuration."
+                return $result
+            }
+
             if (-not $found) {
-                $result.Errors += "E2E_PROVIDER_UNAVAILABLE: Expected model not found on LLM endpoint (expectedModelIdHash=$expectedHash, modelsCount=$($llmProbe.ModelsCount))."
+                # E2E_PROVIDER_UNAVAILABLE: LLM endpoint is reachable but expected model not available
+                # Set all contract fields defensively
+                $result.Details.ErrorCode = 'E2E_PROVIDER_UNAVAILABLE'
+                $result.Details.llmKind = $llmProbe.Kind ?? 'unknown'
+                $result.Details.modelsCount = [int]($llmProbe.ModelsCount ?? 0)
+                $result.Details.expectedModelIdHash = $expectedHash
+                $result.Details.expectedModelFound = $false
+                $result.Errors += "Expected model not found on LLM endpoint (expectedModelIdHash=$expectedHash, modelsCount=$($result.Details.modelsCount))."
                 return $result
             }
         }
@@ -3261,7 +3279,12 @@ function Test-BrainarrLLMGate {
 
         if (-not $effectiveModelId) {
             if ($StrictMode) {
-                $result.Errors += "No model available on LLM endpoint"
+                # E2E_PROVIDER_UNAVAILABLE: LLM endpoint reachable but no usable model
+                $result.Details.ErrorCode = 'E2E_PROVIDER_UNAVAILABLE'
+                $result.Details.llmKind = $llmProbe.Kind ?? 'unknown'
+                $result.Details.modelsCount = [int]($llmProbe.ModelsCount ?? 0)
+                $result.Details.expectedModelFound = $false
+                $result.Errors += "No model available on LLM endpoint (modelsCount=$($result.Details.modelsCount))."
                 return $result
             }
             $result.Outcome = 'skipped'
