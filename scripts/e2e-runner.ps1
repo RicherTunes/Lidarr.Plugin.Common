@@ -364,6 +364,7 @@ $scriptRoot = Split-Path -Parent $PSScriptRoot
 # Import modules
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-gates.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force       
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-docker.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-json-output.psm1") -Force       
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-component-ids.psm1") -Force     
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-brainarr-config.psm1") -Force
@@ -1551,15 +1552,28 @@ function Test-PersistGate {
         Details = @{}
     }
 
-    if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    if ([string]::IsNullOrWhiteSpace($ContainerName)) {
         $result.Outcome = "skipped"
-        $result.Details = @{ Reason = "docker not found" }
+        $result.Details = @{ Reason = "ContainerName not provided" }     
         return $result
     }
 
-    if ([string]::IsNullOrWhiteSpace($ContainerName)) {
-        $result.Outcome = "skipped"
-        $result.Details = @{ Reason = "ContainerName not provided" }
+    # Docker prereq: explicit E2E_DOCKER_UNAVAILABLE at source (no classifier inference)
+    if (Get-Command Test-E2EDockerAvailable -ErrorAction SilentlyContinue) {
+        $dockerCheck = Test-E2EDockerAvailable -Phase 'Persist:Prereq' -Operation 'docker restart'
+        if (-not $dockerCheck.Success) {
+            $result.Outcome = "failed"
+            $result.Success = $false
+            $result.Details = $dockerCheck.Details
+            $result.Details.ErrorCode = 'E2E_DOCKER_UNAVAILABLE'
+            $result.Errors += "E2E_DOCKER_UNAVAILABLE: $($dockerCheck.Details.Suggestion)"
+            return $result
+        }
+    } elseif (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+        $result.Outcome = "failed"
+        $result.Success = $false
+        $result.Details = @{ ErrorCode = "E2E_DOCKER_UNAVAILABLE"; Phase = "Persist:Prereq"; Operation = "docker restart"; Reason = "docker not found" }
+        $result.Errors += "E2E_DOCKER_UNAVAILABLE: docker CLI not found"
         return $result
     }
 
@@ -1664,6 +1678,13 @@ function Test-PersistGate {
     catch {
         $result.Outcome = "failed"
         $result.Errors += "Failed to restart container '$ContainerName': $_"
+        if (-not $result.Details.ErrorCode) {
+            $result.Details.ErrorCode = "E2E_DOCKER_UNAVAILABLE"
+        }
+        if (Get-Command New-DockerUnavailableDetails -ErrorAction SilentlyContinue) {
+            $details = New-DockerUnavailableDetails -Phase 'Persist:RestartContainer' -Operation 'docker restart' -ContainerName $ContainerName -DockerExitCode 1 -DockerStderr ([string]$_.Exception.Message)
+            foreach ($key in $details.Keys) { $result.Details[$key] = $details[$key] }
+        }
         return $result
     }
 

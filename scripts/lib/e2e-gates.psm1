@@ -16,6 +16,12 @@ if (Test-Path $releaseSelectionPath) {
     Import-Module $releaseSelectionPath -Force
 }
 
+# Import shared docker helper (structured E2E_DOCKER_UNAVAILABLE at source)
+$dockerPath = Join-Path $PSScriptRoot "e2e-docker.psm1"
+if (Test-Path $dockerPath) {
+    Import-Module $dockerPath -Force
+}
+
 function Initialize-E2EGates {
     <#
     .SYNOPSIS
@@ -1247,7 +1253,17 @@ function Test-PluginGrabGate {
         }
 
         # Step 6: v3 multi-file validation (requires Docker container access)
-        if ($ValidateOutputPath -and $ContainerName -and (Get-Command docker -ErrorAction SilentlyContinue) -and $result.OutputPath) {
+        if ($ValidateOutputPath -and $ContainerName -and $result.OutputPath) {
+            # Docker prereq: explicit E2E_DOCKER_UNAVAILABLE at source (no classifier inference)
+            if (Get-Command Test-E2EDockerAvailable -ErrorAction SilentlyContinue) {
+                $dockerCheck = Test-E2EDockerAvailable -Phase 'Grab:ValidateOutputPath' -Operation 'docker exec'
+                if (-not $dockerCheck.Success) {
+                    $result.Details.ErrorCode = 'E2E_DOCKER_UNAVAILABLE'
+                    foreach ($key in $dockerCheck.Details.Keys) { $result.Details[$key] = $dockerCheck.Details[$key] }
+                    $result.Errors += "E2E_DOCKER_UNAVAILABLE: $($dockerCheck.Details.Suggestion)"
+                    return $result
+                }
+            }
             try {
                 $container = $ContainerName.Trim()
                 $outPath = $result.OutputPath
@@ -2354,22 +2370,41 @@ function Test-MetadataGate {
     $currentCandidateFile = $null  # Track current file being processed for exception safety (function-level)
 
     try {
-        # Check if docker is available
-        if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
-            $result.Outcome = 'skipped'
-            $result.SkipReason = "Docker not available"
+        # Docker prereq: explicit E2E_DOCKER_UNAVAILABLE at source (no classifier inference)
+        if (Get-Command Test-E2EDockerAvailable -ErrorAction SilentlyContinue) {
+            $dockerCheck = Test-E2EDockerAvailable -Phase 'Metadata:Prereq' -Operation 'docker exec'
+            if (-not $dockerCheck.Success) {
+                $result.Details.ErrorCode = 'E2E_DOCKER_UNAVAILABLE'
+                foreach ($key in $dockerCheck.Details.Keys) { $result.Details[$key] = $dockerCheck.Details[$key] }
+                $result.Errors += "E2E_DOCKER_UNAVAILABLE: $($dockerCheck.Details.Suggestion)"
+                return $result
+            }
+        } elseif (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            $result.Details.ErrorCode = 'E2E_DOCKER_UNAVAILABLE'
+            $result.Errors += 'E2E_DOCKER_UNAVAILABLE: docker CLI not found'
             return $result
         }
 
         # Check if container exists and is accessible
-        docker inspect $ContainerName 1>$null 2>$null
-        if ($LASTEXITCODE -ne 0) {
-            $result.Outcome = 'skipped'
-            $result.SkipReason = "Container '$ContainerName' not found or not accessible"
-            return $result
+        if (Get-Command Invoke-E2EDocker -ErrorAction SilentlyContinue) {
+            $inspect = Invoke-E2EDocker -Args @('inspect', $ContainerName) -TimeoutSec 5
+            if (-not $inspect.Success) {
+                $details = New-DockerUnavailableDetails -Phase 'Metadata:InspectContainer' -Operation 'docker inspect' -ContainerName $ContainerName -DockerExitCode $inspect.ExitCode -DockerStderr $inspect.StdErr -TimedOut:$inspect.TimedOut
+                $result.Details.ErrorCode = 'E2E_DOCKER_UNAVAILABLE'
+                foreach ($key in $details.Keys) { $result.Details[$key] = $details[$key] }
+                $result.Errors += "E2E_DOCKER_UNAVAILABLE: $($details.Suggestion)"
+                return $result
+            }
+        } else {
+            docker inspect $ContainerName 1>$null 2>$null
+            if ($LASTEXITCODE -ne 0) {
+                $result.Details.ErrorCode = 'E2E_DOCKER_UNAVAILABLE'
+                $result.Errors += "E2E_DOCKER_UNAVAILABLE: Container '$ContainerName' not found or not accessible"
+                return $result
+            }
         }
 
-        # Check if python3 + mutagen are available in the container
+        # Check if python3 + mutagen are available in the container      
         $mutagenCheck = docker exec $ContainerName python3 -c "import mutagen; print('ok')" 2>$null
         $mutagenOk = (@($mutagenCheck) -join '').Trim() -eq 'ok'
 
@@ -2738,6 +2773,22 @@ function Test-AudioFileValidation {
     }
 
     try {
+        # Docker prereq: explicit E2E_DOCKER_UNAVAILABLE at source (no classifier inference)
+        if (Get-Command Test-E2EDockerAvailable -ErrorAction SilentlyContinue) {
+            $dockerCheck = Test-E2EDockerAvailable -Phase 'Grab:FileValidation' -Operation 'docker exec'
+            if (-not $dockerCheck.Success) {
+                $result.ErrorCode = 'E2E_DOCKER_UNAVAILABLE'
+                $result.ValidationPhase = 'grab:fileValidation'
+                $result.Errors += "E2E_DOCKER_UNAVAILABLE: $($dockerCheck.Details.Suggestion)"
+                return $result
+            }
+        } elseif (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+            $result.ErrorCode = 'E2E_DOCKER_UNAVAILABLE'
+            $result.ValidationPhase = 'grab:fileValidation'
+            $result.Errors += 'E2E_DOCKER_UNAVAILABLE: docker CLI not found'
+            return $result
+        }
+
         # Find audio files in output path
         $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | LC_ALL=C sort | head -n $MaxFilesToCheck"
         $audioFilesRaw = docker exec $ContainerName sh -c $findCmd 2>$null
