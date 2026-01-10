@@ -45,6 +45,12 @@ $script:E2EErrorCodes = [ordered]@{
         Category = 'infra'
     }
 
+    'E2E_LIDARR_UNREACHABLE' = @{
+        Description = 'Lidarr API is unreachable (transport failure)'
+        Severity = 'blocking'
+        Category = 'infra'
+    }
+
     'E2E_DOCKER_UNAVAILABLE' = @{
         Description = 'Docker interaction required but not available'
         Severity = 'blocking'
