@@ -17,6 +17,8 @@ jobs:
       DOTNET_ROLL_FORWARD: Minor
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       # GitHub-hosted runners already have pwsh - skip apt install entirely
       # (kept for local act runs where pwsh may not be present)
@@ -37,6 +39,22 @@ jobs:
           sudo dpkg -i packages-microsoft-prod.deb
           sudo apt-get update
           sudo apt-get install -y powershell
+
+      - name: Check for contract doc changes
+        id: contract_check
+        shell: bash
+        run: |
+          # Detect if PR touches contract docs (requires tripwire test execution)
+          git fetch origin ${{ github.base_ref }} --depth=1 2>/dev/null || true
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
+
+          # Check for contract files specifically
+          CONTRACT_CHANGED="false"
+          if echo "$CHANGED" | grep -qE '^docs/E2E_ERROR_CODES\.md$|^docs/reference/e2e-run-manifest\.schema\.json$'; then
+            CONTRACT_CHANGED="true"
+            echo "::notice::Contract docs changed - tripwire test MUST execute and emit marker"
+          fi
+          echo "contract_changed=$CONTRACT_CHANGED" >> $GITHUB_OUTPUT
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v5
@@ -67,22 +85,6 @@ jobs:
       - name: Test
         run: dotnet test -c Release --no-build
 
-      - name: Check for contract doc changes
-        id: contract_check
-        shell: bash
-        run: |
-          # Detect if PR touches contract docs (requires tripwire test execution)
-          git fetch origin ${{ github.base_ref }} --depth=1
-          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
-
-          # Check for contract files specifically
-          CONTRACT_CHANGED="false"
-          if echo "$CHANGED" | grep -qE '^docs/E2E_ERROR_CODES\.md$|^docs/reference/e2e-run-manifest\.schema\.json$'; then
-            CONTRACT_CHANGED="true"
-            echo "::notice::Contract docs changed - tripwire test MUST execute"
-          fi
-          echo "contract_changed=$CONTRACT_CHANGED" >> $GITHUB_OUTPUT
-
       - name: Script tests (E2E runner)
         id: script_tests
         shell: pwsh
@@ -93,33 +95,54 @@ jobs:
             throw "No script tests found under ./scripts/tests"
           }
 
-          # Track executed tests for verification
-          $executed = @()
+          # Track execution count for verification
+          $executedCount = 0
           foreach ($test in $tests) {
             Write-Host "Running $($test.Name)..." -ForegroundColor Cyan
             & $test.FullName
-            $executed += $test.Name
+            $executedCount++
           }
 
-          # Output executed tests for tripwire verification
-          $executedList = $executed -join ','
-          "executed_tests=$executedList" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Append
-          Write-Host "Executed tests: $executedList"
+          # Output count for sanity check
+          "executed_count=$executedCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Append
+          Write-Host "Executed $executedCount test scripts"
 
       - name: Verify tripwire execution (contract docs)
-        if: steps.contract_check.outputs.contract_changed == 'true'
+        if: always() && steps.contract_check.outputs.contract_changed == 'true'
         shell: bash
         run: |
           # CRITICAL: If contract docs changed, tripwire test MUST have executed
-          EXECUTED="${{ steps.script_tests.outputs.executed_tests }}"
+          # and emitted a marker file as proof of actual execution
 
-          if [[ "$EXECUTED" != *"Test-ErrorCodeDetailsContract.ps1"* ]]; then
-            echo "::error::TRIPWIRE BYPASS DETECTED: Contract docs changed but Test-ErrorCodeDetailsContract.ps1 did not execute!"
-            echo "This indicates workflow wiring drift. The tripwire test protects doc/code consistency."
-            echo ""
-            echo "Executed tests: $EXECUTED"
-            echo "Required test: Test-ErrorCodeDetailsContract.ps1"
+          MARKER_PATH="${RUNNER_TEMP}/tripwire-contract-test.marker"
+          EXECUTED_COUNT="${{ steps.script_tests.outputs.executed_count }}"
+
+          echo "Checking tripwire execution proof..."
+          echo "  Marker path: $MARKER_PATH"
+          echo "  Executed count: $EXECUTED_COUNT"
+
+          # Fail if script tests step didn't run or executed 0 tests
+          if [ -z "$EXECUTED_COUNT" ] || [ "$EXECUTED_COUNT" = "0" ]; then
+            echo "::error::TRIPWIRE BYPASS: Script tests step did not run or executed 0 tests!"
+            echo "Contract docs changed but test execution was skipped."
             exit 1
           fi
 
-          echo "Tripwire verification passed: Test-ErrorCodeDetailsContract.ps1 executed for contract doc changes"
+          # Fail if marker file doesn't exist (tripwire didn't actually complete)
+          if [ ! -f "$MARKER_PATH" ]; then
+            echo "::error::TRIPWIRE BYPASS: Marker file not found!"
+            echo "Test-ErrorCodeDetailsContract.ps1 either:"
+            echo "  1. Did not run"
+            echo "  2. Failed before completing"
+            echo "  3. Was renamed/moved without updating workflow"
+            echo ""
+            echo "Expected marker at: $MARKER_PATH"
+            echo "This indicates the tripwire test protecting doc/code consistency did not execute."
+            exit 1
+          fi
+
+          # Verify marker content
+          echo "Marker file found. Contents:"
+          cat "$MARKER_PATH"
+          echo ""
+          echo "Tripwire verification PASSED: Contract test executed and emitted proof marker"

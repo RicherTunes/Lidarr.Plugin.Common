@@ -92,6 +92,28 @@ function Get-GoldenErrorResults {
 }
 
 Describe 'E2E error-code details contract' {
+    AfterAll {
+        # Emit marker file ONLY after tests complete successfully
+        # This is the "proof of execution" for workflow verification
+        $markerDir = $env:RUNNER_TEMP
+        if (-not $markerDir) { $markerDir = $env:TEMP }
+        if (-not $markerDir) { $markerDir = '/tmp' }
+
+        $markerPath = Join-Path $markerDir 'tripwire-contract-test.marker'
+        $timestamp = [DateTime]::UtcNow.ToString('o')
+        @{
+            test = 'Test-ErrorCodeDetailsContract.ps1'
+            executedAt = $timestamp
+            status = 'completed'
+        } | ConvertTo-Json | Set-Content -Path $markerPath -Encoding UTF8
+
+        Write-Host "TRIPWIRE_MARKER_PATH=$markerPath" -ForegroundColor Green
+        # Also emit to GITHUB_OUTPUT if available
+        if ($env:GITHUB_OUTPUT) {
+            "tripwire_marker=$markerPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Append
+        }
+    }
+
     It 'Structured details contract matches golden fixtures (required fields present)' {
         $repoRoot = Get-RepoRoot
         $docPath = Join-Path $repoRoot 'docs/E2E_ERROR_CODES.md'
