@@ -138,13 +138,9 @@ Each explicit error code includes a `results[].details` object with stable, mach
 |---|---:|---|
 | `audioFilesValidated` | int | Count of files examined for tags. |
 | `audioFilesWithMissingTags` | int | Count of files missing required tags. |
-| `missingTags` | string[] | Required tag identifiers missing (non-empty, max 10). |
-| `missingTagsCount` | int | Total missing tags before capping. |
-| `missingTagsCapped` | boolean | Whether `missingTags` was capped at 10. |
-| `sampleFile` | string | Deterministic sample file (basename only). |
+| `missingTags` | string[] | Required tag identifiers missing. |
 | `presentTags` | string[] | Tag identifiers present (for context). |
-| `tagReadTool` | enum | `mutagen` \| `taglib` \| `unknown`. |
-| `tagReadToolVersion` | string? | Version string when available; null otherwise. Diagnostic only. |
+| `sampleFile` | string | Deterministic sample file associated with the failure. |
 
 ### `E2E_IMPORT_FAILED`
 | Field | Type | Notes |

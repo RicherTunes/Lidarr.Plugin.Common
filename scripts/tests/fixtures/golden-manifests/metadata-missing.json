@@ -103,17 +103,13 @@
           "ISRC",
           "MUSICBRAINZ_TRACKID"
         ],
-        "missingTagsCount": 3,
-        "missingTagsCapped": false,
         "sampleFile": "01 - So What.flac",
         "presentTags": [
           "TITLE",
           "ARTIST",
           "ALBUM",
           "TRACKNUMBER"
-        ],
-        "tagReadTool": "taglib",
-        "tagReadToolVersion": "2.4.0"
+        ]
       }
     }
   ],
