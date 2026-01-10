@@ -1,18 +1,32 @@
 # Track Identity Mapping Parity
 
-This document defines the **required fields** that all streaming plugins must populate on `StreamingTrack` for consistent metadata application and cross-plugin parity.
+<!-- DOC_VERSION: 2026-01-10-v2 -->
+<!-- Plugin tests should reference this version to detect drift -->
+
+This document defines field mapping expectations for `StreamingTrack` across streaming plugins.
+
+## Tier Semantics (READ FIRST)
+
+| Tier | Contract Type | Test Behavior | Meaning |
+|------|---------------|---------------|---------|
+| **Tier 1** | Hard contract | Tests MUST fail if missing | Core functionality; all plugins MUST implement |
+| **Tier 2** | Informational | Tests MUST NOT fail; log warnings | Expected when API provides; document gaps |
+| **Tier 3** | Aspirational | Tests MUST NOT fail; skip silently | Nice-to-have; blocked by API or not yet implemented |
+
+**Key rule**: Tier 2/3 characterization tests document current behavior but MUST NOT cause CI failures.
+They exist to track parity gaps, not enforce them.
 
 ## Purpose
 
-Track identity mapping ensures that:
+Track identity mapping ensures:
 1. Downloaded audio files have consistent, complete metadata tags
-2. Users can switch between plugins (e.g., Qobuzarr to Tidalarr) without losing metadata fidelity
+2. Users can switch between plugins without losing metadata fidelity
 3. MusicBrainz integration works across all plugins
-4. E2E metadata validation gates can assert consistent behavior
+4. E2E metadata validation gates assert consistent behavior
 
-## Required Fields (Tier 1)
+## Tier 1: Required Fields (Hard Contract)
 
-These fields **MUST** be populated for basic functionality:
+These fields **MUST** be populated. Tests **MUST** fail if missing.
 
 | Field | Type | Example | Notes |
 |-------|------|---------|-------|
@@ -24,85 +38,60 @@ These fields **MUST** be populated for basic functionality:
 | `TrackNumber` | int | `1` | Position on disc (1-based) |
 | `Duration` | TimeSpan | `00:09:22` | Track duration |
 
-## Expected Fields (Tier 2)
+## Tier 2: Expected Fields (Informational)
 
-These fields **SHOULD** be populated when the source API provides them:
+These fields **SHOULD** be populated when the source API provides them.
+Tests document gaps but **MUST NOT** fail.
 
-| Field | Type | Example | Notes |
-|-------|------|---------|-------|
-| `DiscNumber` | int | `1` | Disc number for multi-disc albums. Default to 1 if unknown. |
-| `Album.ReleaseDate` | DateTime? | `1959-08-17` | Album release date (for Year tag) |
-| `Isrc` | string | `"USSM19922509"` | International Standard Recording Code |
-| `Album.Genres` | List<string> | `["Jazz"]` | Genre(s) for the album |
-| `IsExplicit` | bool | `false` | Explicit content flag |
+| Field | Type | Qobuzarr | Tidalarr | Blocker |
+|-------|------|----------|----------|---------|
+| `Album.ReleaseDate` | DateTime? | Populated | Metadata dict only | Implementation gap |
+| `Isrc` | string | Populated | Empty | API doesn't expose at track level |
+| `Album.Genres` | List | Populated | Empty | Implementation gap |
+| `IsExplicit` | bool | Populated | Hardcoded false | Implementation gap |
 
-## Aspirational Fields (Tier 3)
+## Tier 3: Aspirational Fields (Informational)
 
-These fields are valuable for advanced integrations but may not be available from all APIs:
+These fields are valuable but blocked by API limitations or not yet implemented.
+Tests document status but **MUST NOT** fail.
 
-| Field | Type | Example | Notes |
-|-------|------|---------|-------|
-| `MusicBrainzId` | string | `"guid..."` | MusicBrainz Track ID |
-| `Album.MusicBrainzId` | string | `"guid..."` | MusicBrainz Release ID |
-| `Artist.MusicBrainzId` | string | `"guid..."` | MusicBrainz Artist ID |
-| `FeaturedArtists` | List | `[...]` | Featured/guest artists |
-| `Composers` | List | `["Miles Davis"]` | Songwriters/composers |
+| Field | Type | Qobuzarr | Tidalarr | Blocker |
+|-------|------|----------|----------|---------|
+| `DiscNumber` | int | Populated | Hardcoded=1 | **Tidal API limitation** |
+| `MusicBrainzId` | string | Via TrackDownload | Empty | Tidal API doesn't provide |
+| `Album.MusicBrainzId` | string | Via TrackDownload | Empty | Tidal API doesn't provide |
+| `FeaturedArtists` | List | Partial | Empty | Implementation gap |
+| `Composers` | List | Populated | Empty | Implementation gap |
 
-## Current Plugin Status
-
-### Qobuzarr
-
-| Field | Status | Notes |
-|-------|--------|-------|
-| Tier 1 (all) | :white_check_mark: Populated | Full support |
-| DiscNumber | :white_check_mark: Populated | From `media_number` |
-| ReleaseDate | :white_check_mark: Populated | From album endpoint |
-| Isrc | :white_check_mark: Populated | Direct from Qobuz API |
-| MusicBrainzId | :white_check_mark: Populated | Via TrackDownload model |
-
-### Tidalarr
-
-| Field | Status | Notes |
-|-------|--------|-------|
-| Tier 1 (all) | :white_check_mark: Populated | Full support |
-| DiscNumber | :x: Hardcoded=1 | Tidal API limitation |
-| ReleaseDate | :warning: Metadata only | Not in Album.ReleaseDate |
-| Isrc | :x: Empty | Not fetched from API |
-| MusicBrainzId | :x: Empty | Not available from Tidal |
+**Note on DiscNumber**: Tidal's track API endpoint does not return disc/volume information.
+This is a hard API limitation, not an implementation gap. Tidalarr correctly defaults to 1.
 
 ## Metadata Applier Coverage
 
 The `TagLibAudioMetadataApplier` in Common writes these fields:
 
-| StreamingTrack Field | Audio Tag | Written |
-|---------------------|-----------|---------|
-| Title | ID3: TIT2 / Vorbis: TITLE | :white_check_mark: Yes |
-| Artist.Name | ID3: TPE1 / Vorbis: ARTIST | :white_check_mark: Yes |
-| Album.Artist.Name | ID3: TPE2 / Vorbis: ALBUMARTIST | :white_check_mark: Yes |
-| Album.Title | ID3: TALB / Vorbis: ALBUM | :white_check_mark: Yes |
-| TrackNumber | ID3: TRCK / Vorbis: TRACKNUMBER | :white_check_mark: Yes |
-| DiscNumber | ID3: TPOS / Vorbis: DISCNUMBER | :white_check_mark: Yes |
-| Album.ReleaseDate.Year | ID3: TDRC / Vorbis: DATE | :white_check_mark: Yes |
-| Album.Genres[0] | ID3: TCON / Vorbis: GENRE | :white_check_mark: Yes |
-| **Isrc** | ID3: TSRC / Vorbis: ISRC | :x: **Not written** |
-| **MusicBrainzId** | ID3: TXXX:MUSICBRAINZ_TRACKID | :x: **Not written** |
+| StreamingTrack Field | Audio Tag | Written | Gap |
+|---------------------|-----------|---------|-----|
+| Title | ID3: TIT2 / Vorbis: TITLE | Yes | |
+| Artist.Name | ID3: TPE1 / Vorbis: ARTIST | Yes | |
+| Album.Artist.Name | ID3: TPE2 / Vorbis: ALBUMARTIST | Yes | |
+| Album.Title | ID3: TALB / Vorbis: ALBUM | Yes | |
+| TrackNumber | ID3: TRCK / Vorbis: TRACKNUMBER | Yes | |
+| DiscNumber | ID3: TPOS / Vorbis: DISCNUMBER | Yes | |
+| Album.ReleaseDate.Year | ID3: TDRC / Vorbis: DATE | Yes | |
+| Album.Genres[0] | ID3: TCON / Vorbis: GENRE | Yes | |
+| **Isrc** | ID3: TSRC / Vorbis: ISRC | **No** | Implementation gap |
+| **MusicBrainzId** | ID3: TXXX:MUSICBRAINZ_TRACKID | **No** | Implementation gap |
 
 ## Characterization Test Requirements
 
-Each plugin repository should include characterization tests that verify:
-
-1. **Mapper tests**: Assert that `StreamingTrack` fields are populated correctly from API responses
-2. **Tag validation**: Assert that written audio files contain expected tags
-3. **Round-trip**: Download a known track and verify all Tier 1 + Tier 2 fields are present in tags
-
-Example test structure:
+### Tier 1 Tests (MUST fail on missing)
 ```csharp
 [Fact]
-public void StreamingTrack_FromApiResponse_HasRequiredFields()
+public void StreamingTrack_Tier1_AllFieldsPopulated()
 {
     var track = mapper.MapTrack(sampleApiResponse);
 
-    // Tier 1
     Assert.NotEmpty(track.Id);
     Assert.NotEmpty(track.Title);
     Assert.NotEmpty(track.Artist.Name);
@@ -110,18 +99,38 @@ public void StreamingTrack_FromApiResponse_HasRequiredFields()
     Assert.NotEmpty(track.Album.Artist.Name);
     Assert.True(track.TrackNumber > 0);
     Assert.True(track.Duration > TimeSpan.Zero);
-
-    // Tier 2 (when API provides)
-    Assert.True(track.DiscNumber >= 1);
-    // Isrc may be empty if API doesn't provide
 }
+```
+
+### Tier 2/3 Tests (MUST NOT fail; document only)
+```csharp
+/// <summary>
+/// Documents current ISRC status. See TRACK_IDENTITY_PARITY.md DOC_VERSION: 2026-01-10-v2
+/// </summary>
+[Fact]
+public void StreamingTrack_Isrc_DocumentCurrentBehavior()
+{
+    var track = mapper.MapTrack(sampleApiResponse);
+
+    // Document current behavior - DO NOT Assert.NotEmpty
+    // Qobuzarr: populated from API
+    // Tidalarr: empty (API limitation)
+    _output.WriteLine($"Isrc: '{track.Isrc}' (empty={string.IsNullOrEmpty(track.Isrc)})");
+}
+```
+
+### Doc Reference in Plugin Tests
+```csharp
+// At top of parity test file:
+// Reference: TRACK_IDENTITY_PARITY.md DOC_VERSION: 2026-01-10-v2
+// If this version changes, review tests for updated expectations.
 ```
 
 ## Parity Gaps to Address
 
 1. **TagLib applier**: Extend to write ISRC and MusicBrainz IDs when present
-2. **Tidalarr**: Investigate Tidal API for DiscNumber and ISRC availability
-3. **E2E gates**: Add metadata tag validation for Tier 1 + 2 fields
+2. **ReleaseDate normalization**: Tidalarr should populate `Album.ReleaseDate` not Metadata dict
+3. **E2E gates**: Validate Tier 1 fields in metadata; warn on Tier 2/3 gaps
 
 ## Related Documents
 

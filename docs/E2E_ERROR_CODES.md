@@ -142,6 +142,7 @@ Each explicit error code includes a `results[].details` object with stable, mach
 | `sampleFile` | string | Deterministic sample file associated with the failure. |
 | `tagReadTool` | enum | Tool used to read tags: `mutagen` \| `taglib` \| `unknown`. |
 | `tagReadToolVersion` | string? | Reserved; currently always null. May contain version string in future. |
+| `readError` | string? | Sanitized exception message when tag reading threw (max 200 chars). |
 
 ### `E2E_IMPORT_FAILED`
 | Field | Type | Notes |

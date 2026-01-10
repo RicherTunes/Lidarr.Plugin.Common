@@ -2804,12 +2804,26 @@ if __name__ == "__main__":
         if (-not $result.Details.ContainsKey('tagReadToolVersion')) {
             $result.Details.tagReadToolVersion = $result.TagReadToolVersion
         }
-        # Explicit ErrorCode for machine-actionable triage (not inferred from Errors[])
+        # Classify error based on where we were in processing:
+        # - If TagReadTool is mutagen/taglib, exception happened during tag reading → E2E_METADATA_MISSING
+        # - If TagReadTool is still 'unknown', exception happened before tag reading → E2E_INTERNAL_ERROR
         if (-not $result.Details.ContainsKey('ErrorCode')) {
-            $result.Details.ErrorCode = 'E2E_INTERNAL_ERROR'
-            $result.Details.phase = 'Metadata:UnhandledException'
-            $result.Details.reason = 'UnexpectedExceptionInMetadataGate'
-            $result.Details.note = 'Unhandled exception during metadata validation (see errors[] for context).'
+            $exMsg = "$_"
+            if ($result.TagReadTool -in @('mutagen', 'taglib')) {
+                # Exception during tag reading - this is a metadata/content issue, not a script bug
+                $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
+                $result.Details.readError = ($exMsg -replace '[\r\n]+', ' ').Substring(0, [Math]::Min(200, $exMsg.Length))
+                $result.Details.audioFilesValidated = $result.TotalFilesChecked
+                $result.Details.audioFilesWithMissingTags = 0
+                $result.Details.missingTags = @()
+                $result.Details.sampleFile = $result.SampleFile
+            } else {
+                # Exception before tag reading started - genuine script bug
+                $result.Details.ErrorCode = 'E2E_INTERNAL_ERROR'
+                $result.Details.phase = 'Metadata:PreTagRead'
+                $result.Details.reason = 'ExceptionBeforeTagReadStarted'
+                $result.Details.note = 'Exception occurred before tag reading could begin (see errors[] for context).'
+            }
         }
     }
 
