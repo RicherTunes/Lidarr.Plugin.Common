@@ -107,12 +107,12 @@ public class GoodCode
         $failed++
     }
 
-    # Test 4: Skips test files
-    Write-Host "`n[TEST] Skips Test files..." -ForegroundColor Cyan
+    # Test 4: Skips *.Tests.cs files but scans test helpers
+    Write-Host "`n[TEST] Skips *.Tests.cs files..." -ForegroundColor Cyan
+    # Unit test files (*.Tests.cs) should be skipped
     Add-ViolationFile -RepoPath $fakeRepo -RelPath 'src\Tests\BadSanitizerTests.cs' -Content @'
 public class BadSanitizerTests
 {
-    // This uses Path.GetInvalidFileNameChars() but should be skipped
     var chars = Path.GetInvalidFileNameChars();
 }
 '@
@@ -121,22 +121,38 @@ public class BadSanitizerTests
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -eq 0) {
-        Write-Host "  [PASS] Test files skipped (exit=0)" -ForegroundColor Green
+        Write-Host "  [PASS] *.Tests.cs files skipped (exit=0)" -ForegroundColor Green
     } else {
-        Write-Host "  [FAIL] Test files not skipped (exit=$exitCode)" -ForegroundColor Red
+        Write-Host "  [FAIL] *.Tests.cs files not skipped (exit=$exitCode)" -ForegroundColor Red
         $failed++
     }
 
-    # Test 5: Skips comment-only matches
-    Write-Host "`n[TEST] Skips comment-only matches..." -ForegroundColor Cyan
+    # Test 4b: Test helpers in Tests/ directory ARE scanned
+    Write-Host "`n[TEST] Scans test helpers in Tests/ directory..." -ForegroundColor Cyan
+    Add-ViolationFile -RepoPath $fakeRepo -RelPath 'src\Tests\TestHelper.cs' -Content @'
+public class TestHelper
+{
+    var chars = Path.GetInvalidFileNameChars();
+}
+'@
+
+    & $lintScript -RepoPath $fakeRepo | Out-Null
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -eq 1) {
+        Write-Host "  [PASS] Test helper violations detected (exit=1)" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] Test helper violations not detected (exit=$exitCode)" -ForegroundColor Red
+        $failed++
+    }
+
+    # Test 5: Skips single-line comment matches (// only)
+    Write-Host "`n[TEST] Skips // line comments..." -ForegroundColor Cyan
     Remove-Item -Path (Join-Path $fakeRepo 'src\Tests') -Recurse -Force -ErrorAction SilentlyContinue
     Add-ViolationFile -RepoPath $fakeRepo -RelPath 'src\CommentedCode.cs' -Content @'
 public class CommentedCode
 {
     // Path.GetInvalidFileNameChars() - this is just a comment
-    /*
-     * Another comment mentioning Path.GetInvalidFileNameChars()
-     */
     public string DoSomething() => "Hello";
 }
 '@
@@ -145,11 +161,34 @@ public class CommentedCode
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -eq 0) {
-        Write-Host "  [PASS] Comment-only matches skipped (exit=0)" -ForegroundColor Green
+        Write-Host "  [PASS] // comment matches skipped (exit=0)" -ForegroundColor Green
     } else {
-        Write-Host "  [FAIL] Comment matches not skipped (exit=$exitCode)" -ForegroundColor Red
+        Write-Host "  [FAIL] // comment matches not skipped (exit=$exitCode)" -ForegroundColor Red
         $failed++
     }
+
+    # Test 5b: Block comments /* */ are NOT skipped (conservative - prefer false positives)
+    Write-Host "`n[TEST] Flags /* */ block comments (conservative)..." -ForegroundColor Cyan
+    Add-ViolationFile -RepoPath $fakeRepo -RelPath 'src\BlockCommented.cs' -Content @'
+public class BlockCommented
+{
+    /*
+     * Path.GetInvalidFileNameChars() in block comment - still flagged
+     */
+    public string DoSomething() => "Hello";
+}
+'@
+
+    & $lintScript -RepoPath $fakeRepo | Out-Null
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -eq 1) {
+        Write-Host "  [PASS] Block comment match flagged (exit=1, conservative)" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] Block comment not flagged - false negative! (exit=$exitCode)" -ForegroundColor Red
+        $failed++
+    }
+    Remove-Item -Path (Join-Path $fakeRepo 'src\BlockCommented.cs') -Force
 
     # Test 6: Skips excluded directories (bin, obj, docs, scripts)
     Write-Host "`n[TEST] Skips excluded directories..." -ForegroundColor Cyan

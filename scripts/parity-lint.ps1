@@ -111,27 +111,41 @@ function Normalize-Path {
     return $Path -replace '\\', '/'
 }
 
-function Test-IsInComment {
+function Test-IsInLineComment {
+    <#
+    .SYNOPSIS
+        Conservative comment detection: only skips // line comments.
+    .DESCRIPTION
+        Checks if the match occurs after a // on the same line.
+        Does NOT attempt /* */ block comment tracking (too error-prone).
+        This means some commented code may be flagged - prefer false positives
+        over false negatives for a lint tool.
+    #>
     param([string]$Content, [int]$MatchIndex)
     $beforeMatch = $Content.Substring(0, $MatchIndex)
     $lastNewline = $beforeMatch.LastIndexOf("`n")
     $lineStart = if ($lastNewline -ge 0) { $lastNewline + 1 } else { 0 }
     $lineContent = $Content.Substring($lineStart, $MatchIndex - $lineStart)
-    if ($lineContent -match '//') { return $true }
-    $openCount = ([regex]::Matches($beforeMatch, '/\*')).Count
-    $closeCount = ([regex]::Matches($beforeMatch, '\*/')).Count
-    if ($openCount -gt $closeCount) { return $true }
-    return $false
+    # Only skip if there's a // before the match on the same line
+    return $lineContent.Contains('//')
 }
 
 function Test-IsExcludedPath {
+    <#
+    .SYNOPSIS
+        Excludes build artifacts and generated files, but NOT test directories.
+    .DESCRIPTION
+        Test helpers can reimplement forbidden patterns, so we scan Tests/ dirs.
+        Only exclude *.Tests.cs and *.Test.cs files (unit test classes).
+    #>
     param([string]$RelPath)
     $normalized = Normalize-Path $RelPath
     $parts = $normalized -split '/'
     foreach ($part in $parts) {
         if ($part -in $script:ExcludeDirs) { return $true }
-        if ($part -match '^Tests?$' -or $part -match '\.Tests?$') { return $true }
     }
+    # Exclude generated files and unit test files (not test helpers)
+    if ($normalized -match '\.g\.cs$') { return $true }
     if ($normalized -match '(Tests?|\.Tests?)\.cs$') { return $true }
     return $false
 }
@@ -151,8 +165,10 @@ function Test-BaselineExpired {
     param([hashtable]$Entry)
     if (-not $Entry.Expiry) { return $false }
     try {
-        $expiryDate = [DateTime]::ParseExact($Entry.Expiry, 'yyyy-MM-dd', $null)
-        return [DateTime]::Now -gt $expiryDate
+        # Use invariant culture and UTC to avoid timezone flakiness
+        $expiryDate = [DateTime]::ParseExact($Entry.Expiry, 'yyyy-MM-dd', [System.Globalization.CultureInfo]::InvariantCulture)
+        $todayUtc = [DateTime]::UtcNow.Date
+        return $todayUtc -gt $expiryDate
     } catch { return $false }
 }
 
@@ -183,7 +199,7 @@ function Find-Violations {
             foreach ($p in $script:BannedPatterns) {
                 $matches = [regex]::Matches($content, $p.Pattern)
                 foreach ($m in $matches) {
-                    if (Test-IsInComment -Content $content -MatchIndex $m.Index) { continue }
+                    if (Test-IsInLineComment -Content $content -MatchIndex $m.Index) { continue }
                     $lineNum = ($content.Substring(0, $m.Index) -split "`n").Count
                     $violations += [PSCustomObject]@{
                         Repo = $RepoName
@@ -199,7 +215,8 @@ function Find-Violations {
             }
         } catch { }
     }
-    return $violations
+    # Sort for deterministic output (repo, file, pattern)
+    return $violations | Sort-Object Repo, File, Pattern
 }
 
 # Main
