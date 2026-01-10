@@ -107,30 +107,10 @@ public class GoodCode
         $failed++
     }
 
-    # Test 4: Skips *.Tests.cs files but scans test helpers
-    Write-Host "`n[TEST] Skips *.Tests.cs files..." -ForegroundColor Cyan
-    # Unit test files (*.Tests.cs) should be skipped
+    # Test 4: Scans test files (violations in tests are just as bad)
+    Write-Host "`n[TEST] Scans test files for violations..." -ForegroundColor Cyan
     Add-ViolationFile -RepoPath $fakeRepo -RelPath 'src\Tests\BadSanitizerTests.cs' -Content @'
 public class BadSanitizerTests
-{
-    var chars = Path.GetInvalidFileNameChars();
-}
-'@
-
-    $result = & $lintScript -RepoPath $fakeRepo 2>&1
-    $exitCode = $LASTEXITCODE
-
-    if ($exitCode -eq 0) {
-        Write-Host "  [PASS] *.Tests.cs files skipped (exit=0)" -ForegroundColor Green
-    } else {
-        Write-Host "  [FAIL] *.Tests.cs files not skipped (exit=$exitCode)" -ForegroundColor Red
-        $failed++
-    }
-
-    # Test 4b: Test helpers in Tests/ directory ARE scanned
-    Write-Host "`n[TEST] Scans test helpers in Tests/ directory..." -ForegroundColor Cyan
-    Add-ViolationFile -RepoPath $fakeRepo -RelPath 'src\Tests\TestHelper.cs' -Content @'
-public class TestHelper
 {
     var chars = Path.GetInvalidFileNameChars();
 }
@@ -140,15 +120,35 @@ public class TestHelper
     $exitCode = $LASTEXITCODE
 
     if ($exitCode -eq 1) {
-        Write-Host "  [PASS] Test helper violations detected (exit=1)" -ForegroundColor Green
+        Write-Host "  [PASS] Test file violations detected (exit=1)" -ForegroundColor Green
     } else {
-        Write-Host "  [FAIL] Test helper violations not detected (exit=$exitCode)" -ForegroundColor Red
+        Write-Host "  [FAIL] Test file violations not detected (exit=$exitCode)" -ForegroundColor Red
         $failed++
     }
+    Remove-Item -Path (Join-Path $fakeRepo 'src\Tests') -Recurse -Force -ErrorAction SilentlyContinue
+
+    # Test 4b: Does NOT skip // in URLs (http://, file://)
+    Write-Host "`n[TEST] Does not treat URL // as comment..." -ForegroundColor Cyan
+    Add-ViolationFile -RepoPath $fakeRepo -RelPath 'src\UrlCode.cs' -Content @'
+public class UrlCode
+{
+    var url = "http://example.com"; var chars = Path.GetInvalidFileNameChars();
+}
+'@
+
+    & $lintScript -RepoPath $fakeRepo | Out-Null
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -eq 1) {
+        Write-Host "  [PASS] URL // not treated as comment (exit=1)" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] URL // incorrectly treated as comment (exit=$exitCode)" -ForegroundColor Red
+        $failed++
+    }
+    Remove-Item -Path (Join-Path $fakeRepo 'src\UrlCode.cs') -Force
 
     # Test 5: Skips single-line comment matches (// only)
     Write-Host "`n[TEST] Skips // line comments..." -ForegroundColor Cyan
-    Remove-Item -Path (Join-Path $fakeRepo 'src\Tests') -Recurse -Force -ErrorAction SilentlyContinue
     Add-ViolationFile -RepoPath $fakeRepo -RelPath 'src\CommentedCode.cs' -Content @'
 public class CommentedCode
 {

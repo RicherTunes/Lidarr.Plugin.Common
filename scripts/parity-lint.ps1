@@ -65,6 +65,31 @@ $script:KnownTechDebt = @(
         Expiry = '2026-06-01'
         IssueUrl = 'https://github.com/RicherTunes/Tidalarr/issues/TBD'
     }
+    # Test files - magic bytes needed for test data (acceptable)
+    @{
+        Key = 'qobuzarr:tests/Qobuzarr.Tests/Unit/Utilities/AudioMagicBytesValidatorTests.cs:FLACMagicBytes'
+        Owner = 'alex'
+        Expiry = '2099-12-31'
+        IssueUrl = 'N/A - test data'
+    }
+    @{
+        Key = 'qobuzarr:tests/Qobuzarr.Tests/Unit/Utilities/AudioMagicBytesValidatorTests.cs:OggMagicBytes'
+        Owner = 'alex'
+        Expiry = '2099-12-31'
+        IssueUrl = 'N/A - test data'
+    }
+    @{
+        Key = 'qobuzarr:tests/Qobuzarr.Tests/Unit/Utilities/AudioMagicBytesValidatorTests.cs:ID3MagicBytes'
+        Owner = 'alex'
+        Expiry = '2099-12-31'
+        IssueUrl = 'N/A - test data'
+    }
+    @{
+        Key = 'qobuzarr:tests/Qobuzarr.Tests/Unit/Utilities/TrackFileNameBuilderTests.cs:GetInvalidFileNameChars'
+        Owner = 'alex'
+        Expiry = '2099-12-31'
+        IssueUrl = 'N/A - test data'
+    }
 )
 
 # Banned patterns with full context
@@ -116,27 +141,33 @@ function Test-IsInLineComment {
     .SYNOPSIS
         Conservative comment detection: only skips // line comments.
     .DESCRIPTION
-        Checks if the match occurs after a // on the same line.
-        Does NOT attempt /* */ block comment tracking (too error-prone).
-        This means some commented code may be flagged - prefer false positives
-        over false negatives for a lint tool.
+        Checks if the match occurs after a // comment marker on the same line.
+        To avoid false negatives on "http://" or regex patterns, only treats //
+        as a comment if preceded by whitespace or at line start.
     #>
     param([string]$Content, [int]$MatchIndex)
     $beforeMatch = $Content.Substring(0, $MatchIndex)
     $lastNewline = $beforeMatch.LastIndexOf("`n")
     $lineStart = if ($lastNewline -ge 0) { $lastNewline + 1 } else { 0 }
     $lineContent = $Content.Substring($lineStart, $MatchIndex - $lineStart)
-    # Only skip if there's a // before the match on the same line
-    return $lineContent.Contains('//')
+
+    $commentIndex = $lineContent.IndexOf('//')
+    if ($commentIndex -lt 0) { return $false }
+
+    # Only treat as comment if // is at line start or preceded by whitespace
+    # This avoids false negatives on "http://", "file://", regex patterns, etc.
+    if ($commentIndex -eq 0) { return $true }
+    $charBefore = $lineContent[$commentIndex - 1]
+    return [char]::IsWhiteSpace($charBefore)
 }
 
 function Test-IsExcludedPath {
     <#
     .SYNOPSIS
-        Excludes build artifacts and generated files, but NOT test directories.
+        Excludes build artifacts and generated files only.
     .DESCRIPTION
-        Test helpers can reimplement forbidden patterns, so we scan Tests/ dirs.
-        Only exclude *.Tests.cs and *.Test.cs files (unit test classes).
+        Scans ALL test files - parity violations in tests are just as bad.
+        Only excludes: bin/, obj/, ext/, docs/, scripts/, .git/, generated files.
     #>
     param([string]$RelPath)
     $normalized = Normalize-Path $RelPath
@@ -144,9 +175,8 @@ function Test-IsExcludedPath {
     foreach ($part in $parts) {
         if ($part -in $script:ExcludeDirs) { return $true }
     }
-    # Exclude generated files and unit test files (not test helpers)
+    # Only exclude generated files (*.g.cs)
     if ($normalized -match '\.g\.cs$') { return $true }
-    if ($normalized -match '(Tests?|\.Tests?)\.cs$') { return $true }
     return $false
 }
 
