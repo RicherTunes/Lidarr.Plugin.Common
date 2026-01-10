@@ -864,6 +864,13 @@ function ConvertTo-E2ERunManifest {
             }
             # Host capability detection (ALC fix, etc.)
             capabilities = if ($hostCapabilities) { $hostCapabilities } else { $null }
+            # Multi-plugin reliability mode (derived from ALC fix detection)
+            # - "expected": ALC fix present, multi-plugin should work reliably
+            # - "best-effort": ALC fix absent, multi-plugin may fail due to GC bug
+            # - "unknown": Could not probe host capabilities
+            multiPluginMode = if ($hostCapabilities -and $hostCapabilities.alcFix) {
+                if ($hostCapabilities.alcFix.present) { "expected" } else { "best-effort" }
+            } else { "unknown" }
         }
         request = [ordered]@{
             gate = $requestedGate
