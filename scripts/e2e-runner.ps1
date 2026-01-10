@@ -367,6 +367,7 @@ Import-Module (Join-Path $PSScriptRoot "lib/e2e-diagnostics.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-docker.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-json-output.psm1") -Force       
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-component-ids.psm1") -Force     
+Import-Module (Join-Path $PSScriptRoot "lib/e2e-sources.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-brainarr-config.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-host-capabilities.psm1") -Force
 Import-Module (Join-Path $PSScriptRoot "lib/e2e-release-selection.psm1") -Force
@@ -3653,6 +3654,15 @@ if ($EmitJson) {
             }
         }
 
+        # Best-effort sources provenance (git SHAs + deployed plugin.json versions)
+        $commonRepoRoot = Split-Path $PSScriptRoot -Parent
+        $repoOverrides = @{}
+        if ($env:E2E_REPO_PATH_QOBUZARR) { $repoOverrides['Qobuzarr'] = $env:E2E_REPO_PATH_QOBUZARR }
+        if ($env:E2E_REPO_PATH_TIDALARR) { $repoOverrides['Tidalarr'] = $env:E2E_REPO_PATH_TIDALARR }
+        if ($env:E2E_REPO_PATH_BRAINARR) { $repoOverrides['Brainarr'] = $env:E2E_REPO_PATH_BRAINARR }
+        $pluginVendor = if ($env:E2E_PLUGIN_VENDOR) { "$($env:E2E_PLUGIN_VENDOR)".Trim() } else { 'RicherTunes' }
+        $sourcesContext = Get-E2ESourcesContext -CommonRepoRoot $commonRepoRoot -Plugins $pluginList -ContainerName $ContainerName -Vendor $pluginVendor -RepoPathOverrides $repoOverrides
+
         $jsonContext = @{
             LidarrUrl = $LidarrUrl
             ContainerName = $ContainerName
@@ -3672,6 +3682,9 @@ if ($EmitJson) {
             DiagnosticsBundlePath = if ($bundlePath) { $bundlePath } else { $null }
             LidarrVersion = $lidarrVersion
             LidarrBranch = $lidarrBranch
+            SourceShas = $sourcesContext.SourceShas
+            SourceProvenance = $sourcesContext.SourceProvenance
+            SourceVersions = $sourcesContext.SourceVersions
             ComponentIds = @{
                 InstanceKey = $script:E2EComponentIdsInstanceKey
                 InstanceKeySource = $script:E2EInstanceKeySource
