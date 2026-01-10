@@ -8,6 +8,7 @@ $moduleFiles = @(
     'e2e-json-output.psm1',
     'e2e-diagnostics.psm1',
     'e2e-docker.psm1',
+    'e2e-sources.psm1',
     'e2e-error-codes.psm1',
     'e2e-error-classifier.psm1',
     'e2e-component-ids.psm1',

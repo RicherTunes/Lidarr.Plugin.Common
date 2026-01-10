@@ -121,6 +121,11 @@ function New-MockRunContext {
             Tidalarr = "env"
             Brainarr = "unknown"
         }
+        SourceVersions = @{
+            Qobuzarr = "0.0.1"
+            Tidalarr = "1.0.0"
+            Brainarr = "1.3.2"
+        }
         ComponentIds = @{
             InstanceKey = "i-abc123def456"
             InstanceKeySource = "computed"
@@ -547,6 +552,15 @@ $v12SourcesTests = @(
             param($obj)
             $valid = @('git', 'env', 'unknown')
             $obj.sources.common.source -in $valid
+        }
+    }
+    @{
+        Name = "sources.*.version is surfaced when SourceVersions provided"
+        Test = {
+            param($obj)
+            $obj.sources.qobuzarr.version -eq '0.0.1' -and
+            $obj.sources.tidalarr.version -eq '1.0.0' -and
+            $obj.sources.brainarr.version -eq '1.3.2'
         }
     }
 )

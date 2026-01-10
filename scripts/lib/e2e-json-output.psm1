@@ -779,6 +779,19 @@ function ConvertTo-E2ERunManifest {
         }
     }
 
+    # Optional deployed versions (from plugin.json in container). These do not affect `source` provenance,
+    # which is about the `sha` field only.
+    $sourceVersions = Get-SafeProperty -Object $Context -PropertyName 'SourceVersions'
+    if ($sourceVersions) {
+        $qobuzarrVersion = Get-SafeProperty -Object $sourceVersions -PropertyName 'Qobuzarr'
+        $tidalarrVersion = Get-SafeProperty -Object $sourceVersions -PropertyName 'Tidalarr'
+        $brainarrVersion = Get-SafeProperty -Object $sourceVersions -PropertyName 'Brainarr'
+
+        if ($qobuzarrVersion) { $sources.qobuzarr['version'] = $qobuzarrVersion }
+        if ($tidalarrVersion) { $sources.tidalarr['version'] = $tidalarrVersion }
+        if ($brainarrVersion) { $sources.brainarr['version'] = $brainarrVersion }
+    }
+
     # Build manifest - use Get-SafeProperty for all Context accesses (strict mode compatible)
     $runnerArgs = Get-SafeProperty -Object $Context -PropertyName 'RunnerArgs'
     $containerName = Get-SafeProperty -Object $Context -PropertyName 'ContainerName'
