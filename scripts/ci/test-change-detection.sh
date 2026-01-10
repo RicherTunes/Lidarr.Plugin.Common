@@ -47,23 +47,20 @@ echo "--- Docs-only cases (expected: false) ---"
 
 assert_case "A1: docs/README.md" "false" "docs/README.md" || true
 
-assert_case "A2: docs/reference/e2e-run-manifest.schema.json" "false" \
-    "docs/reference/e2e-run-manifest.schema.json" || true
-
-assert_case "A3: .github/ISSUE_TEMPLATE/bug_report.md" "false" \
+assert_case "A2: .github/ISSUE_TEMPLATE/bug_report.md" "false" \
     ".github/ISSUE_TEMPLATE/bug_report.md" || true
 
-assert_case "A4: .github/ISSUE_TEMPLATE/config.yml" "false" \
+assert_case "A3: .github/ISSUE_TEMPLATE/config.yml" "false" \
     ".github/ISSUE_TEMPLATE/config.yml" || true
 
-assert_case "A5: README.md (root)" "false" "README.md" || true
+assert_case "A4: README.md (root)" "false" "README.md" || true
 
-assert_case "A6: CHANGELOG.md (root)" "false" "CHANGELOG.md" || true
+assert_case "A5: CHANGELOG.md (root)" "false" "CHANGELOG.md" || true
 
-assert_case "A7: docs/dev-guide/E2E_HARDENING_ROADMAP.md" "false" \
+assert_case "A6: docs/dev-guide/E2E_HARDENING_ROADMAP.md" "false" \
     "docs/dev-guide/E2E_HARDENING_ROADMAP.md" || true
 
-assert_case "A8: Mixed docs-only list" "false" \
+assert_case "A7: Mixed docs-only list" "false" \
     "README.md
 docs/a.md
 .github/ISSUE_TEMPLATE/x.md
@@ -105,6 +102,22 @@ assert_case "B12: .github/workflows/release.yml" "true" ".github/workflows/relea
 
 assert_case "B13: examples/SamplePlugin/Plugin.cs" "true" \
     "examples/SamplePlugin/Plugin.cs" || true
+
+# ============================================
+# D. Contract files in docs/ (treated as code - tripwire tests)
+# ============================================
+echo ""
+echo "--- Contract files in docs/ (expected: true) ---"
+
+assert_case "D1: docs/E2E_ERROR_CODES.md (tripwire test)" "true" \
+    "docs/E2E_ERROR_CODES.md" || true
+
+assert_case "D2: docs/reference/e2e-run-manifest.schema.json (schema contract)" "true" \
+    "docs/reference/e2e-run-manifest.schema.json" || true
+
+assert_case "D3: Contract file + other docs = code" "true" \
+    "docs/README.md
+docs/E2E_ERROR_CODES.md" || true
 
 # ============================================
 # C. Edge cases
