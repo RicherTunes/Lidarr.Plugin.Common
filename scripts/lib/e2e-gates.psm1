@@ -277,15 +277,25 @@ function Test-SchemaGate {
         if ($null -eq $SchemaItem) { return $false }
 
         $implementationName = $null
-        if ($SchemaItem -is [hashtable]) { $implementationName = $SchemaItem['implementationName'] }
-        else { $implementationName = $SchemaItem.implementationName }
+        $implementation = $null
+        if ($SchemaItem -is [hashtable]) {
+            $implementationName = $SchemaItem['implementationName']
+            $implementation = $SchemaItem['implementation']
+        } else {
+            $implementationName = $SchemaItem.implementationName
+            $implementation = $SchemaItem.implementation
+        }
 
-        if ([string]::IsNullOrWhiteSpace([string]$implementationName)) { return $false }
+        if (
+            [string]::IsNullOrWhiteSpace([string]$implementationName) -and
+            [string]::IsNullOrWhiteSpace([string]$implementation)
+        ) {
+            return $false
+        }
 
-        return [string]::Equals(
-            [string]$implementationName,
-            $ExpectedPluginName,
-            [StringComparison]::OrdinalIgnoreCase
+        return (
+            [string]::Equals([string]$implementationName, $ExpectedPluginName, [StringComparison]::OrdinalIgnoreCase) -or
+            [string]::Equals([string]$implementation, $ExpectedPluginName, [StringComparison]::OrdinalIgnoreCase)
         )
     }
 
