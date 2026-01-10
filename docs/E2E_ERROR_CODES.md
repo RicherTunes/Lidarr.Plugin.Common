@@ -30,6 +30,179 @@ For diagnostics bundle structure, see `docs/DIAGNOSTICS_BUNDLE_CONTRACT.md`.
 | `E2E_PROVIDER_UNAVAILABLE` | Expected external provider (e.g., LLM model) not found. | LLM endpoint reachable but expected model not loaded. | Load expected model in LM Studio/Ollama; verify `expectedModelId` in config. |
 | `E2E_LOAD_FAILURE` | Plugin failed to load during schema discovery. | `ReflectionTypeLoadException`; ALC lifecycle issue; missing dependencies; TFM mismatch. | Check `container-logs.txt` for load exceptions; see `hostBugSuspected.classification` in manifest; verify plugin built against correct Lidarr tag. |
 
+## Structured Details Contract
+
+<!-- CAUTION: These tables are parsed by Pester tripwire tests (Test-StructuredDetailsContract.ps1).
+     Do not reformat the table structure or change column alignment. -->
+
+Each explicit error code includes a `results[].details` object with stable, machine-consumable fields intended for triage automation.
+
+**General rules**
+- Endpoint fields (e.g. `details.endpoint`) are **path-only** (scheme/host stripped) and **query secrets redacted**.
+- Lists are capped; when a list is capped, `...Count` and `...Capped` fields are provided where applicable.
+- `results[].errors[]` is **human context only**. Automation should use `errorCode` + `details.*`.
+
+### `E2E_AUTH_MISSING`
+| Field | Type | Notes |
+|---|---:|---|
+| `skipReason` | string | Human-readable description of the missing credential(s); no secret values. |
+
+### `E2E_CONFIG_INVALID`
+| Field | Type | Notes |
+|---|---:|---|
+| `pluginName` | string | Plugin under test. |
+| `componentType` | enum | `indexer` \| `downloadClient` \| `importList`. |
+| `operation` | enum | `create` \| `update`. |
+| `endpoint` | string | Path-only endpoint (secrets redacted). |
+| `phase` | string | Configure sub-phase (e.g. `Configure:Create:Post`). |
+| `httpStatus` | int | HTTP status when available (typically 400). |
+| `validationErrors` | string[] | Capped list of server-side validation messages (sanitized). |
+| `validationErrorCount` | int | Total validation errors before capping. |
+| `validationErrorsCapped` | boolean | Whether `validationErrors` was capped. |
+| `fieldNames` | string[] | Capped list of field names involved in validation failures. |
+| `fieldNameCount` | int | Total field names before capping. |
+| `fieldNamesCapped` | boolean | Whether `fieldNames` was capped. |
+| `schemaContract` | string | Lidarr schema contract name for the settings model. |
+
+### `E2E_API_TIMEOUT`
+| Field | Type | Notes |
+|---|---:|---|
+| `timeoutType` | enum | `http` \| `commandPoll` \| `queuePoll` \| `queueCompletion`. |
+| `timeoutSeconds` | int | Timeout threshold used. |
+| `endpoint` | string | Path-only endpoint or logical endpoint (secrets redacted). |
+| `operation` | string | Operation name (e.g. `AlbumSearch`). |
+| `pluginName` | string | Plugin under test. |
+| `phase` | string | Gate sub-phase (e.g. `AlbumSearch:PollCommand`). |
+| `indexerId` | int? | When applicable. |
+| `downloadClientId` | int? | When applicable. |
+| `commandId` | int? | When polling a command. |
+| `attempts` | int? | Retry attempts when applicable. |
+| `elapsedMs` | int? | Measured elapsed time when available. |
+
+### `E2E_LIDARR_UNREACHABLE`
+| Field | Type | Notes |
+|---|---:|---|
+| `phase` | string | Always emitted at preflight (`LidarrApi:Preflight`). |
+| `operation` | string | Always `LidarrApiPreflight`. |
+| `endpoint` | string | Path-only endpoint (secrets redacted). |
+| `timeoutSeconds` | int | Preflight timeout. |
+| `unreachableKind` | string | Transport classification (e.g. `connectionRefused`). |
+| `exceptionType` | string | Exception type name (sanitized). |
+| `suggestion` | string | First fix to try (no secrets). |
+
+### `E2E_DOCKER_UNAVAILABLE`
+| Field | Type | Notes |
+|---|---:|---|
+| `phase` | string | Gate phase requiring Docker. |
+| `operation` | string | Docker operation attempted (e.g. `docker restart`). |
+| `containerName` | string | Container name provided to the runner. |
+| `dockerPhase` | string | Internal phase (e.g. `Docker:DetectDaemon`). |
+| `dockerFailureKind` | string | Classified failure kind (e.g. `daemon_unavailable`). |
+| `dockerExitCode` | int | Exit code when available. |
+| `dockerStderr` | string | Stderr excerpt (sanitized). |
+| `suggestion` | string | Remediation hint. |
+
+### `E2E_NO_RELEASES_ATTRIBUTED`
+| Field | Type | Notes |
+|---|---:|---|
+| `searchQuery` | string | Query used for AlbumSearch. |
+| `totalReleases` | int | Total releases returned by Lidarr. |
+| `attributedReleases` | int | Releases attributed to the target plugin. |
+| `expectedIndexerName` | string | Plugin indexer name expected. |
+| `expectedIndexerId` | int | Configured indexer ID under test. |
+| `foundIndexerNames` | string[] | Capped list of other indexer names observed. |
+| `foundIndexerNameCount` | int | Total unique names before capping. |
+| `foundIndexerNamesCapped` | boolean | Whether `foundIndexerNames` was capped. |
+| `nullIndexerReleaseCount` | int | Count of releases with `indexer` empty/null or `indexerId=0`. |
+| `nullIndexerSamples` | object[] | Up to 3 items: `{ title, indexer, indexerId }`. |
+
+### `E2E_QUEUE_NOT_FOUND`
+| Field | Type | Notes |
+|---|---:|---|
+| `queueTimeoutSec` | int | Queue polling timeout. |
+| `queueCount` | int | Queue items seen at failure time. |
+| `downloadId` | string | Download correlation ID (may be empty if missing). |
+| `albumId` | int | Album ID under test when available. |
+| `indexerName` | string | Plugin indexer name under test. |
+
+### `E2E_ZERO_AUDIO_FILES`
+| Field | Type | Notes |
+|---|---:|---|
+| `outputPath` | string | Output directory inspected. |
+| `totalFilesFound` | int | Total candidate audio files found (post-filter). |
+| `validatedFiles` | string[] | Files validated (empty when zero-audio). |
+
+### `E2E_METADATA_MISSING`
+| Field | Type | Notes |
+|---|---:|---|
+| `audioFilesValidated` | int | Count of files examined for tags. |
+| `audioFilesWithMissingTags` | int | Count of files missing required tags. |
+| `missingTags` | string[] | Required tag identifiers missing. |
+| `presentTags` | string[] | Tag identifiers present (for context). |
+| `sampleFile` | string | Deterministic sample file associated with the failure. |
+
+### `E2E_IMPORT_FAILED`
+| Field | Type | Notes |
+|---|---:|---|
+| `pluginName` | string | Plugin under test (ImportList gate). |
+| `importListId` | int | Import list ID under test. |
+| `operation` | string | Always `ImportListSync`. |
+| `phase` | enum | `ImportList:TriggerCommand` \| `ImportList:PollCommand` \| `ImportList:PostSyncVerify`. |
+| `endpoint` | string | Path-only endpoint (secrets redacted). |
+| `commandId` | int? | Command ID when available. |
+| `commandStatus` | string? | Command status when available (e.g. `failed`). |
+| `preSyncImportListFound` | boolean | Whether the import list existed before sync was triggered. |
+| `postSyncVerified` | boolean | Whether post-sync verification succeeded. |
+| `lastSyncError` | string? | Sanitized error string when present. |
+| `attempts` | int? | Retry attempts when applicable. |
+| `elapsedMs` | int? | Measured elapsed time when available. |
+
+### `E2E_COMPONENT_AMBIGUOUS`
+| Field | Type | Notes |
+|---|---:|---|
+| `componentType` | enum | `indexer` \| `downloadClient` \| `importList`. |
+| `resolution` | string | Resolution field used (e.g. `implementationName`). |
+| `candidateIds` | int[] | Candidate IDs found (≥2). |
+
+### `E2E_ABSTRACTIONS_SHA_MISMATCH`
+| Field | Type | Notes |
+|---|---:|---|
+| `abstractionsShas` | object | Map of plugin name → short SHA/hex digest. |
+| `expectedSha` | string | Expected digest (selected baseline). |
+| `mismatchedPlugins` | string[] | Plugin names that differ from expected. |
+| `fixInstructions` | string | Stable human instruction string (no secrets). |
+
+### `E2E_SCHEMA_MISSING_IMPLEMENTATION`
+| Field | Type | Notes |
+|---|---:|---|
+| `indexerFound` | boolean | Whether plugin indexer schema was found. |
+| `downloadClientFound` | boolean | Whether plugin download client schema was found. |
+| `importListFound` | boolean | Whether plugin import list schema was found. |
+| `discoveryDiagnosis` | object | Diagnostic fields (e.g. `schemaEndpointReachable`, counts, and file presence booleans). |
+
+### `E2E_HOST_PLUGIN_DISCOVERY_DISABLED`
+| Field | Type | Notes |
+|---|---:|---|
+| `indexerFound` | boolean | Whether plugin indexer schema was found. |
+| `downloadClientFound` | boolean | Whether plugin download client schema was found. |
+| `importListFound` | boolean | Whether plugin import list schema was found. |
+| `discoveryDiagnosis` | object | Includes affirmative evidence fields: `hostPluginDiscoveryEnabled=false`, plus `detectionBasis` and `detectionEvidence`. |
+
+### `E2E_PROVIDER_UNAVAILABLE`
+| Field | Type | Notes |
+|---|---:|---|
+| `llmKind` | string? | LLM endpoint kind (Brainarr LLM gate). |
+| `modelsCount` | int? | Model count reported by endpoint. |
+| `expectedModelIdHash` | string? | SHA256 prefix hash of expected model ID (no raw ID). |
+| `expectedModelFound` | boolean? | Whether the expected model was found. |
+
+### `E2E_LOAD_FAILURE`
+| Field | Type | Notes |
+|---|---:|---|
+| `note` | string? | Optional human context for synthetic fixtures. |
+
+For load failures, the primary machine-consumable classification is `hostBugSuspected` at the top-level of the manifest (`classification`, `severity`, `matchedLine`).
+
 ## Related Runner Toggles
 
 These are not `errorCode` values, but common toggles referenced in logs/docs:
