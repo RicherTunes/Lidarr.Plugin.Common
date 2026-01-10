@@ -440,6 +440,115 @@ $lastSyncDetails = New-ImportFailedDetails `
 Assert-True "lastSyncError URL is redacted" ($lastSyncDetails.lastSyncError -match '\[REDACTED-URL\]')
 Assert-True "lastSyncError does not contain 192.168" (-not ($lastSyncDetails.lastSyncError -match '192\.168'))
 
+
+Write-Host "`nTest Group: E2E_CONFIG_INVALID (P1)" -ForegroundColor Yellow
+
+# Case 1: Indexer create invalid
+$configInvalidCreate = [PSCustomObject]@{
+    Gate = 'Configure'
+    PluginName = 'Qobuzarr'
+    Outcome = 'failed'
+    Errors = @('Validation failed: Priority must be between 1 and 50')
+    Details = @{
+        ErrorCode = 'E2E_CONFIG_INVALID'
+        pluginName = 'Qobuzarr'
+        componentType = 'indexer'
+        operation = 'create'
+        endpoint = '/api/v1/indexer'
+        phase = 'Configure:Create:Post'
+        httpStatus = 400
+        validationErrors = @('Priority must be between 1 and 50')
+        validationErrorCount = 1
+        validationErrorsCapped = $false
+        fieldNames = @('priority')
+        fieldNameCount = 1
+        fieldNamesCapped = $false
+    }
+}
+
+$jsonConfigInvalid = ConvertTo-E2ERunManifest -Results @($configInvalidCreate) -Context @{
+    LidarrUrl = 'http://localhost:1234'
+    ContainerName = 'lidarr-e2e-test'
+}
+$mConfigInvalid = $jsonConfigInvalid | ConvertFrom-Json
+$configInvalidResult = $mConfigInvalid.results | Where-Object { $_.gate -eq 'Configure' } | Select-Object -First 1
+
+Assert-Equal "ConfigInvalid errorCode is E2E_CONFIG_INVALID" $configInvalidResult.errorCode 'E2E_CONFIG_INVALID'
+Assert-True "ConfigInvalid details has no errorCode key (moved to top-level)" (-not ($configInvalidResult.details.PSObject.Properties.Name -contains 'errorCode'))
+Assert-Equal "ConfigInvalid details.componentType is indexer" $configInvalidResult.details.componentType 'indexer'
+Assert-Equal "ConfigInvalid details.operation is create" $configInvalidResult.details.operation 'create'
+Assert-True "ConfigInvalid details.endpoint starts with /api/" ($configInvalidResult.details.endpoint -match '^/api/')
+Assert-Equal "ConfigInvalid details.phase is Configure:Create:Post" $configInvalidResult.details.phase 'Configure:Create:Post'
+Assert-Equal "ConfigInvalid details.httpStatus is 400" $configInvalidResult.details.httpStatus 400
+Assert-Equal "ConfigInvalid details.validationErrorCount is 1" $configInvalidResult.details.validationErrorCount 1
+Assert-Equal "ConfigInvalid details.validationErrorsCapped is false" $configInvalidResult.details.validationErrorsCapped $false
+
+# Case 2: Validation errors capped (50 items -> 10 in output)
+$manyErrors = @(1..50 | ForEach-Object { "Validation error $_" })
+$configInvalidCapped = [PSCustomObject]@{
+    Gate = 'Configure'
+    PluginName = 'Tidalarr'
+    Outcome = 'failed'
+    Errors = @('Multiple validation failures')
+    Details = @{
+        ErrorCode = 'E2E_CONFIG_INVALID'
+        pluginName = 'Tidalarr'
+        componentType = 'downloadClient'
+        operation = 'update'
+        endpoint = '/api/v1/downloadclient/42'
+        phase = 'Configure:Update:Put'
+        validationErrors = @($manyErrors | Select-Object -First 10)
+        validationErrorCount = 50
+        validationErrorsCapped = $true
+        fieldNames = @()
+        fieldNameCount = 0
+        fieldNamesCapped = $false
+        componentId = 42
+    }
+}
+
+$jsonCapped = ConvertTo-E2ERunManifest -Results @($configInvalidCapped) -Context @{
+    LidarrUrl = 'http://localhost:1234'
+    ContainerName = 'lidarr-e2e-test'
+}
+$mCapped = $jsonCapped | ConvertFrom-Json
+$cappedResult = $mCapped.results | Where-Object { $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+
+Assert-Equal "CappedErrors errorCode is E2E_CONFIG_INVALID" $cappedResult.errorCode 'E2E_CONFIG_INVALID'
+Assert-True "CappedErrors validationErrors count <= 10" ($cappedResult.details.validationErrors.Count -le 10)
+Assert-Equal "CappedErrors validationErrorCount is 50" $cappedResult.details.validationErrorCount 50
+Assert-Equal "CappedErrors validationErrorsCapped is true" $cappedResult.details.validationErrorsCapped $true
+Assert-Equal "CappedErrors componentId is 42" $cappedResult.details.componentId 42
+
+Write-Host "`nTest Group: Endpoint Normalization (New-ConfigInvalidDetails)" -ForegroundColor Yellow
+
+# Case 3: Endpoint normalization - full URL should be stripped to path-only with redaction
+$fullUrlDetails = New-ConfigInvalidDetails `
+    -PluginName 'TestPlugin' `
+    -ComponentType 'indexer' `
+    -Operation 'create' `
+    -Endpoint 'http://192.168.1.10:8686/api/v1/indexer?apiKey=mysecretkey&priority=25' `
+    -Phase 'Configure:Create:Post' `
+    -ValidationErrors @('Validation failed')
+
+Assert-True "ConfigInvalid endpoint does not contain 192.168" (-not ($fullUrlDetails.endpoint -match '192\.168'))
+Assert-True "ConfigInvalid endpoint starts with /" ($fullUrlDetails.endpoint -match '^/')
+Assert-True "ConfigInvalid endpoint has apiKey redacted" ($fullUrlDetails.endpoint -match 'apiKey=\[REDACTED\]')
+Assert-True "ConfigInvalid endpoint preserves priority" ($fullUrlDetails.endpoint -match 'priority=25')
+
+# Test validation error sanitization
+$urlInErrorDetails = New-ConfigInvalidDetails `
+    -PluginName 'TestPlugin2' `
+    -ComponentType 'downloadClient' `
+    -Operation 'update' `
+    -Endpoint '/api/v1/downloadclient/5' `
+    -Phase 'Configure:Update:Put' `
+    -ValidationErrors @('Failed to connect to http://internal.server:8080/api?token=abc123')
+
+Assert-True "ValidationError URL is redacted" ($urlInErrorDetails.validationErrors[0] -match '\[REDACTED-URL\]')
+Assert-True "ValidationError does not contain internal.server" (-not ($urlInErrorDetails.validationErrors[0] -match 'internal\.server'))
+
+
 Write-Host "`nSummary: $passed passed, $failed failed" -ForegroundColor Cyan
 if ($failed -gt 0) {
     throw "$failed assertions failed"

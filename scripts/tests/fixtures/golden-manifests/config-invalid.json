@@ -1,0 +1,101 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/main/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-02T13:00:00.000Z",
+  "runId": "golden-config-invalid",
+  "runner": {
+    "name": "lidarr.plugin.common:e2e-runner.ps1",
+    "version": "deadbeef",
+    "args": ["-Gate", "configure", "-Plugins", "Qobuzarr"]
+  },
+  "lidarr": {
+    "url": "http://[LOCALHOST]:8686",
+    "containerName": "lidarr-e2e-test",
+    "imageTag": "pr-plugins-3.1.1.4884",
+    "imageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "version": "3.1.1.4884",
+    "branch": "plugins",
+    "containerId": "000000000000",
+    "startedAt": "2026-01-02T12:59:00.000Z",
+    "imageId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "request": {
+    "gate": "configure",
+    "plugins": ["Qobuzarr"]
+  },
+  "effective": {
+    "gates": ["Schema", "Configure"],
+    "plugins": ["Qobuzarr"],
+    "stopReason": "failed at Configure for Qobuzarr"
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 42
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Qobuzarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-02T13:00:01.000Z",
+      "endedAt": "2026-01-02T13:00:02.000Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Configure",
+      "plugin": "Qobuzarr",
+      "outcome": "failed",
+      "errorCode": "E2E_CONFIG_INVALID",
+      "outcomeReason": "Indexer creation failed: validation errors",
+      "startedAt": "2026-01-02T13:00:03.000Z",
+      "endedAt": "2026-01-02T13:00:04.000Z",
+      "durationMs": 1000,
+      "errors": [
+        "Validation failed: Priority must be between 1 and 50"
+      ],
+      "details": {
+        "pluginName": "Qobuzarr",
+        "componentType": "indexer",
+        "operation": "create",
+        "endpoint": "/api/v1/indexer",
+        "phase": "Configure:Create:Post",
+        "httpStatus": 400,
+        "validationErrors": [
+          "Priority must be between 1 and 50"
+        ],
+        "validationErrorCount": 1,
+        "validationErrorsCapped": false,
+        "fieldNames": [
+          "priority"
+        ],
+        "fieldNameCount": 1,
+        "fieldNamesCapped": false,
+        "schemaContract": "QobuzIndexerSettings"
+      }
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 2,
+    "passed": 1,
+    "failed": 1,
+    "skipped": 0,
+    "totalDurationMs": 2000
+  },
+  "diagnostics": {
+    "bundlePath": null,
+    "bundleCreated": false,
+    "includedFiles": ["run-manifest.json"],
+    "redactionApplied": true,
+    "redactionSelfTestPassed": true
+  },
+  "hostBugSuspected": {
+    "detected": false
+  }
+}
