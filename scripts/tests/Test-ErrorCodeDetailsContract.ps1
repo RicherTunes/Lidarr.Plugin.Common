@@ -91,6 +91,32 @@ function Get-GoldenErrorResults {
     }
 }
 
+function Write-TripwireMarker {
+    param(
+        [int]$ContractsChecked,
+        [int]$FixturesChecked
+    )
+
+    # Emit marker file as proof of successful execution
+    # This is ONLY called after all assertions pass
+    $markerDir = $env:RUNNER_TEMP
+    if (-not $markerDir) { $markerDir = $env:TEMP }
+    if (-not $markerDir) { $markerDir = '/tmp' }
+
+    $markerPath = Join-Path $markerDir 'tripwire-contract-test.marker'
+    $timestamp = [DateTime]::UtcNow.ToString('o')
+
+    @{
+        test = 'Test-ErrorCodeDetailsContract.ps1'
+        executedAt = $timestamp
+        status = 'passed'
+        contractsChecked = $ContractsChecked
+        fixturesChecked = $FixturesChecked
+    } | ConvertTo-Json | Set-Content -Path $markerPath -Encoding UTF8
+
+    Write-Host "TRIPWIRE_MARKER_PATH=$markerPath" -ForegroundColor Green
+}
+
 Describe 'E2E error-code details contract' {
     It 'Structured details contract matches golden fixtures (required fields present)' {
         $repoRoot = Get-RepoRoot
@@ -110,8 +136,10 @@ Describe 'E2E error-code details contract' {
         }
 
         $failures = @()
+        $fixturesChecked = 0
 
         foreach ($item in Get-GoldenErrorResults -GoldenDir $goldenDir) {
+            $fixturesChecked++
             $code = $item.ErrorCode
             $details = $item.Details
 
@@ -146,8 +174,20 @@ Describe 'E2E error-code details contract' {
             }
         }
 
+        # CRITICAL: Fail if no fixtures were checked (test would vacuously pass)
+        if ($fixturesChecked -eq 0) {
+            throw "No golden fixtures with errorCode found - test would vacuously pass"
+        }
+
         if ($failures.Count -gt 0) {
             throw ("Error-code details contract violations:`n- " + ($failures -join "`n- "))
         }
+
+        # SUCCESS: All assertions passed, emit proof marker
+        # This line is ONLY reached if:
+        #   1. Contracts were parsed (Keys.Count > 0)
+        #   2. Fixtures were checked (fixturesChecked > 0)
+        #   3. No failures (failures.Count == 0)
+        Write-TripwireMarker -ContractsChecked $contracts.Keys.Count -FixturesChecked $fixturesChecked
     }
 }
