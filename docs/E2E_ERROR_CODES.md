@@ -202,7 +202,7 @@ For load failures, the primary machine-consumable classification is `hostBugSusp
 
 ## Related Runner Toggles
 
-These are not `errorCode` values, but common toggles referenced in logs/docs:   	
+These are not `errorCode` values, but common toggles referenced in logs/docs:
 
 - `E2E_FORCE_CONFIG_UPDATE=1` — overwrite masked `********` fields during Configure.
 - `E2E_VALIDATE_METADATA=1` — run opt-in metadata gate after successful Grab.
