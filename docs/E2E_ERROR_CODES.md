@@ -29,6 +29,7 @@ For diagnostics bundle structure, see `docs/DIAGNOSTICS_BUNDLE_CONTRACT.md`.
 | `E2E_HOST_PLUGIN_DISCOVERY_DISABLED` | Host has plugin discovery disabled (confirmed via host capabilities). | Host `EnablePlugins` setting is `false`. | Check `config.xml` for `<EnablePlugins>true</EnablePlugins>`. Only emitted with affirmative host evidence. |
 | `E2E_PROVIDER_UNAVAILABLE` | Expected external provider (e.g., LLM model) not found. | LLM endpoint reachable but expected model not loaded. | Load expected model in LM Studio/Ollama; verify `expectedModelId` in config. |
 | `E2E_LOAD_FAILURE` | Plugin failed to load during schema discovery. | `ReflectionTypeLoadException`; ALC lifecycle issue; missing dependencies; TFM mismatch. | Check `container-logs.txt` for load exceptions; see `hostBugSuspected.classification` in manifest; verify plugin built against correct Lidarr tag. |
+| `E2E_INTERNAL_ERROR` | Internal runner error (should not occur in normal operation). | Hash computation failure; unexpected null reference; defensive code path triggered. | Report to maintainers with full manifest; this indicates a runner bug or edge case. |
 
 ## Structured Details Contract
 
@@ -196,12 +197,26 @@ Each explicit error code includes a `results[].details` object with stable, mach
 | `expectedModelIdHash` | string? | SHA256 prefix hash of expected model ID (no raw ID). |
 | `expectedModelFound` | boolean? | Whether the expected model was found. |
 
+**Strict vs non-strict behavior:**
+- **Non-strict** (default): If no models are loaded (`modelsCount=0`), the gate SKIPs with no `errorCode`. This avoids noisy failures when LM Studio/Ollama is simply not ready.
+- **Strict** (`E2E_STRICT_BRAINARR=1`): If no models are loaded, the gate FAILs with `E2E_PROVIDER_UNAVAILABLE`. Use this for CI enforcement.
+- In both modes: If an expected model is configured but not found, the gate FAILs with `E2E_PROVIDER_UNAVAILABLE`.
+
+
 ### `E2E_LOAD_FAILURE`
 | Field | Type | Notes |
 |---|---:|---|
 | `note` | string? | Optional human context for synthetic fixtures. |
 
 For load failures, the primary machine-consumable classification is `hostBugSuspected` at the top-level of the manifest (`classification`, `severity`, `matchedLine`).
+
+
+### `E2E_INTERNAL_ERROR`
+| Field | Type | Notes |
+|---|---:|---|
+| `phase` | string | Gate sub-phase where error occurred (e.g. `BrainarrLLM:ComputeExpectedModelHash`). |
+| `reason` | string | Short error classification (e.g. `ExpectedModelHashComputationFailed`). |
+| `note` | string? | Sanitized human-readable context (no secrets or raw IDs). |
 
 ## Related Runner Toggles
 

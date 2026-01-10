@@ -3240,8 +3240,11 @@ function Test-BrainarrLLMGate {
 
             # Config validation: if we have an expectedModel but failed to compute hash, that is a config issue
             if ([string]::IsNullOrWhiteSpace($expectedHash)) {
-                # Note: Rare edge case (SHA256 should not fail for valid UTF-8). No explicit code emitted.
-                # Removed: ErrorCode not emitted (E2E_CONFIG_INVALID contract requires HTTP validation fields)
+                # E2E_INTERNAL_ERROR: Hash computation failed (rare edge case)
+                $result.Details.ErrorCode = 'E2E_INTERNAL_ERROR'
+                $result.Details.phase = 'BrainarrLLM:ComputeExpectedModelHash'
+                $result.Details.reason = 'ExpectedModelHashComputationFailed'
+                $result.Details.note = 'SHA256 hash computation failed for expected model ID'
                 $result.Details.llmKind = $llmProbe.Kind ?? 'unknown'
                 $result.Details.modelsCount = [int]($llmProbe.ModelsCount ?? 0)
                 $result.Details.expectedModelFound = $false
