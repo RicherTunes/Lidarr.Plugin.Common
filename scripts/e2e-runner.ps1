@@ -1897,28 +1897,96 @@ $stopNow = $false
 $stopReason = $null
 
 # Preflight: Lidarr API must be reachable before running any per-plugin gates.
-# Emit E2E_LIDARR_UNREACHABLE explicitly rather than letting Schema gate throw a generic exception.
-$preflightTimeoutSec = 5
-$preflightGateStart = Get-Date
-try {
-    Invoke-LidarrApi -Endpoint 'system/status' -TimeoutSec $preflightTimeoutSec | Out-Null
-}
-catch {
-    $preflightGateEnd = Get-Date
-    $details = New-LidarrUnreachableDetails `
-        -Phase 'LidarrApi:Preflight' `
-        -Operation 'LidarrApiPreflight' `
-        -Endpoint '/api/v1/system/status' `
-        -TimeoutSeconds $preflightTimeoutSec `
-        -Exception $_.Exception
+# Emit E2E_LIDARR_UNREACHABLE or E2E_AUTH_MISSING explicitly rather than letting Schema gate throw a generic exception.
+# Configurable via env var: E2E_PREFLIGHT_TIMEOUT_SEC (default 5), E2E_PREFLIGHT_RETRIES (default 3)
+$preflightTimeoutSec = [int]($env:E2E_PREFLIGHT_TIMEOUT_SEC)
+if ($preflightTimeoutSec -le 0) { $preflightTimeoutSec = 5 }
+$preflightRetries = [int]($env:E2E_PREFLIGHT_RETRIES)
+if ($preflightRetries -le 0) { $preflightRetries = 3 }
 
-    $allResults += New-OutcomeResult -Gate 'LidarrApi' -PluginName 'Ecosystem' -Outcome 'failed' `
-        -Errors @('E2E_LIDARR_UNREACHABLE: Unable to reach Lidarr API. Verify Lidarr is running and the Lidarr URL/port mapping is correct.') `
-        -StartTime $preflightGateStart -EndTime $preflightGateEnd -Details $details
+$preflightGateStart = Get-Date
+$preflightSuccess = $false
+$preflightException = $null
+$preflightAttempt = 0
+
+while (-not $preflightSuccess -and $preflightAttempt -lt $preflightRetries) {
+    $preflightAttempt++
+    try {
+        Invoke-LidarrApi -Endpoint 'system/status' -TimeoutSec $preflightTimeoutSec | Out-Null
+        $preflightSuccess = $true
+    }
+    catch {
+        $preflightException = $_
+        # Check for auth failures - don't retry on 401/403
+        $httpStatus = 0
+        if ($_.Exception.Response) {
+            try { $httpStatus = [int]$_.Exception.Response.StatusCode } catch { }
+        }
+        if ($httpStatus -eq 401 -or $httpStatus -eq 403) {
+            break  # Auth failure, don't retry
+        }
+        # Exponential backoff: 1s, 2s, 4s...
+        if ($preflightAttempt -lt $preflightRetries) {
+            $backoffSec = [Math]::Pow(2, $preflightAttempt - 1)
+            Start-Sleep -Seconds $backoffSec
+        }
+    }
+}
+
+if (-not $preflightSuccess) {
+    $preflightGateEnd = Get-Date
+
+    # CRITICAL: Detect 401/403 and emit E2E_AUTH_MISSING instead of E2E_LIDARR_UNREACHABLE
+    $httpStatus = 0
+    if ($preflightException.Exception.Response) {
+        try { $httpStatus = [int]$preflightException.Exception.Response.StatusCode } catch { }
+    }
+
+    $isAuthFailure = ($httpStatus -eq 401 -or $httpStatus -eq 403)
+    if (-not $isAuthFailure) {
+        # Check for auth-shaped error messages
+        $errorMsg = "$($preflightException.Exception.Message)".ToLowerInvariant()
+        $authPatterns = @('unauthorized', 'forbidden', 'invalid api key', 'apikey', 'authentication')
+        foreach ($pattern in $authPatterns) {
+            if ($errorMsg -match [regex]::Escape($pattern)) {
+                $isAuthFailure = $true
+                break
+            }
+        }
+    }
+
+    if ($isAuthFailure) {
+        $details = @{
+            ErrorCode = 'E2E_AUTH_MISSING'
+            phase = 'LidarrApi:Preflight'
+            operation = 'LidarrApiPreflight'
+            endpoint = '/api/v1/system/status'
+            httpStatus = $httpStatus
+            suggestion = 'Verify -LidarrApiKey is correct; ensure the API key has sufficient permissions; regenerate key if expired.'
+        }
+        $allResults += New-OutcomeResult -Gate 'LidarrApi' -PluginName 'Ecosystem' -Outcome 'failed' `
+            -Errors @("E2E_AUTH_MISSING: Lidarr API returned $httpStatus. Verify API key is correct and has sufficient permissions.") `
+            -StartTime $preflightGateStart -EndTime $preflightGateEnd -Details $details
+        $stopReason = 'Lidarr API auth failed (preflight)'
+    }
+    else {
+        $details = New-LidarrUnreachableDetails `
+            -Phase 'LidarrApi:Preflight' `
+            -Operation 'LidarrApiPreflight' `
+            -Endpoint '/api/v1/system/status' `
+            -TimeoutSeconds $preflightTimeoutSec `
+            -Exception $preflightException.Exception
+        $details['preflightAttempts'] = $preflightAttempt
+        $details['preflightRetries'] = $preflightRetries
+
+        $allResults += New-OutcomeResult -Gate 'LidarrApi' -PluginName 'Ecosystem' -Outcome 'failed' `
+            -Errors @("E2E_LIDARR_UNREACHABLE: Unable to reach Lidarr API after $preflightAttempt attempt(s). Verify Lidarr is running and the URL/port mapping is correct.") `
+            -StartTime $preflightGateStart -EndTime $preflightGateEnd -Details $details
+        $stopReason = 'Lidarr API unreachable (preflight)'
+    }
 
     $overallSuccess = $false
     $stopNow = $true
-    $stopReason = 'Lidarr API unreachable (preflight)'
 }
 
 $runConfigure = ($Gate -eq "configure" -or $Gate -eq "bootstrap")
