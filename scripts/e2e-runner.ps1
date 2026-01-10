@@ -1012,10 +1012,185 @@ function Get-ComponentSchema {
 
 <#
 .SYNOPSIS
+    Central helper for configure gate REST requests with structured error handling.
+.DESCRIPTION
+    Wraps Invoke-LidarrApi for component create/update operations.
+    On success: returns @{ Success=$true; Component=$response }
+    On failure: returns @{ Success=$false; Details=$configInvalidDetails; Errors=@(...) }
+
+    This centralizes error parsing and New-ConfigInvalidDetails construction to
+    prevent drift between POST (create) and PUT (update) code paths.
+#>
+function Invoke-ConfigureRequest {
+    param(
+        [Parameter(Mandatory)]
+        [string]$PluginName,
+
+        [Parameter(Mandatory)]
+        [ValidateSet("indexer", "downloadclient", "importlist")]
+        [string]$Type,
+
+        [Parameter(Mandatory)]
+        [ValidateSet("create", "update")]
+        [string]$Operation,
+
+        [Parameter(Mandatory)]
+        [string]$Endpoint,
+
+        [Parameter(Mandatory)]
+        $Body,
+
+        [string]$SchemaContract,
+        [int]$ComponentId
+    )
+
+    $method = if ($Operation -eq 'create') { 'POST' } else { 'PUT' }
+    $phase = if ($Operation -eq 'create') { 'Configure:Create:Post' } else { 'Configure:Update:Put' }
+
+    # Map component type to the format expected by New-ConfigInvalidDetails
+    $componentTypeMap = @{
+        'indexer' = 'indexer'
+        'downloadclient' = 'downloadClient'
+        'importlist' = 'importList'
+    }
+    $mappedComponentType = $componentTypeMap[$Type]
+
+    try {
+        $response = Invoke-LidarrApi -Endpoint $Endpoint -Method $method -Body $Body
+        return @{
+            Success = $true
+            Component = $response
+        }
+    }
+    catch {
+        $httpStatus = 0
+        $validationErrors = @()
+        $fieldNames = @()
+        $errorMsg = "$_"
+        $responseBody = $null
+        $contentType = $null
+
+        # Try to extract HTTP status and validation details from exception
+        if ($_.Exception.Response) {
+            try {
+                $httpStatus = [int]$_.Exception.Response.StatusCode
+            }
+            catch {
+                # Ignore - some exception types don't have StatusCode
+            }
+
+            # Try to get Content-Type header
+            try {
+                $contentType = $_.Exception.Response.ContentType
+            }
+            catch {
+                # Ignore
+            }
+
+            # Try to read response body for validation details
+            try {
+                $stream = $_.Exception.Response.GetResponseStream()
+                if ($stream -and $stream.CanRead) {
+                    $reader = [System.IO.StreamReader]::new($stream)
+                    $responseBody = $reader.ReadToEnd()
+                    $reader.Close()
+
+                    # Check for HTML response (proxy masquerade)
+                    if ($contentType -match 'text/html' -or $responseBody -match '^\s*<(!DOCTYPE|html)') {
+                        $validationErrors += "Expected JSON response but received HTML (possible proxy/auth page)"
+                        $phase = 'Configure:ValidationFailed'
+                    }
+                    # Parse as JSON (Lidarr validation errors are JSON)
+                    elseif ($responseBody) {
+                        $parsed = $responseBody | ConvertFrom-Json -ErrorAction SilentlyContinue
+                        if ($parsed) {
+                            if ($parsed -is [array]) {
+                                foreach ($item in $parsed) {
+                                    if ($item.errorMessage) {
+                                        $validationErrors += $item.errorMessage
+                                    }
+                                    if ($item.propertyName) {
+                                        $fieldNames += $item.propertyName
+                                    }
+                                }
+                            }
+                            elseif ($parsed.message) {
+                                $validationErrors += $parsed.message
+                            }
+                        }
+                    }
+                }
+            }
+            catch {
+                # Ignore parsing errors, use original error message
+            }
+        }
+
+        # Fall back to exception message if no validation errors extracted
+        if ($validationErrors.Count -eq 0) {
+            $validationErrors += $errorMsg
+        }
+
+        # CRITICAL: Detect auth failures - do NOT classify as E2E_CONFIG_INVALID
+        # Auth failures should be E2E_AUTH_MISSING (set by caller)
+        $isAuthFailure = $false
+        $authPatterns = @(
+            'unauthorized', 'forbidden', 'invalid_grant', 'invalid_client',
+            'token expired', 'oauth', 'authentication failed', 'access denied',
+            'api key', 'apikey invalid', 'not authenticated'
+        )
+
+        if ($httpStatus -eq 401 -or $httpStatus -eq 403) {
+            $isAuthFailure = $true
+        }
+        elseif ($responseBody -or $errorMsg) {
+            $combinedText = "$responseBody $errorMsg".ToLowerInvariant()
+            foreach ($pattern in $authPatterns) {
+                if ($combinedText -match [regex]::Escape($pattern)) {
+                    $isAuthFailure = $true
+                    break
+                }
+            }
+        }
+
+        if ($isAuthFailure) {
+            # Return auth failure marker - caller should set E2E_AUTH_MISSING
+            return @{
+                Success = $false
+                IsAuthFailure = $true
+                HttpStatus = $httpStatus
+                Errors = @($errorMsg)
+            }
+        }
+
+        $details = New-ConfigInvalidDetails `
+            -PluginName $PluginName `
+            -ComponentType $mappedComponentType `
+            -Operation $Operation `
+            -Endpoint "/api/v1/$Endpoint" `
+            -Phase $phase `
+            -HttpStatus $httpStatus `
+            -ValidationErrors $validationErrors `
+            -FieldNames $fieldNames `
+            -ComponentId $ComponentId `
+            -SchemaContract $SchemaContract
+
+        return @{
+            Success = $false
+            Details = $details
+            Errors = @($errorMsg)
+        }
+    }
+}
+
+<#
+.SYNOPSIS
     Creates a new component from schema and env var config.
 .DESCRIPTION
     Uses the schema as a template, populates fields from envConfig,
-    and POSTs to create the component. Returns the created component or $null.
+    and POSTs to create the component. Returns a result object with Success flag.
+    On success: @{ Success=$true; Component=$created }
+    On failure: @{ Success=$false; Details=$configInvalidDetails; Errors=@(...) }
 #>
 function New-ComponentFromEnv {
     param(
@@ -1054,14 +1229,23 @@ function New-ComponentFromEnv {
         $payload.PSObject.Properties.Remove('id')
     }
 
-    try {
-        $created = Invoke-LidarrApi -Endpoint $Type -Method POST -Body $payload
-        return $created
+    # Derive schema contract from implementation name (e.g., QobuzIndexerSettings)
+    $implName = if ($Schema.implementationName) { $Schema.implementationName } else { $PluginName }
+    $schemaContract = "${implName}Settings"
+
+    $result = Invoke-ConfigureRequest `
+        -PluginName $PluginName `
+        -Type $Type `
+        -Operation "create" `
+        -Endpoint $Type `
+        -Body $payload `
+        -SchemaContract $schemaContract
+
+    if (-not $result.Success) {
+        Write-Warning "Failed to create $Type for $PluginName : $($result.Errors -join '; ')"
     }
-    catch {
-        Write-Warning "Failed to create $Type for $PluginName : $_"
-        return $null
-    }
+
+    return $result
 }
 
 <#
@@ -1171,15 +1355,52 @@ function Update-ComponentAuthFields {
 
     $fullComponent.fields = $updatedFields
 
-    try {
-        $updated = Invoke-LidarrApi -Endpoint "$Type/$($fullComponent.id)" -Method PUT -Body $fullComponent
-        return @{ Updated = $true; Component = $updated; ChangedFields = $changedFieldNames }
+    # Derive schema contract from implementation name
+    $implName = if ($fullComponent.implementationName) { $fullComponent.implementationName } else { $ExistingComponent.name }
+    $schemaContract = "${implName}Settings"
+
+    # Primary endpoint: /type/{id}
+    $result = Invoke-ConfigureRequest `
+        -PluginName $ExistingComponent.name `
+        -Type $Type `
+        -Operation "update" `
+        -Endpoint "$Type/$($fullComponent.id)" `
+        -Body $fullComponent `
+        -SchemaContract $schemaContract `
+        -ComponentId $fullComponent.id
+
+    if ($result.Success) {
+        return @{ Updated = $true; Component = $result.Component; ChangedFields = $changedFieldNames }
     }
-    catch {
-        # Fallback for some Lidarr versions
-        $updated = Invoke-LidarrApi -Endpoint $Type -Method PUT -Body $fullComponent
-        return @{ Updated = $true; Component = $updated; ChangedFields = $changedFieldNames }
+
+    # Fallback for some Lidarr versions: /type (without ID)
+    $fallbackResult = Invoke-ConfigureRequest `
+        -PluginName $ExistingComponent.name `
+        -Type $Type `
+        -Operation "update" `
+        -Endpoint $Type `
+        -Body $fullComponent `
+        -SchemaContract $schemaContract `
+        -ComponentId $fullComponent.id
+
+    if ($fallbackResult.Success) {
+        return @{ Updated = $true; Component = $fallbackResult.Component; ChangedFields = $changedFieldNames }
     }
+
+    # Both failed - return failure with structured details
+    # Propagate IsAuthFailure if set (for E2E_AUTH_MISSING detection)
+    $failureResult = @{
+        Updated = $false
+        Failed = $true
+        Details = $result.Details
+        Errors = $result.Errors
+        ChangedFields = $changedFieldNames
+    }
+    if ($result.IsAuthFailure) {
+        $failureResult.IsAuthFailure = $true
+        $failureResult.HttpStatus = $result.HttpStatus
+    }
+    return $failureResult
 }
 
 function Test-ConfigureGateForPlugin {
@@ -1350,23 +1571,45 @@ function Test-ConfigureGateForPlugin {
                     return $result
                 }
 
-                $created = New-ComponentFromEnv -Type "indexer" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.IndexerFields
-                if ($created) {
-                    $result.Actions += "Created indexer '$PluginName' (id=$($created.id))"
-                    $result.Details.componentIds["indexerId"] = $created.id     
+                $createResult = New-ComponentFromEnv -Type "indexer" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.IndexerFields
+                if ($createResult.Success) {
+                    $result.Actions += "Created indexer '$PluginName' (id=$($createResult.Component.id))"
+                    $result.Details.componentIds["indexerId"] = $createResult.Component.id
                     $result.Details.created = $true
                     $result.Details.resolution["indexer"] = "created"
                 } else {
                     $result.Errors += "Failed to create indexer for $PluginName"
                     $result.Outcome = "failed"
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($createResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $createResult.HttpStatus
+                    } elseif ($createResult.Details) {
+                        foreach ($key in $createResult.Details.Keys) {
+                            $result.Details[$key] = $createResult.Details[$key]
+                        }
+                    }
                     return $result
                 }
             } else {
                 # Update existing indexer (auth fields only, unless ForceUpdate)
-                $result.Details.componentIds["indexerId"] = $indexer.id   
+                $result.Details.componentIds["indexerId"] = $indexer.id
                 $result.Details.resolution["indexer"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "indexer|$PluginName" -DefaultValue "implementationName"
                 $updateResult = Update-ComponentAuthFields -Type "indexer" -ExistingComponent $indexer -FieldValues $envConfig.IndexerFields -ForceUpdate:$ForceUpdate
-                if ($updateResult.Updated) {
+                if ($updateResult.Failed) {
+                    $result.Errors += "Failed to update indexer for $PluginName"
+                    $result.Outcome = "failed"
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($updateResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $updateResult.HttpStatus
+                    } elseif ($updateResult.Details) {
+                        foreach ($key in $updateResult.Details.Keys) {
+                            $result.Details[$key] = $updateResult.Details[$key]
+                        }
+                    }
+                    return $result
+                } elseif ($updateResult.Updated) {
                     $result.Actions += "Updated indexer auth fields: $($updateResult.ChangedFields -join ', ')"
                     $result.Details.updated = $true
                 } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
@@ -1404,15 +1647,24 @@ function Test-ConfigureGateForPlugin {
                     return $result
                 }
 
-                $created = New-ComponentFromEnv -Type "downloadclient" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.DownloadClientFields
-                if ($created) {
-                    $result.Actions += "Created download client '$PluginName' (id=$($created.id))"
-                    $result.Details.componentIds["downloadClientId"] = $created.id
+                $createResult = New-ComponentFromEnv -Type "downloadclient" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.DownloadClientFields
+                if ($createResult.Success) {
+                    $result.Actions += "Created download client '$PluginName' (id=$($createResult.Component.id))"
+                    $result.Details.componentIds["downloadClientId"] = $createResult.Component.id
                     $result.Details.created = $true
                     $result.Details.resolution["downloadclient"] = "created"
                 } else {
                     $result.Errors += "Failed to create download client for $PluginName"
                     $result.Outcome = "failed"
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($createResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $createResult.HttpStatus
+                    } elseif ($createResult.Details) {
+                        foreach ($key in $createResult.Details.Keys) {
+                            $result.Details[$key] = $createResult.Details[$key]
+                        }
+                    }
                     return $result
                 }
             } else {
@@ -1420,7 +1672,20 @@ function Test-ConfigureGateForPlugin {
                 $result.Details.componentIds["downloadClientId"] = $client.id
                 $result.Details.resolution["downloadclient"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "downloadclient|$PluginName" -DefaultValue "implementationName"
                 $updateResult = Update-ComponentAuthFields -Type "downloadclient" -ExistingComponent $client -FieldValues $envConfig.DownloadClientFields -ForceUpdate:$ForceUpdate
-                if ($updateResult.Updated) {
+                if ($updateResult.Failed) {
+                    $result.Errors += "Failed to update download client for $PluginName"
+                    $result.Outcome = "failed"
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($updateResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $updateResult.HttpStatus
+                    } elseif ($updateResult.Details) {
+                        foreach ($key in $updateResult.Details.Keys) {
+                            $result.Details[$key] = $updateResult.Details[$key]
+                        }
+                    }
+                    return $result
+                } elseif ($updateResult.Updated) {
                     $result.Actions += "Updated download client auth fields: $($updateResult.ChangedFields -join ', ')"
                     $result.Details.updated = $true
                 } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
@@ -1458,15 +1723,24 @@ function Test-ConfigureGateForPlugin {
                     return $result
                 }
 
-                $created = New-ComponentFromEnv -Type "importlist" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.ImportListFields
-                if ($created) {
-                    $result.Actions += "Created import list '$PluginName' (id=$($created.id))"
-                    $result.Details.componentIds["importListId"] = $created.id
+                $createResult = New-ComponentFromEnv -Type "importlist" -PluginName $PluginName -Schema $schema -FieldValues $envConfig.ImportListFields
+                if ($createResult.Success) {
+                    $result.Actions += "Created import list '$PluginName' (id=$($createResult.Component.id))"
+                    $result.Details.componentIds["importListId"] = $createResult.Component.id
                     $result.Details.created = $true
                     $result.Details.resolution["importlist"] = "created"
                 } else {
                     $result.Errors += "Failed to create import list for $PluginName"
                     $result.Outcome = "failed"
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($createResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $createResult.HttpStatus
+                    } elseif ($createResult.Details) {
+                        foreach ($key in $createResult.Details.Keys) {
+                            $result.Details[$key] = $createResult.Details[$key]
+                        }
+                    }
                     return $result
                 }
             } else {
@@ -1474,7 +1748,20 @@ function Test-ConfigureGateForPlugin {
                 $result.Details.componentIds["importListId"] = $importList.id
                 $result.Details.resolution["importlist"] = Get-HashtableStringOrDefault -Table $script:E2EComponentResolution -Key "importlist|$PluginName" -DefaultValue "implementationName"
                 $updateResult = Update-ComponentAuthFields -Type "importlist" -ExistingComponent $importList -FieldValues $envConfig.ImportListFields -ForceUpdate:$ForceUpdate
-                if ($updateResult.Updated) {
+                if ($updateResult.Failed) {
+                    $result.Errors += "Failed to update import list for $PluginName"
+                    $result.Outcome = "failed"
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($updateResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $updateResult.HttpStatus
+                    } elseif ($updateResult.Details) {
+                        foreach ($key in $updateResult.Details.Keys) {
+                            $result.Details[$key] = $updateResult.Details[$key]
+                        }
+                    }
+                    return $result
+                } elseif ($updateResult.Updated) {
                     $result.Actions += "Updated import list fields: $($updateResult.ChangedFields -join ', ')"
                     $result.Details.updated = $true
                 } elseif ($updateResult.ChangedFields -and $updateResult.ChangedFields.Count -gt 0) {
