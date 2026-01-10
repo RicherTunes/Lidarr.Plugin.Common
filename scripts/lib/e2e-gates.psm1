@@ -1229,6 +1229,20 @@ function Test-PluginGrabGate {
 
         if (-not [string]::Equals($result.QueueStatus, "completed", [StringComparison]::OrdinalIgnoreCase)) {
             $result.Errors += "Queue item did not complete within ${CompletionTimeoutSec}s (status=$($result.QueueStatus), downloadId=$($grabResult.downloadId))"
+
+            # Structured timeout details (explicit at source)
+            $timeoutDetails = New-ApiTimeoutDetails `
+                -TimeoutType 'queueCompletion' `
+                -TimeoutSeconds $CompletionTimeoutSec `
+                -Endpoint "/api/v1/queue" `
+                -Operation 'GrabQueueWait' `
+                -PluginName $PluginName `
+                -Phase 'Grab:WaitQueueCompletion' `
+                -IndexerId $IndexerId
+            foreach ($key in $timeoutDetails.Keys) {
+                $result.Details[$key] = $timeoutDetails[$key]
+            }
+
             return $result
         }
 
@@ -1731,6 +1745,21 @@ function Test-AlbumSearchGate {
             try { $lastStatus = Invoke-LidarrApi -Endpoint "command/$($command.id)" } catch {}
             $statusInfo = if ($lastStatus) { "status=$($lastStatus.status), message=$($lastStatus.message)" } else { "unknown" }
             $result.Errors += "AlbumSearch command timed out after ${CommandTimeoutSec}s ($statusInfo)"
+
+            # Structured timeout details (explicit at source)
+            $timeoutDetails = New-ApiTimeoutDetails `
+                -TimeoutType 'commandPoll' `
+                -TimeoutSeconds $CommandTimeoutSec `
+                -Endpoint "/api/v1/command/$($command.id)" `
+                -Operation 'AlbumSearch' `
+                -PluginName $PluginName `
+                -Phase 'AlbumSearch:PollCommand' `
+                -IndexerId $IndexerId `
+                -CommandId $command.id
+            foreach ($key in $timeoutDetails.Keys) {
+                $result.Details[$key] = $timeoutDetails[$key]
+            }
+
             return $result
         }
 
@@ -2110,6 +2139,20 @@ function Test-ImportListGate {
             try { $lastStatus = Invoke-LidarrApi -Endpoint "command/$($command.id)" } catch {}
             $statusInfo = if ($lastStatus) { "status=$($lastStatus.status), message=$($lastStatus.message)" } else { "unknown" }
             $result.Errors += "ImportListSync command timed out after ${CommandTimeoutSec}s ($statusInfo)"
+
+            # Structured timeout details (explicit at source)
+            $timeoutDetails = New-ApiTimeoutDetails `
+                -TimeoutType 'commandPoll' `
+                -TimeoutSeconds $CommandTimeoutSec `
+                -Endpoint "/api/v1/command/$($command.id)" `
+                -Operation 'ImportListSync' `
+                -PluginName $PluginName `
+                -Phase 'ImportList:PollCommand' `
+                -CommandId $command.id
+            foreach ($key in $timeoutDetails.Keys) {
+                $result.Details[$key] = $timeoutDetails[$key]
+            }
+
             return $result
         }
 
@@ -3224,6 +3267,20 @@ function Test-BrainarrLLMGate {
             $lastStatus = "unknown"
             try { $lastStatus = (Invoke-LidarrApi -Endpoint "command/$($command.id)").status } catch {}
             $result.Errors += "ImportListSync command timed out (last status: $lastStatus)"
+
+            # Structured timeout details (explicit at source)
+            $timeoutDetails = New-ApiTimeoutDetails `
+                -TimeoutType 'commandPoll' `
+                -TimeoutSeconds $CommandTimeoutSec `
+                -Endpoint "/api/v1/command/$($command.id)" `
+                -Operation 'ImportListSync' `
+                -PluginName 'Brainarr' `
+                -Phase 'BrainarrLLM:PollCommand' `
+                -CommandId $command.id
+            foreach ($key in $timeoutDetails.Keys) {
+                $result.Details[$key] = $timeoutDetails[$key]
+            }
+
             return $result
         }
 
@@ -3278,6 +3335,72 @@ function Test-BrainarrLLMGate {
     }
 
     return $result
+}
+
+function New-ApiTimeoutDetails {
+    <#
+    .SYNOPSIS
+        Creates structured details for E2E_API_TIMEOUT error code.
+
+    .DESCRIPTION
+        Single source of truth for the API_TIMEOUT details structure.
+        All gates must call this helper to prevent structural drift.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [ValidateSet('http', 'commandPoll', 'queuePoll', 'queueCompletion')]
+        [string]$TimeoutType,
+
+        [Parameter(Mandatory)]
+        [int]$TimeoutSeconds,
+
+        [Parameter(Mandatory)]
+        [string]$Endpoint,
+
+        [Parameter(Mandatory)]
+        [string]$Operation,
+
+        [Parameter(Mandatory)]
+        [string]$PluginName,
+
+        [Parameter(Mandatory)]
+        [string]$Phase,
+
+        [int]$IndexerId,
+        [int]$DownloadClientId,
+        [int]$CommandId,
+        [int]$Attempts,
+        [int]$ElapsedMs
+    )
+
+    $details = @{
+        ErrorCode = 'E2E_API_TIMEOUT'
+        timeoutType = $TimeoutType
+        timeoutSeconds = $TimeoutSeconds
+        endpoint = $Endpoint
+        operation = $Operation
+        pluginName = $PluginName
+        phase = $Phase
+    }
+
+    # Add optional fields only when provided (non-zero)
+    if ($IndexerId -and $IndexerId -gt 0) {
+        $details.indexerId = $IndexerId
+    }
+    if ($DownloadClientId -and $DownloadClientId -gt 0) {
+        $details.downloadClientId = $DownloadClientId
+    }
+    if ($CommandId -and $CommandId -gt 0) {
+        $details.commandId = $CommandId
+    }
+    if ($Attempts -and $Attempts -gt 0) {
+        $details.attempts = $Attempts
+    }
+    if ($ElapsedMs -and $ElapsedMs -gt 0) {
+        $details.elapsedMs = $ElapsedMs
+    }
+
+    return $details
 }
 
 function Get-FoundIndexerNamesDetails {
@@ -3336,4 +3459,4 @@ function Get-FoundIndexerNamesDetails {
     }
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Get-FoundIndexerNamesDetails, Invoke-LidarrApi
+Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Get-FoundIndexerNamesDetails, New-ApiTimeoutDetails, Invoke-LidarrApi

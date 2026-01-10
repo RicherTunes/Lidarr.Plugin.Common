@@ -149,6 +149,20 @@ $zeroAudioResult = $zeroAudioFiles.results | Where-Object { $_.errorCode -eq 'E2
 Assert-True -Name "zero-audio-files.json has outputPath" -Condition ($null -ne $zeroAudioResult.details.outputPath)
 Assert-Equal -Name "zero-audio-files.json totalFilesFound is 0" -Actual $zeroAudioResult.details.totalFilesFound -Expected 0
 
+$apiTimeout = Validate-Fixture -FileName 'api-timeout.json'
+Assert-True -Name "api-timeout.json has E2E_API_TIMEOUT" -Condition ($apiTimeout.results.errorCode -contains 'E2E_API_TIMEOUT')
+$apiTimeoutResult = $apiTimeout.results | Where-Object { $_.errorCode -eq 'E2E_API_TIMEOUT' }
+# Contract: must include structured timeout details
+Assert-True -Name "api-timeout.json has timeoutType" -Condition ($null -ne $apiTimeoutResult.details.timeoutType)
+Assert-True -Name "api-timeout.json has timeoutSeconds" -Condition ($null -ne $apiTimeoutResult.details.timeoutSeconds)
+Assert-True -Name "api-timeout.json has endpoint" -Condition ($null -ne $apiTimeoutResult.details.endpoint)
+Assert-True -Name "api-timeout.json has operation" -Condition ($null -ne $apiTimeoutResult.details.operation)
+Assert-True -Name "api-timeout.json has pluginName" -Condition ($null -ne $apiTimeoutResult.details.pluginName)
+Assert-True -Name "api-timeout.json has phase" -Condition ($null -ne $apiTimeoutResult.details.phase)
+# Verify expected values
+Assert-Equal -Name "api-timeout.json timeoutType is commandPoll" -Actual $apiTimeoutResult.details.timeoutType -Expected 'commandPoll'
+Assert-Equal -Name "api-timeout.json timeoutSeconds is 120" -Actual $apiTimeoutResult.details.timeoutSeconds -Expected 120
+
 Write-Host ""
 Write-Host "Passed: $passed" -ForegroundColor Green
 Write-Host "Failed: $failed" -ForegroundColor Red

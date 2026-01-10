@@ -239,6 +239,74 @@ $manyIndexersResult = $mManyIndexers.results | Where-Object { $_.plugin -eq 'Tes
 Assert-True "ManyIndexers details.foundIndexerNamesCapped is true" ($manyIndexersResult.details.foundIndexerNamesCapped -eq $true)
 Assert-Equal "ManyIndexers details.foundIndexerNameCount is 50" $manyIndexersResult.details.foundIndexerNameCount 50
 
+Write-Host "`nTest Group: E2E_API_TIMEOUT (P1)" -ForegroundColor Yellow
+
+$apiTimeoutFail = [PSCustomObject]@{
+    Gate = 'AlbumSearch'
+    PluginName = 'Tidalarr'
+    Outcome = 'failed'
+    Errors = @('AlbumSearch command timed out after 120s (status=queued, message=null)')
+    Details = @{
+        ErrorCode = 'E2E_API_TIMEOUT'
+        timeoutType = 'commandPoll'
+        timeoutSeconds = 120
+        endpoint = '/api/v1/command/42'
+        operation = 'AlbumSearch'
+        pluginName = 'Tidalarr'
+        phase = 'AlbumSearch:PollCommand'
+        indexerId = 101
+        commandId = 42
+    }
+}
+
+$jsonApiTimeout = ConvertTo-E2ERunManifest -Results @($apiTimeoutFail) -Context @{
+    LidarrUrl = 'http://localhost:1234'
+    ContainerName = 'lidarr-e2e-test'
+}
+$mApiTimeout = $jsonApiTimeout | ConvertFrom-Json
+$apiTimeoutResult = $mApiTimeout.results | Where-Object { $_.gate -eq 'AlbumSearch' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+
+Assert-Equal "ApiTimeout errorCode is E2E_API_TIMEOUT" $apiTimeoutResult.errorCode 'E2E_API_TIMEOUT'
+Assert-True "ApiTimeout details has no errorCode key (moved to top-level)" (-not ($apiTimeoutResult.details.PSObject.Properties.Name -contains 'errorCode'))
+Assert-Equal "ApiTimeout details.timeoutType is commandPoll" $apiTimeoutResult.details.timeoutType 'commandPoll'
+Assert-Equal "ApiTimeout details.timeoutSeconds is 120" $apiTimeoutResult.details.timeoutSeconds 120
+Assert-Equal "ApiTimeout details.endpoint is /api/v1/command/42" $apiTimeoutResult.details.endpoint '/api/v1/command/42'
+Assert-Equal "ApiTimeout details.operation is AlbumSearch" $apiTimeoutResult.details.operation 'AlbumSearch'
+Assert-Equal "ApiTimeout details.pluginName is Tidalarr" $apiTimeoutResult.details.pluginName 'Tidalarr'
+Assert-Equal "ApiTimeout details.phase is AlbumSearch:PollCommand" $apiTimeoutResult.details.phase 'AlbumSearch:PollCommand'
+Assert-Equal "ApiTimeout details.indexerId is 101" $apiTimeoutResult.details.indexerId 101
+Assert-Equal "ApiTimeout details.commandId is 42" $apiTimeoutResult.details.commandId 42
+
+# Test queueCompletion timeout type
+$queueTimeoutFail = [PSCustomObject]@{
+    Gate = 'Grab'
+    PluginName = 'Qobuzarr'
+    Outcome = 'failed'
+    Errors = @('Queue item did not complete within 600s (status=downloading, downloadId=abc123)')
+    Details = @{
+        ErrorCode = 'E2E_API_TIMEOUT'
+        timeoutType = 'queueCompletion'
+        timeoutSeconds = 600
+        endpoint = '/api/v1/queue'
+        operation = 'GrabQueueWait'
+        pluginName = 'Qobuzarr'
+        phase = 'Grab:WaitQueueCompletion'
+        indexerId = 102
+    }
+}
+
+$jsonQueueTimeout = ConvertTo-E2ERunManifest -Results @($queueTimeoutFail) -Context @{
+    LidarrUrl = 'http://localhost:1234'
+    ContainerName = 'lidarr-e2e-test'
+}
+$mQueueTimeout = $jsonQueueTimeout | ConvertFrom-Json
+$queueTimeoutResult = $mQueueTimeout.results | Where-Object { $_.gate -eq 'Grab' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+
+Assert-Equal "QueueTimeout errorCode is E2E_API_TIMEOUT" $queueTimeoutResult.errorCode 'E2E_API_TIMEOUT'
+Assert-Equal "QueueTimeout details.timeoutType is queueCompletion" $queueTimeoutResult.details.timeoutType 'queueCompletion'
+Assert-Equal "QueueTimeout details.timeoutSeconds is 600" $queueTimeoutResult.details.timeoutSeconds 600
+Assert-Equal "QueueTimeout details.phase is Grab:WaitQueueCompletion" $queueTimeoutResult.details.phase 'Grab:WaitQueueCompletion'
+
 Write-Host "`nSummary: $passed passed, $failed failed" -ForegroundColor Cyan
 if ($failed -gt 0) {
     throw "$failed assertions failed"
