@@ -2796,6 +2796,14 @@ if __name__ == "__main__":
         if (-not $result.SampleFile -and $currentCandidateFile) {
             $result.SampleFile = $currentCandidateFile
         }
+        # Defensive: ensure tagReadTool is always in Details for triage
+        # (exception may have occurred after TagReadTool was set but before Details populated)
+        if (-not $result.Details.ContainsKey('tagReadTool')) {
+            $result.Details.tagReadTool = $result.TagReadTool
+        }
+        if (-not $result.Details.ContainsKey('tagReadToolVersion')) {
+            $result.Details.tagReadToolVersion = $result.TagReadToolVersion
+        }
     }
 
     return $result
