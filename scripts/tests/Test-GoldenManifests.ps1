@@ -163,6 +163,17 @@ Assert-True -Name "api-timeout.json has phase" -Condition ($null -ne $apiTimeout
 Assert-Equal -Name "api-timeout.json timeoutType is commandPoll" -Actual $apiTimeoutResult.details.timeoutType -Expected 'commandPoll'
 Assert-Equal -Name "api-timeout.json timeoutSeconds is 120" -Actual $apiTimeoutResult.details.timeoutSeconds -Expected 120
 
+$importFailed = Validate-Fixture -FileName 'import-failed.json'
+Assert-True -Name "import-failed.json has E2E_IMPORT_FAILED" -Condition ($importFailed.results.errorCode -contains 'E2E_IMPORT_FAILED')
+$importFailedResult = $importFailed.results | Where-Object { $_.errorCode -eq 'E2E_IMPORT_FAILED' }
+# Contract: must include structured import failed details
+Assert-True -Name "import-failed.json has importListId (int)" -Condition ($null -ne $importFailedResult.details.importListId)
+Assert-True -Name "import-failed.json has phase (non-empty)" -Condition (-not [string]::IsNullOrWhiteSpace($importFailedResult.details.phase))
+Assert-True -Name "import-failed.json has operation" -Condition ($null -ne $importFailedResult.details.operation)
+Assert-True -Name "import-failed.json endpoint starts with /api/" -Condition ($importFailedResult.details.endpoint -match '^/api/')
+Assert-True -Name "import-failed.json has pluginName" -Condition ($null -ne $importFailedResult.details.pluginName)
+Assert-Equal -Name "import-failed.json operation is ImportListSync" -Actual $importFailedResult.details.operation -Expected 'ImportListSync'
+
 Write-Host ""
 Write-Host "Passed: $passed" -ForegroundColor Green
 Write-Host "Failed: $failed" -ForegroundColor Red
