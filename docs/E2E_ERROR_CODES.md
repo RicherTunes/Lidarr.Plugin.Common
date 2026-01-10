@@ -32,6 +32,9 @@ For diagnostics bundle structure, see `docs/DIAGNOSTICS_BUNDLE_CONTRACT.md`.
 
 ## Structured Details Contract
 
+<!-- CAUTION: These tables are parsed by Pester tripwire tests (Test-StructuredDetailsContract.ps1).
+     Do not reformat the table structure or change column alignment. -->
+
 Each explicit error code includes a `results[].details` object with stable, machine-consumable fields intended for triage automation.
 
 **General rules**
