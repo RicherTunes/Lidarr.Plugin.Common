@@ -307,6 +307,50 @@ Assert-Equal "QueueTimeout details.timeoutType is queueCompletion" $queueTimeout
 Assert-Equal "QueueTimeout details.timeoutSeconds is 600" $queueTimeoutResult.details.timeoutSeconds 600
 Assert-Equal "QueueTimeout details.phase is Grab:WaitQueueCompletion" $queueTimeoutResult.details.phase 'Grab:WaitQueueCompletion'
 
+Write-Host "`nTest Group: Endpoint Normalization & Redaction (New-ApiTimeoutDetails)" -ForegroundColor Yellow
+
+# Test the helper directly to verify endpoint normalization
+# Full URL with sensitive query params should be normalized to path-only with redaction
+$fullUrlDetails = New-ApiTimeoutDetails `
+    -TimeoutType 'http' `
+    -TimeoutSeconds 30 `
+    -Endpoint 'http://192.168.1.2:8686/api/v1/release?apiKey=mysecretkey&albumId=123' `
+    -Operation 'FetchReleases' `
+    -PluginName 'TestPlugin' `
+    -Phase 'AlbumSearch:FetchReleases'
+
+# The endpoint should NOT leak the internal IP
+Assert-True "FullURL endpoint does not contain 192.168" (-not ($fullUrlDetails.endpoint -match '192\.168'))
+# The endpoint should be path-only
+Assert-True "FullURL endpoint starts with /" ($fullUrlDetails.endpoint -match '^/')
+# apiKey should be redacted
+Assert-True "FullURL endpoint has apiKey redacted" ($fullUrlDetails.endpoint -match 'apiKey=\[REDACTED\]')
+# albumId should NOT be redacted (not sensitive)
+Assert-True "FullURL endpoint preserves albumId" ($fullUrlDetails.endpoint -match 'albumId=123')
+
+# Test: Path-only endpoint should pass through unchanged
+$pathOnlyDetails = New-ApiTimeoutDetails `
+    -TimeoutType 'commandPoll' `
+    -TimeoutSeconds 60 `
+    -Endpoint '/api/v1/command/42' `
+    -Operation 'AlbumSearch' `
+    -PluginName 'TestPlugin2' `
+    -Phase 'AlbumSearch:PollCommand'
+
+Assert-Equal "PathOnly endpoint preserved" $pathOnlyDetails.endpoint '/api/v1/command/42'
+
+# Test: token query param should also be redacted
+$tokenDetails = New-ApiTimeoutDetails `
+    -TimeoutType 'http' `
+    -TimeoutSeconds 10 `
+    -Endpoint '/api/v1/indexer/test?token=abc123&name=foo' `
+    -Operation 'IndexerTest' `
+    -PluginName 'TestPlugin3' `
+    -Phase 'Search:TestIndexer'
+
+Assert-True "Token param is redacted" ($tokenDetails.endpoint -match 'token=\[REDACTED\]')
+Assert-True "Name param is preserved" ($tokenDetails.endpoint -match 'name=foo')
+
 Write-Host "`nSummary: $passed passed, $failed failed" -ForegroundColor Cyan
 if ($failed -gt 0) {
     throw "$failed assertions failed"

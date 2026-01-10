@@ -3033,14 +3033,30 @@ function Test-BrainarrLLMGate {
 
         if (-not $llmProbe.Success) {
             $reason = "LLM endpoint unreachable: $($llmProbe.Error)"
+            $result.Details.llmKind = 'unknown'
+
+            # Detect if this is a timeout error
+            $isTimeout = $llmProbe.Error -match '(?i)(timed?\s*out|timeout|operation.*canceled|task.*canceled)'
+            if ($isTimeout) {
+                # HTTP timeout for LLM endpoint
+                $timeoutDetails = New-ApiTimeoutDetails `
+                    -TimeoutType 'http' `
+                    -TimeoutSeconds 10 `
+                    -Endpoint '/v1/models' `
+                    -Operation 'BrainarrLLMEndpoint' `
+                    -PluginName 'Brainarr' `
+                    -Phase 'BrainarrLLM:DetectModels'
+                foreach ($key in $timeoutDetails.Keys) {
+                    $result.Details[$key] = $timeoutDetails[$key]
+                }
+            }
+
             if ($StrictMode) {
                 $result.Errors += $reason
-                $result.Details.llmKind = 'unknown'
                 return $result
             }
             $result.Outcome = 'skipped'
             $result.SkipReason = $reason
-            $result.Details.llmKind = 'unknown'
             return $result
         }
 
@@ -3373,11 +3389,27 @@ function New-ApiTimeoutDetails {
         [int]$ElapsedMs
     )
 
+    # Normalize endpoint: strip scheme+host, keep path+query, redact sensitive query params
+    $normalizedEndpoint = $Endpoint
+    if ($Endpoint -match '^https?://') {
+        # Full URL - extract path+query only
+        try {
+            $uri = [System.Uri]$Endpoint
+            $normalizedEndpoint = $uri.PathAndQuery
+        }
+        catch {
+            # If URI parsing fails, try regex extraction
+            $normalizedEndpoint = $Endpoint -replace '^https?://[^/]+', ''
+        }
+    }
+    # Redact sensitive query parameters (apiKey, token, password, secret, etc.)
+    $normalizedEndpoint = $normalizedEndpoint -replace '(?i)(apiKey|token|password|secret|key|auth)=[^&]+', '$1=[REDACTED]'
+
     $details = @{
         ErrorCode = 'E2E_API_TIMEOUT'
         timeoutType = $TimeoutType
         timeoutSeconds = $TimeoutSeconds
-        endpoint = $Endpoint
+        endpoint = $normalizedEndpoint
         operation = $Operation
         pluginName = $PluginName
         phase = $Phase
