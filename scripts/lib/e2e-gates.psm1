@@ -2087,8 +2087,10 @@ function Test-ImportListGate {
 
         # Step 4: Capture baseline state before sync
         $preSync = $null
+        $preSyncImportListFound = $false
         try {
             $preSync = Invoke-LidarrApi -Endpoint "importlist/$($configuredList.id)"
+            $preSyncImportListFound = ($null -ne $preSync)
         }
         catch { }
 
@@ -2101,6 +2103,26 @@ function Test-ImportListGate {
         }
 
         $command = Invoke-LidarrApi -Endpoint "command" -Method POST -Body $commandBody
+
+        # Site A: Check command creation succeeded
+        if (-not $command -or -not $command.id) {
+            $result.Errors += "Failed to trigger ImportListSync command"
+
+            # Structured import failed details (explicit at source)
+            $failedDetails = New-ImportFailedDetails `
+                -PluginName $PluginName `
+                -ImportListId $configuredList.id `
+                -Phase 'ImportList:TriggerCommand' `
+                -Endpoint '/api/v1/command' `
+                -ImportListName $configuredList.name `
+                -PostSyncVerified $false
+            foreach ($key in $failedDetails.Keys) {
+                $result.Details[$key] = $failedDetails[$key]
+            }
+
+            return $result
+        }
+
         $result.CommandId = $command.id
         Write-Host "       Command ID: $($command.id)" -ForegroundColor Gray
 
@@ -2127,6 +2149,40 @@ function Test-ImportListGate {
                     return $result
                 }
                 $result.Errors += "ImportListSync command failed: $failMsg"
+
+                # Site B: Structured import failed details (explicit at source)
+                $failedDetails = New-ImportFailedDetails `
+                    -PluginName $PluginName `
+                    -ImportListId $configuredList.id `
+                    -Phase 'ImportList:PollCommand' `
+                    -Endpoint "/api/v1/command/$($command.id)" `
+                    -ImportListName $configuredList.name `
+                    -CommandId $command.id `
+                    -CommandStatus $commandStatus.status `
+                    -PostSyncVerified $false
+                foreach ($key in $failedDetails.Keys) {
+                    $result.Details[$key] = $failedDetails[$key]
+                }
+
+                return $result
+            }
+            elseif ($commandStatus.status -eq 'aborted') {
+                $result.Errors += "ImportListSync command aborted"
+
+                # Site B: Aborted also counts as import failed
+                $failedDetails = New-ImportFailedDetails `
+                    -PluginName $PluginName `
+                    -ImportListId $configuredList.id `
+                    -Phase 'ImportList:PollCommand' `
+                    -Endpoint "/api/v1/command/$($command.id)" `
+                    -ImportListName $configuredList.name `
+                    -CommandId $command.id `
+                    -CommandStatus 'aborted' `
+                    -PostSyncVerified $false
+                foreach ($key in $failedDetails.Keys) {
+                    $result.Details[$key] = $failedDetails[$key]
+                }
+
                 return $result
             }
             else {
@@ -2168,6 +2224,23 @@ function Test-ImportListGate {
         }
         catch {
             $result.Errors += "Import list $($configuredList.id) not accessible after sync: $_"
+
+            # Site C: Structured import failed details (explicit at source)
+            # Include preSyncImportListFound to distinguish "disappeared" from "never existed"
+            $failedDetails = New-ImportFailedDetails `
+                -PluginName $PluginName `
+                -ImportListId $configuredList.id `
+                -Phase 'ImportList:PostSyncVerify' `
+                -Endpoint "/api/v1/importlist/$($configuredList.id)" `
+                -ImportListName $configuredList.name `
+                -CommandId $command.id `
+                -CommandStatus 'completed' `
+                -PostSyncVerified $false `
+                -PreSyncImportListFound $preSyncImportListFound
+            foreach ($key in $failedDetails.Keys) {
+                $result.Details[$key] = $failedDetails[$key]
+            }
+
             return $result
         }
 
@@ -2179,6 +2252,23 @@ function Test-ImportListGate {
         if ($postSyncError -and $postSyncError -ne '') {
             $result.PostSyncError = $postSyncError
             $result.Errors += "Import list sync error reported: $postSyncError"
+
+            # Site C: Structured import failed details (explicit at source)
+            $failedDetails = New-ImportFailedDetails `
+                -PluginName $PluginName `
+                -ImportListId $configuredList.id `
+                -Phase 'ImportList:PostSyncVerify' `
+                -Endpoint "/api/v1/importlist/$($configuredList.id)" `
+                -ImportListName $configuredList.name `
+                -CommandId $command.id `
+                -CommandStatus 'completed' `
+                -LastSyncError $postSyncError `
+                -PostSyncVerified $true `
+                -PreSyncImportListFound $preSyncImportListFound
+            foreach ($key in $failedDetails.Keys) {
+                $result.Details[$key] = $failedDetails[$key]
+            }
+
             return $result
         }
 
@@ -3435,6 +3525,95 @@ function New-ApiTimeoutDetails {
     return $details
 }
 
+function New-ImportFailedDetails {
+    <#
+    .SYNOPSIS
+        Creates structured details for E2E_IMPORT_FAILED error code.
+
+    .DESCRIPTION
+        Single source of truth for the IMPORT_FAILED details structure.
+        Used when ImportListSync fails at command creation, command execution, or post-sync verification.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$PluginName,
+
+        [Parameter(Mandatory)]
+        [int]$ImportListId,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('ImportList:TriggerCommand', 'ImportList:PollCommand', 'ImportList:PostSyncVerify')]
+        [string]$Phase,
+
+        [Parameter(Mandatory)]
+        [string]$Endpoint,
+
+        [string]$ImportListName,
+        [int]$CommandId,
+        [string]$CommandStatus,
+        [string]$LastSyncError,
+        [bool]$PostSyncVerified = $false,
+        [bool]$PreSyncImportListFound = $true,
+        [int]$ElapsedMs,
+        [int]$Attempts
+    )
+
+    # Normalize endpoint: strip scheme+host, redact sensitive query params
+    $normalizedEndpoint = $Endpoint
+    if ($Endpoint -match '^https?://') {
+        try {
+            $uri = [System.Uri]$Endpoint
+            $normalizedEndpoint = $uri.PathAndQuery
+        }
+        catch {
+            $normalizedEndpoint = $Endpoint -replace '^https?://[^/]+', ''
+        }
+    }
+    $normalizedEndpoint = $normalizedEndpoint -replace '(?i)(apiKey|token|password|secret|key|auth)=[^&]+', '$1=[REDACTED]'
+
+    # Sanitize lastSyncError (may contain URLs with secrets)
+    $sanitizedLastSyncError = $LastSyncError
+    if ($LastSyncError) {
+        # Redact full URLs
+        $sanitizedLastSyncError = $LastSyncError -replace 'https?://[^\s"'']+', '[REDACTED-URL]'
+        # Redact query params that might contain secrets
+        $sanitizedLastSyncError = $sanitizedLastSyncError -replace '(?i)(apiKey|token|password|secret|key|auth)=[^\s&"'']+', '$1=[REDACTED]'
+    }
+
+    $details = @{
+        ErrorCode = 'E2E_IMPORT_FAILED'
+        pluginName = $PluginName
+        importListId = $ImportListId
+        operation = 'ImportListSync'
+        phase = $Phase
+        endpoint = $normalizedEndpoint
+        postSyncVerified = $PostSyncVerified
+        preSyncImportListFound = $PreSyncImportListFound
+    }
+
+    # Add optional fields only when provided
+    if (-not [string]::IsNullOrWhiteSpace($ImportListName)) {
+        $details.importListName = $ImportListName
+    }
+    if ($CommandId -and $CommandId -gt 0) {
+        $details.commandId = $CommandId
+    }
+    if (-not [string]::IsNullOrWhiteSpace($CommandStatus)) {
+        $details.commandStatus = $CommandStatus
+    }
+    if (-not [string]::IsNullOrWhiteSpace($sanitizedLastSyncError)) {
+        $details.lastSyncError = $sanitizedLastSyncError
+    }
+    if ($ElapsedMs -and $ElapsedMs -gt 0) {
+        $details.elapsedMs = $ElapsedMs
+    }
+    if ($Attempts -and $Attempts -gt 0) {
+        $details.attempts = $Attempts
+    }
+
+    return $details
+}
+
 function Get-FoundIndexerNamesDetails {
     <#
     .SYNOPSIS
@@ -3491,4 +3670,4 @@ function Get-FoundIndexerNamesDetails {
     }
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Get-FoundIndexerNamesDetails, New-ApiTimeoutDetails, Invoke-LidarrApi
+Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Get-FoundIndexerNamesDetails, New-ApiTimeoutDetails, New-ImportFailedDetails, Invoke-LidarrApi

@@ -7,17 +7,16 @@ Write-Host "========================================" -ForegroundColor Cyan
 
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $jsonModule = Join-Path $repoRoot 'scripts/lib/e2e-json-output.psm1'
+$gatesModule = Join-Path $repoRoot 'scripts/lib/e2e-gates.psm1'
 
 if (-not (Test-Path $jsonModule)) {
     throw "Module not found: $jsonModule"
 }
-
-Import-Module $jsonModule -Force
-
-$gatesModule = Join-Path $repoRoot 'scripts/lib/e2e-gates.psm1'
 if (-not (Test-Path $gatesModule)) {
     throw "Module not found: $gatesModule"
 }
+
+Import-Module $jsonModule -Force
 Import-Module $gatesModule -Force
 
 $passed = 0
@@ -356,6 +355,90 @@ $tokenDetails = New-ApiTimeoutDetails `
 
 Assert-True "Token param is redacted" ($tokenDetails.endpoint -match 'token=\[REDACTED\]')
 Assert-True "Name param is preserved" ($tokenDetails.endpoint -match 'name=foo')
+
+Write-Host "`nTest Group: E2E_IMPORT_FAILED (P1)" -ForegroundColor Yellow
+
+# Test command failure
+$importFailedCmd = [PSCustomObject]@{
+    Gate = 'ImportList'
+    PluginName = 'Brainarr'
+    Outcome = 'failed'
+    Errors = @('ImportListSync command failed: Connection refused')
+    Details = @{
+        ErrorCode = 'E2E_IMPORT_FAILED'
+        pluginName = 'Brainarr'
+        importListId = 42
+        importListName = 'Brainarr AI Recommendations'
+        operation = 'ImportListSync'
+        phase = 'ImportList:PollCommand'
+        endpoint = '/api/v1/command/123'
+        commandId = 123
+        commandStatus = 'failed'
+        postSyncVerified = $false
+        preSyncImportListFound = $true
+    }
+}
+
+$jsonImportFailed = ConvertTo-E2ERunManifest -Results @($importFailedCmd) -Context @{
+    LidarrUrl = 'http://localhost:1234'
+    ContainerName = 'lidarr-e2e-test'
+}
+$mImportFailed = $jsonImportFailed | ConvertFrom-Json
+$importFailedResult = $mImportFailed.results | Where-Object { $_.gate -eq 'ImportList' } | Select-Object -First 1
+
+Assert-Equal "ImportFailed errorCode is E2E_IMPORT_FAILED" $importFailedResult.errorCode 'E2E_IMPORT_FAILED'
+Assert-True "ImportFailed details has no errorCode key (moved to top-level)" (-not ($importFailedResult.details.PSObject.Properties.Name -contains 'errorCode'))
+Assert-Equal "ImportFailed details.importListId is 42" $importFailedResult.details.importListId 42
+Assert-Equal "ImportFailed details.phase is ImportList:PollCommand" $importFailedResult.details.phase 'ImportList:PollCommand'
+Assert-Equal "ImportFailed details.operation is ImportListSync" $importFailedResult.details.operation 'ImportListSync'
+Assert-True "ImportFailed details.endpoint starts with /" ($importFailedResult.details.endpoint -match '^/')
+Assert-Equal "ImportFailed details.commandStatus is failed" $importFailedResult.details.commandStatus 'failed'
+Assert-Equal "ImportFailed details.preSyncImportListFound is true" $importFailedResult.details.preSyncImportListFound $true
+
+# Test post-sync verification with lastSyncError
+$postSyncFailed = [PSCustomObject]@{
+    Gate = 'ImportList'
+    PluginName = 'Brainarr'
+    Outcome = 'failed'
+    Errors = @('Import list sync error reported: LLM API returned error')
+    Details = @{
+        ErrorCode = 'E2E_IMPORT_FAILED'
+        pluginName = 'Brainarr'
+        importListId = 42
+        operation = 'ImportListSync'
+        phase = 'ImportList:PostSyncVerify'
+        endpoint = '/api/v1/importlist/42'
+        commandId = 456
+        commandStatus = 'completed'
+        lastSyncError = 'LLM API returned error'
+        postSyncVerified = $true
+        preSyncImportListFound = $true
+    }
+}
+
+$jsonPostSync = ConvertTo-E2ERunManifest -Results @($postSyncFailed) -Context @{
+    LidarrUrl = 'http://localhost:1234'
+    ContainerName = 'lidarr-e2e-test'
+}
+$mPostSync = $jsonPostSync | ConvertFrom-Json
+$postSyncResult = $mPostSync.results | Where-Object { $_.details.phase -eq 'ImportList:PostSyncVerify' } | Select-Object -First 1
+
+Assert-Equal "PostSync errorCode is E2E_IMPORT_FAILED" $postSyncResult.errorCode 'E2E_IMPORT_FAILED'
+Assert-Equal "PostSync details.postSyncVerified is true" $postSyncResult.details.postSyncVerified $true
+Assert-True "PostSync details.lastSyncError exists" ($null -ne $postSyncResult.details.lastSyncError)
+
+Write-Host "`nTest Group: lastSyncError Sanitization (New-ImportFailedDetails)" -ForegroundColor Yellow
+
+# Test lastSyncError sanitization - URLs and secrets should be redacted
+$lastSyncDetails = New-ImportFailedDetails `
+    -PluginName 'Brainarr' `
+    -ImportListId 99 `
+    -Phase 'ImportList:PostSyncVerify' `
+    -Endpoint '/api/v1/importlist/99' `
+    -LastSyncError 'Failed to connect to http://192.168.1.100:1234/api?apiKey=mysecret&token=abc123'
+
+Assert-True "lastSyncError URL is redacted" ($lastSyncDetails.lastSyncError -match '\[REDACTED-URL\]')
+Assert-True "lastSyncError does not contain 192.168" (-not ($lastSyncDetails.lastSyncError -match '192\.168'))
 
 Write-Host "`nSummary: $passed passed, $failed failed" -ForegroundColor Cyan
 if ($failed -gt 0) {
