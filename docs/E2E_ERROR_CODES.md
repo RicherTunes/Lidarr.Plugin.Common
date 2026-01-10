@@ -16,6 +16,7 @@ For diagnostics bundle structure, see `docs/DIAGNOSTICS_BUNDLE_CONTRACT.md`.
 | `E2E_AUTH_MISSING` | Required credentials are missing for the requested gate. | Secrets/env vars not set; Lidarr component not configured; masked `********` values but no overwrite requested. | Set required secrets/env vars; rerun Configure; use `E2E_FORCE_CONFIG_UPDATE=1` when rotating tokens. |
 | `E2E_CONFIG_INVALID` | Configuration exists but fails validation (server-side reject). | Wrong `redirectUrl`; invalid market; missing download path; invalid field shape. | Check component fields in Lidarr UI/API; rerun with `E2E_FORCE_CONFIG_UPDATE=1`; ensure schema field names match. |
 | `E2E_API_TIMEOUT` | A Lidarr API call or polling loop timed out. | Lidarr slow startup; Docker host under load; network hiccup; gate timeout too low. | Increase timeout input; re-run; inspect `container-logs.txt` and command status endpoints. |
+| `E2E_LIDARR_UNREACHABLE` | Lidarr API is unreachable (transport failure). | Lidarr not running; wrong port mapping; DNS failure; TLS/cert error; firewall. | Verify `-LidarrUrl` is correct and reachable; check container port mappings; inspect container logs; then re-run. |
 | `E2E_DOCKER_UNAVAILABLE` | Docker interaction required but not available. | Docker not installed/running; insufficient permissions; wrong container name. | Verify Docker daemon; set correct `-ContainerName`; run schema gate without docker-only features. |
 | `E2E_NO_RELEASES_ATTRIBUTED` | AlbumSearch returned releases but none attributed to the target plugin. | Indexer not actually used; parser regression (missing indexerId/indexer); wrong indexer id; cached results from other indexers. | Re-run AlbumSearch; check `indexerId` attribution warnings; verify plugin schema + configured indexer id. |
 | `E2E_QUEUE_NOT_FOUND` | Grab triggered but expected queue item could not be correlated. | Download client didn’t enqueue; correlation logic mismatch; Lidarr API change; auth failure masked as enqueue. | Inspect `queue-state.json`; check download client logs; verify DownloadProtocol matches release protocol. |
@@ -45,4 +46,3 @@ If a run fails very early (e.g. schema cannot load plugins), consult:
 
 - `hostBugSuspected` in `run-manifest.json` (classification + severity)
 - `docs/HOST_FAILURE_CLASSIFICATION.md`
-

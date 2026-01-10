@@ -157,6 +157,11 @@
               "description": "SHA256 hash of the mounted Lidarr.Common.dll for forensics and reproducibility."
             }
           }
+        },
+        "capabilities": {
+          "type": ["object", "null"],
+          "additionalProperties": true,
+          "description": "Host capability detection results (e.g., ALC fix presence)."
         }
       }
     },
