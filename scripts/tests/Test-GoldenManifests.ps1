@@ -189,6 +189,15 @@ Assert-True -Name "config-invalid.json validationErrorCount >= validationErrors.
 Assert-True -Name "config-invalid.json validationErrorsCapped boolean exists" -Condition ($null -ne $configInvalidResult.details.validationErrorsCapped)
 
 
+$dockerUnavailable = Validate-Fixture -FileName 'docker-unavailable.json'
+Assert-True -Name "docker-unavailable.json has E2E_DOCKER_UNAVAILABLE" -Condition ($dockerUnavailable.results.errorCode -contains 'E2E_DOCKER_UNAVAILABLE')
+$dockerUnavailableResult = $dockerUnavailable.results | Where-Object { $_.errorCode -eq 'E2E_DOCKER_UNAVAILABLE' }
+# Contract: must include structured docker failure details
+Assert-True -Name "docker-unavailable.json has dockerFailureKind" -Condition (-not [string]::IsNullOrWhiteSpace($dockerUnavailableResult.details.dockerFailureKind))
+Assert-True -Name "docker-unavailable.json has dockerPhase" -Condition (-not [string]::IsNullOrWhiteSpace($dockerUnavailableResult.details.dockerPhase))
+Assert-True -Name "docker-unavailable.json has suggestion" -Condition (-not [string]::IsNullOrWhiteSpace($dockerUnavailableResult.details.suggestion))
+Assert-True -Name "docker-unavailable.json operation starts with docker" -Condition ($dockerUnavailableResult.details.operation -match '^docker\s')
+
 Write-Host ""
 Write-Host "Passed: $passed" -ForegroundColor Green
 Write-Host "Failed: $failed" -ForegroundColor Red

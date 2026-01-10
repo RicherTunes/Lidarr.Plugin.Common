@@ -7,6 +7,7 @@ $moduleFiles = @(
     'e2e-gates.psm1',
     'e2e-json-output.psm1',
     'e2e-diagnostics.psm1',
+    'e2e-docker.psm1',
     'e2e-error-codes.psm1',
     'e2e-error-classifier.psm1',
     'e2e-component-ids.psm1',
@@ -31,6 +32,12 @@ $requiredGatesExports = @(
     'Get-FoundIndexerNamesDetails'
 )
 
+$requiredDockerExports = @(
+    'Invoke-E2EDocker',
+    'Test-E2EDockerAvailable',
+    'New-DockerUnavailableDetails'
+)
+
 $failed = 0
 foreach ($fn in $requiredGatesExports) {
     $cmd = Get-Command -Name $fn -ErrorAction SilentlyContinue
@@ -39,6 +46,16 @@ foreach ($fn in $requiredGatesExports) {
         $failed++
     } else {
         Write-Host "  [PASS] e2e-gates.psm1 exports: $fn" -ForegroundColor Green
+    }
+}
+
+foreach ($fn in $requiredDockerExports) {
+    $cmd = Get-Command -Name $fn -ErrorAction SilentlyContinue
+    if (-not $cmd) {
+        Write-Host "  [FAIL] e2e-docker.psm1 must export: $fn" -ForegroundColor Red
+        $failed++
+    } else {
+        Write-Host "  [PASS] e2e-docker.psm1 exports: $fn" -ForegroundColor Green
     }
 }
 
