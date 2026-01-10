@@ -198,6 +198,16 @@ Assert-True -Name "docker-unavailable.json has dockerPhase" -Condition (-not [st
 Assert-True -Name "docker-unavailable.json has suggestion" -Condition (-not [string]::IsNullOrWhiteSpace($dockerUnavailableResult.details.suggestion))
 Assert-True -Name "docker-unavailable.json operation starts with docker" -Condition ($dockerUnavailableResult.details.operation -match '^docker\s')
 
+$queueNotFound = Validate-Fixture -FileName 'queue-not-found.json'
+Assert-True -Name "queue-not-found.json has E2E_QUEUE_NOT_FOUND" -Condition ($queueNotFound.results.errorCode -contains 'E2E_QUEUE_NOT_FOUND')
+$queueNotFoundResult = $queueNotFound.results | Where-Object { $_.errorCode -eq 'E2E_QUEUE_NOT_FOUND' }
+# Contract: must include structured queue correlation details
+Assert-True -Name "queue-not-found.json has queueTimeoutSec (int)" -Condition ($null -ne $queueNotFoundResult.details.queueTimeoutSec)
+Assert-True -Name "queue-not-found.json has queueCount (int)" -Condition ($null -ne $queueNotFoundResult.details.queueCount)
+Assert-True -Name "queue-not-found.json has downloadId (non-empty)" -Condition (-not [string]::IsNullOrWhiteSpace($queueNotFoundResult.details.downloadId))
+Assert-True -Name "queue-not-found.json has albumId (int)" -Condition ($null -ne $queueNotFoundResult.details.albumId)
+Assert-True -Name "queue-not-found.json has indexerName (non-empty)" -Condition (-not [string]::IsNullOrWhiteSpace($queueNotFoundResult.details.indexerName))
+
 Write-Host ""
 Write-Host "Passed: $passed" -ForegroundColor Green
 Write-Host "Failed: $failed" -ForegroundColor Red
