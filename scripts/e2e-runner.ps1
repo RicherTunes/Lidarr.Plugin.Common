@@ -1067,6 +1067,8 @@ function Invoke-ConfigureRequest {
         $validationErrors = @()
         $fieldNames = @()
         $errorMsg = "$_"
+        $responseBody = $null
+        $contentType = $null
 
         # Try to extract HTTP status and validation details from exception
         if ($_.Exception.Response) {
@@ -1077,6 +1079,14 @@ function Invoke-ConfigureRequest {
                 # Ignore - some exception types don't have StatusCode
             }
 
+            # Try to get Content-Type header
+            try {
+                $contentType = $_.Exception.Response.ContentType
+            }
+            catch {
+                # Ignore
+            }
+
             # Try to read response body for validation details
             try {
                 $stream = $_.Exception.Response.GetResponseStream()
@@ -1085,21 +1095,28 @@ function Invoke-ConfigureRequest {
                     $responseBody = $reader.ReadToEnd()
                     $reader.Close()
 
+                    # Check for HTML response (proxy masquerade)
+                    if ($contentType -match 'text/html' -or $responseBody -match '^\s*<(!DOCTYPE|html)') {
+                        $validationErrors += "Expected JSON response but received HTML (possible proxy/auth page)"
+                        $phase = 'Configure:ValidationFailed'
+                    }
                     # Parse as JSON (Lidarr validation errors are JSON)
-                    $parsed = $responseBody | ConvertFrom-Json -ErrorAction SilentlyContinue
-                    if ($parsed) {
-                        if ($parsed -is [array]) {
-                            foreach ($item in $parsed) {
-                                if ($item.errorMessage) {
-                                    $validationErrors += $item.errorMessage
-                                }
-                                if ($item.propertyName) {
-                                    $fieldNames += $item.propertyName
+                    elseif ($responseBody) {
+                        $parsed = $responseBody | ConvertFrom-Json -ErrorAction SilentlyContinue
+                        if ($parsed) {
+                            if ($parsed -is [array]) {
+                                foreach ($item in $parsed) {
+                                    if ($item.errorMessage) {
+                                        $validationErrors += $item.errorMessage
+                                    }
+                                    if ($item.propertyName) {
+                                        $fieldNames += $item.propertyName
+                                    }
                                 }
                             }
-                        }
-                        elseif ($parsed.message) {
-                            $validationErrors += $parsed.message
+                            elseif ($parsed.message) {
+                                $validationErrors += $parsed.message
+                            }
                         }
                     }
                 }
@@ -1112,6 +1129,38 @@ function Invoke-ConfigureRequest {
         # Fall back to exception message if no validation errors extracted
         if ($validationErrors.Count -eq 0) {
             $validationErrors += $errorMsg
+        }
+
+        # CRITICAL: Detect auth failures - do NOT classify as E2E_CONFIG_INVALID
+        # Auth failures should be E2E_AUTH_MISSING (set by caller)
+        $isAuthFailure = $false
+        $authPatterns = @(
+            'unauthorized', 'forbidden', 'invalid_grant', 'invalid_client',
+            'token expired', 'oauth', 'authentication failed', 'access denied',
+            'api key', 'apikey invalid', 'not authenticated'
+        )
+
+        if ($httpStatus -eq 401 -or $httpStatus -eq 403) {
+            $isAuthFailure = $true
+        }
+        elseif ($responseBody -or $errorMsg) {
+            $combinedText = "$responseBody $errorMsg".ToLowerInvariant()
+            foreach ($pattern in $authPatterns) {
+                if ($combinedText -match [regex]::Escape($pattern)) {
+                    $isAuthFailure = $true
+                    break
+                }
+            }
+        }
+
+        if ($isAuthFailure) {
+            # Return auth failure marker - caller should set E2E_AUTH_MISSING
+            return @{
+                Success = $false
+                IsAuthFailure = $true
+                HttpStatus = $httpStatus
+                Errors = @($errorMsg)
+            }
         }
 
         $details = New-ConfigInvalidDetails `
@@ -1339,13 +1388,19 @@ function Update-ComponentAuthFields {
     }
 
     # Both failed - return failure with structured details
-    return @{
+    # Propagate IsAuthFailure if set (for E2E_AUTH_MISSING detection)
+    $failureResult = @{
         Updated = $false
         Failed = $true
         Details = $result.Details
         Errors = $result.Errors
         ChangedFields = $changedFieldNames
     }
+    if ($result.IsAuthFailure) {
+        $failureResult.IsAuthFailure = $true
+        $failureResult.HttpStatus = $result.HttpStatus
+    }
+    return $failureResult
 }
 
 function Test-ConfigureGateForPlugin {
@@ -1525,9 +1580,14 @@ function Test-ConfigureGateForPlugin {
                 } else {
                     $result.Errors += "Failed to create indexer for $PluginName"
                     $result.Outcome = "failed"
-                    # Merge structured error details
-                    foreach ($key in $createResult.Details.Keys) {
-                        $result.Details[$key] = $createResult.Details[$key]
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($createResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $createResult.HttpStatus
+                    } elseif ($createResult.Details) {
+                        foreach ($key in $createResult.Details.Keys) {
+                            $result.Details[$key] = $createResult.Details[$key]
+                        }
                     }
                     return $result
                 }
@@ -1539,9 +1599,14 @@ function Test-ConfigureGateForPlugin {
                 if ($updateResult.Failed) {
                     $result.Errors += "Failed to update indexer for $PluginName"
                     $result.Outcome = "failed"
-                    # Merge structured error details
-                    foreach ($key in $updateResult.Details.Keys) {
-                        $result.Details[$key] = $updateResult.Details[$key]
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($updateResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $updateResult.HttpStatus
+                    } elseif ($updateResult.Details) {
+                        foreach ($key in $updateResult.Details.Keys) {
+                            $result.Details[$key] = $updateResult.Details[$key]
+                        }
                     }
                     return $result
                 } elseif ($updateResult.Updated) {
@@ -1591,9 +1656,14 @@ function Test-ConfigureGateForPlugin {
                 } else {
                     $result.Errors += "Failed to create download client for $PluginName"
                     $result.Outcome = "failed"
-                    # Merge structured error details
-                    foreach ($key in $createResult.Details.Keys) {
-                        $result.Details[$key] = $createResult.Details[$key]
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($createResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $createResult.HttpStatus
+                    } elseif ($createResult.Details) {
+                        foreach ($key in $createResult.Details.Keys) {
+                            $result.Details[$key] = $createResult.Details[$key]
+                        }
                     }
                     return $result
                 }
@@ -1605,9 +1675,14 @@ function Test-ConfigureGateForPlugin {
                 if ($updateResult.Failed) {
                     $result.Errors += "Failed to update download client for $PluginName"
                     $result.Outcome = "failed"
-                    # Merge structured error details
-                    foreach ($key in $updateResult.Details.Keys) {
-                        $result.Details[$key] = $updateResult.Details[$key]
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($updateResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $updateResult.HttpStatus
+                    } elseif ($updateResult.Details) {
+                        foreach ($key in $updateResult.Details.Keys) {
+                            $result.Details[$key] = $updateResult.Details[$key]
+                        }
                     }
                     return $result
                 } elseif ($updateResult.Updated) {
@@ -1657,9 +1732,14 @@ function Test-ConfigureGateForPlugin {
                 } else {
                     $result.Errors += "Failed to create import list for $PluginName"
                     $result.Outcome = "failed"
-                    # Merge structured error details
-                    foreach ($key in $createResult.Details.Keys) {
-                        $result.Details[$key] = $createResult.Details[$key]
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($createResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $createResult.HttpStatus
+                    } elseif ($createResult.Details) {
+                        foreach ($key in $createResult.Details.Keys) {
+                            $result.Details[$key] = $createResult.Details[$key]
+                        }
                     }
                     return $result
                 }
@@ -1671,9 +1751,14 @@ function Test-ConfigureGateForPlugin {
                 if ($updateResult.Failed) {
                     $result.Errors += "Failed to update import list for $PluginName"
                     $result.Outcome = "failed"
-                    # Merge structured error details
-                    foreach ($key in $updateResult.Details.Keys) {
-                        $result.Details[$key] = $updateResult.Details[$key]
+                    # CRITICAL: Auth failures get E2E_AUTH_MISSING, not E2E_CONFIG_INVALID
+                    if ($updateResult.IsAuthFailure) {
+                        $result.Details.ErrorCode = "E2E_AUTH_MISSING"
+                        $result.Details.httpStatus = $updateResult.HttpStatus
+                    } elseif ($updateResult.Details) {
+                        foreach ($key in $updateResult.Details.Keys) {
+                            $result.Details[$key] = $updateResult.Details[$key]
+                        }
                     }
                     return $result
                 } elseif ($updateResult.Updated) {

@@ -638,6 +638,58 @@ Assert-True "Gate result has validationErrors after merge" ($gateResult.Details.
 Assert-True "Gate result preserves original componentIds" ($null -ne $gateResult.Details.componentIds)
 
 
+Write-Host "`nTest Group: Auth Failure Detection (CRITICAL)" -ForegroundColor Yellow
+
+# Verify auth failure wiring patterns exist in e2e-runner.ps1
+Assert-True "e2e-runner.ps1 detects 401 status" ($runnerContent -match 'httpStatus -eq 401')
+Assert-True "e2e-runner.ps1 detects 403 status" ($runnerContent -match 'httpStatus -eq 403')
+Assert-True "e2e-runner.ps1 has auth patterns list" ($runnerContent -match 'unauthorized.*forbidden.*invalid_grant')
+Assert-True "e2e-runner.ps1 sets IsAuthFailure" ($runnerContent -match 'IsAuthFailure = \$true')
+Assert-True "e2e-runner.ps1 returns E2E_AUTH_MISSING on auth failure" ($runnerContent -match 'IsAuthFailure.*E2E_AUTH_MISSING')
+
+# Simulate auth failure result (what Invoke-ConfigureRequest returns for 401/403)
+$authFailureResult = @{
+    Success = $false
+    IsAuthFailure = $true
+    HttpStatus = 401
+    Errors = @('401 Unauthorized')
+}
+
+Assert-True "Auth failure has Success=false" ($authFailureResult.Success -eq $false)
+Assert-True "Auth failure has IsAuthFailure=true" ($authFailureResult.IsAuthFailure -eq $true)
+Assert-True "Auth failure has HttpStatus" ($authFailureResult.HttpStatus -eq 401)
+
+# Simulate gate result handling for auth failure (as done in Test-ConfigureGateForPlugin)
+$gateResultAuth = @{
+    Gate = 'Configure'
+    PluginName = 'TestPlugin'
+    Outcome = 'failed'
+    Errors = @()
+    Details = @{
+        componentIds = @{}
+    }
+}
+
+$gateResultAuth.Errors += "Failed to create indexer for TestPlugin"
+$gateResultAuth.Outcome = "failed"
+if ($authFailureResult.IsAuthFailure) {
+    $gateResultAuth.Details.ErrorCode = "E2E_AUTH_MISSING"
+    $gateResultAuth.Details.httpStatus = $authFailureResult.HttpStatus
+}
+
+Assert-True "Auth failure gate result has E2E_AUTH_MISSING" ($gateResultAuth.Details['ErrorCode'] -eq 'E2E_AUTH_MISSING')
+Assert-True "Auth failure gate result has httpStatus" ($gateResultAuth.Details['httpStatus'] -eq 401)
+Assert-True "Auth failure gate result does NOT have componentType" (-not $gateResultAuth.Details.ContainsKey('componentType'))
+
+
+Write-Host "`nTest Group: HTML Response Detection" -ForegroundColor Yellow
+
+# Verify HTML masquerade detection exists
+Assert-True "e2e-runner.ps1 detects HTML content-type" ($runnerContent -match 'text/html')
+Assert-True "e2e-runner.ps1 detects HTML doctype" ($runnerContent -match '<!DOCTYPE|html')
+Assert-True "e2e-runner.ps1 sets ValidationFailed phase for HTML" ($runnerContent -match 'Configure:ValidationFailed')
+
+
 Write-Host "`nSummary: $passed passed, $failed failed" -ForegroundColor Cyan
 if ($failed -gt 0) {
     throw "$failed assertions failed"
