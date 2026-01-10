@@ -27,6 +27,7 @@ foreach ($moduleFile in $moduleFiles) {
 $requiredGatesExports = @(
     'New-ApiTimeoutDetails',
     'New-ImportFailedDetails',
+    'New-ConfigInvalidDetails',
     'Get-FoundIndexerNamesDetails'
 )
 

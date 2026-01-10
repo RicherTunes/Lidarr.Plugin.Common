@@ -3614,6 +3614,113 @@ function New-ImportFailedDetails {
     return $details
 }
 
+
+function New-ConfigInvalidDetails {
+    <#
+    .SYNOPSIS
+        Creates structured details for E2E_CONFIG_INVALID error code.
+
+    .DESCRIPTION
+        Single source of truth for the CONFIG_INVALID details structure.
+        Used when component create/update fails due to validation errors,
+        schema mismatch, or API rejection.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$PluginName,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('indexer', 'downloadClient', 'importList')]
+        [string]$ComponentType,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('create', 'update')]
+        [string]$Operation,
+
+        [Parameter(Mandatory)]
+        [string]$Endpoint,
+
+        [Parameter(Mandatory)]
+        [ValidateSet('Configure:Create:Post', 'Configure:Update:Put', 'Configure:SchemaMismatch', 'Configure:ValidationFailed')]
+        [string]$Phase,
+
+        [int]$HttpStatus,
+        [string[]]$ValidationErrors = @(),
+        [string[]]$FieldNames = @(),
+        [int]$ComponentId,
+        [string]$SchemaContract,
+        [int]$MaxErrors = 10,
+        [int]$MaxFields = 10
+    )
+
+    # Normalize endpoint: strip scheme+host, redact sensitive query params
+    $normalizedEndpoint = $Endpoint
+    if ($Endpoint -match '^https?://') {
+        try {
+            $uri = [System.Uri]$Endpoint
+            $normalizedEndpoint = $uri.PathAndQuery
+        }
+        catch {
+            $normalizedEndpoint = $Endpoint -replace '^https?://[^/]+', ''
+        }
+    }
+    $normalizedEndpoint = $normalizedEndpoint -replace '(?i)(apiKey|token|password|secret|key|auth)=[^&]+', '$1=[REDACTED]'
+
+    # Sanitize validation errors (may contain URLs with secrets or PII)
+    $sanitizedErrors = @()
+    foreach ($err in @($ValidationErrors)) {
+        if ([string]::IsNullOrWhiteSpace($err)) { continue }
+        $sanitized = $err
+        # Redact URLs
+        $sanitized = $sanitized -replace 'https?://[^\s"'']+', '[REDACTED-URL]'
+        # Redact query params that might contain secrets
+        $sanitized = $sanitized -replace '(?i)(apiKey|token|password|secret|key|auth|userId|email)=[^\s&"'']+', '$1=[REDACTED]'
+        $sanitizedErrors += $sanitized
+    }
+
+    # Cap and sort validation errors deterministically
+    $totalErrors = $sanitizedErrors.Count
+    $errorsCapped = $totalErrors -gt $MaxErrors
+    $sortedErrors = @($sanitizedErrors | Sort-Object { $_.ToUpperInvariant() })
+    $cappedErrors = if ($errorsCapped) { @($sortedErrors | Select-Object -First $MaxErrors) } else { $sortedErrors }
+
+    # Cap and sort field names deterministically
+    $cleanFieldNames = @($FieldNames | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    $totalFields = $cleanFieldNames.Count
+    $fieldsCapped = $totalFields -gt $MaxFields
+    $sortedFields = @($cleanFieldNames | Sort-Object { $_.ToUpperInvariant() })
+    $cappedFields = if ($fieldsCapped) { @($sortedFields | Select-Object -First $MaxFields) } else { $sortedFields }
+
+    $details = @{
+        ErrorCode = 'E2E_CONFIG_INVALID'
+        pluginName = $PluginName
+        componentType = $ComponentType
+        operation = $Operation
+        endpoint = $normalizedEndpoint
+        phase = $Phase
+        validationErrors = @($cappedErrors)
+        validationErrorCount = $totalErrors
+        validationErrorsCapped = $errorsCapped
+        fieldNames = @($cappedFields)
+        fieldNameCount = $totalFields
+        fieldNamesCapped = $fieldsCapped
+    }
+
+    # Add optional fields only when provided
+    if ($HttpStatus -and $HttpStatus -gt 0) {
+        $details.httpStatus = $HttpStatus
+    }
+    if ($ComponentId -and $ComponentId -gt 0) {
+        $details.componentId = $ComponentId
+    }
+    if (-not [string]::IsNullOrWhiteSpace($SchemaContract)) {
+        $details.schemaContract = $SchemaContract
+    }
+
+    return $details
+}
+
+
 function Get-FoundIndexerNamesDetails {
     <#
     .SYNOPSIS
@@ -3670,4 +3777,4 @@ function Get-FoundIndexerNamesDetails {
     }
 }
 
-Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Get-FoundIndexerNamesDetails, New-ApiTimeoutDetails, New-ImportFailedDetails, Invoke-LidarrApi
+Export-ModuleMember -Function Initialize-E2EGates, Test-PackagingPreflight, Test-SchemaGate, Test-SearchGate, Test-IsCredentialPrereqSkipReason, Test-AlbumSearchGate, Test-PluginGrabGate, Test-GrabGate, Test-ImportListGate, Test-MetadataGate, Test-AudioFileValidation, Test-LLMEndpoint, Test-LLMModelAvailability, Test-BrainarrLLMGate, Get-FoundIndexerNamesDetails, New-ApiTimeoutDetails, New-ImportFailedDetails, New-ConfigInvalidDetails, Invoke-LidarrApi

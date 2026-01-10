@@ -175,6 +175,20 @@ Assert-True -Name "import-failed.json has pluginName" -Condition ($null -ne $imp
 Assert-Equal -Name "import-failed.json operation is ImportListSync" -Actual $importFailedResult.details.operation -Expected 'ImportListSync'
 Assert-True -Name "import-failed.json has preSyncImportListFound" -Condition ($null -ne $importFailedResult.details.preSyncImportListFound)
 
+
+$configInvalid = Validate-Fixture -FileName 'config-invalid.json'
+Assert-True -Name "config-invalid.json has E2E_CONFIG_INVALID" -Condition ($configInvalid.results.errorCode -contains 'E2E_CONFIG_INVALID')
+$configInvalidResult = $configInvalid.results | Where-Object { $_.errorCode -eq 'E2E_CONFIG_INVALID' }
+# Contract: must include structured config invalid details
+Assert-True -Name "config-invalid.json has componentType (non-empty)" -Condition (-not [string]::IsNullOrWhiteSpace($configInvalidResult.details.componentType))
+Assert-True -Name "config-invalid.json has operation (non-empty)" -Condition (-not [string]::IsNullOrWhiteSpace($configInvalidResult.details.operation))
+Assert-True -Name "config-invalid.json endpoint starts with /api/" -Condition ($configInvalidResult.details.endpoint -match '^/api/')
+Assert-True -Name "config-invalid.json has pluginName" -Condition ($null -ne $configInvalidResult.details.pluginName)
+Assert-True -Name "config-invalid.json validationErrors count <= 10" -Condition ($configInvalidResult.details.validationErrors.Count -le 10)
+Assert-True -Name "config-invalid.json validationErrorCount >= validationErrors.Count" -Condition ($configInvalidResult.details.validationErrorCount -ge $configInvalidResult.details.validationErrors.Count)
+Assert-True -Name "config-invalid.json validationErrorsCapped boolean exists" -Condition ($null -ne $configInvalidResult.details.validationErrorsCapped)
+
+
 Write-Host ""
 Write-Host "Passed: $passed" -ForegroundColor Green
 Write-Host "Failed: $failed" -ForegroundColor Red
