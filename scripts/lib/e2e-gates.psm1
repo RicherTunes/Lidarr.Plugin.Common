@@ -883,6 +883,8 @@ function Test-PluginGrabGate {
         [switch]$SkipIfNoCreds = $true
     )
 
+    $currentPhase = 'Grab:Start'
+
     $result = [PSCustomObject]@{
         Gate = 'Grab'
         PluginName = $PluginName
@@ -912,11 +914,13 @@ function Test-PluginGrabGate {
     }
 
     try {
+        $currentPhase = 'Grab:GetIndexerInfo'
+
         # Get indexer info for diagnostics
-        $indexer = Invoke-LidarrApi -Endpoint "indexer/$IndexerId"
+        $indexer = Invoke-LidarrApi -Endpoint "indexer/$IndexerId"       
         if ($indexer) {
             $result.IndexerName = $indexer.name
-            $result.IndexerImplementation = $indexer.implementation
+            $result.IndexerImplementation = $indexer.implementation      
         }
 
         # Credential check helpers
@@ -1109,15 +1113,19 @@ function Test-PluginGrabGate {
             return $result
         }
 
+        $currentPhase = 'Grab:SelectRelease'
+
         # Pick release deterministically (culture-invariant, stable sort)
         $selection = Select-DeterministicRelease -Releases $pluginReleases -ReturnSelectionBasis
         $targetRelease = $selection.release
         $result.ReleaseGuid = $targetRelease.guid
         $result.ReleaseTitle = if ($targetRelease.title.Length -gt 50) { $targetRelease.title.Substring(0,50) + "..." } else { $targetRelease.title }
-        $result.SelectionBasis = $selection.selectionBasis
+        $result.Details.SelectionBasis = $selection.selectionBasis
 
         Write-Host "       Selected: $($result.ReleaseTitle) (of $($selection.selectionBasis.candidateCount) candidates)" -ForegroundColor Gray
-        Write-Host "       Triggering grab..." -ForegroundColor Gray
+        Write-Host "       Triggering grab..." -ForegroundColor Gray     
+
+        $currentPhase = 'Grab:GrabRequest'
 
         # Step 3: Grab the release
         $grabBody = @{
@@ -1160,6 +1168,7 @@ function Test-PluginGrabGate {
         }
 
         # Step 4: Wait for queue item
+        $currentPhase = 'Grab:WaitQueueItem'
         Write-Host "       Waiting for queue item..." -ForegroundColor Gray
         $deadline = (Get-Date).AddSeconds([Math]::Max(1, $QueueTimeoutSec))
         $queueItem = $null
@@ -1211,6 +1220,7 @@ function Test-PluginGrabGate {
         Write-Host "       Queue item found: id=$($queueItem.id) status=$($queueItem.status)" -ForegroundColor Green
 
         # Step 5: Wait for completion
+        $currentPhase = 'Grab:WaitQueueCompletion'
         $completionDeadline = (Get-Date).AddSeconds([Math]::Max(1, $CompletionTimeoutSec))
         while ((Get-Date) -lt $completionDeadline) {
             $queueRecords = Get-QueueRecords
@@ -1254,6 +1264,8 @@ function Test-PluginGrabGate {
 
         # Step 6: v3 multi-file validation (requires Docker container access)
         if ($ValidateOutputPath -and $ContainerName -and $result.OutputPath) {
+            $currentPhase = 'Grab:OutputValidation'
+
             # Docker prereq: explicit E2E_DOCKER_UNAVAILABLE at source (no classifier inference)
             if (Get-Command Test-E2EDockerAvailable -ErrorAction SilentlyContinue) {
                 $dockerCheck = Test-E2EDockerAvailable -Phase 'Grab:ValidateOutputPath' -Operation 'docker exec'
@@ -1451,6 +1463,11 @@ function Test-PluginGrabGate {
             return $result
         }
         $result.Errors += "Grab gate failed: $errMsg"
+        # Unexpected exceptions should be explicit and stable for triage (not inferred from errors[])
+        $result.Details.ErrorCode = 'E2E_INTERNAL_ERROR'
+        $result.Details.phase = $currentPhase
+        $result.Details.reason = 'UnhandledException'
+        $result.Details.note = 'Unhandled exception in Grab gate (see errors[] for redacted exception context).'
     }
 
     return $result

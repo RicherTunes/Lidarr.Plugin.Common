@@ -40,6 +40,11 @@ function Assert-True {
 
 $repoRoot = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $gatesPath = Join-Path $repoRoot 'scripts/lib/e2e-gates.psm1'
+if (-not (Test-Path $gatesPath)) {
+    throw "Module not found: $gatesPath"
+}
+
+$gatesContent = Get-Content $gatesPath -Raw -ErrorAction Stop
 
 # ============================================================================
 # Invariant: E2E_HOST_PLUGIN_DISCOVERY_DISABLED requires detectionBasis
@@ -142,6 +147,17 @@ Assert-True -Name "3 indexer names within cap" -Condition (Test-IndexerNamesCapp
 $manyNames = 1..15 | ForEach-Object { "Indexer$_" }
 $exceedsCap = -not (Test-IndexerNamesCapped $manyNames $maxIndexerNames)
 Assert-True -Name "15 indexer names exceeds cap: emitter should truncate" -Condition $exceedsCap
+
+# ============================================================================
+# Invariant: Grab gate unexpected exceptions are explicit at source
+# ============================================================================
+
+Write-Host ""
+Write-Host "Invariant: Grab gate unexpected exceptions emit E2E_INTERNAL_ERROR" -ForegroundColor Cyan
+
+$pattern = '(?s)function\s+Test-PluginGrabGate\b.*?\$result\.Details\.ErrorCode\s*=\s*''E2E_INTERNAL_ERROR'''
+$grabCatchHasInternalError = $gatesContent -match $pattern
+Assert-True -Name "Test-PluginGrabGate catch assigns Details.ErrorCode='E2E_INTERNAL_ERROR'" -Condition $grabCatchHasInternalError
 
 # ============================================================================
 # Summary
