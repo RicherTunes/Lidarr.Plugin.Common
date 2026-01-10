@@ -2804,6 +2804,13 @@ if __name__ == "__main__":
         if (-not $result.Details.ContainsKey('tagReadToolVersion')) {
             $result.Details.tagReadToolVersion = $result.TagReadToolVersion
         }
+        # Explicit ErrorCode for machine-actionable triage (not inferred from Errors[])
+        if (-not $result.Details.ContainsKey('ErrorCode')) {
+            $result.Details.ErrorCode = 'E2E_INTERNAL_ERROR'
+            $result.Details.phase = 'Metadata:UnhandledException'
+            $result.Details.reason = 'UnexpectedExceptionInMetadataGate'
+            $result.Details.note = 'Unhandled exception during metadata validation (see errors[] for context).'
+        }
     }
 
     return $result

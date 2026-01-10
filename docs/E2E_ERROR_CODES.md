@@ -141,7 +141,7 @@ Each explicit error code includes a `results[].details` object with stable, mach
 | `missingTags` | string[] | Required tag identifiers missing (max 10 entries). |
 | `sampleFile` | string | Deterministic sample file associated with the failure. |
 | `tagReadTool` | enum | Tool used to read tags: `mutagen` \| `taglib` \| `unknown`. |
-| `tagReadToolVersion` | string? | Version of the tag reader (null if unavailable). |
+| `tagReadToolVersion` | string? | Reserved; currently always null. May contain version string in future. |
 
 ### `E2E_IMPORT_FAILED`
 | Field | Type | Notes |
