@@ -14,6 +14,12 @@ if (-not (Test-Path $jsonModule)) {
 
 Import-Module $jsonModule -Force
 
+$gatesModule = Join-Path $repoRoot 'scripts/lib/e2e-gates.psm1'
+if (-not (Test-Path $gatesModule)) {
+    throw "Module not found: $gatesModule"
+}
+Import-Module $gatesModule -Force
+
 $passed = 0
 $failed = 0
 
@@ -238,6 +244,118 @@ $manyIndexersResult = $mManyIndexers.results | Where-Object { $_.plugin -eq 'Tes
 # So this test verifies the manifest preserves what's passed, and the golden fixture test verifies the cap
 Assert-True "ManyIndexers details.foundIndexerNamesCapped is true" ($manyIndexersResult.details.foundIndexerNamesCapped -eq $true)
 Assert-Equal "ManyIndexers details.foundIndexerNameCount is 50" $manyIndexersResult.details.foundIndexerNameCount 50
+
+Write-Host "`nTest Group: E2E_API_TIMEOUT (P1)" -ForegroundColor Yellow
+
+$apiTimeoutFail = [PSCustomObject]@{
+    Gate = 'AlbumSearch'
+    PluginName = 'Tidalarr'
+    Outcome = 'failed'
+    Errors = @('AlbumSearch command timed out after 120s (status=queued, message=null)')
+    Details = @{
+        ErrorCode = 'E2E_API_TIMEOUT'
+        timeoutType = 'commandPoll'
+        timeoutSeconds = 120
+        endpoint = '/api/v1/command/42'
+        operation = 'AlbumSearch'
+        pluginName = 'Tidalarr'
+        phase = 'AlbumSearch:PollCommand'
+        indexerId = 101
+        commandId = 42
+    }
+}
+
+$jsonApiTimeout = ConvertTo-E2ERunManifest -Results @($apiTimeoutFail) -Context @{
+    LidarrUrl = 'http://localhost:1234'
+    ContainerName = 'lidarr-e2e-test'
+}
+$mApiTimeout = $jsonApiTimeout | ConvertFrom-Json
+$apiTimeoutResult = $mApiTimeout.results | Where-Object { $_.gate -eq 'AlbumSearch' -and $_.plugin -eq 'Tidalarr' } | Select-Object -First 1
+
+Assert-Equal "ApiTimeout errorCode is E2E_API_TIMEOUT" $apiTimeoutResult.errorCode 'E2E_API_TIMEOUT'
+Assert-True "ApiTimeout details has no errorCode key (moved to top-level)" (-not ($apiTimeoutResult.details.PSObject.Properties.Name -contains 'errorCode'))
+Assert-Equal "ApiTimeout details.timeoutType is commandPoll" $apiTimeoutResult.details.timeoutType 'commandPoll'
+Assert-Equal "ApiTimeout details.timeoutSeconds is 120" $apiTimeoutResult.details.timeoutSeconds 120
+Assert-Equal "ApiTimeout details.endpoint is /api/v1/command/42" $apiTimeoutResult.details.endpoint '/api/v1/command/42'
+Assert-Equal "ApiTimeout details.operation is AlbumSearch" $apiTimeoutResult.details.operation 'AlbumSearch'
+Assert-Equal "ApiTimeout details.pluginName is Tidalarr" $apiTimeoutResult.details.pluginName 'Tidalarr'
+Assert-Equal "ApiTimeout details.phase is AlbumSearch:PollCommand" $apiTimeoutResult.details.phase 'AlbumSearch:PollCommand'
+Assert-Equal "ApiTimeout details.indexerId is 101" $apiTimeoutResult.details.indexerId 101
+Assert-Equal "ApiTimeout details.commandId is 42" $apiTimeoutResult.details.commandId 42
+
+# Test queueCompletion timeout type
+$queueTimeoutFail = [PSCustomObject]@{
+    Gate = 'Grab'
+    PluginName = 'Qobuzarr'
+    Outcome = 'failed'
+    Errors = @('Queue item did not complete within 600s (status=downloading, downloadId=abc123)')
+    Details = @{
+        ErrorCode = 'E2E_API_TIMEOUT'
+        timeoutType = 'queueCompletion'
+        timeoutSeconds = 600
+        endpoint = '/api/v1/queue'
+        operation = 'GrabQueueWait'
+        pluginName = 'Qobuzarr'
+        phase = 'Grab:WaitQueueCompletion'
+        indexerId = 102
+    }
+}
+
+$jsonQueueTimeout = ConvertTo-E2ERunManifest -Results @($queueTimeoutFail) -Context @{
+    LidarrUrl = 'http://localhost:1234'
+    ContainerName = 'lidarr-e2e-test'
+}
+$mQueueTimeout = $jsonQueueTimeout | ConvertFrom-Json
+$queueTimeoutResult = $mQueueTimeout.results | Where-Object { $_.gate -eq 'Grab' -and $_.plugin -eq 'Qobuzarr' } | Select-Object -First 1
+
+Assert-Equal "QueueTimeout errorCode is E2E_API_TIMEOUT" $queueTimeoutResult.errorCode 'E2E_API_TIMEOUT'
+Assert-Equal "QueueTimeout details.timeoutType is queueCompletion" $queueTimeoutResult.details.timeoutType 'queueCompletion'
+Assert-Equal "QueueTimeout details.timeoutSeconds is 600" $queueTimeoutResult.details.timeoutSeconds 600
+Assert-Equal "QueueTimeout details.phase is Grab:WaitQueueCompletion" $queueTimeoutResult.details.phase 'Grab:WaitQueueCompletion'
+
+Write-Host "`nTest Group: Endpoint Normalization & Redaction (New-ApiTimeoutDetails)" -ForegroundColor Yellow
+
+# Test the helper directly to verify endpoint normalization
+# Full URL with sensitive query params should be normalized to path-only with redaction
+$fullUrlDetails = New-ApiTimeoutDetails `
+    -TimeoutType 'http' `
+    -TimeoutSeconds 30 `
+    -Endpoint 'http://192.168.1.2:8686/api/v1/release?apiKey=mysecretkey&albumId=123' `
+    -Operation 'FetchReleases' `
+    -PluginName 'TestPlugin' `
+    -Phase 'AlbumSearch:FetchReleases'
+
+# The endpoint should NOT leak the internal IP
+Assert-True "FullURL endpoint does not contain 192.168" (-not ($fullUrlDetails.endpoint -match '192\.168'))
+# The endpoint should be path-only
+Assert-True "FullURL endpoint starts with /" ($fullUrlDetails.endpoint -match '^/')
+# apiKey should be redacted
+Assert-True "FullURL endpoint has apiKey redacted" ($fullUrlDetails.endpoint -match 'apiKey=\[REDACTED\]')
+# albumId should NOT be redacted (not sensitive)
+Assert-True "FullURL endpoint preserves albumId" ($fullUrlDetails.endpoint -match 'albumId=123')
+
+# Test: Path-only endpoint should pass through unchanged
+$pathOnlyDetails = New-ApiTimeoutDetails `
+    -TimeoutType 'commandPoll' `
+    -TimeoutSeconds 60 `
+    -Endpoint '/api/v1/command/42' `
+    -Operation 'AlbumSearch' `
+    -PluginName 'TestPlugin2' `
+    -Phase 'AlbumSearch:PollCommand'
+
+Assert-Equal "PathOnly endpoint preserved" $pathOnlyDetails.endpoint '/api/v1/command/42'
+
+# Test: token query param should also be redacted
+$tokenDetails = New-ApiTimeoutDetails `
+    -TimeoutType 'http' `
+    -TimeoutSeconds 10 `
+    -Endpoint '/api/v1/indexer/test?token=abc123&name=foo' `
+    -Operation 'IndexerTest' `
+    -PluginName 'TestPlugin3' `
+    -Phase 'Search:TestIndexer'
+
+Assert-True "Token param is redacted" ($tokenDetails.endpoint -match 'token=\[REDACTED\]')
+Assert-True "Name param is preserved" ($tokenDetails.endpoint -match 'name=foo')
 
 Write-Host "`nSummary: $passed passed, $failed failed" -ForegroundColor Cyan
 if ($failed -gt 0) {
