@@ -104,12 +104,8 @@
           "MUSICBRAINZ_TRACKID"
         ],
         "sampleFile": "01 - So What.flac",
-        "presentTags": [
-          "TITLE",
-          "ARTIST",
-          "ALBUM",
-          "TRACKNUMBER"
-        ]
+        "tagReadTool": "mutagen",
+        "tagReadToolVersion": null
       }
     }
   ],
