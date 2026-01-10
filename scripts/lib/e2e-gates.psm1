@@ -3239,7 +3239,8 @@ function Test-BrainarrLLMGate {
             $result.Details.expectedModelFound = $found
 
             if (-not $found) {
-                $result.Errors += "E2E_PROVIDER_UNAVAILABLE: Expected model not found on LLM endpoint (expectedModelIdHash=$expectedHash, modelsCount=$($llmProbe.ModelsCount))."
+                $result.Details.ErrorCode = 'E2E_PROVIDER_UNAVAILABLE'
+                $result.Errors += "Expected model not found on LLM endpoint (expectedModelIdHash=$expectedHash, modelsCount=$($llmProbe.ModelsCount))."
                 return $result
             }
         }
