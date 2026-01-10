@@ -127,6 +127,73 @@ public class BadSanitizerTests
         $failed++
     }
 
+    # Test 5: Skips comment-only matches
+    Write-Host "`n[TEST] Skips comment-only matches..." -ForegroundColor Cyan
+    Remove-Item -Path (Join-Path $fakeRepo 'src\Tests') -Recurse -Force -ErrorAction SilentlyContinue
+    Add-ViolationFile -RepoPath $fakeRepo -RelPath 'src\CommentedCode.cs' -Content @'
+public class CommentedCode
+{
+    // Path.GetInvalidFileNameChars() - this is just a comment
+    /*
+     * Another comment mentioning Path.GetInvalidFileNameChars()
+     */
+    public string DoSomething() => "Hello";
+}
+'@
+
+    $result = & $lintScript -RepoPath $fakeRepo 2>&1
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -eq 0) {
+        Write-Host "  [PASS] Comment-only matches skipped (exit=0)" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] Comment matches not skipped (exit=$exitCode)" -ForegroundColor Red
+        $failed++
+    }
+
+    # Test 6: Skips excluded directories (bin, obj, docs, scripts)
+    Write-Host "`n[TEST] Skips excluded directories..." -ForegroundColor Cyan
+    Remove-Item -Path (Join-Path $fakeRepo 'src\CommentedCode.cs') -Force
+    Add-ViolationFile -RepoPath $fakeRepo -RelPath 'bin\Debug\BadCode.cs' -Content @'
+public class BadCode { var chars = Path.GetInvalidFileNameChars(); }
+'@
+    Add-ViolationFile -RepoPath $fakeRepo -RelPath 'obj\Release\BadCode.cs' -Content @'
+public class BadCode { var chars = Path.GetInvalidFileNameChars(); }
+'@
+    Add-ViolationFile -RepoPath $fakeRepo -RelPath 'docs\Example.cs' -Content @'
+public class BadCode { var chars = Path.GetInvalidFileNameChars(); }
+'@
+
+    $result = & $lintScript -RepoPath $fakeRepo 2>&1
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -eq 0) {
+        Write-Host "  [PASS] Excluded directories skipped (exit=0)" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] Excluded directories not skipped (exit=$exitCode)" -ForegroundColor Red
+        $failed++
+    }
+
+    # Test 7: Nested path violations are detected (path normalization verified visually)
+    Write-Host "`n[TEST] Nested path violations detected..." -ForegroundColor Cyan
+    Remove-Item -Path (Join-Path $fakeRepo 'bin') -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $fakeRepo 'obj') -Recurse -Force -ErrorAction SilentlyContinue
+    Remove-Item -Path (Join-Path $fakeRepo 'docs') -Recurse -Force -ErrorAction SilentlyContinue
+    Add-ViolationFile -RepoPath $fakeRepo -RelPath 'src\nested\deep\BadCode.cs' -Content @'
+public class BadCode { var chars = Path.GetInvalidFileNameChars(); }
+'@
+
+    & $lintScript -RepoPath $fakeRepo | Out-Null
+    $exitCode = $LASTEXITCODE
+
+    # Verify nested paths are scanned and violations detected
+    if ($exitCode -eq 1) {
+        Write-Host "  [PASS] Nested path violation detected (exit=1)" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] Nested path violation not detected (exit=$exitCode)" -ForegroundColor Red
+        $failed++
+    }
+
     Write-Host "`n========================================" -ForegroundColor Cyan
     if ($failed -gt 0) {
         Write-Host "FAILED: $failed test(s) failed" -ForegroundColor Red

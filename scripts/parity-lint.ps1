@@ -11,69 +11,149 @@
     Scan all known plugin repos.
 .PARAMETER Fix
     Show suggested fixes for violations.
+.PARAMETER Mode
+    Run mode: 'interactive' (default) or 'ci' (strict, fails on expired baselines).
 #>
 
 param(
     [string]$RepoPath,
     [switch]$AllRepos,
-    [switch]$Fix
+    [switch]$Fix,
+    [ValidateSet('interactive', 'ci')]
+    [string]$Mode = 'interactive'
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 # Known tech debt baseline - violations here are tracked but don't fail
+# Each entry has: Key (repo:file:pattern), Owner, Expiry (YYYY-MM-DD), IssueUrl
 $script:KnownTechDebt = @(
-    'qobuzarr:main_pluginhost.cs:GetInvalidFileNameChars'
-    'qobuzarr:QobuzCLI\Models\Configuration\DuplicateHandlingConfig.cs:GetInvalidFileNameChars'
-    'qobuzarr:QobuzCLI\Services\PluginHost.cs:GetInvalidFileNameChars'
-    'qobuzarr:src\Configuration\QobuzPluginConstants.cs:FLACMagicBytes'
-    'tidalarr:src\Tidalarr\Integration\LidarrNative\TidalLidarrDownloadClient.cs:GetInvalidFileNameChars'
-    'tidalarr:TidalCLI\TidalCLIHelper.cs:GetInvalidFileNameChars'
+    @{
+        Key = 'qobuzarr:main_pluginhost.cs:GetInvalidFileNameChars'
+        Owner = 'alex'
+        Expiry = '2026-06-01'
+        IssueUrl = 'https://github.com/RicherTunes/Qobuzarr/issues/TBD'
+    }
+    @{
+        Key = 'qobuzarr:QobuzCLI/Models/Configuration/DuplicateHandlingConfig.cs:GetInvalidFileNameChars'
+        Owner = 'alex'
+        Expiry = '2026-06-01'
+        IssueUrl = 'https://github.com/RicherTunes/Qobuzarr/issues/TBD'
+    }
+    @{
+        Key = 'qobuzarr:QobuzCLI/Services/PluginHost.cs:GetInvalidFileNameChars'
+        Owner = 'alex'
+        Expiry = '2026-06-01'
+        IssueUrl = 'https://github.com/RicherTunes/Qobuzarr/issues/TBD'
+    }
+    @{
+        Key = 'qobuzarr:src/Configuration/QobuzPluginConstants.cs:FLACMagicBytes'
+        Owner = 'alex'
+        Expiry = '2026-06-01'
+        IssueUrl = 'https://github.com/RicherTunes/Qobuzarr/issues/TBD'
+    }
+    @{
+        Key = 'tidalarr:src/Tidalarr/Integration/LidarrNative/TidalLidarrDownloadClient.cs:GetInvalidFileNameChars'
+        Owner = 'alex'
+        Expiry = '2026-06-01'
+        IssueUrl = 'https://github.com/RicherTunes/Tidalarr/issues/TBD'
+    }
+    @{
+        Key = 'tidalarr:TidalCLI/TidalCLIHelper.cs:GetInvalidFileNameChars'
+        Owner = 'alex'
+        Expiry = '2026-06-01'
+        IssueUrl = 'https://github.com/RicherTunes/Tidalarr/issues/TBD'
+    }
 )
 
-# Banned patterns - specific to avoid false positives
+# Banned patterns with full context
 $script:BannedPatterns = @(
     @{
         Name = 'GetInvalidFileNameChars'
-        Description = 'Using Path.GetInvalidFileNameChars() (use Sanitize from Common)'
+        Why = 'Platform-specific invalid chars cause cross-platform bugs'
+        Use = 'Lidarr.Plugin.Common.Security.Sanitize.PathSegment()'
+        Link = 'src/Security/Sanitize.cs'
         Pattern = 'Path\.GetInvalidFileNameChars\s*\(\s*\)'
         Severity = 'error'
-        Fix = 'Use Lidarr.Plugin.Common.Security.Sanitize.PathSegment()'
     }
     @{
         Name = 'FLACMagicBytes'
-        Description = 'Hardcoded FLAC magic bytes (use DownloadPayloadValidator)'
+        Why = 'Hardcoded magic bytes diverge from shared validator'
+        Use = 'DownloadPayloadValidator.LooksLikeAudioPayload()'
+        Link = 'src/Validation/DownloadPayloadValidator.cs'
         Pattern = '0x66\s*,\s*0x4C\s*,\s*0x61\s*,\s*0x43'
         Severity = 'error'
-        Fix = 'Use DownloadPayloadValidator.LooksLikeAudioPayload()'
     }
     @{
         Name = 'OggMagicBytes'
-        Description = 'Hardcoded OggS magic bytes (use DownloadPayloadValidator)'
+        Why = 'Hardcoded magic bytes diverge from shared validator'
+        Use = 'DownloadPayloadValidator.LooksLikeAudioPayload()'
+        Link = 'src/Validation/DownloadPayloadValidator.cs'
         Pattern = '0x4F\s*,\s*0x67\s*,\s*0x67\s*,\s*0x53'
         Severity = 'error'
-        Fix = 'Use DownloadPayloadValidator.LooksLikeAudioPayload()'
     }
     @{
         Name = 'ID3MagicBytes'
-        Description = 'Hardcoded ID3 magic bytes (use DownloadPayloadValidator)'
+        Why = 'Hardcoded magic bytes diverge from shared validator'
+        Use = 'DownloadPayloadValidator.LooksLikeAudioPayload()'
+        Link = 'src/Validation/DownloadPayloadValidator.cs'
         Pattern = '0x49\s*,\s*0x44\s*,\s*0x33'
         Severity = 'error'
-        Fix = 'Use DownloadPayloadValidator.LooksLikeAudioPayload()'
     }
 )
 
-function Test-IsBaselined {
-    param([string]$Repo, [string]$File, [string]$Pattern)
-    $repoLower = $Repo.ToLowerInvariant()
-    foreach ($b in $script:KnownTechDebt) {
-        $bLower = $b.ToLowerInvariant()
-        if ("${repoLower}:${File}:${Pattern}".ToLowerInvariant() -like "*$bLower*") {
-            return $true
-        }
-    }
+# Directories to exclude from scanning
+$script:ExcludeDirs = @('ext', 'docs', 'scripts', 'bin', 'obj', '.git', '.worktrees', 'node_modules')
+
+function Normalize-Path {
+    param([string]$Path)
+    return $Path -replace '\\', '/'
+}
+
+function Test-IsInComment {
+    param([string]$Content, [int]$MatchIndex)
+    $beforeMatch = $Content.Substring(0, $MatchIndex)
+    $lastNewline = $beforeMatch.LastIndexOf("`n")
+    $lineStart = if ($lastNewline -ge 0) { $lastNewline + 1 } else { 0 }
+    $lineContent = $Content.Substring($lineStart, $MatchIndex - $lineStart)
+    if ($lineContent -match '//') { return $true }
+    $openCount = ([regex]::Matches($beforeMatch, '/\*')).Count
+    $closeCount = ([regex]::Matches($beforeMatch, '\*/')).Count
+    if ($openCount -gt $closeCount) { return $true }
     return $false
+}
+
+function Test-IsExcludedPath {
+    param([string]$RelPath)
+    $normalized = Normalize-Path $RelPath
+    $parts = $normalized -split '/'
+    foreach ($part in $parts) {
+        if ($part -in $script:ExcludeDirs) { return $true }
+        if ($part -match '^Tests?$' -or $part -match '\.Tests?$') { return $true }
+    }
+    if ($normalized -match '(Tests?|\.Tests?)\.cs$') { return $true }
+    return $false
+}
+
+function Get-BaselineEntry {
+    param([string]$Repo, [string]$File, [string]$Pattern)
+    $normalizedFile = Normalize-Path $File
+    $key = "${Repo}:${normalizedFile}:${Pattern}".ToLowerInvariant()
+    foreach ($entry in $script:KnownTechDebt) {
+        $entryKey = $entry.Key.ToLowerInvariant()
+        if ($key -like "*$entryKey*" -or $entryKey -like "*$key*") { return $entry }
+    }
+    return $null
+}
+
+function Test-BaselineExpired {
+    param([hashtable]$Entry)
+    if (-not $Entry.Expiry) { return $false }
+    try {
+        $expiryDate = [DateTime]::ParseExact($Entry.Expiry, 'yyyy-MM-dd', $null)
+        return [DateTime]::Now -gt $expiryDate
+    } catch { return $false }
 }
 
 function Get-PluginRepos {
@@ -95,25 +175,25 @@ function Find-Violations {
     $files = Get-ChildItem -Path $RepoPath -Filter '*.cs' -Recurse -File -ErrorAction SilentlyContinue
     foreach ($file in $files) {
         $rel = $file.FullName.Substring($RepoPath.Length).TrimStart('\', '/')
-        # Skip ext/, tests, worktrees
-        if ($rel -like 'ext*' -or $rel -like '*Test*' -or $rel -like '*.worktrees*') { continue }
-
+        $relNormalized = Normalize-Path $rel
+        if (Test-IsExcludedPath $rel) { continue }
         try {
             $content = Get-Content $file.FullName -Raw -ErrorAction SilentlyContinue
             if (-not $content) { continue }
-
             foreach ($p in $script:BannedPatterns) {
                 $matches = [regex]::Matches($content, $p.Pattern)
                 foreach ($m in $matches) {
+                    if (Test-IsInComment -Content $content -MatchIndex $m.Index) { continue }
                     $lineNum = ($content.Substring(0, $m.Index) -split "`n").Count
                     $violations += [PSCustomObject]@{
                         Repo = $RepoName
-                        File = $rel
+                        File = $relNormalized
                         Line = $lineNum
                         Pattern = $p.Name
-                        Description = $p.Description
+                        Why = $p.Why
+                        Use = $p.Use
+                        Link = $p.Link
                         Severity = $p.Severity
-                        Fix = $p.Fix
                     }
                 }
             }
@@ -124,10 +204,12 @@ function Find-Violations {
 
 # Main
 $script:ShowFix = $Fix
+$script:IsCIMode = ($Mode -eq 'ci')
 $commonRoot = Split-Path $PSScriptRoot -Parent
 
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Parity Lint - Plugin Re-invention Check" -ForegroundColor Cyan
+if ($script:IsCIMode) { Write-Host "Mode: CI (strict)" -ForegroundColor Yellow }
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -139,43 +221,67 @@ if ($RepoPath) {
     $reposToScan = Get-PluginRepos -CommonRoot $commonRoot
     if ($reposToScan.Count -eq 0) { Write-Host "No repos found" -ForegroundColor Yellow; exit 0 }
 } else {
-    Write-Host "Usage: parity-lint.ps1 [-RepoPath <path>] [-AllRepos] [-Fix]"
+    Write-Host "Usage: parity-lint.ps1 [-RepoPath <path>] [-AllRepos] [-Fix] [-Mode ci|interactive]"
     exit 0
 }
 
 $allNew = @()
+$expiredBaselines = @()
+
 foreach ($repo in $reposToScan) {
     Write-Host "Scanning: $($repo.Name)" -ForegroundColor Cyan
     $violations = @(Find-Violations -RepoPath $repo.Path -RepoName $repo.Name)
-
-    $new = @(); $baselined = 0
+    $new = @(); $baselined = 0; $expired = @()
     foreach ($v in $violations) {
-        if (Test-IsBaselined -Repo $v.Repo -File $v.File -Pattern $v.Pattern) { $baselined++ }
-        else { $new += $v }
+        $entry = Get-BaselineEntry -Repo $v.Repo -File $v.File -Pattern $v.Pattern
+        if ($entry) {
+            if (Test-BaselineExpired $entry) {
+                $expired += [PSCustomObject]@{ Violation = $v; Entry = $entry }
+            }
+            $baselined++
+        } else { $new += $v }
     }
-
     if ($new.Count -eq 0 -and $baselined -eq 0) {
         Write-Host "  [OK] No violations" -ForegroundColor Green
-    } elseif ($new.Count -eq 0) {
+    } elseif ($new.Count -eq 0 -and $expired.Count -eq 0) {
         Write-Host "  [OK] $baselined baselined (tech debt)" -ForegroundColor DarkGray
     } else {
-        Write-Host "  Found $($new.Count) NEW violation(s):" -ForegroundColor Red
-        foreach ($v in $new) {
-            Write-Host "    [X] $($v.File):$($v.Line) - $($v.Pattern)" -ForegroundColor Red
-            if ($script:ShowFix) { Write-Host "        Fix: $($v.Fix)" -ForegroundColor Green }
+        if ($new.Count -gt 0) {
+            Write-Host "  Found $($new.Count) NEW violation(s):" -ForegroundColor Red
+            foreach ($v in $new) {
+                Write-Host "    [X] $($v.File):$($v.Line) - $($v.Pattern)" -ForegroundColor Red
+                Write-Host "        WHY:  $($v.Why)" -ForegroundColor Yellow
+                Write-Host "        USE:  $($v.Use)" -ForegroundColor Green
+                Write-Host "        LINK: $($v.Link)" -ForegroundColor Cyan
+            }
+            $allNew += $new
         }
-        $allNew += $new
+        if ($expired.Count -gt 0) {
+            Write-Host "  Found $($expired.Count) EXPIRED baseline(s):" -ForegroundColor Magenta
+            foreach ($e in $expired) {
+                Write-Host "    [!] $($e.Violation.File):$($e.Violation.Line) - $($e.Violation.Pattern)" -ForegroundColor Magenta
+                Write-Host "        Owner:  $($e.Entry.Owner)" -ForegroundColor Yellow
+                Write-Host "        Expiry: $($e.Entry.Expiry) (EXPIRED)" -ForegroundColor Red
+                Write-Host "        Issue:  $($e.Entry.IssueUrl)" -ForegroundColor Cyan
+            }
+            $expiredBaselines += $expired
+        }
     }
     Write-Host ""
 }
 
 Write-Host "========================================" -ForegroundColor Cyan
-Write-Host "Summary: Repos=$($reposToScan.Count), New errors=$($allNew.Count)" -ForegroundColor Cyan
+Write-Host "Summary: Repos=$($reposToScan.Count), New=$($allNew.Count), Expired=$($expiredBaselines.Count)" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
+$exitCode = 0
 if ($allNew.Count -gt 0) {
     Write-Host "FAILED: $($allNew.Count) new violation(s)" -ForegroundColor Red
-    exit 1
+    $exitCode = 1
 }
-Write-Host "PASSED" -ForegroundColor Green
-exit 0
+if ($expiredBaselines.Count -gt 0 -and $script:IsCIMode) {
+    Write-Host "FAILED: $($expiredBaselines.Count) expired baseline(s) in CI mode" -ForegroundColor Red
+    $exitCode = 1
+}
+if ($exitCode -eq 0) { Write-Host "PASSED" -ForegroundColor Green }
+exit $exitCode
