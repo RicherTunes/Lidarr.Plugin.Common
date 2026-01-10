@@ -664,6 +664,51 @@ function New-OutcomeResult {
     }
 }
 
+function New-LidarrUnreachableDetails {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Phase,
+
+        [Parameter(Mandatory)]
+        [string]$Operation,
+
+        [Parameter(Mandatory)]
+        [string]$Endpoint,
+
+        [Parameter(Mandatory)]
+        [int]$TimeoutSeconds,
+
+        [Parameter(Mandatory)]
+        [AllowNull()]
+        [System.Exception]$Exception
+    )
+
+    $exceptionType = if ($Exception) { $Exception.GetType().FullName } else { $null }
+    $message = if ($Exception) { "$($Exception.Message)" } else { "" }
+
+    $unreachableKind = 'unknown'
+    if ($message -match '(?i)(name or service not known|no such host|name resolution|cannot resolve|name does not resolve)') {
+        $unreachableKind = 'dns'
+    } elseif ($message -match '(?i)(refused|actively refused|connection refused)') {
+        $unreachableKind = 'connectionRefused'
+    } elseif ($message -match '(?i)(timed out|timeout)') {
+        $unreachableKind = 'timeout'
+    } elseif ($message -match '(?i)(ssl|tls|certificate|authentication failed)') {
+        $unreachableKind = 'tls'
+    }
+
+    return @{
+        ErrorCode = 'E2E_LIDARR_UNREACHABLE'
+        phase = $Phase
+        operation = $Operation
+        endpoint = $Endpoint
+        timeoutSeconds = $TimeoutSeconds
+        unreachableKind = $unreachableKind
+        exceptionType = $exceptionType
+        suggestion = 'Verify -LidarrUrl is correct and reachable; check container/port mappings; inspect Lidarr logs; then re-run.'
+    }
+}
+
 <#
 .SYNOPSIS
     Normalizes nested credential arrays to plain string arrays for JSON serialization.
@@ -1849,6 +1894,32 @@ $pluginList = $Plugins -split ',' | ForEach-Object { $_.Trim() }
 $allResults = @()
 $overallSuccess = $true
 $stopNow = $false
+$stopReason = $null
+
+# Preflight: Lidarr API must be reachable before running any per-plugin gates.
+# Emit E2E_LIDARR_UNREACHABLE explicitly rather than letting Schema gate throw a generic exception.
+$preflightTimeoutSec = 5
+$preflightGateStart = Get-Date
+try {
+    Invoke-LidarrApi -Endpoint 'system/status' -TimeoutSec $preflightTimeoutSec | Out-Null
+}
+catch {
+    $preflightGateEnd = Get-Date
+    $details = New-LidarrUnreachableDetails `
+        -Phase 'LidarrApi:Preflight' `
+        -Operation 'LidarrApiPreflight' `
+        -Endpoint '/api/v1/system/status' `
+        -TimeoutSeconds $preflightTimeoutSec `
+        -Exception $_.Exception
+
+    $allResults += New-OutcomeResult -Gate 'LidarrApi' -PluginName 'Ecosystem' -Outcome 'failed' `
+        -Errors @('E2E_LIDARR_UNREACHABLE: Unable to reach Lidarr API. Verify Lidarr is running and the Lidarr URL/port mapping is correct.') `
+        -StartTime $preflightGateStart -EndTime $preflightGateEnd -Details $details
+
+    $overallSuccess = $false
+    $stopNow = $true
+    $stopReason = 'Lidarr API unreachable (preflight)'
+}
 
 $runConfigure = ($Gate -eq "configure" -or $Gate -eq "bootstrap")
 $runSearch = ($Gate -eq "search" -or $Gate -eq "all" -or $Gate -eq "bootstrap")
@@ -1857,6 +1928,7 @@ $runGrab = ($Gate -eq "grab" -or $Gate -eq "all" -or $Gate -eq "bootstrap")
 $runImportList = ($Gate -eq "importlist" -or $Gate -eq "all" -or $Gate -eq "bootstrap")
 $runPersist = ($Gate -eq "persist" -or $Gate -eq "bootstrap")
 
+if (-not $stopNow) {
 foreach ($plugin in $pluginList) {
     if ($stopNow) { break }
     Write-Host "Testing: $plugin" -ForegroundColor Yellow
@@ -3124,9 +3196,10 @@ if ($runPostRestartGrab) {
 
     Write-Host ""
 }
+}
 
 # Summary
-Write-Host "========================================" -ForegroundColor Cyan
+Write-Host "========================================" -ForegroundColor Cyan     
 Write-Host "Results Summary" -ForegroundColor Cyan
 Write-Host "========================================" -ForegroundColor Cyan
 
@@ -3237,6 +3310,7 @@ if ($EmitJson) {
             Plugins = $pluginList
             EffectiveGates = $effectiveGates
             EffectivePlugins = $pluginList
+            StopReason = $stopReason
             RedactionSelfTestExecuted = $true
             RedactionSelfTestPassed = $redactionSelfTestPassed
             RunnerArgs = $cleanArgs

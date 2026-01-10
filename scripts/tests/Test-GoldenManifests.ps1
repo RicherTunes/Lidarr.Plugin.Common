@@ -199,6 +199,16 @@ Assert-True -Name "docker-unavailable.json has suggestion" -Condition (-not [str
 Assert-True -Name "docker-unavailable.json operation starts with docker" -Condition ($dockerUnavailableResult.details.operation -match '^docker\s')
 
 $queueNotFound = Validate-Fixture -FileName 'queue-not-found.json'
+
+$lidarrUnreachable = Validate-Fixture -FileName 'lidarr-unreachable.json'
+Assert-True -Name "lidarr-unreachable.json has E2E_LIDARR_UNREACHABLE" -Condition ($lidarrUnreachable.results.errorCode -contains 'E2E_LIDARR_UNREACHABLE')
+$lidarrUnreachableResult = $lidarrUnreachable.results | Where-Object { $_.errorCode -eq 'E2E_LIDARR_UNREACHABLE' }
+# Contract: must include structured Lidarr preflight failure details
+Assert-Equal -Name "lidarr-unreachable.json gate is LidarrApi" -Actual $lidarrUnreachableResult.gate -Expected 'LidarrApi'
+Assert-True -Name "lidarr-unreachable.json endpoint starts with /api/" -Condition ($lidarrUnreachableResult.details.endpoint -match '^/api/')
+Assert-True -Name "lidarr-unreachable.json has unreachableKind (non-empty)" -Condition (-not [string]::IsNullOrWhiteSpace($lidarrUnreachableResult.details.unreachableKind))
+Assert-True -Name "lidarr-unreachable.json has exceptionType (non-empty)" -Condition (-not [string]::IsNullOrWhiteSpace($lidarrUnreachableResult.details.exceptionType))
+Assert-True -Name "lidarr-unreachable.json has suggestion (non-empty)" -Condition (-not [string]::IsNullOrWhiteSpace($lidarrUnreachableResult.details.suggestion))
 Assert-True -Name "queue-not-found.json has E2E_QUEUE_NOT_FOUND" -Condition ($queueNotFound.results.errorCode -contains 'E2E_QUEUE_NOT_FOUND')
 $queueNotFoundResult = $queueNotFound.results | Where-Object { $_.errorCode -eq 'E2E_QUEUE_NOT_FOUND' }
 # Contract: must include structured queue correlation details
