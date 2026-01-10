@@ -1,0 +1,90 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/main/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-10T03:10:00.000Z",
+  "runId": "golden-lidarr-unreachable",
+  "runner": {
+    "name": "lidarr.plugin.common:e2e-runner.ps1",
+    "version": "deadbeef",
+    "args": ["-Gate", "bootstrap", "-Plugins", "Qobuzarr,Tidalarr,Brainarr", "-LidarrUrl", "http://[LOCALHOST]:8691"]
+  },
+  "lidarr": {
+    "url": "http://[LOCALHOST]:8691",
+    "containerName": "lidarr-e2e-test",
+    "imageTag": "pr-plugins-3.1.1.4884",
+    "imageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "version": null,
+    "branch": null,
+    "containerId": "000000000000",
+    "startedAt": "2026-01-10T03:09:00.000Z",
+    "imageId": "sha256:1111111111111111111111111111111111111111111111111111111111111111",
+    "hostOverride": {
+      "used": false,
+      "reason": null,
+      "sourceRepo": null,
+      "sourceRef": null,
+      "sha": null,
+      "dllSha256": null
+    },
+    "capabilities": null
+  },
+  "request": {
+    "gate": "bootstrap",
+    "plugins": ["Qobuzarr", "Tidalarr", "Brainarr"]
+  },
+  "effective": {
+    "gates": ["LidarrApi"],
+    "plugins": ["Ecosystem"],
+    "stopReason": "failed at LidarrApi for Ecosystem"
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 42
+  },
+  "results": [
+    {
+      "gate": "LidarrApi",
+      "plugin": "Ecosystem",
+      "outcome": "failed",
+      "errorCode": "E2E_LIDARR_UNREACHABLE",
+      "outcomeReason": "Lidarr API unreachable (connection refused)",
+      "startedAt": "2026-01-10T03:10:01.000Z",
+      "endedAt": "2026-01-10T03:10:06.000Z",
+      "durationMs": 5000,
+      "errors": [
+        "E2E_LIDARR_UNREACHABLE: Unable to reach Lidarr API. Verify Lidarr is running and the Lidarr URL/port mapping is correct."
+      ],
+      "details": {
+        "errorCode": "E2E_LIDARR_UNREACHABLE",
+        "phase": "LidarrApi:Preflight",
+        "operation": "LidarrApiPreflight",
+        "endpoint": "/api/v1/system/status",
+        "timeoutSeconds": 5,
+        "unreachableKind": "connectionRefused",
+        "exceptionType": "System.Net.Http.HttpRequestException",
+        "suggestion": "Verify Lidarr is running and reachable at LidarrUrl (Docker port mappings, firewall)."
+      }
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 1,
+    "passed": 0,
+    "failed": 1,
+    "skipped": 0,
+    "totalDurationMs": 5000
+  },
+  "diagnostics": {
+    "bundlePath": null,
+    "bundleCreated": false,
+    "includedFiles": ["run-manifest.json"],
+    "redactionApplied": true,
+    "redactionSelfTestPassed": true
+  },
+  "hostBugSuspected": {
+    "detected": false
+  }
+}
+
