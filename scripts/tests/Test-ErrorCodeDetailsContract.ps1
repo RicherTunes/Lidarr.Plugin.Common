@@ -1,5 +1,4 @@
 #!/usr/bin/env pwsh
-
 $ErrorActionPreference = 'Stop'
 
 function Get-RepoRoot {
@@ -13,7 +12,6 @@ function Parse-StructuredDetailsContract {
     )
 
     $content = Get-Content -Path $DocPath
-
     $inSection = $false
     $currentCode = $null
     $contracts = @{}
@@ -53,7 +51,7 @@ function Parse-StructuredDetailsContract {
         $type = $rowMatch.Groups['type'].Value.Trim()
         $notes = $rowMatch.Groups['notes'].Value.Trim()
 
-        # Skip header separator rows (handled by regex, but be defensive).
+        # Skip header rows.
         if ($field -eq 'Field') {
             continue
         }
@@ -93,63 +91,63 @@ function Get-GoldenErrorResults {
     }
 }
 
-$repoRoot = Get-RepoRoot
-$docPath = Join-Path $repoRoot 'docs/E2E_ERROR_CODES.md'
-$goldenDir = Join-Path $repoRoot 'scripts/tests/fixtures/golden-manifests'
+Describe 'E2E error-code details contract' {
+    It 'Structured details contract matches golden fixtures (required fields present)' {
+        $repoRoot = Get-RepoRoot
+        $docPath = Join-Path $repoRoot 'docs/E2E_ERROR_CODES.md'
+        $goldenDir = Join-Path $repoRoot 'scripts/tests/fixtures/golden-manifests'
 
-if (-not (Test-Path $docPath)) {
-    throw "docs/E2E_ERROR_CODES.md not found at: $docPath"
-}
-if (-not (Test-Path $goldenDir)) {
-    throw "Golden manifests dir not found at: $goldenDir"
-}
-
-$contracts = Parse-StructuredDetailsContract -DocPath $docPath
-
-if ($contracts.Keys.Count -eq 0) {
-    throw "No structured details contracts parsed from docs/E2E_ERROR_CODES.md (missing '## Structured Details Contract'?)"
-}
-
-$failures = @()
-
-foreach ($item in Get-GoldenErrorResults -GoldenDir $goldenDir) {
-    $code = $item.ErrorCode
-    $details = $item.Details
-
-    if (-not $contracts.ContainsKey($code)) {
-        $failures += "Fixture '$($item.File)' uses errorCode '$code' but docs has no contract section for it."
-        continue
-    }
-
-    $requiredFields = @($contracts[$code] | Where-Object { -not $_.Optional } | Select-Object -ExpandProperty Field)
-
-    if ($requiredFields.Count -eq 0) {
-        continue
-    }
-
-    if ($null -eq $details) {
-        $failures += "Fixture '$($item.File)' errorCode '$code' is missing details object."
-        continue
-    }
-
-    $detailProps = @($details.PSObject.Properties.Name)
-
-    foreach ($fieldName in $requiredFields) {
-        if (-not ($detailProps -contains $fieldName)) {
-            $failures += "Fixture '$($item.File)' errorCode '$code' missing required details field '$fieldName' (per docs)."
-            continue
+        if (-not (Test-Path $docPath)) {
+            throw "docs/E2E_ERROR_CODES.md not found at: $docPath"
+        }
+        if (-not (Test-Path $goldenDir)) {
+            throw "Golden manifests dir not found at: $goldenDir"
         }
 
-        $value = $details.$fieldName
-        if ($null -eq $value) {
-            $failures += "Fixture '$($item.File)' errorCode '$code' required details field '$fieldName' is null (per docs)."
+        $contracts = Parse-StructuredDetailsContract -DocPath $docPath
+        if ($contracts.Keys.Count -eq 0) {
+            throw "No structured details contracts parsed from docs/E2E_ERROR_CODES.md (missing '## Structured Details Contract'?)"
+        }
+
+        $failures = @()
+
+        foreach ($item in Get-GoldenErrorResults -GoldenDir $goldenDir) {
+            $code = $item.ErrorCode
+            $details = $item.Details
+
+            if (-not $contracts.ContainsKey($code)) {
+                $failures += "Fixture '$($item.File)' uses errorCode '$code' but docs has no contract section for it."
+                continue
+            }
+
+            $requiredFields = @($contracts[$code] | Where-Object { -not $_.Optional } | Select-Object -ExpandProperty Field)
+
+            if ($requiredFields.Count -eq 0) {
+                continue
+            }
+
+            if ($null -eq $details) {
+                $failures += "Fixture '$($item.File)' errorCode '$code' is missing details object."
+                continue
+            }
+
+            $detailProps = @($details.PSObject.Properties.Name)
+
+            foreach ($fieldName in $requiredFields) {
+                if (-not ($detailProps -contains $fieldName)) {
+                    $failures += "Fixture '$($item.File)' errorCode '$code' missing required details field '$fieldName' (per docs)."
+                    continue
+                }
+
+                $value = $details.$fieldName
+                if ($null -eq $value) {
+                    $failures += "Fixture '$($item.File)' errorCode '$code' required details field '$fieldName' is null (per docs)."
+                }
+            }
+        }
+
+        if ($failures.Count -gt 0) {
+            throw ("Error-code details contract violations:`n- " + ($failures -join "`n- "))
         }
     }
 }
-
-if ($failures.Count -gt 0) {
-    throw ("Error-code details contract violations:`n- " + ($failures -join "`n- "))
-}
-
-Write-Host "PASS: Structured details contract matches golden fixtures (required fields present)." -ForegroundColor Green
-
