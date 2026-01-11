@@ -22,11 +22,9 @@ if (Test-Path $dockerPath) {
     Import-Module $dockerPath -Force
 }
 
-# Import JSON output module for error sanitization (prevents secret leakage in details fields)
-$jsonOutputPath = Join-Path $PSScriptRoot "e2e-json-output.psm1"
-if (Test-Path $jsonOutputPath) {
-    Import-Module $jsonOutputPath -Force
-}
+# Note: Invoke-ErrorSanitization from e2e-json-output.psm1 is used for readError sanitization.
+# We check at call-time rather than importing here to avoid circular module dependencies.
+# The caller (e2e-runner.ps1) already imports e2e-json-output.psm1 before e2e-gates.psm1.
 
 function Initialize-E2EGates {
     <#
