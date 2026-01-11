@@ -344,3 +344,47 @@ Describe 'Get-PluginPinnedVersions' {
         { Get-PluginPinnedVersions -RepoRoot '/nonexistent/path' } | Should -Throw
     }
 }
+
+Describe 'Cache directory filesystem safety' {
+    It 'Sanitizes Docker tag with colons for Windows filesystem' {
+        # Tags like "pr-plugins-3.1.1.4884" or "ghcr.io/hotio/lidarr:tag" contain unsafe chars
+        InModuleScope 'e2e-host-versions' {
+            $tag = 'ghcr.io/hotio/lidarr:pr-plugins-3.1.1.4884'
+            $cacheKey = $tag -replace '[^a-zA-Z0-9._-]', '_'
+
+            # Should not contain Windows-unsafe characters
+            $cacheKey | Should -Not -Match ':'
+            $cacheKey | Should -Not -Match '/'
+            $cacheKey | Should -Not -Match '\\'
+            $cacheKey | Should -Not -Match '<'
+            $cacheKey | Should -Not -Match '>'
+            $cacheKey | Should -Not -Match '\|'
+            $cacheKey | Should -Not -Match '\?'
+            $cacheKey | Should -Not -Match '\*'
+            $cacheKey | Should -Not -Match '"'
+
+            # Should produce valid result
+            $cacheKey | Should -Be 'ghcr.io_hotio_lidarr_pr-plugins-3.1.1.4884'
+        }
+    }
+
+    It 'Sanitizes simple tag without special characters' {
+        InModuleScope 'e2e-host-versions' {
+            $tag = 'pr-plugins-3.1.1.4884'
+            $cacheKey = $tag -replace '[^a-zA-Z0-9._-]', '_'
+
+            # Should remain unchanged (only safe chars)
+            $cacheKey | Should -Be 'pr-plugins-3.1.1.4884'
+        }
+    }
+
+    It 'Sanitizes tag with backslashes (Windows paths)' {
+        InModuleScope 'e2e-host-versions' {
+            $tag = 'some\weird\\tag'
+            $cacheKey = $tag -replace '[^a-zA-Z0-9._-]', '_'
+
+            $cacheKey | Should -Not -Match '\\'
+            $cacheKey | Should -Be 'some_weird__tag'
+        }
+    }
+}
