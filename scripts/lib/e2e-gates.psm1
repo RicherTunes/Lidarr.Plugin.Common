@@ -22,6 +22,12 @@ if (Test-Path $dockerPath) {
     Import-Module $dockerPath -Force
 }
 
+# Import JSON output module for error sanitization (prevents secret leakage in details fields)
+$jsonOutputPath = Join-Path $PSScriptRoot "e2e-json-output.psm1"
+if (Test-Path $jsonOutputPath) {
+    Import-Module $jsonOutputPath -Force
+}
+
 function Initialize-E2EGates {
     <#
     .SYNOPSIS
@@ -2812,7 +2818,15 @@ if __name__ == "__main__":
             if ($result.TagReadTool -in @('mutagen', 'taglib')) {
                 # Exception during tag reading - this is a metadata/content issue, not a script bug
                 $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
-                $result.Details.readError = ($exMsg -replace '[\r\n]+', ' ').Substring(0, [Math]::Min(200, $exMsg.Length))
+                # Sanitize exception message to prevent secret leakage (tokens, URLs, private IPs)
+                $rawError = ($exMsg -replace '[\r\n]+', ' ').Substring(0, [Math]::Min(200, $exMsg.Length))
+                if (Get-Command 'Invoke-ErrorSanitization' -ErrorAction SilentlyContinue) {
+                    $result.Details.readError = Invoke-ErrorSanitization -ErrorString $rawError
+                } else {
+                    # Fallback: basic URL/token redaction if sanitizer not available
+                    $result.Details.readError = $rawError -replace 'https?://[^\s"'']+', '[REDACTED-URL]' `
+                        -replace '(?i)(access_token|token|apikey|password|secret|auth)=[^\s&"'']+', '$1=[REDACTED]'
+                }
                 $result.Details.audioFilesValidated = $result.TotalFilesChecked
                 $result.Details.audioFilesWithMissingTags = 0
                 $result.Details.missingTags = @()
