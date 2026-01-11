@@ -8,6 +8,7 @@
     Invariants:
     - `SourceProvenance.*` values MUST be one of: git | env | unknown
     - `SourceShas.*` values are git short SHAs (7 chars) or $null
+    - `SourceFullShas.*` values are git full SHAs (40 chars) or $null (for reproducibility)
     - Optional `SourceVersions.*` values come from deployed plugin.json (container) when available
 #>
 
@@ -23,6 +24,27 @@ function Get-GitShortSha {
         if ("$isGit".Trim().ToLowerInvariant() -ne 'true') { return $null }
 
         $sha = git -C $RepoRoot rev-parse --short=7 HEAD 2>$null
+        $sha = "$sha".Trim()
+        if ([string]::IsNullOrWhiteSpace($sha)) { return $null }
+        return $sha
+    }
+    catch {
+        return $null
+    }
+}
+
+function Get-GitFullSha {
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$RepoRoot
+    )
+
+    try {
+        if (-not (Test-Path -LiteralPath $RepoRoot)) { return $null }
+        $isGit = git -C $RepoRoot rev-parse --is-inside-work-tree 2>$null
+        if ("$isGit".Trim().ToLowerInvariant() -ne 'true') { return $null }
+
+        $sha = git -C $RepoRoot rev-parse HEAD 2>$null
         $sha = "$sha".Trim()
         if ([string]::IsNullOrWhiteSpace($sha)) { return $null }
         return $sha
@@ -119,11 +141,14 @@ function Get-E2ESourcesContext {
     )
 
     $sourceShas = @{}
+    $sourceFullShas = @{}
     $sourceProvenance = @{}
     $sourceVersions = @{}
 
     $commonSha = Get-GitShortSha -RepoRoot $CommonRepoRoot
+    $commonFullSha = Get-GitFullSha -RepoRoot $CommonRepoRoot
     $sourceShas['Common'] = $commonSha
+    $sourceFullShas['Common'] = $commonFullSha
     $sourceProvenance['Common'] = 'git'
 
     foreach ($plugin in $Plugins) {
@@ -143,8 +168,10 @@ function Get-E2ESourcesContext {
 
         $repoPath = Find-RepoPath -CommonRepoRoot $CommonRepoRoot -RepoName $pluginKey -ExplicitPath $overridePath
         $sha = if ($repoPath) { Get-GitShortSha -RepoRoot $repoPath } else { $null }
+        $fullSha = if ($repoPath) { Get-GitFullSha -RepoRoot $repoPath } else { $null }
 
         $sourceShas[$pluginKey] = $sha
+        $sourceFullShas[$pluginKey] = $fullSha
         if ($sha) {
             $sourceProvenance[$pluginKey] = 'git'
         } else {
@@ -169,6 +196,7 @@ function Get-E2ESourcesContext {
 
     return @{
         SourceShas = $sourceShas
+        SourceFullShas = $sourceFullShas
         SourceProvenance = $sourceProvenance
         SourceVersions = $sourceVersions
     }
