@@ -14,6 +14,15 @@
 .NOTES
     Part of Lidarr.Plugin.Common E2E infrastructure.
     See: docs/ECOSYSTEM_PARITY_ROADMAP.md
+
+    CACHE LOCATION:
+    When using -ExtractFrom, assemblies are cached in the system temp directory:
+    - Windows: $env:TEMP\lidarr-host-extract-{sanitized-tag}
+    - Linux/macOS: /tmp/lidarr-host-extract-{sanitized-tag}
+
+    Cache is keyed by Docker tag (unsafe chars replaced with _).
+    Use -ForceExtract to clear and re-extract, or manually delete the folder.
+    Cache does not auto-expire; clean periodically if disk space is a concern.
 #>
 
 # Default host-coupled packages that must match between host and plugin
