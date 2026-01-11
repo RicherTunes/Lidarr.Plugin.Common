@@ -29,43 +29,13 @@ Set-StrictMode -Version Latest
 # Known tech debt baseline - violations here are tracked but don't fail
 # Each entry has: Key (repo:file:pattern), Owner, Expiry (YYYY-MM-DD), IssueUrl
 $script:KnownTechDebt = @(
-    @{
-        Key = 'qobuzarr:main_pluginhost.cs:GetInvalidFileNameChars'
-        Owner = 'alex'
-        Expiry = '2026-06-01'
-        IssueUrl = 'https://github.com/RicherTunes/Qobuzarr/issues/TBD'
-    }
-    @{
-        Key = 'qobuzarr:QobuzCLI/Models/Configuration/DuplicateHandlingConfig.cs:GetInvalidFileNameChars'
-        Owner = 'alex'
-        Expiry = '2026-06-01'
-        IssueUrl = 'https://github.com/RicherTunes/Qobuzarr/issues/TBD'
-    }
-    @{
-        Key = 'qobuzarr:QobuzCLI/Services/PluginHost.cs:GetInvalidFileNameChars'
-        Owner = 'alex'
-        Expiry = '2026-06-01'
-        IssueUrl = 'https://github.com/RicherTunes/Qobuzarr/issues/TBD'
-    }
-    @{
-        Key = 'qobuzarr:src/Configuration/QobuzPluginConstants.cs:FLACMagicBytes'
-        Owner = 'alex'
-        Expiry = '2026-06-01'
-        IssueUrl = 'https://github.com/RicherTunes/Qobuzarr/issues/TBD'
-    }
-    @{
-        Key = 'tidalarr:src/Tidalarr/Integration/LidarrNative/TidalLidarrDownloadClient.cs:GetInvalidFileNameChars'
-        Owner = 'alex'
-        Expiry = '2026-06-01'
-        IssueUrl = 'https://github.com/RicherTunes/Tidalarr/issues/TBD'
-    }
-    @{
-        Key = 'tidalarr:TidalCLI/TidalCLIHelper.cs:GetInvalidFileNameChars'
-        Owner = 'alex'
-        Expiry = '2026-06-01'
-        IssueUrl = 'https://github.com/RicherTunes/Tidalarr/issues/TBD'
-    }
     # Test files - magic bytes needed for test data (acceptable)
+    @{
+        Key = 'qobuzarr:tests/Qobuzarr.Tests/Unit/Download/MetadataTaggingTests.cs:FLACMagicBytes'
+        Owner = 'alex'
+        Expiry = '2099-12-31'
+        IssueUrl = 'N/A - test data'
+    }
     @{
         Key = 'qobuzarr:tests/Qobuzarr.Tests/Unit/Utilities/AudioMagicBytesValidatorTests.cs:FLACMagicBytes'
         Owner = 'alex'
