@@ -22,6 +22,10 @@ if (Test-Path $dockerPath) {
     Import-Module $dockerPath -Force
 }
 
+# Note: Invoke-ErrorSanitization from e2e-json-output.psm1 is used for readError sanitization.
+# We check at call-time rather than importing here to avoid circular module dependencies.
+# The caller (e2e-runner.ps1) already imports e2e-json-output.psm1 before e2e-gates.psm1.
+
 function Initialize-E2EGates {
     <#
     .SYNOPSIS
@@ -2392,6 +2396,8 @@ function Test-MetadataGate {
         Errors = @()
         SkipReason = $null
         Details = @{}
+        TagReadTool = 'unknown'
+        TagReadToolVersion = $null
     }
 
     $currentCandidateFile = $null  # Track current file being processed for exception safety (function-level)
@@ -2437,6 +2443,7 @@ function Test-MetadataGate {
 
         if (-not $mutagenOk) {
             # Host-side fallback for local development (uses TagLibSharp via dotnet).
+            $result.TagReadTool = 'taglib'
             $dotnetAvailable = (Get-Command dotnet -ErrorAction SilentlyContinue) -ne $null
             $probeProjectPath = Join-Path $PSScriptRoot "..\tools\MetadataProbe\MetadataProbe.csproj"
             $probeProjectPath = [System.IO.Path]::GetFullPath($probeProjectPath)
@@ -2549,6 +2556,16 @@ function Test-MetadataGate {
                 elseif ($filesWithTags -gt 0 -and $missingTags.Count -gt 0) {
                     # Partial success - some files ok, some missing
                     $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
+                    $result.Details.tagReadTool = $result.TagReadTool
+                    $result.Details.tagReadToolVersion = $result.TagReadToolVersion
+                    $result.Details.audioFilesValidated = $result.TotalFilesChecked
+                    $result.Details.audioFilesWithMissingTags = $missingTags.Count
+                    $result.Details.sampleFile = $result.SampleFile
+                    # Cap missingTags at 10 entries
+                    $cappedTags = @($missingTags | Select-Object -First 10)
+                    $result.Details.missingTags = $cappedTags
+                    $result.Details.missingTagsCount = $missingTags.Count
+                    $result.Details.missingTagsCapped = ($missingTags.Count -gt 10)
                     $result.Errors += "Metadata validation failed for $($missingTags.Count) of $($result.TotalFilesChecked) files"
                     foreach ($m in $missingTags) {
                         $result.Errors += "  FAIL: $m"
@@ -2558,6 +2575,16 @@ function Test-MetadataGate {
                 else {
                     # All files failed
                     $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
+                    $result.Details.tagReadTool = $result.TagReadTool
+                    $result.Details.tagReadToolVersion = $result.TagReadToolVersion
+                    $result.Details.audioFilesValidated = $result.TotalFilesChecked
+                    $result.Details.audioFilesWithMissingTags = $missingTags.Count
+                    $result.Details.sampleFile = $result.SampleFile
+                    # Cap missingTags at 10 entries
+                    $cappedTags = @($missingTags | Select-Object -First 10)
+                    $result.Details.missingTags = $cappedTags
+                    $result.Details.missingTagsCount = $missingTags.Count
+                    $result.Details.missingTagsCapped = ($missingTags.Count -gt 10)
                     $result.Errors += "No files passed metadata validation"
                     foreach ($m in $missingTags) {
                         $result.Errors += "  FAIL: $m"
@@ -2571,6 +2598,9 @@ function Test-MetadataGate {
                 try { Remove-Item -Recurse -Force -Path $tempRoot -ErrorAction SilentlyContinue } catch { }
             }
         }
+
+        # Using mutagen (container python path)
+        $result.TagReadTool = 'mutagen'
 
         # Get audio files from output path (filter common audio extensions)
         $findCmd = "find '$OutputPath' -type f \( -name '*.flac' -o -name '*.m4a' -o -name '*.mp3' -o -name '*.ogg' -o -name '*.wav' \) 2>/dev/null | LC_ALL=C sort | head -n $MaxFilesToCheck"
@@ -2728,6 +2758,16 @@ if __name__ == "__main__":
         elseif ($filesWithTags -gt 0 -and $missingTags.Count -gt 0) {
             # Partial success - some files ok, some missing
             $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
+            $result.Details.tagReadTool = $result.TagReadTool
+            $result.Details.tagReadToolVersion = $result.TagReadToolVersion
+            $result.Details.audioFilesValidated = $result.TotalFilesChecked
+            $result.Details.audioFilesWithMissingTags = $missingTags.Count
+            $result.Details.sampleFile = $result.SampleFile
+            # Cap missingTags at 10 entries
+            $cappedTags = @($missingTags | Select-Object -First 10)
+            $result.Details.missingTags = $cappedTags
+            $result.Details.missingTagsCount = $missingTags.Count
+            $result.Details.missingTagsCapped = ($missingTags.Count -gt 10)
             $result.Errors += "Metadata validation failed for $($missingTags.Count) of $($audioFiles.Count) files"
             foreach ($m in $missingTags) {
                 $result.Errors += "  FAIL: $m"
@@ -2737,6 +2777,16 @@ if __name__ == "__main__":
         else {
             # All files failed
             $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
+            $result.Details.tagReadTool = $result.TagReadTool
+            $result.Details.tagReadToolVersion = $result.TagReadToolVersion
+            $result.Details.audioFilesValidated = $result.TotalFilesChecked
+            $result.Details.audioFilesWithMissingTags = $missingTags.Count
+            $result.Details.sampleFile = $result.SampleFile
+            # Cap missingTags at 10 entries
+            $cappedTags = @($missingTags | Select-Object -First 10)
+            $result.Details.missingTags = $cappedTags
+            $result.Details.missingTagsCount = $missingTags.Count
+            $result.Details.missingTagsCapped = ($missingTags.Count -gt 10)
             $result.Errors += "No files passed metadata validation"
             foreach ($m in $missingTags) {
                 $result.Errors += "  FAIL: $m"
@@ -2749,6 +2799,43 @@ if __name__ == "__main__":
         # Ensure SampleFile is set even if exception occurred during processing
         if (-not $result.SampleFile -and $currentCandidateFile) {
             $result.SampleFile = $currentCandidateFile
+        }
+        # Defensive: ensure tagReadTool is always in Details for triage
+        # (exception may have occurred after TagReadTool was set but before Details populated)
+        if (-not $result.Details.ContainsKey('tagReadTool')) {
+            $result.Details.tagReadTool = $result.TagReadTool
+        }
+        if (-not $result.Details.ContainsKey('tagReadToolVersion')) {
+            $result.Details.tagReadToolVersion = $result.TagReadToolVersion
+        }
+        # Classify error based on where we were in processing:
+        # - If TagReadTool is mutagen/taglib, exception happened during tag reading → E2E_METADATA_MISSING
+        # - If TagReadTool is still 'unknown', exception happened before tag reading → E2E_INTERNAL_ERROR
+        if (-not $result.Details.ContainsKey('ErrorCode')) {
+            $exMsg = "$_"
+            if ($result.TagReadTool -in @('mutagen', 'taglib')) {
+                # Exception during tag reading - this is a metadata/content issue, not a script bug
+                $result.Details.ErrorCode = 'E2E_METADATA_MISSING'
+                # Sanitize exception message to prevent secret leakage (tokens, URLs, private IPs)
+                $rawError = ($exMsg -replace '[\r\n]+', ' ').Substring(0, [Math]::Min(200, $exMsg.Length))
+                if (Get-Command 'Invoke-ErrorSanitization' -ErrorAction SilentlyContinue) {
+                    $result.Details.readError = Invoke-ErrorSanitization -ErrorString $rawError
+                } else {
+                    # Fallback: basic URL/token redaction if sanitizer not available
+                    $result.Details.readError = $rawError -replace 'https?://[^\s"'']+', '[REDACTED-URL]' `
+                        -replace '(?i)(access_token|token|apikey|password|secret|auth)=[^\s&"'']+', '$1=[REDACTED]'
+                }
+                $result.Details.audioFilesValidated = $result.TotalFilesChecked
+                $result.Details.audioFilesWithMissingTags = 0
+                $result.Details.missingTags = @()
+                $result.Details.sampleFile = $result.SampleFile
+            } else {
+                # Exception before tag reading started - genuine script bug
+                $result.Details.ErrorCode = 'E2E_INTERNAL_ERROR'
+                $result.Details.phase = 'Metadata:PreTagRead'
+                $result.Details.reason = 'ExceptionBeforeTagReadStarted'
+                $result.Details.note = 'Exception occurred before tag reading could begin (see errors[] for context).'
+            }
         }
     }
 

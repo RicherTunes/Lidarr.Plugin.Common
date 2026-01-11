@@ -118,6 +118,11 @@ function Write-TripwireMarker {
 }
 
 Describe 'E2E error-code details contract' {
+    BeforeAll {
+        $script:repoRoot = Get-RepoRoot
+        $script:goldenDir = Join-Path $script:repoRoot 'scripts/tests/fixtures/golden-manifests'
+    }
+
     It 'Structured details contract matches golden fixtures (required fields present)' {
         $repoRoot = Get-RepoRoot
         $docPath = Join-Path $repoRoot 'docs/E2E_ERROR_CODES.md'
@@ -189,5 +194,84 @@ Describe 'E2E error-code details contract' {
         #   2. Fixtures were checked (fixturesChecked > 0)
         #   3. No failures (failures.Count == 0)
         Write-TripwireMarker -ContractsChecked $contracts.Keys.Count -FixturesChecked $fixturesChecked
+    }
+
+    Context 'E2E_METADATA_MISSING contract' {
+        It 'tagReadTool is a valid enum value (mutagen|taglib|unknown)' {
+            $validValues = @('mutagen', 'taglib', 'unknown')
+
+            foreach ($item in Get-GoldenErrorResults -GoldenDir $script:goldenDir) {
+                if ($item.ErrorCode -ne 'E2E_METADATA_MISSING') { continue }
+
+                $tagReadTool = $item.Details.tagReadTool
+                $tagReadTool | Should Not BeNullOrEmpty
+                ($validValues -contains $tagReadTool) | Should Be $true
+            }
+        }
+
+        It 'tagReadToolVersion can be null (optional field)' {
+            # This test validates that the fixture has tagReadToolVersion field and it can be null
+            $foundMetadataMissing = $false
+
+            foreach ($item in Get-GoldenErrorResults -GoldenDir $script:goldenDir) {
+                if ($item.ErrorCode -ne 'E2E_METADATA_MISSING') { continue }
+                $foundMetadataMissing = $true
+
+                # Field should exist (even if null)
+                ($item.Details.PSObject.Properties.Name -contains 'tagReadToolVersion') | Should Be $true
+            }
+
+            $foundMetadataMissing | Should Be $true
+        }
+
+        It 'sampleFile contains no path separators (basename only)' {
+            foreach ($item in Get-GoldenErrorResults -GoldenDir $script:goldenDir) {
+                if ($item.ErrorCode -ne 'E2E_METADATA_MISSING') { continue }
+
+                $sampleFile = $item.Details.sampleFile
+                $sampleFile | Should Not BeNullOrEmpty
+                $sampleFile | Should Not Match '[/\\]'
+            }
+        }
+
+        It 'missingTags is non-empty array with max 10 entries' {
+            foreach ($item in Get-GoldenErrorResults -GoldenDir $script:goldenDir) {
+                if ($item.ErrorCode -ne 'E2E_METADATA_MISSING') { continue }
+
+                $missingTags = @($item.Details.missingTags)
+                ($missingTags.Count -gt 0) | Should Be $true
+                ($missingTags.Count -le 10) | Should Be $true
+            }
+        }
+
+        It 'tagReadToolVersion if present is short string without whitespace' {
+            foreach ($item in Get-GoldenErrorResults -GoldenDir $script:goldenDir) {
+                if ($item.ErrorCode -ne 'E2E_METADATA_MISSING') { continue }
+
+                $version = $item.Details.tagReadToolVersion
+                # null is allowed (optional field)
+                if ($null -eq $version) { continue }
+
+                # If present, must be short string without spaces/newlines
+                ($version.Length -le 32) | Should Be $true
+                $version | Should Not Match '[\s\r\n]'
+            }
+        }
+    }
+
+    Context 'E2E_METADATA_MISSING coverage' {
+        It 'at least one fixture exercises the mutagen path' {
+            $found = $false
+            foreach ($item in Get-GoldenErrorResults -GoldenDir $script:goldenDir) {
+                if ($item.ErrorCode -ne 'E2E_METADATA_MISSING') { continue }
+                if ($item.Details.tagReadTool -eq 'mutagen') { $found = $true; break }
+            }
+            $found | Should Be $true
+        }
+
+        # Note: The TagLib fallback path is rare in CI (requires python unavailable).
+        # The outer catch block in Test-MetadataGate has defensive code that ensures
+        # tagReadTool is always populated in Details even if an exception occurs
+        # mid-processing. This prevents contract violations on edge-case exception paths.
     }
 }
