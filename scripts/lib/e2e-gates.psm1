@@ -2367,8 +2367,16 @@ function Test-MetadataGate {
     .PARAMETER IsMultiDisc
         If true, also validates disc/track metadata.
 
+    .PARAMETER WarnMissingIsrc
+        If true, logs a warning (does not fail) when ISRC is missing from files.
+        Useful for Qobuz which should always have ISRC.
+
+    .PARAMETER WarnMissingMusicBrainzId
+        If true, logs a warning (does not fail) when MusicBrainz IDs are missing.
+        These are typically only present for Lidarr-sourced metadata.
+
     .OUTPUTS
-        PSCustomObject with Success, Outcome, ValidatedFiles, Errors, SkipReason
+        PSCustomObject with Success, Outcome, ValidatedFiles, Errors, SkipReason, IdentityTagStats
     #>
     param(
         [Parameter(Mandatory)]
@@ -2379,7 +2387,11 @@ function Test-MetadataGate {
 
         [int]$MaxFilesToCheck = 3,
 
-        [switch]$IsMultiDisc
+        [switch]$IsMultiDisc,
+
+        [switch]$WarnMissingIsrc,
+
+        [switch]$WarnMissingMusicBrainzId
     )
 
     $result = [PSCustomObject]@{
@@ -2398,6 +2410,14 @@ function Test-MetadataGate {
         Details = @{}
         TagReadTool = 'unknown'
         TagReadToolVersion = $null
+        # Identity tag statistics (optional validation - warn but don't fail)
+        IdentityTagStats = @{
+            FilesWithIsrc = 0
+            FilesWithMusicBrainzTrackId = 0
+            FilesWithMusicBrainzReleaseId = 0
+            MissingIsrcFiles = @()
+            MissingMusicBrainzFiles = @()
+        }
     }
 
     $currentCandidateFile = $null  # Track current file being processed for exception safety (function-level)
@@ -2533,6 +2553,21 @@ function Test-MetadataGate {
                     }
 
                     $filesWithTags++
+
+                    # Track identity tags (ISRC, MusicBrainz IDs) - optional, for reporting
+                    $hasIsrc = -not [string]::IsNullOrWhiteSpace($probe.Isrc)
+                    $hasMbTrackId = -not [string]::IsNullOrWhiteSpace($probe.MusicBrainzTrackId)
+                    $hasMbReleaseId = -not [string]::IsNullOrWhiteSpace($probe.MusicBrainzReleaseId)
+
+                    if ($hasIsrc) { $result.IdentityTagStats.FilesWithIsrc++ }
+                    else { $result.IdentityTagStats.MissingIsrcFiles += $fileName }
+
+                    if ($hasMbTrackId) { $result.IdentityTagStats.FilesWithMusicBrainzTrackId++ }
+                    if ($hasMbReleaseId) { $result.IdentityTagStats.FilesWithMusicBrainzReleaseId++ }
+                    if (-not $hasMbTrackId -and -not $hasMbReleaseId) {
+                        $result.IdentityTagStats.MissingMusicBrainzFiles += $fileName
+                    }
+
                     $validatedFiles += [PSCustomObject]@{
                         Name = $fileName
                         Artist = $probe.Artist
@@ -2540,8 +2575,15 @@ function Test-MetadataGate {
                         Title = $probe.Title
                         Track = $probe.Track
                         Disc = $probe.Disc
+                        Isrc = $probe.Isrc
+                        MusicBrainzTrackId = $probe.MusicBrainzTrackId
+                        MusicBrainzReleaseId = $probe.MusicBrainzReleaseId
                     }
-                    Write-Host "         OK: artist='$($probe.Artist)', album='$($probe.Album)', title='$($probe.Title)', track=$($probe.Track)" -ForegroundColor Green
+
+                    $identityInfo = ""
+                    if ($hasIsrc) { $identityInfo += ", isrc='$($probe.Isrc)'" }
+                    if ($hasMbTrackId) { $identityInfo += ", mbid='$($probe.MusicBrainzTrackId)'" }
+                    Write-Host "         OK: artist='$($probe.Artist)', album='$($probe.Album)', title='$($probe.Title)', track=$($probe.Track)$identityInfo" -ForegroundColor Green
                 }
 
                 $result.ValidatedFiles = $validatedFiles
@@ -2592,6 +2634,22 @@ function Test-MetadataGate {
                     }
                 }
 
+                # Optional warnings for missing identity tags (does not affect success/failure)
+                if ($WarnMissingIsrc -and $result.IdentityTagStats.MissingIsrcFiles.Count -gt 0) {
+                    $missingCount = $result.IdentityTagStats.MissingIsrcFiles.Count
+                    Write-Host "       WARN: $missingCount file(s) missing ISRC" -ForegroundColor Yellow
+                    foreach ($f in ($result.IdentityTagStats.MissingIsrcFiles | Select-Object -First 3)) {
+                        Write-Host "         - $f" -ForegroundColor DarkYellow
+                    }
+                }
+                if ($WarnMissingMusicBrainzId -and $result.IdentityTagStats.MissingMusicBrainzFiles.Count -gt 0) {
+                    $missingCount = $result.IdentityTagStats.MissingMusicBrainzFiles.Count
+                    Write-Host "       WARN: $missingCount file(s) missing MusicBrainz IDs" -ForegroundColor Yellow
+                    foreach ($f in ($result.IdentityTagStats.MissingMusicBrainzFiles | Select-Object -First 3)) {
+                        Write-Host "         - $f" -ForegroundColor DarkYellow
+                    }
+                }
+
                 return $result
             }
             finally {
@@ -2618,7 +2676,7 @@ function Test-MetadataGate {
         Write-Host "       Checking metadata for $($audioFiles.Count) files..." -ForegroundColor Gray
 
         # Python script to read metadata using mutagen
-        # Returns JSON: {"artist": "...", "album": "...", "title": "...", "track": N, "disc": N, "error": "..."}
+        # Returns JSON with core tags + optional identity tags (ISRC, MusicBrainz IDs)
         $pythonScript = @'
 import sys
 import json
@@ -2626,10 +2684,12 @@ import mutagen
 from mutagen.flac import FLAC
 from mutagen.mp4 import MP4
 from mutagen.mp3 import MP3
+from mutagen.id3 import ID3
 from mutagen.oggvorbis import OggVorbis
 
 def get_tags(filepath):
-    result = {"artist": "", "album": "", "title": "", "track": None, "disc": None, "error": None}
+    result = {"artist": "", "album": "", "title": "", "track": None, "disc": None,
+              "isrc": None, "musicbrainz_trackid": None, "musicbrainz_releaseid": None, "error": None}
     try:
         audio = mutagen.File(filepath, easy=True)
         if audio is None:
@@ -2666,6 +2726,20 @@ def get_tags(filepath):
                 result["disc"] = int(disc_str.split("/")[0])
             except:
                 pass
+
+        # ISRC - using EasyID3 key or direct access
+        isrc = get_tag(["isrc"])
+        if isrc:
+            result["isrc"] = isrc
+
+        # MusicBrainz IDs - standard EasyID3 keys
+        mb_trackid = get_tag(["musicbrainz_trackid"])
+        if mb_trackid:
+            result["musicbrainz_trackid"] = mb_trackid
+
+        mb_releaseid = get_tag(["musicbrainz_albumid", "musicbrainz_releaseid"])
+        if mb_releaseid:
+            result["musicbrainz_releaseid"] = mb_releaseid
 
     except Exception as e:
         result["error"] = str(e)
@@ -2732,6 +2806,21 @@ if __name__ == "__main__":
             }
             else {
                 $filesWithTags++
+
+                # Track identity tags (ISRC, MusicBrainz IDs) - optional, for reporting
+                $hasIsrc = -not [string]::IsNullOrWhiteSpace($tags.isrc)
+                $hasMbTrackId = -not [string]::IsNullOrWhiteSpace($tags.musicbrainz_trackid)
+                $hasMbReleaseId = -not [string]::IsNullOrWhiteSpace($tags.musicbrainz_releaseid)
+
+                if ($hasIsrc) { $result.IdentityTagStats.FilesWithIsrc++ }
+                else { $result.IdentityTagStats.MissingIsrcFiles += $fileName }
+
+                if ($hasMbTrackId) { $result.IdentityTagStats.FilesWithMusicBrainzTrackId++ }
+                if ($hasMbReleaseId) { $result.IdentityTagStats.FilesWithMusicBrainzReleaseId++ }
+                if (-not $hasMbTrackId -and -not $hasMbReleaseId) {
+                    $result.IdentityTagStats.MissingMusicBrainzFiles += $fileName
+                }
+
                 $validatedFiles += [PSCustomObject]@{
                     Path = $file
                     Name = $fileName
@@ -2740,8 +2829,15 @@ if __name__ == "__main__":
                     Title = $tags.title
                     Track = $tags.track
                     Disc = $tags.disc
+                    Isrc = $tags.isrc
+                    MusicBrainzTrackId = $tags.musicbrainz_trackid
+                    MusicBrainzReleaseId = $tags.musicbrainz_releaseid
                 }
-                Write-Host "         OK: artist='$($tags.artist)', album='$($tags.album)', title='$($tags.title)', track=$($tags.track)" -ForegroundColor Green
+
+                $identityInfo = ""
+                if ($hasIsrc) { $identityInfo += ", isrc='$($tags.isrc)'" }
+                if ($hasMbTrackId) { $identityInfo += ", mbid='$($tags.musicbrainz_trackid)'" }
+                Write-Host "         OK: artist='$($tags.artist)', album='$($tags.album)', title='$($tags.title)', track=$($tags.track)$identityInfo" -ForegroundColor Green
             }
         }
 
@@ -2791,6 +2887,22 @@ if __name__ == "__main__":
             foreach ($m in $missingTags) {
                 $result.Errors += "  FAIL: $m"
                 Write-Host "       FAIL: $m" -ForegroundColor Red
+            }
+        }
+
+        # Optional warnings for missing identity tags (does not affect success/failure)
+        if ($WarnMissingIsrc -and $result.IdentityTagStats.MissingIsrcFiles.Count -gt 0) {
+            $missingCount = $result.IdentityTagStats.MissingIsrcFiles.Count
+            Write-Host "       WARN: $missingCount file(s) missing ISRC" -ForegroundColor Yellow
+            foreach ($f in ($result.IdentityTagStats.MissingIsrcFiles | Select-Object -First 3)) {
+                Write-Host "         - $f" -ForegroundColor DarkYellow
+            }
+        }
+        if ($WarnMissingMusicBrainzId -and $result.IdentityTagStats.MissingMusicBrainzFiles.Count -gt 0) {
+            $missingCount = $result.IdentityTagStats.MissingMusicBrainzFiles.Count
+            Write-Host "       WARN: $missingCount file(s) missing MusicBrainz IDs" -ForegroundColor Yellow
+            foreach ($f in ($result.IdentityTagStats.MissingMusicBrainzFiles | Select-Object -First 3)) {
+                Write-Host "         - $f" -ForegroundColor DarkYellow
             }
         }
     }

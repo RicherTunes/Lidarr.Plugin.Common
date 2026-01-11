@@ -3683,6 +3683,7 @@ if ($EmitJson) {
             LidarrVersion = $lidarrVersion
             LidarrBranch = $lidarrBranch
             SourceShas = $sourcesContext.SourceShas
+            SourceFullShas = $sourcesContext.SourceFullShas
             SourceProvenance = $sourcesContext.SourceProvenance
             SourceVersions = $sourcesContext.SourceVersions
             ComponentIds = @{

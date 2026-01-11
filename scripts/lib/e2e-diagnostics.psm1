@@ -1,6 +1,14 @@
 # E2E Diagnostics Bundle for Plugin Testing
 # Collects logs, config, and state on failure for AI-assisted triage
 
+# Import centralized sanitization module (single source of truth for patterns)
+$sanitizePath = Join-Path $PSScriptRoot "e2e-sanitize.psm1"
+if (Test-Path $sanitizePath) {
+    Import-Module $sanitizePath -Force -Global
+}
+
+# DEPRECATED: These patterns are now in e2e-sanitize.psm1
+# Kept for backward compatibility - will be removed in future version
 # Sensitive field patterns to redact (comprehensive list)
 $script:SensitivePatterns = @(
     'password',
@@ -32,6 +40,8 @@ $script:SensitivePatterns = @(
     'configuration_url'
 )
 
+# DEPRECATED: These patterns are now in e2e-sanitize.psm1
+# Kept for backward compatibility - will be removed in next major version
 # Private/internal endpoint patterns for value-based redaction
 # These are matched against STRING VALUES, not field names
 $script:PrivateEndpointPatterns = @{
@@ -53,6 +63,8 @@ $script:PrivateEndpointPatterns = @{
     'IPv6_UniqueLocal' = '(?i)\[f[cd][0-9a-f]{2}:[0-9a-f:]+\]'
 }
 
+# DEPRECATED: These patterns are now in e2e-sanitize.psm1
+# Kept for backward compatibility - will be removed in next major version
 # Query parameters that commonly carry secrets (redact the value, keep the param name)
 $script:SecretQueryParams = @(
     'code',

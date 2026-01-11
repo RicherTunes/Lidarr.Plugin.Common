@@ -73,7 +73,12 @@
           "properties": {
             "sha": {
               "type": ["string", "null"],
-              "description": "Git short SHA or null if unknown."
+              "description": "Git short SHA (7 chars) or null if unknown."
+            },
+            "fullSha": {
+              "type": ["string", "null"],
+              "pattern": "^[a-f0-9]{40}$",
+              "description": "Git full SHA (40 chars) for reproducibility, or null if unknown."
             },
             "source": {
               "type": "string",

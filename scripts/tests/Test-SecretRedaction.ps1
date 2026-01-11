@@ -157,6 +157,16 @@ $mbidError = "Artist not found: mbid=f27ec8db-af05-4f36-916e-3d57f91ecf5e"
 $sanitized = Invoke-ErrorSanitization -ErrorString $mbidError
 Test-Assertion ($sanitized -match 'f27ec8db-af05-4f36-916e-3d57f91ecf5e') "MusicBrainz UUID preserved"
 
+# ISRC codes (12-char alphanumeric) should not be redacted - they're public identifiers
+$isrcError = "Track ISRC: USRC17607839 not found in database"
+$sanitized = Invoke-ErrorSanitization -ErrorString $isrcError
+Test-Assertion ($sanitized -match 'USRC17607839') "ISRC code preserved (public identifier)"
+
+# ISRC with lowercase should also be preserved
+$isrcLower = "isrc=gbaye6700012 from Qobuz API"
+$sanitized = Invoke-ErrorSanitization -ErrorString $isrcLower
+Test-Assertion ($sanitized -match 'gbaye6700012') "Lowercase ISRC preserved"
+
 # Lidarr localhost URLs - hostname normalized to [LOCALHOST] but path preserved
 $localhostUrl = "API call to http://localhost:8686/api/v1/artist/123 failed"
 $sanitized = Invoke-ErrorSanitization -ErrorString $localhostUrl
@@ -284,6 +294,77 @@ Test-Assertion ($sanitized -notmatch 'mysupersecretvalue') "Secret redacted even
 $authHeaderError = "Request failed: Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.test" # gitleaks:allow
 $sanitized = Invoke-ErrorSanitization -ErrorString $authHeaderError
 Test-Assertion ($sanitized -notmatch 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9') "JWT in readError Authorization header redacted"
+
+# ============================================================================
+# Identity Tag Stats Safety Tests
+# ============================================================================
+Write-Host ""
+Write-Host "Test Group: Identity Tag Stats (ISRC/MBID) Safety" -ForegroundColor Yellow
+
+# Verify ISRC and MBID values in manifest are safe (public identifiers, not secrets)
+$identityTestResults = @(
+    [PSCustomObject]@{
+        Gate = 'Metadata'
+        PluginName = 'Qobuzarr'
+        Outcome = 'success'
+        Success = $true
+        Errors = @()
+        Details = @{
+            ValidatedFiles = @(
+                @{ Name = "01-Track.flac"; Isrc = "USRC17607839"; MusicBrainzTrackId = "f27ec8db-af05-4f36-916e-3d57f91ecf5e" }
+            )
+            IdentityTagStats = @{
+                FilesWithIsrc = 1
+                FilesWithMusicBrainzTrackId = 1
+                FilesWithMusicBrainzReleaseId = 0
+                MissingIsrcFiles = @()
+                MissingMusicBrainzFiles = @("02-Track.flac")
+            }
+        }
+        StartTime = [DateTime]::UtcNow.AddSeconds(-1)
+        EndTime = [DateTime]::UtcNow
+    }
+)
+
+$identityContext = @{
+    LidarrUrl = 'http://localhost:8686'
+    ContainerName = 'test'
+    ContainerId = 'abc123'
+    ContainerStartedAt = [DateTime]::UtcNow.AddMinutes(-5)
+    ImageTag = 'test'
+    ImageId = 'sha256:img123'
+    ImageDigest = 'sha256:abc'
+    RequestedGate = 'all'
+    Plugins = @('Qobuzarr')
+    EffectiveGates = @('Metadata')
+    EffectivePlugins = @('Qobuzarr')
+    StopReason = $null
+    RedactionSelfTestExecuted = $true
+    RedactionSelfTestPassed = $true
+    RunnerArgs = @('-Gate', 'all', '-ValidateMetadata')
+    DiagnosticsBundlePath = $null
+    DiagnosticsIncludedFiles = @()
+    LidarrVersion = '2.9.6'
+    LidarrBranch = 'plugins'
+    SourceShas = @{ Common = 'abc'; Qobuzarr = $null; Tidalarr = $null; Brainarr = $null }
+    SourceProvenance = @{ Common = 'git'; Qobuzarr = 'unknown'; Tidalarr = 'unknown'; Brainarr = 'unknown' }
+}
+
+$identityJson = ConvertTo-E2ERunManifest -Results $identityTestResults -Context $identityContext
+$identityObj = $identityJson | ConvertFrom-Json
+
+# ISRC should be preserved (it's a public music identifier, not a secret)
+Test-Assertion ($identityJson -match 'USRC17607839') "ISRC preserved in manifest (public identifier)"
+
+# MusicBrainz ID should be preserved (it's a public database UUID)
+Test-Assertion ($identityJson -match 'f27ec8db-af05-4f36-916e-3d57f91ecf5e') "MusicBrainz ID preserved in manifest"
+
+# Counts should be present (safe numerical data) - check for the value regardless of case/key format
+Test-Assertion ($identityJson -match 'FilesWithIsrc' -or $identityJson -match 'filesWithIsrc') "Identity tag stats present in manifest"
+
+# Filenames should be safe (just track names, no paths with tokens)
+Test-Assertion ($identityJson -match '01-Track\.flac') "Track filename preserved"
+Test-Assertion ($identityJson -match '02-Track\.flac') "Missing ISRC filename preserved"
 
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
