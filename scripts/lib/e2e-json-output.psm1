@@ -6,6 +6,12 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
+# Import centralized sanitization module (single source of truth for redaction patterns)
+$sanitizePath = Join-Path $PSScriptRoot "e2e-sanitize.psm1"
+if (Test-Path $sanitizePath) {
+    Import-Module $sanitizePath -Force -Global
+}
+
 # Import diagnostics module for redaction
 # Use -Global so it remains available after this module loads
 $diagnosticsPath = Join-Path $PSScriptRoot "e2e-diagnostics.psm1"
@@ -151,15 +157,26 @@ function Get-SchemaUrl {
 <#
 .SYNOPSIS
     Gets the git SHA for a specific repository path.
+.PARAMETER RepoPath
+    Path to the git repository.
+.PARAMETER Full
+    If specified, returns the full 40-character SHA instead of short SHA.
 #>
 function Get-RepoSha {
-    param([string]$RepoPath)
+    param(
+        [string]$RepoPath,
+        [switch]$Full
+    )
     if (-not $RepoPath -or -not (Test-Path $RepoPath)) { return $null }
     try {
         Push-Location $RepoPath
-        $sha = git rev-parse --short HEAD 2>$null
+        if ($Full) {
+            $sha = git rev-parse HEAD 2>$null
+        } else {
+            $sha = git rev-parse --short HEAD 2>$null
+        }
         Pop-Location
-        if ($sha) { return $sha }
+        if ($sha) { return $sha.Trim() }
     } catch { }
     return $null
 }
@@ -322,62 +339,14 @@ function Get-RedactedArgs {
     return $result
 }
 
-# Patterns for secrets that can appear in error messages/URLs
-$script:ErrorSanitizationPatterns = @(
-    # URL query parameters with secrets
-    @{ Pattern = '(?i)([\?&](access_token|api_key|apikey|token|auth|secret|password|bearer|refresh_token|client_secret))=([^\s&"'']+)'; Replace = '$1=[REDACTED]' }
-    # Authorization headers in error messages
-    @{ Pattern = '(?i)(authorization:\s*(bearer|basic)\s+)([^\s"'']+)'; Replace = '$1[REDACTED]' }
-    # Hex strings that look like API keys (20-40 chars) in URLs or messages
-    @{ Pattern = '(?i)(?<=[=:/"''])[a-f0-9]{20,40}(?=[&\s"''/?]|$)'; Replace = '[REDACTED]' }
-    # Base64-encoded tokens (long alphanumeric with +/=)
-    @{ Pattern = '(?i)(?<=[=:/"''])[A-Za-z0-9+/]{40,}={0,2}(?=[&\s"''/?]|$)'; Replace = '[REDACTED]' }
-    # Private IPs in URLs
-    @{ Pattern = '(?i)(https?://)(192\.168\.\d+\.\d+|10\.\d+\.\d+\.\d+|172\.(1[6-9]|2[0-9]|3[01])\.\d+\.\d+)'; Replace = '$1[PRIVATE-IP]' }
-    # JWT tokens (xxx.xxx.xxx format)
-    @{ Pattern = '(?i)eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+'; Replace = '[JWT-REDACTED]' }
-)
-
-<#
-.SYNOPSIS
-    Sanitizes error strings to remove secrets before adding to manifest.
-.DESCRIPTION
-    Scrubs URLs with query params, API keys, tokens, and other secrets from error messages.
-    This is the last line of defense against secret leakage in the JSON manifest.
-.PARAMETER ErrorString
-    The error string to sanitize.
-.OUTPUTS
-    Sanitized string with secrets replaced by [REDACTED].
-#>
-function Invoke-ErrorSanitization {
-    param(
-        [Parameter(ValueFromPipeline)]
-        [AllowNull()]
-        [AllowEmptyString()]
-        [string]$ErrorString
-    )
-
-    if ([string]::IsNullOrEmpty($ErrorString)) {
-        return $ErrorString
-    }
-
-    $result = $ErrorString
-
-    foreach ($pattern in $script:ErrorSanitizationPatterns) {
-        $result = $result -replace $pattern.Pattern, $pattern.Replace
-    }
-
-    # Also use the diagnostics module's redaction if available
-    if (Get-Command 'Invoke-ValueRedaction' -ErrorAction SilentlyContinue) {
-        $result = Invoke-ValueRedaction -Value $result
-    }
-
-    return $result
-}
+# NOTE: Invoke-ErrorSanitization is now provided by e2e-sanitize.psm1 (imported above)
+# This module re-exports it for backward compatibility
 
 <#
 .SYNOPSIS
     Sanitizes an array of error strings.
+.DESCRIPTION
+    Uses the centralized Invoke-ErrorSanitization from e2e-sanitize.psm1.
 #>
 function Get-SanitizedErrors {
     param([array]$Errors)
@@ -754,27 +723,37 @@ function ConvertTo-E2ERunManifest {
     # source values: git (from checkout), env (from environment var), unknown (not available)
     $prov = Get-SafeProperty -Object $Context -PropertyName 'SourceProvenance'
     $sourceShas = Get-SafeProperty -Object $Context -PropertyName 'SourceShas'
+    $sourceFullShas = Get-SafeProperty -Object $Context -PropertyName 'SourceFullShas'
 
     $commonSha = Get-SafeProperty -Object $sourceShas -PropertyName 'Common'
     $qobuzarrSha = Get-SafeProperty -Object $sourceShas -PropertyName 'Qobuzarr'
     $tidalarrSha = Get-SafeProperty -Object $sourceShas -PropertyName 'Tidalarr'
     $brainarrSha = Get-SafeProperty -Object $sourceShas -PropertyName 'Brainarr'
 
+    $commonFullSha = Get-SafeProperty -Object $sourceFullShas -PropertyName 'Common'
+    $qobuzarrFullSha = Get-SafeProperty -Object $sourceFullShas -PropertyName 'Qobuzarr'
+    $tidalarrFullSha = Get-SafeProperty -Object $sourceFullShas -PropertyName 'Tidalarr'
+    $brainarrFullSha = Get-SafeProperty -Object $sourceFullShas -PropertyName 'Brainarr'
+
     $sources = [ordered]@{
         common = [ordered]@{
             sha = if ($commonSha) { $commonSha } else { (Get-RunnerVersion) }
+            fullSha = $commonFullSha
             source = if ($prov -and (Get-SafeProperty $prov 'Common')) { (Get-SafeProperty $prov 'Common') } elseif ($commonSha) { 'git' } else { 'git' }
         }
         qobuzarr = [ordered]@{
             sha = $qobuzarrSha
+            fullSha = $qobuzarrFullSha
             source = if ($prov -and (Get-SafeProperty $prov 'Qobuzarr')) { (Get-SafeProperty $prov 'Qobuzarr') } elseif ($qobuzarrSha) { 'git' } else { 'unknown' }
         }
         tidalarr = [ordered]@{
             sha = $tidalarrSha
+            fullSha = $tidalarrFullSha
             source = if ($prov -and (Get-SafeProperty $prov 'Tidalarr')) { (Get-SafeProperty $prov 'Tidalarr') } elseif ($tidalarrSha) { 'git' } else { 'unknown' }
         }
         brainarr = [ordered]@{
             sha = $brainarrSha
+            fullSha = $brainarrFullSha
             source = if ($prov -and (Get-SafeProperty $prov 'Brainarr')) { (Get-SafeProperty $prov 'Brainarr') } elseif ($brainarrSha) { 'git' } else { 'unknown' }
         }
     }

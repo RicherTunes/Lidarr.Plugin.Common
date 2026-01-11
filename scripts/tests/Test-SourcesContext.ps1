@@ -90,12 +90,30 @@ function Test-BasicShaExtraction {
     }
     Write-Host "  [PASS] Common SHA: $($result.SourceShas['Common'])" -ForegroundColor Green
 
+    # Common fullSha should be extracted (40 chars)
+    if (-not $result.SourceFullShas['Common']) {
+        Write-Host "  [FAIL] Common fullSha is null" -ForegroundColor Red
+        return $false
+    }
+    if ($result.SourceFullShas['Common'].Length -ne 40) {
+        Write-Host "  [FAIL] Common fullSha not 40 chars: $($result.SourceFullShas['Common'])" -ForegroundColor Red
+        return $false
+    }
+    Write-Host "  [PASS] Common fullSha: $($result.SourceFullShas['Common'])" -ForegroundColor Green
+
     # Qobuzarr SHA should be extracted (exact casing match)
     if (-not $result.SourceShas['Qobuzarr']) {
         Write-Host "  [FAIL] Qobuzarr SHA is null" -ForegroundColor Red
         return $false
     }
     Write-Host "  [PASS] Qobuzarr SHA: $($result.SourceShas['Qobuzarr'])" -ForegroundColor Green
+
+    # Qobuzarr fullSha should be extracted
+    if (-not $result.SourceFullShas['Qobuzarr']) {
+        Write-Host "  [FAIL] Qobuzarr fullSha is null" -ForegroundColor Red
+        return $false
+    }
+    Write-Host "  [PASS] Qobuzarr fullSha: $($result.SourceFullShas['Qobuzarr'])" -ForegroundColor Green
 
     # Provenance should be 'git'
     if ($result.SourceProvenance['Common'] -ne 'git') {
