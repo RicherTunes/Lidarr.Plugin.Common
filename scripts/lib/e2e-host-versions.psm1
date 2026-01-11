@@ -32,7 +32,12 @@ function Get-HostAssemblyVersions {
 
     .PARAMETER ExtractFrom
         Docker image tag to extract assemblies from (e.g., pr-plugins-3.1.1.4884).
-        If specified, extracts assemblies to a temp directory and reads from there.
+        If specified, extracts assemblies to a cached directory based on the tag.
+        Reuses cached assemblies if they exist (use -ForceExtract to re-extract).
+
+    .PARAMETER ForceExtract
+        Force re-extraction of assemblies even if cached version exists.
+        Only used with -ExtractFrom.
 
     .PARAMETER Packages
         Array of package definitions to check. Each should have PackageId and DllName.
@@ -56,6 +61,9 @@ function Get-HostAssemblyVersions {
         [string]$ExtractFrom,
 
         [Parameter(Mandatory = $false)]
+        [switch]$ForceExtract,
+
+        [Parameter(Mandatory = $false)]
         [array]$Packages = $script:DefaultHostCoupledPackages
     )
 
@@ -65,30 +73,59 @@ function Get-HostAssemblyVersions {
 
     $effectiveDir = $HostAssembliesDir
 
-    # Extract from Docker if requested
+    # Extract from Docker if requested (with caching)
     if ($ExtractFrom) {
-        $effectiveDir = Join-Path ([System.IO.Path]::GetTempPath()) "lidarr-host-extract-$([guid]::NewGuid().ToString('N').Substring(0,8))"
-        New-Item -ItemType Directory -Path $effectiveDir -Force | Out-Null
+        # Create cache key from tag (sanitize for filesystem)
+        $cacheKey = $ExtractFrom -replace '[^a-zA-Z0-9._-]', '_'
+        $cacheDir = Join-Path ([System.IO.Path]::GetTempPath()) "lidarr-host-extract-$cacheKey"
 
-        $containerName = "lidarr-extract-$([guid]::NewGuid().ToString('N').Substring(0,8))"
-        try {
-            Write-Verbose "Extracting assemblies from ghcr.io/hotio/lidarr:$ExtractFrom..."
-            docker create --name $containerName "ghcr.io/hotio/lidarr:$ExtractFrom" 2>&1 | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-                throw "Failed to create container from ghcr.io/hotio/lidarr:$ExtractFrom"
-            }
-
+        # Check if cached assemblies exist and are valid
+        $cacheValid = $false
+        if (-not $ForceExtract -and (Test-Path $cacheDir)) {
+            $allPresent = $true
             foreach ($pkg in $Packages) {
-                $dllName = $pkg.DllName
-                docker cp "${containerName}:/app/bin/$dllName" "$effectiveDir/$dllName" 2>&1 | Out-Null
-                if ($LASTEXITCODE -eq 0) {
-                    Write-Verbose "  Extracted: $dllName"
+                $dllPath = Join-Path $cacheDir $pkg.DllName
+                if (-not (Test-Path $dllPath)) {
+                    $allPresent = $false
+                    break
                 }
             }
+            if ($allPresent) {
+                Write-Verbose "Using cached assemblies from: $cacheDir"
+                $cacheValid = $true
+            }
         }
-        finally {
-            docker rm $containerName 2>&1 | Out-Null
+
+        if (-not $cacheValid) {
+            # Clear existing cache if forcing or incomplete
+            if (Test-Path $cacheDir) {
+                Remove-Item -Path $cacheDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+            New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+
+            $containerName = "lidarr-extract-$([guid]::NewGuid().ToString('N').Substring(0,8))"
+            try {
+                Write-Verbose "Extracting assemblies from ghcr.io/hotio/lidarr:$ExtractFrom..."
+                docker create --name $containerName "ghcr.io/hotio/lidarr:$ExtractFrom" 2>&1 | Out-Null
+                if ($LASTEXITCODE -ne 0) {
+                    throw "Failed to create container from ghcr.io/hotio/lidarr:$ExtractFrom"
+                }
+
+                foreach ($pkg in $Packages) {
+                    $dllName = $pkg.DllName
+                    docker cp "${containerName}:/app/bin/$dllName" "$cacheDir/$dllName" 2>&1 | Out-Null
+                    if ($LASTEXITCODE -eq 0) {
+                        Write-Verbose "  Extracted: $dllName"
+                    }
+                }
+                Write-Verbose "Cached assemblies to: $cacheDir"
+            }
+            finally {
+                docker rm $containerName 2>&1 | Out-Null
+            }
         }
+
+        $effectiveDir = $cacheDir
     }
 
     if (-not (Test-Path $effectiveDir)) {
@@ -137,10 +174,8 @@ function Get-HostAssemblyVersions {
         $results += $result
     }
 
-    # Cleanup temp directory if we extracted
-    if ($ExtractFrom -and $effectiveDir -and (Test-Path $effectiveDir)) {
-        Remove-Item -Path $effectiveDir -Recurse -Force -ErrorAction SilentlyContinue
-    }
+    # Note: Cached assemblies from -ExtractFrom are preserved for reuse
+    # Use -ForceExtract to clear cache and re-extract
 
     return $results
 }
@@ -332,21 +367,33 @@ function Compare-HostPluginVersions {
 
     # Output results
     if ($Format -eq 'Json') {
-        $output = [PSCustomObject]@{
-            matchPolicy = $MatchPolicy
+        # Sort results by packageId for stable output (CI diff-friendly)
+        $sortedResults = @($results | Sort-Object PackageId | ForEach-Object {
+            [ordered]@{
+                match = $_.Match
+                hostVersion = $_.HostVersion
+                packageId = $_.PackageId
+                pinnedVersion = $_.PinnedVersion
+                reason = $_.Reason
+                status = $_.Status
+            }
+        })
+
+        $output = [ordered]@{
             hasErrors = $hasErrors
-            results = @($results | ForEach-Object {
-                [PSCustomObject]@{
-                    packageId = $_.PackageId
-                    reason = $_.Reason
-                    pinnedVersion = $_.PinnedVersion
-                    hostVersion = $_.HostVersion
-                    status = $_.Status
-                    match = $_.Match
-                }
-            })
+            matchPolicy = $MatchPolicy
+            results = $sortedResults
         }
-        return ($output | ConvertTo-Json -Depth 5)
+
+        $json = $output | ConvertTo-Json -Depth 5
+
+        # Handle -Strict for JSON format (exit after output)
+        if ($Strict -and $hasErrors) {
+            Write-Output $json
+            exit 1
+        }
+
+        return $json
     }
     else {
         Write-Host ""
@@ -447,6 +494,9 @@ function Test-HostVersionCompatibility {
     .PARAMETER ExtractFrom
         Docker image tag to extract host assemblies from.
 
+    .PARAMETER ForceExtract
+        Force re-extraction of assemblies even if cached version exists.
+
     .PARAMETER MatchPolicy
         Version comparison policy: MajorMinor or Exact. Default: MajorMinor
 
@@ -474,6 +524,9 @@ function Test-HostVersionCompatibility {
         [string]$ExtractFrom,
 
         [Parameter(Mandatory = $false)]
+        [switch]$ForceExtract,
+
+        [Parameter(Mandatory = $false)]
         [ValidateSet('MajorMinor', 'Exact')]
         [string]$MatchPolicy = 'MajorMinor',
 
@@ -488,6 +541,7 @@ function Test-HostVersionCompatibility {
     $hostParams = @{}
     if ($HostAssembliesDir) { $hostParams.HostAssembliesDir = $HostAssembliesDir }
     if ($ExtractFrom) { $hostParams.ExtractFrom = $ExtractFrom }
+    if ($ForceExtract) { $hostParams.ForceExtract = $true }
 
     $hostVersions = Get-HostAssemblyVersions @hostParams
     $pinnedVersions = Get-PluginPinnedVersions -RepoRoot $RepoRoot
