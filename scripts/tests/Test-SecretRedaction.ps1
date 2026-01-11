@@ -238,6 +238,53 @@ $errorObj = $errorJson | ConvertFrom-Json
 Test-Assertion ($errorObj.results[0].outcomeReason -notmatch 'mysecrettoken123') "outcomeReason does not leak access_token"
 Test-Assertion ($errorObj.results[0].outcomeReason -match '\[REDACTED\]') "outcomeReason has redaction applied"
 
+# ============================================================================
+# Metadata Gate readError Field Sanitization
+# ============================================================================
+Write-Host ""
+Write-Host "Test Group: Metadata Gate readError Sanitization" -ForegroundColor Yellow
+
+# Test: Exception containing access_token in URL query param should be sanitized
+$exceptionWithToken = "TagLib read failed for https://api.service.com/stream?access_token=supersecrettoken123456 - file corrupted"
+$sanitized = Invoke-ErrorSanitization -ErrorString $exceptionWithToken
+Test-Assertion ($sanitized -notmatch 'supersecrettoken123456') "access_token value redacted from readError"
+Test-Assertion ($sanitized -match '\[REDACTED\]') "Redaction marker present for access_token"
+
+# Test: Exception containing private IP should be sanitized
+$exceptionWithPrivateIP = "Failed to read metadata from http://192.168.50.100:8686/downloads/track.flac"
+$sanitized = Invoke-ErrorSanitization -ErrorString $exceptionWithPrivateIP
+Test-Assertion ($sanitized -match '\[PRIVATE-IP\]') "Private IP redacted from readError"
+Test-Assertion ($sanitized -notmatch '192\.168\.50\.100') "IP octets not present in output"
+
+# Test: Exception containing API key in URL query param should be sanitized
+$exceptionWithApiKey = "mutagen parse error: downloaded from https://cdn.service.com/file?api_key=abcdef1234567890abcdef1234567890&id=123" # gitleaks:allow
+$sanitized = Invoke-ErrorSanitization -ErrorString $exceptionWithApiKey
+Test-Assertion ($sanitized -notmatch 'abcdef1234567890abcdef1234567890') "API key redacted from readError"
+
+# Test: Exception with auth URL param (URL format, not bare text)
+$exceptionWithAuthUrl = "Stream read failed from https://api.service.com/download?auth=secretauthvalue123&track=5"
+$sanitized = Invoke-ErrorSanitization -ErrorString $exceptionWithAuthUrl
+Test-Assertion ($sanitized -notmatch 'secretauthvalue123') "auth= URL param redacted from readError"
+
+# Test: Exception with multiple URL secrets
+$exceptionMultiSecrets = "Error fetching https://api.com/get?token=secret1&password=secret2 from http://10.0.0.1:8080/api"
+$sanitized = Invoke-ErrorSanitization -ErrorString $exceptionMultiSecrets
+Test-Assertion ($sanitized -notmatch 'secret1') "token= URL param redacted"
+Test-Assertion ($sanitized -notmatch 'secret2') "password= URL param redacted"
+Test-Assertion ($sanitized -notmatch '10\.0\.0\.1') "10.x.x.x RFC1918 IP not in output"
+
+# Test: readError length truncation (max 200 chars) - verify sanitization works with truncation
+$longException = "A" * 50 + " https://api.com/x?access_token=mysupersecretvalue " + "B" * 200
+$truncated = $longException.Substring(0, [Math]::Min(200, $longException.Length))
+$sanitized = Invoke-ErrorSanitization -ErrorString $truncated
+Test-Assertion ($sanitized.Length -le 200) "Truncated readError respects length limit"
+Test-Assertion ($sanitized -notmatch 'mysupersecretvalue') "Secret redacted even after truncation"
+
+# Test: Bearer token in Authorization header within error message
+$authHeaderError = "Request failed: Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.test" # gitleaks:allow
+$sanitized = Invoke-ErrorSanitization -ErrorString $authHeaderError
+Test-Assertion ($sanitized -notmatch 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9') "JWT in readError Authorization header redacted"
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Audit Summary" -ForegroundColor Cyan
