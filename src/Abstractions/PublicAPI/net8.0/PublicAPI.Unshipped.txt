@@ -1,2 +1,2 @@
 #nullable enable
-
+T:Lidarr.Plugin.Abstractions.Results.StreamingFailureReason
