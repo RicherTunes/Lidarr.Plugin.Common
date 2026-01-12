@@ -10,18 +10,32 @@ namespace Lidarr.Plugin.Common.TestKit.Validation;
 /// Tier-2 characterization tests (log-only, non-failing) for documenting
 /// cross-plugin ReleaseDate handling behavior.
 /// </summary>
+/// <remarks>
+/// <para><b>Policy: Album release dates are calendar dates (no timezone).</b></para>
+/// <para>
+/// Streaming services publish album release dates as simple calendar dates (e.g., "2024-01-15")
+/// without timezone information. We normalize to DateTimeKind.Unspecified to avoid accidental
+/// timezone drift when comparing dates from different sources.
+/// </para>
+/// </remarks>
 public static class ReleaseDateParityTests
 {
     /// <summary>
-    /// Normalizes a DateTime to date-only (strips time component).
-    /// This is the canonical policy: album release dates are date-only.
+    /// Normalizes a DateTime to date-only with Unspecified kind.
+    /// This is the canonical policy: album release dates are calendar dates (no timezone).
     /// </summary>
+    /// <remarks>
+    /// Uses DateTimeKind.Unspecified to prevent timezone conversion issues.
+    /// Album release dates from streaming APIs are typically just YYYY-MM-DD.
+    /// </remarks>
     public static DateTime? NormalizeToDateOnly(DateTime? dateTime)
     {
         if (!dateTime.HasValue)
             return null;
 
-        return dateTime.Value.Date;
+        // Strip time and normalize to Unspecified kind (calendar date)
+        var date = dateTime.Value.Date;
+        return DateTime.SpecifyKind(date, DateTimeKind.Unspecified);
     }
 
     /// <summary>
@@ -60,17 +74,27 @@ public static class ReleaseDateParityTests
 
         var dt = releaseDate.Value;
         var hasTime = dt.TimeOfDay != TimeSpan.Zero;
+        var kind = dt.Kind;
+        var normalizedDate = DateTime.SpecifyKind(dt.Date, DateTimeKind.Unspecified);
+
+        var kindNote = kind switch
+        {
+            DateTimeKind.Utc => "UTC",
+            DateTimeKind.Local => "Local (potential timezone drift risk)",
+            _ => "Unspecified (calendar date)"
+        };
 
         return new ReleaseDateCharacterization
         {
             Source = source,
             RawValue = dt,
-            NormalizedValue = dt.Date,
+            NormalizedValue = normalizedDate,
             HasTimeComponent = hasTime,
             IsNullOrMissing = false,
+            DateTimeKind = kind,
             Notes = hasTime
-                ? $"Has time component: {dt:HH:mm:ss.fff} (will be stripped to {dt.Date:yyyy-MM-dd})"
-                : $"Clean date-only: {dt:yyyy-MM-dd}"
+                ? $"Has time component: {dt:HH:mm:ss.fff} Kind={kindNote} (normalized to {normalizedDate:yyyy-MM-dd})"
+                : $"Clean date-only: {dt:yyyy-MM-dd} Kind={kindNote}"
         };
     }
 
@@ -169,6 +193,9 @@ public class ReleaseDateCharacterization
 
     /// <summary>Whether the value was null or missing.</summary>
     public bool IsNullOrMissing { get; init; }
+
+    /// <summary>DateTimeKind of the raw value (UTC, Local, or Unspecified).</summary>
+    public DateTimeKind DateTimeKind { get; init; }
 
     /// <summary>Whether the legacy Metadata["release_date"] field exists.</summary>
     public bool HasLegacyMetadataField { get; set; }
