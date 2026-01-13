@@ -2,6 +2,7 @@ using System;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Common.Services.Authentication;
+using Lidarr.Plugin.Common.TestKit.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -80,30 +81,36 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public async Task ProactiveRefresh_RefreshesSession_WhenApproachingExpiryAndCredentialsAvailable()
         {
+            // Use FakeTimeProvider for deterministic time control (no flaky timer/threadpool variance)
+            var fakeTime = new FakeTimeProvider();
             var store = new MemoryTokenStore<TestSession>();
-            // The proactive refresh logic only acts on an in-memory session.
-            // Load a persisted session that is initially valid, but will enter the refresh buffer shortly.
-            // Use 2 seconds lifetime with 1 second buffer to give enough margin for Windows timer resolution (~15ms).
+
+            // Create a session that expires 10 seconds from "now" (fake time)
+            var sessionExpiry = fakeTime.GetUtcNow().UtcDateTime.AddSeconds(10);
             await store.SaveAsync(new TokenEnvelope<TestSession>(
                 new TestSession("persisted"),
-                DateTime.UtcNow.AddSeconds(2)));
+                sessionExpiry));
 
             var authService = new FakeAuthService();
             using var manager = CreateManager(
                 authService,
                 store,
                 proactiveCredentialsProvider: () => new TestCredentials("proactive"),
-                refreshBuffer: TimeSpan.FromSeconds(1));
+                refreshBuffer: TimeSpan.FromSeconds(5),
+                timeProvider: fakeTime);
 
-            // Ensure the persisted session is loaded into memory so the background timer can act.
+            // Ensure the persisted session is loaded into memory
             _ = await manager.GetValidSessionAsync();
+            Assert.Equal(0, authService.AuthenticateCalls); // Should not have refreshed yet
 
-            // Wait for proactive refresh to trigger. Give generous timeout for CI timing variance.
-            var deadline = DateTime.UtcNow.AddSeconds(8);
-            while (DateTime.UtcNow < deadline && authService.AuthenticateCalls < 1)
-            {
-                await Task.Delay(50);
-            }
+            // Advance time to enter the refresh buffer (10s expiry - 5s buffer = triggers at 5s)
+            fakeTime.Advance(TimeSpan.FromSeconds(6));
+
+            // Manually trigger the refresh check (deterministic, no timer variance)
+            manager.TriggerRefreshCheck();
+
+            // Give async refresh a moment to complete
+            await Task.Delay(50);
 
             Assert.True(authService.AuthenticateCalls >= 1, "Expected proactive refresh to authenticate at least once.");
             Assert.Equal(new TestCredentials("proactive"), authService.LastCredentials);
@@ -118,7 +125,8 @@ namespace Lidarr.Plugin.Common.Tests
             ITokenStore<TestSession> store,
             Func<TestCredentials?>? proactiveCredentialsProvider = null,
             TimeSpan? refreshBuffer = null,
-            TimeSpan? refreshCheckInterval = null)
+            TimeSpan? refreshCheckInterval = null,
+            TimeProvider? timeProvider = null)
         {
             var options = new StreamingTokenManagerOptions<TestSession>
             {
@@ -134,7 +142,8 @@ namespace Lidarr.Plugin.Common.Tests
                 authService,
                 NullLogger<StreamingTokenManager<TestSession, TestCredentials>>.Instance,
                 store,
-                options);
+                options,
+                timeProvider);
         }
 
         private sealed record TestSession(string Id);
