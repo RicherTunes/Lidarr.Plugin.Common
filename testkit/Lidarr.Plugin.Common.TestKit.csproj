@@ -24,8 +24,14 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\src\Abstractions\Lidarr.Plugin.Abstractions.csproj" />
-    <ProjectReference Include="..\src\Lidarr.Plugin.Common.csproj" />
+    <!-- AdditionalProperties must match consumer projects (e.g., Brainarr.Plugin) to avoid CS2012 file locks
+         when both plugin and test projects reference these assemblies with different global properties -->
+    <ProjectReference Include="..\src\Abstractions\Lidarr.Plugin.Abstractions.csproj">
+      <AdditionalProperties>GeneratePackageOnBuild=false;RunAnalyzersDuringBuild=false;EnableNETAnalyzers=false</AdditionalProperties>
+    </ProjectReference>
+    <ProjectReference Include="..\src\Lidarr.Plugin.Common.csproj">
+      <AdditionalProperties>GeneratePackageOnBuild=false;RunAnalyzersDuringBuild=false;EnableNETAnalyzers=false</AdditionalProperties>
+    </ProjectReference>
   </ItemGroup>
 
   <ItemGroup>
