@@ -3,6 +3,14 @@ name: Multi-Plugin Smoke Test
 on:
   workflow_dispatch:
     inputs:
+      test_plugins:
+        description: "Comma-separated plugins to build/mount (qobuzarr,tidalarr,brainarr). Default: qobuzarr,tidalarr"
+        required: true
+        default: qobuzarr,tidalarr
+      caller_plugin:
+        description: Optional caller plugin name (for reusable workflow callers)
+        required: false
+        default: ""
       lidarr_tag:
         description: Lidarr Docker tag (plugins branch; must support net8 plugins)
         required: true
@@ -14,6 +22,10 @@ on:
       tidalarr_ref:
         description: Tidalarr branch/tag/SHA
         required: true
+        default: main
+      brainarr_ref:
+        description: Brainarr branch/tag/SHA (optional; defaults to caller SHA if called from Brainarr)
+        required: false
         default: main
       run_medium_gate:
         description: Configure + test indexers (requires credentials)
@@ -56,6 +68,118 @@ on:
         required: true
         default: false
 
+  workflow_call:
+    inputs:
+      test_plugins:
+        description: "Comma-separated plugins to build/mount (qobuzarr,tidalarr,brainarr). Default: qobuzarr,tidalarr"
+        type: string
+        required: false
+        default: qobuzarr,tidalarr
+      caller_plugin:
+        description: Optional caller plugin name (e.g., brainarr) to default that plugin ref to the caller SHA
+        type: string
+        required: false
+        default: ""
+      lidarr_tag:
+        description: Lidarr Docker tag (plugins branch; must support net8 plugin hosts)
+        type: string
+        required: false
+        default: pr-plugins-3.1.1.4884
+      qobuzarr_ref:
+        description: Qobuzarr branch/tag/SHA
+        type: string
+        required: false
+        default: main
+      tidalarr_ref:
+        description: Tidalarr branch/tag/SHA
+        type: string
+        required: false
+        default: main
+      brainarr_ref:
+        description: Brainarr branch/tag/SHA (defaults to caller SHA if called from Brainarr)
+        type: string
+        required: false
+        default: ""
+      run_medium_gate:
+        description: Configure + test indexers (requires credentials)
+        type: boolean
+        required: false
+        default: false
+      run_downloadclient_gate:
+        description: Configure + test download clients (requires credentials)
+        type: boolean
+        required: false
+        default: false
+      run_search_gate:
+        description: Run AlbumSearch + require releases (requires credentials)
+        type: boolean
+        required: false
+        default: false
+      run_grab_gate:
+        description: POST /api/v1/release to queue downloads (requires credentials)
+        type: boolean
+        required: false
+        default: false
+      require_downloaded_files:
+        description: Require at least one downloaded file on disk (grab gate only; slow)
+        type: boolean
+        required: false
+        default: false
+      grab_timeout_seconds:
+        description: Timeout for grab gate queue/files checks
+        type: string
+        required: false
+        default: "300"
+      require_all_indexers_in_search:
+        description: Fail search unless releases include each configured indexer name
+        type: boolean
+        required: false
+        default: false
+      run_canary:
+        description: Also run against moving tag "pr-plugins" (allowed to fail)
+        type: boolean
+        required: false
+        default: false
+    secrets:
+      CROSS_REPO_PAT:
+        required: true
+      QOBUZARR_EMAIL:
+        required: false
+      QOBUZARR_PASSWORD:
+        required: false
+      QOBUZARR_USER_ID:
+        required: false
+      QOBUZARR_AUTH_TOKEN:
+        required: false
+      QOBUZARR_APP_ID:
+        required: false
+      QOBUZARR_APP_SECRET:
+        required: false
+      QOBUZARR_COUNTRY_CODE:
+        required: false
+      QOBUZ_EMAIL:
+        required: false
+      QOBUZ_PASSWORD:
+        required: false
+      QOBUZ_USER_ID:
+        required: false
+      QOBUZ_AUTH_TOKEN:
+        required: false
+      QOBUZ_APP_ID:
+        required: false
+      QOBUZ_APP_SECRET:
+        required: false
+      QOBUZ_COUNTRY_CODE:
+        required: false
+      TIDALARR_REDIRECT_URL:
+        required: false
+      TIDALARR_MARKET:
+        required: false
+      TIDAL_REDIRECT_URL:
+        required: false
+      TIDAL_MARKET:
+        required: false
+
 permissions:
   contents: read
 
@@ -76,9 +200,11 @@ jobs:
           - name: gate
             lidarr_tag: ${{ inputs.lidarr_tag }}
             allow_failure: false
+            port: 8689
           - name: canary
             lidarr_tag: pr-plugins
             allow_failure: true
+            port: 8690
     steps:
       - name: Preflight - Validate CROSS_REPO_PAT secret
         shell: bash
@@ -115,7 +241,48 @@ jobs:
             6.0.x
             8.0.x
 
+      - name: Resolve plugin selection and refs
+        id: plugin_meta
+        shell: bash
+        env:
+          INPUT_TEST_PLUGINS: ${{ inputs.test_plugins }}
+          INPUT_CALLER_PLUGIN: ${{ inputs.caller_plugin }}
+          INPUT_BRAINARR_REF: ${{ inputs.brainarr_ref }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+
+          plugins="${INPUT_TEST_PLUGINS:-qobuzarr,tidalarr}"
+          plugins_lc="$(echo "$plugins" | tr '[:upper:]' '[:lower:]' | tr -d ' ' | tr ';' ',')"
+
+          include_qobuzarr=false
+          include_tidalarr=false
+          include_brainarr=false
+
+          if echo ",$plugins_lc," | grep -q ",qobuzarr,"; then include_qobuzarr=true; fi
+          if echo ",$plugins_lc," | grep -q ",tidalarr,"; then include_tidalarr=true; fi
+          if echo ",$plugins_lc," | grep -q ",brainarr,"; then include_brainarr=true; fi
+
+          echo "include_qobuzarr=$include_qobuzarr" >> "$GITHUB_OUTPUT"
+          echo "include_tidalarr=$include_tidalarr" >> "$GITHUB_OUTPUT"
+          echo "include_brainarr=$include_brainarr" >> "$GITHUB_OUTPUT"
+
+          brainarr_ref="${INPUT_BRAINARR_REF:-}"
+          if [[ -z "$brainarr_ref" ]]; then
+            caller_lc="$(echo "${INPUT_CALLER_PLUGIN:-}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')"
+            if [[ "$caller_lc" == "brainarr" || "$GITHUB_REPOSITORY" == "RicherTunes/Brainarr" ]]; then
+              brainarr_ref="$GITHUB_SHA"
+            else
+              brainarr_ref="main"
+            fi
+          fi
+
+          echo "brainarr_ref=$brainarr_ref" >> "$GITHUB_OUTPUT"
+          echo "plugins=$plugins_lc" >> "$GITHUB_OUTPUT"
+
       - name: Checkout Qobuzarr
+        if: ${{ steps.plugin_meta.outputs.include_qobuzarr == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: RicherTunes/Qobuzarr
@@ -125,11 +292,22 @@ jobs:
           submodules: recursive
 
       - name: Checkout Tidalarr
+        if: ${{ steps.plugin_meta.outputs.include_tidalarr == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: RicherTunes/Tidalarr
           ref: ${{ inputs.tidalarr_ref }}
           path: tidalarr
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          submodules: recursive
+
+      - name: Checkout Brainarr
+        if: ${{ steps.plugin_meta.outputs.include_brainarr == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/Brainarr
+          ref: ${{ steps.plugin_meta.outputs.brainarr_ref }}
+          path: brainarr
           token: ${{ secrets.CROSS_REPO_PAT }}
           submodules: recursive
 
@@ -168,16 +346,23 @@ jobs:
 
           echo "Copying assemblies to plugin ext directories..."
 
-          # Create target directories for both plugins
-          mkdir -p qobuzarr/ext/Lidarr/_output/net8.0
-          mkdir -p tidalarr/ext/Lidarr/_output/net8.0
+          targets=()
+          if [[ "${{ steps.plugin_meta.outputs.include_qobuzarr }}" == "true" ]]; then targets+=(qobuzarr); fi
+          if [[ "${{ steps.plugin_meta.outputs.include_tidalarr }}" == "true" ]]; then targets+=(tidalarr); fi
+          if [[ "${{ steps.plugin_meta.outputs.include_brainarr }}" == "true" ]]; then targets+=(brainarr); fi
 
-          # Copy all DLLs to both plugin directories
-          find _lidarr_extracted -type f -name "*.dll" -exec cp {} qobuzarr/ext/Lidarr/_output/net8.0/ \;
-          find _lidarr_extracted -type f -name "*.dll" -exec cp {} tidalarr/ext/Lidarr/_output/net8.0/ \;
+          if [[ ${#targets[@]} -eq 0 ]]; then
+            echo "::error::No test plugins selected (test_plugins='${{ steps.plugin_meta.outputs.plugins }}')."
+            exit 1
+          fi
+
+          for plugin_dir in "${targets[@]}"; do
+            mkdir -p "$plugin_dir/ext/Lidarr/_output/net8.0"
+            find _lidarr_extracted -type f -name "*.dll" -exec cp {} "$plugin_dir/ext/Lidarr/_output/net8.0/" \;
+          done
 
           # Verify critical assemblies exist
-          for plugin_dir in qobuzarr tidalarr; do
+          for plugin_dir in "${targets[@]}"; do
             if [ ! -f "$plugin_dir/ext/Lidarr/_output/net8.0/Lidarr.dll" ]; then
               echo "::error::Missing Lidarr.dll in $plugin_dir after extraction"
               ls -la "$plugin_dir/ext/Lidarr/_output/net8.0/" || true
@@ -197,10 +382,18 @@ jobs:
           set -euo pipefail
           echo "Syncing tools and build assets from main checkout to plugin submodules..."
 
-          # Both plugins have submodules at ext/Lidarr.Plugin.Common
+          # Plugins have a Common submodule (path differs by repo casing)
           # The submodules may point to older commits, so we sync from this checkout
-          for plugin_dir in qobuzarr tidalarr; do
-            submod_common="$plugin_dir/ext/Lidarr.Plugin.Common"
+          for plugin_dir in qobuzarr tidalarr brainarr; do
+            if [ ! -d "$plugin_dir" ]; then
+              continue
+            fi
+
+            if [ "$plugin_dir" = "brainarr" ]; then
+              submod_common="$plugin_dir/ext/lidarr.plugin.common"
+            else
+              submod_common="$plugin_dir/ext/Lidarr.Plugin.Common"
+            fi
             if [ -d "$submod_common" ]; then
               echo "Syncing to $submod_common..."
 
@@ -225,6 +418,7 @@ jobs:
           echo "Tool sync complete"
 
       - name: Build Qobuzarr package
+        if: ${{ steps.plugin_meta.outputs.include_qobuzarr == 'true' }}
         shell: pwsh
         working-directory: qobuzarr
         run: |
@@ -245,6 +439,7 @@ jobs:
           }
 
       - name: Build Tidalarr package
+        if: ${{ steps.plugin_meta.outputs.include_tidalarr == 'true' }}
         shell: pwsh
         working-directory: tidalarr
         run: |
@@ -265,6 +460,27 @@ jobs:
             } else {
               dotnet build --configuration Release --no-restore --verbosity normal -p:RunAnalyzersDuringBuild=false -p:EnableNETAnalyzers=false -p:TreatWarningsAsErrors=false 2>&1
             }
+            Write-Host "::endgroup::"
+            exit 1
+          }
+
+      - name: Build Brainarr package
+        if: ${{ steps.plugin_meta.outputs.include_brainarr == 'true' }}
+        shell: pwsh
+        working-directory: brainarr
+        run: |
+          $buildSuccess = $false
+          try {
+            ./build.ps1 -Configuration Release -Restore -Package -VerboseOutput
+            if ($LASTEXITCODE -eq 0) { $buildSuccess = $true }
+          } catch {
+            Write-Host "build.ps1 threw exception: $_" -ForegroundColor Red
+          }
+          if (-not $buildSuccess) {
+            Write-Host ""
+            Write-Host "::group::Detailed build error output"
+            dotnet restore --verbosity quiet 2>&1 | Out-Null
+            dotnet build Brainarr.sln --configuration Release --no-restore --verbosity normal -p:RunAnalyzersDuringBuild=false -p:EnableNETAnalyzers=false -p:TreatWarningsAsErrors=false 2>&1
             Write-Host "::endgroup::"
             exit 1
           }
@@ -313,14 +529,28 @@ jobs:
             return $zip.FullName
           }
 
-          $qobuzZip = Find-PluginZip -RepoDir 'qobuzarr' -NamePattern 'Qobuzarr'
-          $tidalZip = Find-PluginZip -RepoDir 'tidalarr' -NamePattern 'Tidalarr'
+          $qobuzZip = ""
+          if ("${{ steps.plugin_meta.outputs.include_qobuzarr }}" -eq "true") {
+            $qobuzZip = Find-PluginZip -RepoDir 'qobuzarr' -NamePattern 'Qobuzarr'
+          }
+
+          $tidalZip = ""
+          if ("${{ steps.plugin_meta.outputs.include_tidalarr }}" -eq "true") {
+            $tidalZip = Find-PluginZip -RepoDir 'tidalarr' -NamePattern 'Tidalarr'
+          }
+
+          $brainZip = ""
+          if ("${{ steps.plugin_meta.outputs.include_brainarr }}" -eq "true") {
+            $brainZip = Find-PluginZip -RepoDir 'brainarr' -NamePattern 'Brainarr'
+          }
 
           "QOBUZ_ZIP=$qobuzZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "TIDAL_ZIP=$tidalZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "BRAIN_ZIP=$brainZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-          Write-Host "Qobuzarr zip: $qobuzZip"
-          Write-Host "Tidalarr zip: $tidalZip"
+          if (-not [string]::IsNullOrWhiteSpace($qobuzZip)) { Write-Host "Qobuzarr zip: $qobuzZip" }
+          if (-not [string]::IsNullOrWhiteSpace($tidalZip)) { Write-Host "Tidalarr zip: $tidalZip" }
+          if (-not [string]::IsNullOrWhiteSpace($brainZip)) { Write-Host "Brainarr zip: $brainZip" }
 
       - name: Validate credentials (if gates enabled)
         if: ${{ inputs.run_medium_gate || inputs.run_downloadclient_gate || inputs.run_search_gate || inputs.run_grab_gate }}
@@ -387,11 +617,20 @@ jobs:
           $containerName = "lidarr-multi-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}"
           "SMOKE_CONTAINER_NAME=$containerName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+          $pluginZips = @()
+          if (-not [string]::IsNullOrWhiteSpace($env:QOBUZ_ZIP)) { $pluginZips += "qobuzarr=$env:QOBUZ_ZIP" }
+          if (-not [string]::IsNullOrWhiteSpace($env:TIDAL_ZIP)) { $pluginZips += "tidalarr=$env:TIDAL_ZIP" }
+          if (-not [string]::IsNullOrWhiteSpace($env:BRAIN_ZIP)) { $pluginZips += "brainarr=$env:BRAIN_ZIP" }
+          if ($pluginZips.Count -eq 0) {
+            throw "No plugin zips were located. Check the build steps and the 'Locate plugin zips' output."
+          }
+
           $params = @{
             LidarrTag = "${{ matrix.lidarr_tag }}"
             ContainerName = $containerName
-            PluginZip = @("qobuzarr=$env:QOBUZ_ZIP", "tidalarr=$env:TIDAL_ZIP")
+            PluginZip = $pluginZips
             KeepRunning = $true
+            Port = [int]"${{ matrix.port }}"
           }
 
           if ("${{ inputs.run_medium_gate }}" -eq "true") { $params.RunMediumGate = $true }
@@ -437,5 +676,6 @@ jobs:
           path: |
             ${{ env.QOBUZ_ZIP }}
             ${{ env.TIDAL_ZIP }}
+            ${{ env.BRAIN_ZIP }}
             .docker-multi-smoke-test/
           if-no-files-found: warn

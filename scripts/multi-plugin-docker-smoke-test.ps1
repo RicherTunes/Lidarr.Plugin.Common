@@ -8,6 +8,7 @@
     waits for Lidarr to become available, then verifies plugin discovery via:
       - /api/v1/indexer/schema
       - /api/v1/downloadclient/schema
+      - /api/v1/importlist/schema
 
     This is a "basic gate" intended to catch runtime load failures and type-identity
     mismatches when multiple plugins co-exist in the same Lidarr instance.
@@ -208,10 +209,17 @@ $expectations = @{
     "qobuzarr" = @{
         Indexers = @("QobuzIndexer")
         DownloadClients = @("QobuzDownloadClient")
+        ImportLists = @()
     }
     "tidalarr" = @{
         Indexers = @("TidalLidarrIndexer")
         DownloadClients = @("TidalLidarrDownloadClient")
+        ImportLists = @()
+    }
+    "brainarr" = @{
+        Indexers = @()
+        DownloadClients = @()
+        ImportLists = @("Brainarr")
     }
 }
 
@@ -733,16 +741,31 @@ try {
 
     $indexerSchemas = $null
     $downloadClientSchemas = $null
+    $importListSchemas = $null
+    $anyImportListsExpected = $false
+    foreach ($plugin in $pluginNames) {
+        if (-not $expectations.ContainsKey($plugin)) { continue }
+        if (@($expectations[$plugin].ImportLists).Count -gt 0) {
+            $anyImportListsExpected = $true
+            break
+        }
+    }
 
     while (((Get-Date) - $schemaStart).TotalSeconds -lt $SchemaTimeoutSeconds) {
         try {
             $indexerResponse = Invoke-WebRequest -Uri "$lidarrUrl/api/v1/indexer/schema" -Headers $headers -TimeoutSec 10 -ErrorAction Stop
             $downloadResponse = Invoke-WebRequest -Uri "$lidarrUrl/api/v1/downloadclient/schema" -Headers $headers -TimeoutSec 10 -ErrorAction Stop
+            if ($anyImportListsExpected) {
+                $importListResponse = Invoke-WebRequest -Uri "$lidarrUrl/api/v1/importlist/schema" -Headers $headers -TimeoutSec 10 -ErrorAction Stop
+            }
 
             $indexerSchemas = $indexerResponse.Content | ConvertFrom-Json
             $downloadClientSchemas = $downloadResponse.Content | ConvertFrom-Json
+            if ($anyImportListsExpected) {
+                $importListSchemas = $importListResponse.Content | ConvertFrom-Json
+            }
 
-            if ($indexerSchemas -and $downloadClientSchemas) {
+            if ($indexerSchemas -and $downloadClientSchemas -and (-not $anyImportListsExpected -or $importListSchemas)) {
                 break
             }
         }
@@ -751,8 +774,12 @@ try {
         }
     }
 
-    if (-not $indexerSchemas -or -not $downloadClientSchemas) {
-        throw "Failed to fetch schema endpoints within ${SchemaTimeoutSeconds}s."
+    if (-not $indexerSchemas -or -not $downloadClientSchemas -or ($anyImportListsExpected -and -not $importListSchemas)) {
+        $missing = @()
+        if (-not $indexerSchemas) { $missing += "/api/v1/indexer/schema" }
+        if (-not $downloadClientSchemas) { $missing += "/api/v1/downloadclient/schema" }
+        if ($anyImportListsExpected -and -not $importListSchemas) { $missing += "/api/v1/importlist/schema" }
+        throw "Failed to fetch schema endpoints within ${SchemaTimeoutSeconds}s (missing: $($missing -join ', '))."
     }
 
     $failed = $false
@@ -786,6 +813,17 @@ try {
                 $failed = $true
             }
         }
+
+        foreach ($impl in $exp.ImportLists) {
+            $found = $importListSchemas | Where-Object { $_.implementation -eq $impl }
+            if ($found) {
+                Write-Host "✓ importlist/schema contains $impl" -ForegroundColor Green
+            }
+            else {
+                Write-Host "✗ importlist/schema missing $impl" -ForegroundColor Red
+                $failed = $true
+            }
+        }
     }
 
     if ($failed) {
@@ -794,6 +832,11 @@ try {
 
         Write-Host "`nAvailable download client implementations (sample):" -ForegroundColor Yellow
         $downloadClientSchemas | ForEach-Object { $_.implementation } | Sort-Object -Unique | Select-Object -First 80 | ForEach-Object { Write-Host "  - $_" }
+
+        if ($importListSchemas) {
+            Write-Host "`nAvailable import list implementations (sample):" -ForegroundColor Yellow
+            $importListSchemas | ForEach-Object { $_.implementation } | Sort-Object -Unique | Select-Object -First 80 | ForEach-Object { Write-Host "  - $_" }
+        }
 
         exit 1
     }
