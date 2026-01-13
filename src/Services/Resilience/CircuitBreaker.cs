@@ -134,6 +134,7 @@ namespace Lidarr.Plugin.Common.Services.Resilience
     {
         private readonly ILogger _logger;
         private readonly CircuitBreakerOptions _options;
+        private readonly TimeProvider _timeProvider;
         private readonly CircularBuffer<DateTime> _failureTimestamps;
         private readonly object _stateLock = new object();
 
@@ -141,6 +142,11 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         private DateTime _openedAt;
         private int _halfOpenSuccesses;
         private CircuitBreakerStatistics _statistics;
+
+        /// <summary>
+        /// Gets the current UTC time from the time provider.
+        /// </summary>
+        private DateTime UtcNow => _timeProvider.GetUtcNow().UtcDateTime;
 
         /// <inheritdoc />
         public string Name { get; }
@@ -153,7 +159,7 @@ namespace Lidarr.Plugin.Common.Services.Resilience
                 lock (_stateLock)
                 {
                     // Check if we should transition from Open to HalfOpen
-                    if (_state == CircuitState.Open && DateTime.UtcNow - _openedAt >= _options.OpenDuration)
+                    if (_state == CircuitState.Open && UtcNow - _openedAt >= _options.OpenDuration)
                     {
                         TransitionTo(CircuitState.HalfOpen, "Open duration elapsed");
                     }
@@ -194,11 +200,24 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         /// <param name="options">Configuration options. Uses defaults if null.</param>
         /// <param name="logger">Optional logger for diagnostics.</param>
         public CircuitBreaker(string name, CircuitBreakerOptions options = null, ILogger logger = null)
+            : this(name, options, logger, TimeProvider.System)
+        {
+        }
+
+        /// <summary>
+        /// Creates a new circuit breaker with the specified name, options, and time provider.
+        /// </summary>
+        /// <param name="name">Unique identifier for this circuit breaker.</param>
+        /// <param name="options">Configuration options. Uses defaults if null.</param>
+        /// <param name="logger">Optional logger for diagnostics.</param>
+        /// <param name="timeProvider">Time provider for testability. Uses system time if null.</param>
+        public CircuitBreaker(string name, CircuitBreakerOptions options, ILogger? logger, TimeProvider? timeProvider)
         {
             Name = name ?? throw new ArgumentNullException(nameof(name));
             _options = options ?? CircuitBreakerOptions.Default;
             _options.Validate();
             _logger = logger;
+            _timeProvider = timeProvider ?? TimeProvider.System;
             _failureTimestamps = new CircularBuffer<DateTime>(_options.SlidingWindowSize);
             _statistics = new CircuitBreakerStatistics();
         }
@@ -331,8 +350,8 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             lock (_stateLock)
             {
                 _statistics.TotalFailures++;
-                _statistics.LastFailureTime = DateTime.UtcNow;
-                _failureTimestamps.Add(DateTime.UtcNow);
+                _statistics.LastFailureTime = UtcNow;
+                _failureTimestamps.Add(UtcNow);
                 _statistics.FailuresInWindow = _failureTimestamps.Count;
 
                 // Log the failure with operation context if provided
@@ -385,7 +404,7 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             var currentState = State; // May trigger state transition
             if (currentState == CircuitState.Open)
             {
-                var retryAfter = _options.OpenDuration - (DateTime.UtcNow - _openedAt);
+                var retryAfter = _options.OpenDuration - (UtcNow - _openedAt);
                 if (retryAfter < TimeSpan.Zero) retryAfter = TimeSpan.Zero;
 
                 var message = !string.IsNullOrEmpty(operationName)
@@ -422,7 +441,7 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             switch (newState)
             {
                 case CircuitState.Open:
-                    _openedAt = DateTime.UtcNow;
+                    _openedAt = UtcNow;
                     _statistics.TimesOpened++;
                     _statistics.LastOpenedTime = _openedAt;
                     _logger?.LogWarning("Circuit '{Name}' OPENED: {Reason}", Name, reason);

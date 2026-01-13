@@ -2,6 +2,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Resilience;
+using Lidarr.Plugin.Common.TestKit.Testing;
 using Xunit;
 
 namespace Lidarr.Plugin.Common.Tests
@@ -105,14 +106,15 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public async Task ExecuteAsync_HalfOpenTransition_AfterTimeout()
         {
+            var fakeTime = new FakeTimeProvider();
             var options = new CircuitBreakerOptions
             {
                 FailureThreshold = 1,
                 SlidingWindowSize = 2,
-                OpenDuration = TimeSpan.FromMilliseconds(100),
+                OpenDuration = TimeSpan.FromSeconds(30),
                 SuccessThresholdInHalfOpen = 1
             };
-            var cb = new CircuitBreaker("test-halfopen", options);
+            var cb = new CircuitBreaker("test-halfopen", options, null, fakeTime);
 
             // Open the circuit
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
@@ -120,10 +122,12 @@ namespace Lidarr.Plugin.Common.Tests
 
             Assert.Equal(CircuitState.Open, cb.State);
 
-            // Wait for open duration
-            await Task.Delay(150);
+            // Advance time but not past open duration - should stay open
+            fakeTime.Advance(TimeSpan.FromSeconds(29));
+            Assert.Equal(CircuitState.Open, cb.State);
 
-            // Accessing State should trigger transition to HalfOpen
+            // Advance past open duration - should transition to HalfOpen
+            fakeTime.Advance(TimeSpan.FromSeconds(2));
             Assert.Equal(CircuitState.HalfOpen, cb.State);
             Assert.True(cb.AllowsRequest);
         }
@@ -131,21 +135,23 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public async Task ExecuteAsync_HalfOpenSuccess_ClosesCircuit()
         {
+            var fakeTime = new FakeTimeProvider();
             var options = new CircuitBreakerOptions
             {
                 FailureThreshold = 1,
                 SlidingWindowSize = 2,
-                OpenDuration = TimeSpan.FromMilliseconds(50),
+                OpenDuration = TimeSpan.FromSeconds(30),
                 SuccessThresholdInHalfOpen = 1
             };
-            var cb = new CircuitBreaker("test-halfopen-close", options);
+            var cb = new CircuitBreaker("test-halfopen-close", options, null, fakeTime);
 
             // Open the circuit
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 cb.ExecuteAsync<int>(() => throw new InvalidOperationException("fail")));
 
-            // Wait for half-open
-            await Task.Delay(100);
+            // Advance time past open duration to trigger half-open
+            fakeTime.Advance(TimeSpan.FromSeconds(31));
+            Assert.Equal(CircuitState.HalfOpen, cb.State);
 
             // Successful operation should close the circuit
             var result = await cb.ExecuteAsync(() => Task.FromResult(42));
@@ -156,21 +162,23 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public async Task ExecuteAsync_HalfOpenFailure_ReopensCircuit()
         {
+            var fakeTime = new FakeTimeProvider();
             var options = new CircuitBreakerOptions
             {
                 FailureThreshold = 1,
                 SlidingWindowSize = 2,
-                OpenDuration = TimeSpan.FromMilliseconds(50),
+                OpenDuration = TimeSpan.FromSeconds(30),
                 SuccessThresholdInHalfOpen = 1
             };
-            var cb = new CircuitBreaker("test-halfopen-reopen", options);
+            var cb = new CircuitBreaker("test-halfopen-reopen", options, null, fakeTime);
 
             // Open the circuit
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
                 cb.ExecuteAsync<int>(() => throw new InvalidOperationException("fail")));
 
-            // Wait for half-open
-            await Task.Delay(100);
+            // Advance time past open duration to trigger half-open
+            fakeTime.Advance(TimeSpan.FromSeconds(31));
+            Assert.Equal(CircuitState.HalfOpen, cb.State);
 
             // Failure in half-open should reopen
             await Assert.ThrowsAsync<InvalidOperationException>(() =>
