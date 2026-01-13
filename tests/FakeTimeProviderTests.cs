@@ -17,32 +17,19 @@ namespace Lidarr.Plugin.Common.Tests
             var fakeTime = new FakeTimeProvider();
             var completed = new ConcurrentBag<int>();
 
-            var delay1 = Task.Run(async () =>
-            {
-                await fakeTime.CreateDelayTask(TimeSpan.FromSeconds(1));
-                completed.Add(1);
-            });
-
-            var delay2 = Task.Run(async () =>
-            {
-                await fakeTime.CreateDelayTask(TimeSpan.FromSeconds(2));
-                completed.Add(2);
-            });
-
-            var delay3 = Task.Run(async () =>
-            {
-                await fakeTime.CreateDelayTask(TimeSpan.FromSeconds(3));
-                completed.Add(3);
-            });
-
-            // Give tasks time to register their delays
-            await Task.Delay(50);
+            // Register delays synchronously to avoid threadpool scheduling races (CI flakiness on Windows)
+            var delay1 = fakeTime.CreateDelayTask(TimeSpan.FromSeconds(1))
+                .ContinueWith(_ => completed.Add(1), TaskScheduler.Default);
+            var delay2 = fakeTime.CreateDelayTask(TimeSpan.FromSeconds(2))
+                .ContinueWith(_ => completed.Add(2), TaskScheduler.Default);
+            var delay3 = fakeTime.CreateDelayTask(TimeSpan.FromSeconds(3))
+                .ContinueWith(_ => completed.Add(3), TaskScheduler.Default);
 
             // Act: advance 2 seconds - first two should complete
             fakeTime.Advance(TimeSpan.FromSeconds(2));
 
-            // Allow completions to propagate
-            await Task.Delay(50);
+            // Wait deterministically for the first two to complete
+            await Task.WhenAll(delay1, delay2).WaitAsync(TimeSpan.FromSeconds(1));
 
             // Assert: exactly first two complete
             Assert.Contains(1, completed);
@@ -55,26 +42,17 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
-        public async Task Delay_AdvancePastDeadline_CompletesImmediately()
+        public async Task Delay_AdvancePastDeadline_CompletesImmediately()      
         {
             // Arrange
             var fakeTime = new FakeTimeProvider();
-            var completed = false;
-
-            var delayTask = Task.Run(async () =>
-            {
-                await fakeTime.CreateDelayTask(TimeSpan.FromSeconds(5));
-                completed = true;
-            });
-
-            await Task.Delay(50); // Let task register
+            var delayTask = fakeTime.CreateDelayTask(TimeSpan.FromSeconds(5));
 
             // Act: advance big jump past deadline
             fakeTime.Advance(TimeSpan.FromSeconds(100));
 
             // Assert: completes immediately
             await delayTask.WaitAsync(TimeSpan.FromMilliseconds(100));
-            Assert.True(completed);
         }
 
         [Fact]
@@ -102,25 +80,18 @@ namespace Lidarr.Plugin.Common.Tests
             var fakeTime = new FakeTimeProvider();
             fakeTime.Advance(TimeSpan.FromSeconds(100));
 
-            // Now schedule a short delay
-            var completed = false;
-            var delayTask = Task.Run(async () =>
-            {
-                await fakeTime.CreateDelayTask(TimeSpan.FromSeconds(1));
-                completed = true;
-            });
+            // Now schedule a short delay (should not complete until we advance again)
+            var delayTask = fakeTime.CreateDelayTask(TimeSpan.FromSeconds(1));
 
-            await Task.Delay(50); // Let task register
-
-            // Assert: should NOT complete immediately (not stale state)
-            Assert.False(completed);
+            // Assert: should NOT complete immediately (not stale state)        
+            Assert.False(delayTask.IsCompleted);
 
             // Act: advance more time
             fakeTime.Advance(TimeSpan.FromSeconds(1));
 
             // Assert: now completes
             await delayTask.WaitAsync(TimeSpan.FromMilliseconds(100));
-            Assert.True(completed);
+            Assert.True(delayTask.IsCompletedSuccessfully);
         }
 
         [Fact]
@@ -129,9 +100,14 @@ namespace Lidarr.Plugin.Common.Tests
             // Arrange
             var fakeTime = new FakeTimeProvider();
             var callbackCount = 0;
+            var callbackTcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
 
             using var timer = fakeTime.CreateTimer(
-                _ => Interlocked.Increment(ref callbackCount),
+                _ =>
+                {
+                    Interlocked.Increment(ref callbackCount);
+                    callbackTcs.TrySetResult();
+                },
                 null,
                 TimeSpan.FromSeconds(1),
                 Timeout.InfiniteTimeSpan);
@@ -139,8 +115,8 @@ namespace Lidarr.Plugin.Common.Tests
             // Act: advance time to fire timer
             fakeTime.Advance(TimeSpan.FromSeconds(1));
 
-            // Allow callback to execute
-            await Task.Delay(50);
+            // Wait deterministically for callback execution
+            await callbackTcs.Task.WaitAsync(TimeSpan.FromSeconds(1));
 
             // Assert: callback fired exactly once
             Assert.Equal(1, callbackCount);
@@ -150,7 +126,7 @@ namespace Lidarr.Plugin.Common.Tests
 
             // Advance more - should not fire again
             fakeTime.Advance(TimeSpan.FromSeconds(10));
-            await Task.Delay(50);
+            await Task.Delay(10);
 
             Assert.Equal(1, callbackCount);
         }
@@ -175,8 +151,10 @@ namespace Lidarr.Plugin.Common.Tests
                 });
             }
 
-            // Give tasks time to register
-            await Task.Delay(100);
+            // Wait for all tasks to register delays (no wall-clock sleeps)
+            Assert.True(
+                SpinWait.SpinUntil(() => fakeTime.PendingDelayCount == taskCount, TimeSpan.FromSeconds(2)),
+                $"Expected all {taskCount} delays to be registered (actual: {fakeTime.PendingDelayCount})");
 
             // Advance time in chunks to test concurrent completion
             for (int i = 0; i < 10; i++)
