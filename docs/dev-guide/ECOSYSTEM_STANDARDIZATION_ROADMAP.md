@@ -36,7 +36,9 @@ Non-goals:
 ### M3 — Manifest/entrypoint reality checks (correctness ROI)
 **Target:** Catch “manifest points at a type that does not exist in net8 build” problems early.
 
-- [ ] Common: extend tooling (or add a testkit helper) that can validate `plugin.json` / `manifest.json` entry points against an assembly.
+- [x] Common: `tools/ManifestCheck.ps1` supports `-ValidateEntryPoints` for `plugin.json` `entryPoints` (metadata-only; no `Assembly.Load`).
+  - Acceptance: `tests/ManifestCheckScriptTests.cs` covers success + `ENT001` missing-type behavior.
+- [ ] Common: extend tooling (or add a testkit helper) that can validate `manifest.json` entry points against a net8 build (AppleMusicarr uses a separate `manifest.json` today).
   - Acceptance: a unit test fails on a known-bad fixture; passes on real plugin artifacts.
 - [ ] AppleMusicarr follow-up: align `manifest.json` / `plugin.json` with net8 build outputs; fix any stale docs mentioning net6-only types.
 
