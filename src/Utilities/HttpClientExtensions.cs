@@ -846,6 +846,90 @@ namespace Lidarr.Plugin.Common.Utilities
         }
 
         /// <summary>
+        /// Builds a log-safe URL that includes only query parameter names (no values).
+        /// This avoids leaking secrets embedded in query parameter values.
+        /// </summary>
+        internal static string BuildUrlWithQueryNames(string baseUrl, IEnumerable<KeyValuePair<string, string>> parameters)
+        {
+            if (string.IsNullOrWhiteSpace(baseUrl))
+            {
+                return baseUrl ?? string.Empty;
+            }
+
+            var url = baseUrl;
+
+            string fragment = string.Empty;
+            var fragmentIndex = url.IndexOf('#');
+            if (fragmentIndex >= 0)
+            {
+                fragment = url.Substring(fragmentIndex);
+                url = url.Substring(0, fragmentIndex);
+            }
+
+            string existingQuery = string.Empty;
+            var queryIndex = url.IndexOf('?');
+            if (queryIndex >= 0)
+            {
+                existingQuery = url.Substring(queryIndex + 1);
+                url = url.Substring(0, queryIndex);
+            }
+
+            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+            if (!string.IsNullOrWhiteSpace(existingQuery))
+            {
+                foreach (var part in existingQuery.Split('&', StringSplitOptions.RemoveEmptyEntries))
+                {
+                    var key = part;
+                    var eq = part.IndexOf('=');
+                    if (eq >= 0)
+                    {
+                        key = part.Substring(0, eq);
+                    }
+
+                    if (string.IsNullOrWhiteSpace(key))
+                    {
+                        continue;
+                    }
+
+                    // Keys may be URL-encoded; normalize best-effort for stable output.
+                    try
+                    {
+                        key = Uri.UnescapeDataString(key);
+                    }
+                    catch
+                    {
+                        // Ignore invalid escapes and keep the raw key.
+                    }
+
+                    keys.Add(key);
+                }
+            }
+
+            if (parameters != null)
+            {
+                foreach (var p in parameters)
+                {
+                    if (!string.IsNullOrWhiteSpace(p.Key))
+                    {
+                        keys.Add(p.Key);
+                    }
+                }
+            }
+
+            if (keys.Count == 0)
+            {
+                return url + fragment;
+            }
+
+            var queryString = string.Join("&", keys
+                .OrderBy(k => k, StringComparer.OrdinalIgnoreCase)
+                .Select(Uri.EscapeDataString));
+
+            return $"{url}?{queryString}{fragment}";
+        }
+
+        /// <summary>
         /// Builds a URL with query parameters from a dictionary.
         /// </summary>
         public static string BuildUrlWithParams(string baseUrl, Dictionary<string, string> parameters)
@@ -957,7 +1041,7 @@ namespace Lidarr.Plugin.Common.Utilities
             var maskedParams = new Dictionary<string, string>();
             foreach (var param in parameters)
             {
-                if (IsSensitiveParameter(param.Key))
+                if (IsSensitiveParameter(param.Key) || SensitiveKeys.LooksSensitiveValue(param.Value))
                 {
                     maskedParams[param.Key] = MaskValue(param.Value);
                 }
@@ -1023,11 +1107,7 @@ namespace Lidarr.Plugin.Common.Utilities
         {
             if (string.IsNullOrWhiteSpace(value))
                 return "[empty]";
-
-            if (value.Length <= 4)
-                return new string('*', value.Length);
-
-            return $"{value.Substring(0, 2)}{"*".PadLeft(value.Length - 4, '*')}{value.Substring(value.Length - 2)}";
+            return "[redacted]";
         }
 
         public static async Task<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage request)
@@ -1169,7 +1249,6 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
-
 
 
 
