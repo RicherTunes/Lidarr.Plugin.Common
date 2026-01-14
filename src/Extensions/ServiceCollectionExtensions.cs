@@ -10,12 +10,14 @@ namespace Lidarr.Plugin.Common.Extensions
         public static IServiceCollection AddTokenProtection(this IServiceCollection services)
         {
             services.AddSingleton<ITokenProtector>(_ => TokenProtectorFactory.CreateFromEnvironment());
+            services.AddSingleton<IStringTokenProtector, StringTokenProtector>();
             return services;
         }
 
         public static IServiceCollection AddTokenProtection(this IServiceCollection services, Func<IServiceProvider, ITokenProtector> factory)
         {
             services.AddSingleton<ITokenProtector>(factory);
+            services.AddSingleton<IStringTokenProtector, StringTokenProtector>();
             return services;
         }
     }
