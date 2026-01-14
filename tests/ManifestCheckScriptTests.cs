@@ -137,6 +137,40 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Contains("ENT001", stdout + stderr, StringComparison.OrdinalIgnoreCase);
         }
 
+        [Fact]
+        public async Task ManifestCheck_ValidateEntryPoints_ManifestJson_Succeeds_When_Type_Exists()
+        {
+            using var dir = new TempDir();
+            var csproj = await CreateBuildablePluginProjectAsync(dir.Path, includeEntryPointType: true);
+            var manifest = await WriteManifestJsonAsync(dir.Path, implementationType: "Lidarr.Plugin.TestEntry.EntryPoint");
+
+            await DotnetBuildAsync(csproj);
+
+            var (code, stdout, stderr) = await RunPwshAsync(
+                "tools/ManifestCheck.ps1",
+                $"-ProjectPath \"{csproj}\" -ManifestPath \"{manifest}\" -ValidateEntryPoints -Configuration Release -TargetFramework net8.0");
+
+            Assert.Equal(0, code);
+            Assert.Contains("Manifest validation succeeded", stdout + stderr, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public async Task ManifestCheck_ValidateEntryPoints_ManifestJson_Fails_With_Ent001_When_Type_Missing()
+        {
+            using var dir = new TempDir();
+            var csproj = await CreateBuildablePluginProjectAsync(dir.Path, includeEntryPointType: false);
+            var manifest = await WriteManifestJsonAsync(dir.Path, implementationType: "Lidarr.Plugin.TestEntry.MissingEntryPoint");
+
+            await DotnetBuildAsync(csproj);
+
+            var (code, stdout, stderr) = await RunPwshAsync(
+                "tools/ManifestCheck.ps1",
+                $"-ProjectPath \"{csproj}\" -ManifestPath \"{manifest}\" -ValidateEntryPoints -Configuration Release -TargetFramework net8.0");
+
+            Assert.NotEqual(0, code);
+            Assert.Contains("ENT001", stdout + stderr, StringComparison.OrdinalIgnoreCase);
+        }
+
         private static async Task<string> CreateBuildablePluginProjectAsync(string root, bool includeEntryPointType)
         {
             var abstractionsDir = Path.Combine(root, "Abstractions");
@@ -202,6 +236,29 @@ public sealed class EntryPoint { }
                 entryPoints = new[]
                 {
                     new { name = "Test", implementation = implementationType }
+                }
+            };
+            await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifestObj));
+            return manifestPath;
+        }
+
+        private static async Task<string> WriteManifestJsonAsync(string root, string implementationType)
+        {
+            // AppleMusicarr-style manifest.json shape: includes targetFrameworks and entryPoints with "type".
+            var manifestPath = Path.Combine(root, "manifest.json");
+            var manifestObj = new
+            {
+                id = "testentry",
+                name = "Test Entry",
+                version = "1.0.0",
+                apiVersion = "1.x",
+                commonVersion = "1.0.0",
+                minHostVersion = "10.0.0",
+                assemblies = new[] { "Lidarr.Plugin.TestEntry.dll" },
+                targetFrameworks = new[] { "net8.0" },
+                entryPoints = new[]
+                {
+                    new { type = "ImportList", implementation = implementationType }
                 }
             };
             await File.WriteAllTextAsync(manifestPath, JsonSerializer.Serialize(manifestObj));

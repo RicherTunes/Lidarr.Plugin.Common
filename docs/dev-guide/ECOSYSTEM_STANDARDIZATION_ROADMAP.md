@@ -38,8 +38,8 @@ Non-goals:
 
 - [x] Common: `tools/ManifestCheck.ps1` supports `-ValidateEntryPoints` for `plugin.json` `entryPoints` (metadata-only; no `Assembly.Load`).
   - Acceptance: `tests/ManifestCheckScriptTests.cs` covers success + `ENT001` missing-type behavior.
-- [ ] Common: extend tooling (or add a testkit helper) that can validate `manifest.json` entry points against a net8 build (AppleMusicarr uses a separate `manifest.json` today).
-  - Acceptance: a unit test fails on a known-bad fixture; passes on real plugin artifacts.
+- [x] Common: `tools/ManifestCheck.ps1 -ValidateEntryPoints` supports `manifest.json` `entryPoints` (AppleMusicarr-style `entryPoints: [{ type, implementation }]`) (metadata-only; no `Assembly.Load`).
+  - Acceptance: `tests/ManifestCheckScriptTests.cs` covers `plugin.json` and `manifest.json` success + `ENT001` missing-type behavior.
 - [ ] AppleMusicarr follow-up: align `manifest.json` / `plugin.json` with net8 build outputs; fix any stale docs mentioning net6-only types.
 
 ### M4 — Standardize hosting entrypoint pattern where possible (reduce drift)
