@@ -16,6 +16,36 @@ The persisted file contains only a small envelope:
 
 On first read of a legacy (plaintext) file, the store migrates it in-place to the protected format.
 
+## String Protection (Recommended Facade)
+
+For plugin settings that need to store secrets as strings (API keys, refresh tokens), use `IStringTokenProtector`.
+
+Protected string format:
+
+```
+enc:v1:<algorithmId>:<base64Ciphertext>
+```
+
+Behavior:
+- `Protect(null)` -> `null`, `Protect("")` -> `""`
+- `Protect("enc:...")` is idempotent only when the value is already a valid protected string for the current `algorithmId` (otherwise it throws)
+- `Unprotect("enc:...")` validates format/version/algorithm before decrypting
+- `Unprotect("plaintext")` returns the input unchanged
+
+Minimal usage:
+
+```csharp
+// Saving:
+settings.ApiKey = stringTokenProtector.Protect(settings.ApiKey);
+
+// Loading/using:
+var apiKey = stringTokenProtector.Unprotect(settings.ApiKey);
+```
+
+Notes:
+- `algorithmId` is platform/provider-specific (e.g., DPAPI vs DataProtection); a protected string is not expected to decrypt on a different machine/OS.
+- Exception messages never include ciphertext.
+
 ## Environment Configuration
 
 - `LP_COMMON_PROTECTOR`: auto | dpapi | dpapi-user | dpapi-machine | keychain | secret-service | dataprotection
