@@ -2,6 +2,8 @@
 
 This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr).
 
+For the current “remaining parity” backlog focused on code duplication and correctness, see `dev-guide/REMAINING_PARITY_BACKLOG.md`.
+
 ## Current Status
 
 | Dimension | Tidalarr | Qobuzarr | Brainarr | Common |
