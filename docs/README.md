@@ -53,6 +53,8 @@ Pick the guide that matches what you need to do.
 ## Maintainers & contributors
 
 - [Developer guide](dev-guide/DEVELOPER_GUIDE.md)
+- [Remaining parity backlog (authoritative)](dev-guide/REMAINING_PARITY_BACKLOG.md)
+- [Ecosystem parity roadmap](ECOSYSTEM_PARITY_ROADMAP.md)
 - [Release policy](dev-guide/RELEASE_POLICY.md)
 - [CI & automation](dev-guide/CI.md)
 - [Unified plugin pipeline](dev-guide/UNIFIED_PLUGIN_PIPELINE.md)
@@ -71,6 +73,5 @@ These production plugins are built on Lidarr.Plugin.Common:
 | **Qobuzarr** | Qobuz high-res audio integration | [RicherTunes/qobuzarr](https://github.com/RicherTunes/qobuzarr) |
 
 Need something else? Open an issue or PR so the documentation evolves with the code.
-
 
 
