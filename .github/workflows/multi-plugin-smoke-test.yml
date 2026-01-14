@@ -190,21 +190,11 @@ env:
 jobs:
   smoke-test:
     name: Smoke Test (${{ matrix.name }})
-    if: ${{ matrix.name != 'canary' || inputs.run_canary }}
     continue-on-error: ${{ matrix.allow_failure }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: gate
-            lidarr_tag: ${{ inputs.lidarr_tag }}
-            allow_failure: false
-            port: 8689
-          - name: canary
-            lidarr_tag: pr-plugins
-            allow_failure: true
-            port: 8690
+      matrix: ${{ fromJSON(format('{{"include":[{{"name":"gate","lidarr_tag":"{0}","allow_failure":false,"port":8689}}{1}]}}', inputs.lidarr_tag, ((inputs.run_canary == true || inputs.run_canary == 'true') && ',{"name":"canary","lidarr_tag":"pr-plugins","allow_failure":true,"port":8690}' || ''))) }}
     steps:
       - name: Preflight - Validate CROSS_REPO_PAT secret
         shell: bash
