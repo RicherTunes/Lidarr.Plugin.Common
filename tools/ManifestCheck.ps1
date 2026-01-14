@@ -9,6 +9,12 @@ param(
 
     [string]$AbstractionsPackage = 'Lidarr.Plugin.Abstractions',
 
+    [switch]$ValidateEntryPoints,
+
+    [string]$Configuration = 'Release',
+
+    [string]$TargetFramework,
+
     [switch]$Strict,
 
     [switch]$JsonOutput
@@ -148,6 +154,172 @@ else {
 $errorList = @()
 $warningList = @()
 
+function Get-ProjectProperty {
+    param([xml]$Project, [System.Xml.XmlNamespaceManager]$NsMgr, [string]$Name)
+    $node = $Project.SelectSingleNode("//msb:Project/msb:PropertyGroup/msb:$Name", $NsMgr)
+    if (-not $node) { $node = $Project.SelectSingleNode("//Project/PropertyGroup/$Name") }
+    if ($node) { return $node.InnerText.Trim() }
+    return $null
+}
+
+function Get-ProjectTargetFrameworks {
+    param([xml]$Project, [System.Xml.XmlNamespaceManager]$NsMgr)
+    $tfms = Get-ProjectProperty -Project $Project -NsMgr $NsMgr -Name 'TargetFrameworks'
+    if (-not $tfms) { $tfms = Get-ProjectProperty -Project $Project -NsMgr $NsMgr -Name 'TargetFramework' }
+    if (-not $tfms) { return @() }
+    return $tfms.Split(';') | ForEach-Object { $_.Trim() } | Where-Object { $_ }
+}
+
+function Resolve-EntryPointAssemblyPaths {
+    param(
+        [pscustomobject]$Manifest,
+        [xml]$Project,
+        [System.Xml.XmlNamespaceManager]$NsMgr,
+        [string]$ProjectPath,
+        [string]$Configuration,
+        [string]$TargetFramework
+    )
+
+    $tfm = $TargetFramework
+    if (-not $tfm) {
+        if ($Manifest.targets -and $Manifest.targets.Count -gt 0) {
+            $tfm = $Manifest.targets[0]
+        }
+        elseif ($Manifest.targetFramework) {
+            $tfm = [string]$Manifest.targetFramework
+        }
+        elseif ($Manifest.targetFrameworks -and $Manifest.targetFrameworks.Count -gt 0) {
+            $tfm = $Manifest.targetFrameworks[0]
+        }
+        else {
+            $tfm = (Get-ProjectTargetFrameworks -Project $Project -NsMgr $NsMgr | Select-Object -First 1)
+        }
+    }
+
+    if (-not $tfm) {
+        return [pscustomobject]@{ Tfm = $null; OutputDir = $null; AssemblyPaths = @() }
+    }
+
+    $projectDir = Split-Path -Parent (Resolve-Path -LiteralPath $ProjectPath)
+    $outputDir = Join-Path $projectDir "bin/$Configuration/$tfm"
+
+    $assemblies = @()
+    if ($Manifest.assemblies -and $Manifest.assemblies.Count -gt 0) {
+        foreach ($a in $Manifest.assemblies) { if ($a) { $assemblies += [string]$a } }
+    }
+    elseif ($Manifest.main) {
+        $assemblies = @([string]$Manifest.main)
+    }
+
+    if ($assemblies.Count -eq 0) {
+        $assemblyName = Get-ProjectProperty -Project $Project -NsMgr $NsMgr -Name 'AssemblyName'
+        if (-not $assemblyName) { $assemblyName = [System.IO.Path]::GetFileNameWithoutExtension($ProjectPath) }
+        $assemblies = @("$assemblyName.dll")
+    }
+
+    $paths = @()
+    foreach ($file in $assemblies) { $paths += (Join-Path $outputDir $file) }
+
+    return [pscustomobject]@{
+        Tfm = $tfm
+        OutputDir = $outputDir
+        AssemblyPaths = $paths
+    }
+}
+
+function Test-EntryPointTypesExist {
+    param(
+        [string]$OutputDir,
+        [string[]]$AssemblyPaths,
+        [pscustomobject[]]$EntryPoints
+    )
+
+    if (-not $EntryPoints -or $EntryPoints.Count -eq 0) { return @() }
+
+    try {
+        Add-Type -AssemblyName System.Reflection.Metadata -ErrorAction Stop | Out-Null
+    } catch {
+        return @("ENT000: Unable to load System.Reflection.Metadata required for entrypoint validation: $($_.Exception.Message)")
+    }
+
+    $typeIndex = @{}
+    foreach ($ap in $AssemblyPaths) {
+        if (-not $ap -or -not (Test-Path -LiteralPath $ap)) { continue }
+
+        try {
+            $fs = [System.IO.File]::Open($ap, [System.IO.FileMode]::Open, [System.IO.FileAccess]::Read, [System.IO.FileShare]::ReadWrite)
+        } catch {
+            return @("ENT000: Failed to open assembly for entrypoint validation: '$ap' ($($_.Exception.Message))")
+        }
+
+        try {
+            $pe = [System.Reflection.PortableExecutable.PEReader]::new($fs)
+            try {
+                if (-not $pe.HasMetadata) { continue }
+
+                $metaBlock = $pe.GetMetadata()
+                $metaBytes = [byte[]]$metaBlock.GetContent()
+                $ms = [System.IO.MemoryStream]::new($metaBytes, $false)
+                $provider = [System.Reflection.Metadata.MetadataReaderProvider]::FromMetadataStream(
+                    $ms,
+                    [System.Reflection.Metadata.MetadataStreamOptions]::Default,
+                    0)
+                try {
+                    $reader = $provider.GetMetadataReader(
+                        [System.Reflection.Metadata.MetadataReaderOptions]::None,
+                        [System.Reflection.Metadata.MetadataStringDecoder]::DefaultUTF8)
+
+                    foreach ($handle in $reader.TypeDefinitions) {
+                        $td = $reader.GetTypeDefinition($handle)
+                        $name = $reader.GetString($td.Name)
+                        if (-not $name -or $name -eq "<Module>") { continue }
+
+                        $ns = $reader.GetString($td.Namespace)
+                        $fullName = if ($ns) { "$ns.$name" } else { $name }
+
+                        $attrs = [System.Reflection.TypeAttributes]$td.Attributes
+                        $vis = $attrs -band [System.Reflection.TypeAttributes]::VisibilityMask
+                        $isPublic = ($vis -eq [System.Reflection.TypeAttributes]::Public -or $vis -eq [System.Reflection.TypeAttributes]::NestedPublic)
+
+                        if ($typeIndex.ContainsKey($fullName)) {
+                            $typeIndex[$fullName] = ($typeIndex[$fullName] -or $isPublic)
+                        } else {
+                            $typeIndex[$fullName] = $isPublic
+                        }
+                    }
+                }
+                finally {
+                    try { $provider.Dispose() } catch { }
+                    try { $ms.Dispose() } catch { }
+                }
+            }
+            finally { try { $pe.Dispose() } catch { } }
+        } catch {
+            return @("ENT000: Failed to read assembly metadata for entrypoint validation: '$ap' ($($_.Exception.Message))")
+        }
+        finally { try { $fs.Dispose() } catch { } }
+    }
+
+    if ($typeIndex.Count -eq 0) {
+        return @("ENT000: No assemblies found to validate entrypoints. Expected outputs under '$OutputDir'.")
+    }
+
+    $errors = @()
+    foreach ($ep in $EntryPoints) {
+        $impl = $ep.implementation
+        if (-not $impl) { continue }
+
+        if (-not $typeIndex.ContainsKey([string]$impl)) {
+            $errors += "ENT001: entryPoints implementation type '$impl' was not found in built assemblies under '$OutputDir'."
+        }
+        elseif (-not $typeIndex[[string]$impl]) {
+            $errors += "ENT002: entryPoints implementation type '$impl' exists but is not public; plugin loaders commonly require public entrypoints."
+        }
+    }
+
+    return $errors
+}
+
 if ($manifest.version -ne $projectVersion) {
     $errorList += "Manifest version '$($manifest.version)' does not match project Version '$projectVersion'."
 }
@@ -201,6 +373,12 @@ if ($manifest.targets) {
     if ($missing.Count -gt 0) {
         $errorList += "Project is missing TargetFramework(s): $($missing -join ', ') referenced in manifest.targets."
     }
+}
+
+if ($ValidateEntryPoints -and $manifest.entryPoints) {
+    $resolved = Resolve-EntryPointAssemblyPaths -Manifest $manifest -Project $project -NsMgr $nsmgr -ProjectPath $ProjectPath -Configuration $Configuration -TargetFramework $TargetFramework
+    $epErrors = Test-EntryPointTypesExist -OutputDir $resolved.OutputDir -AssemblyPaths $resolved.AssemblyPaths -EntryPoints $manifest.entryPoints
+    foreach ($msg in $epErrors) { $errorList += $msg }
 }
 
 if ($JsonOutput) {
