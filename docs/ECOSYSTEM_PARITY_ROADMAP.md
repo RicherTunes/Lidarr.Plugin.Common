@@ -10,7 +10,7 @@ This document tracks progress toward full structural and behavioral parity acros
 | **Naming/Path** | ✅ | ✅ | N/A | FileSystemUtilities |
 | **Concurrency** | ✅ | ✅ | N/A | BaseDownloadOrchestrator |
 | **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | Single-authority pattern |
-| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | JSON schema (PR #187) |
+| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | E2E platform (schema + tripwires) |
 
 **Overall Ecosystem Parity: ~97%**
 
