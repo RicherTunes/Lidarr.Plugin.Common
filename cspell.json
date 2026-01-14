@@ -95,7 +95,11 @@
     "creds",
     "prereqs",
     "pluginloader",
-    "parallelizable"
+    "parallelizable",
+    "Footguns",
+    "Musicarr",
+    "facade",
+    "façade"
   ],
   "ignorePaths": [
     "**/bin",
