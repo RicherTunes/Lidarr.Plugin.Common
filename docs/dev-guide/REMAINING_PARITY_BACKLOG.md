@@ -19,6 +19,7 @@ Rule: each `lidarr.plugin.common/` addition must be justified by deleting real d
 ## P1 — Delete clones / drift reducers
 
 - [ ] Qobuzarr: delete local `PreviewDetectionUtility` clone and use Common everywhere.
+  - Status: in review (Qobuzarr PR `RicherTunes/Qobuzarr#156`).
   - Acceptance: `qobuzarr/src/Utilities/PreviewDetectionUtility.cs` removed; tests reference `Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility`.
   - Guard: a test fails if the clone file reappears.
 - [ ] Brainarr: resilience split-brain: characterize circuit breaker behavior, then delete the duplicate implementation.
