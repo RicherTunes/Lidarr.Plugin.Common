@@ -14,6 +14,22 @@ Non-goals:
 - Packaging preflight + Abstractions SHA mismatch detection.
 - Shared filename/path helpers in `FileSystemUtilities` and shared download payload validation in `DownloadPayloadValidator`.
 
+## Current Status Snapshot (2026-01-15)
+This section is the “what do we do next?” view; the milestone checklists below remain the long-term structure.
+
+**Stable + proven (ship behavior)**
+- 3-plugin Docker bootstrap: Qobuzarr + Tidalarr (full gates) + Brainarr (schema/importlist gates, opt-in LLM).
+- E2E runner is safe-by-default: explicit error codes, redaction, deterministic selection, JSON schema validation, and contract tripwires.
+- CI hygiene: change-detection self-test, path normalization tests, docs-only builds still report status.
+
+**In-flight (work on this branch / pending PRs)**
+- W1 AppleMusicarr: manifest/entryPoint mismatch confirmed (net6-only ImportList entryPoint referenced) and crypto duplication confirmed; implementation work pending.
+- M2 Common token protection facade: code + tests exist locally; requires PR + downstream adoption (delete AppleMusicarr custom crypto within ≤2 follow-up PRs).
+- M2 publishing: `release.yml` supports nuget.org publish, but requires `NUGET_API_KEY` secret (optional; prefer “thin common” even if using GitHub Packages).
+
+**Known upstream dependency**
+- Lidarr multi-plugin ALC lifecycle fix: tracking `Lidarr/Lidarr#5662` for a published Docker tag that contains the fix.
+
 ## Milestones (PR-Sized)
 
 ### M1 — Remove obvious clones (quick wins)
@@ -27,7 +43,7 @@ Non-goals:
 ### M2 — Public token protection facade in Common (enables deletion)
 **Target:** Stop downstream plugins from implementing their own encryption primitives.
 
-- [ ] Common: expose a small, stable public API for protecting strings at rest.
+- [ ] Common: expose a small, stable public API for protecting strings at rest. (in progress)
   - Deliverable: `IStringProtector` (or similar) + versioned format docs + tests.
   - Acceptance: Common tests pass; no breaking changes to existing consumers.
 - [ ] AppleMusicarr follow-up: replace `AppleMusicarr.Plugin.Security.DataProtector` with the Common facade.
@@ -74,6 +90,48 @@ Non-goals:
 - **AI B:** AppleMusicarr M2 follow-up (migrate DataProtector → Common facade).
 - **AI C:** Brainarr M5 (resilience consolidation) with characterization tests first.
 - **AI D:** M3 tooling (entrypoint reality check) + AppleMusicarr manifest/docs cleanup.
+
+## Work Queue (6+ weeks, safe parallelism)
+These are intentionally PR-sized and scoped to avoid merge conflicts. Each item lists “hot files” to prevent two agents editing the same core surfaces.
+
+### W1 — Common token protection (finish + ship)
+- Goal: land M2 in `lidarr.plugin.common` and delete custom crypto in at least one downstream repo within 1–2 follow-up PRs.
+- Hot files: `src/Security/TokenProtection/*`, `src/Extensions/ServiceCollectionExtensions.cs`, `docs/dev-guide/TOKEN_PROTECTION.md`.
+- Acceptance: `dotnet test -c Release --no-build` passes; a downstream repo (AppleMusicarr) removes its custom protector.
+
+### W2 — AppleMusicarr correctness (manifest reality + crypto migration)
+- Goal: fix net8 manifest/entrypoint mismatch and converge encryption to Common.
+- Hot files: `applemusicarr/src/AppleMusicarr.Plugin/manifest.json`, `applemusicarr/src/AppleMusicarr.Plugin/Security/DataProtector.cs`.
+- Acceptance: `dotnet build applemusicarr/src/AppleMusicarr.Plugin/AppleMusicarr.Plugin.csproj -c Release` passes; manifests match compiled types; old encrypted values migrate.
+
+### W3 — Hosting convergence (reduce drift without breaking legacy)
+- Goal: converge on `StreamingPlugin<Module, Settings>` where already structurally aligned.
+- Hot files: `tidalarr/src/Tidalarr/Integration/TidalarrPlugin.cs`, new Qobuzarr entrypoint file(s) under `qobuzarr/src/Integration/`.
+- Acceptance: E2E bootstrap passes unchanged; legacy wrappers remain thin.
+
+### W4 — Brainarr resilience split-brain cleanup
+- Goal: pick one breaker/policy path, delete the other, keep behavior stable via characterization tests.
+- Hot files: `brainarr/Brainarr.Plugin/Resilience/*`, `brainarr/Brainarr.Plugin/Services/Resilience/*`.
+- Acceptance: provider-failure behavior unchanged; no `Task.Delay` in tests; circuit breaker tests use `FakeTimeProvider`.
+
+### W5 — Parity-lint expansion + “delete duplicates” automation
+- Goal: expand parity-lint to include `applemusicarr/`, add low-false-positive rules, enforce expiry+owner+issue URL.
+- Hot files: `scripts/parity-lint.ps1`, `scripts/tests/Test-ParityLint.ps1`.
+- Acceptance: parity-lint is quiet on `main` with justified baselines; violations are actionable and not noisy.
+
+### W6 — E2E gates raising (optional, credentialed)
+- Goal: keep raising confidence without slowing default runs.
+- Ideas: post-import verification (opt-in), richer metadata assertions (opt-in), provider canary job (continue-on-error).
+- Hot files: `scripts/e2e-runner.ps1`, `scripts/lib/e2e-gates.psm1`, `.github/workflows/e2e-bootstrap.yml`.
+- Acceptance: opt-in gates improve signal without breaking local dev; manifests remain schema-valid.
+
+## Coordination (Multi-Agent Safety)
+To keep multiple agents productive without stepping on each other:
+
+- **Claim work**: Add your name/handle next to an item (W1–W6/M1–M7) and push a PR-sized branch.
+- **One hot surface per PR**: Don’t mix edits to `scripts/e2e-runner.ps1` with `scripts/lib/e2e-gates.psm1` unless the PR is explicitly E2E-focused.
+- **Deletion-first rule**: If you add a Common API, your next PR (or the next agent’s PR) must delete the corresponding duplication in a plugin repo within 1–2 PRs.
+- **Avoid overlap**: Before editing a “hot files” set, check if another open PR is touching those exact files.
 
 ## Definition of Done (Pragmatic “100% parity”)
 - No duplicated generic utilities across plugin repos (preview detection, filename sanitization, payload validation, common retry/breaker primitives).
