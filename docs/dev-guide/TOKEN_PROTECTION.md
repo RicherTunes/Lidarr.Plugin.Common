@@ -16,6 +16,23 @@ The persisted file contains only a small envelope:
 
 On first read of a legacy (plaintext) file, the store migrates it in-place to the protected format.
 
+## Protected Strings (ISecretProtector)
+
+For plugin settings that need to store single secret values (tokens, API keys, cookies), use `ISecretProtector`.
+
+Format (v2):
+
+```
+enc:v2:<alg>:<base64>
+```
+
+- `<alg>` is the current `ITokenProtector.AlgorithmId` (e.g., `dpapi-user`, `dataprotection`).
+- `<base64>` is the protected bytes payload.
+
+Read semantics:
+- Values without an `enc:` prefix are treated as plaintext (for migration).
+- Unknown `enc:*` prefixes and invalid payloads return an empty string (fail-safe).
+
 ## Environment Configuration
 
 - `LP_COMMON_PROTECTOR`: auto | dpapi | dpapi-user | dpapi-machine | keychain | secret-service | dataprotection
