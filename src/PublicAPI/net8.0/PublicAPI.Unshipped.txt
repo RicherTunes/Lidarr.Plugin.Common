@@ -1,3 +1,2 @@
 #nullable enable
 
-M:Lidarr.Plugin.Common.Services.Resilience.CircuitBreaker.#ctor(System.String,Lidarr.Plugin.Common.Services.Resilience.CircuitBreakerOptions,Microsoft.Extensions.Logging.ILogger,System.TimeProvider)
