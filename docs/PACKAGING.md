@@ -15,7 +15,7 @@ $artifact = New-PluginPackage -Csproj plugins/Tidalarr/Tidalarr.csproj -Manifest
 Write-Host "Created $artifact"
 ```
 
-This produces `artifacts/packages/<pluginId>-<version>-<tfm>.zip` containing the publish folder (minus `Lidarr.Plugin.Abstractions`). No ILRepack step runs, logs stay quiet, and dependencies remain side-by-side with the plugin.
+This produces `artifacts/packages/<pluginId>-<version>-<tfm>.zip` containing the publish folder **including** `Lidarr.Plugin.Abstractions.dll` (required at runtime) but stripped of host-owned DLLs. No ILRepack step runs, logs stay quiet, and dependencies remain side-by-side with the plugin.
 
 ## Optional: merge plugin-private assemblies
 
@@ -51,7 +51,7 @@ flowchart TD
 
 1. `dotnet publish` into a plugin-local folder with `CopyLocalLockFileAssemblies=true`.
 2. Run `ManifestCheck.ps1` to ensure the manifest matches the project file.
-3. Remove host-owned assemblies (`Lidarr.Plugin.Abstractions*`) from the payload.
+3. Remove host-owned assemblies (e.g., `Microsoft.Extensions.*.Abstractions.dll`, `FluentValidation.dll`, `System.Text.Json.dll`, `Lidarr.*.dll`, `NzbDrone.*.dll`) from the payload.
 4. Zip the folder as `<PluginId>-<Version>-<TFM>.zip` and upload as a release asset.
 5. Keep README/CHANGELOG alongside the package for discovery—other docs stay in the repo.
 
@@ -59,6 +59,22 @@ flowchart TD
 
 - Every plugin repository should import and call `New-PluginPackage` in CI before publishing.
 - Packaging must fail if the manifest is out of sync with the project file.
-- The packed plugin must contain only plugin-owned assemblies plus `plugin.json`.
+- The packed plugin must contain only plugin-owned assemblies plus `plugin.json` and `Lidarr.Plugin.Abstractions.dll`.
 - Hosts load plugins from their directory without additional installation steps.
-- Update this document whenever packaging scripts or conventions change.
+- Update this document whenever packaging scripts or conventions change.  
+
+## Runtime Payload Policy (Canonical)
+
+This mirrors `build/PluginPackaging.targets` and `tools/PluginPack.psm1`.
+
+**MUST SHIP**
+- `Lidarr.Plugin.<Name>.dll`
+- `plugin.json`
+- `Lidarr.Plugin.Abstractions.dll`
+
+**MUST NOT SHIP**
+- `FluentValidation.dll`
+- `Microsoft.Extensions.*.Abstractions.dll`
+- `System.Text.Json.dll`
+- `NLog.dll`
+- Host assemblies (`Lidarr.*.dll`, `NzbDrone.*.dll`)
