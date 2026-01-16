@@ -101,7 +101,13 @@
     "creds",
     "prereqs",
     "pluginloader",
-    "parallelizable"
+    "parallelizable",
+    "entrypoint",
+    "entrypoints",
+    "SkippableFact",
+    "PackageReference",
+    "ProjectReference",
+    "net8"
   ],
   "ignorePaths": [
     "**/bin",

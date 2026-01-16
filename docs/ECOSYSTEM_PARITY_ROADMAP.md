@@ -20,6 +20,17 @@ This document tracks progress toward full structural and behavioral parity acros
 
 ---
 
+## Merge Waves (Current)
+
+These PR “waves” are sequenced to unblock downstream deletions and keep work parallelizable.
+
+| Wave | Repo | PRs | Status | Notes |
+|------|------|-----|--------|-------|
+| 1 | Common | #280, #281, #283, #284 | Open (mergeable) | Keep docs-only changes in #282 to avoid doc-lint blocking code PRs |
+| 2 | Brainarr | #371, #372 | Open (mergeable) | Unblocks WS4.2 PR2/PR3 (swap breaker → delete old) |
+| 3 | Qobuzarr | #156 | Open (mergeable) | CI currently blocked by Packaging Closure workflow bug (see WS5) |
+| 4 | Tidalarr | #130 → #127 | Open (mergeable) | #130 unblocks pre-existing “missing Lidarr assemblies” CI failure for #127 |
+
 ## Status Board (Workstreams)
 
 Rule: Any new `lidarr.plugin.common/` API must delete measurable duplication in at least one plugin within 1-2 follow-up PRs (or it does not land).
@@ -30,8 +41,8 @@ Rule: Any new `lidarr.plugin.common/` API must delete measurable duplication in 
 | WS2 | Byte-identical Abstractions distribution | Blocked on secret | `NUGET_API_KEY` in Common | Publish `Lidarr.Plugin.Abstractions` to NuGet + convert at least 1 plugin to `PackageReference` |
 | WS3 | Hosting convergence (streaming plugins) | In progress | None | Tidalarr: `StreamingPlugin<>` migration + deletion; Qobuzarr: no stub adapters (hard stop) |
 | WS4 | Brainarr resilience convergence | In progress | Common PR #283 + Brainarr PRs #371/#372 | Merge #371/#372/#283 → adapter registry → swap to Common breaker → delete old breaker |
-| WS5 | No-drift guardrails | In progress | Common PR #284 + Qobuzarr PR #156 | Merge #284/#156 → extend parity-lint rules only when paired with a deletion PR |
-| WS6 | CI/workflow standardization | In progress | Common reusable workflows | Merge Common PR #281 → propagate to plugin repos; document required `CROSS_REPO_PAT` secret |
+| WS5 | No-drift guardrails | In progress | Common PR #284 + Qobuzarr PR #156 | Merge #284 → fix Qobuzarr Packaging Closure `plugin.json` copy path → merge #156 → extend parity-lint rules only when paired with a deletion PR |
+| WS6 | CI/workflow standardization | In progress | Common reusable workflows | Merge Common PR #281 → propagate to plugin repos; ensure `CROSS_REPO_PAT` exists as a repo secret in each caller repo (not just Common) |
 | WS7 | HTTP safe-by-default logging | Done | Common #273 | Add regression tests + delete any remaining per-plugin URL redaction forks |
 | WS8 | Manifest/entrypoint tooling | Pending | None | Add opt-in entrypoint type-resolution check (net8) to `tools/ManifestCheck.ps1` |
 
@@ -51,11 +62,29 @@ Each item below is intended to be an independent, PR-sized unit. Avoid overlappi
 | C | Merge Common PR #284 (parity-lint includes applemusicarr) | CI green; parity-lint runs in CI and stays quiet on baseline |
 | C | Merge Qobuzarr PR #156 (delete duplicate PreviewDetectionUtility) | Local clone removed from `origin/main`; tests pass |
 | C | Common: parity-lint rule for PreviewDetectionUtility clone | Lint fails when clone reintroduced; requires a paired deletion PR |
+| C | Qobuzarr: fix Packaging Closure workflow to copy generated `plugin.json` | `Verify Package Closure` job passes (no `cp: cannot stat 'plugin.json'`) |
 | D | Abstractions: publish `Lidarr.Plugin.Abstractions` to NuGet.org | Tag+package published; doc shows how plugins consume it |
 | D | Switch 1 plugin to `PackageReference` Abstractions | Packaging passes; no Abstractions recompilation in that plugin |
 | E | Merge Common PR #281 (`CROSS_REPO_PAT` fail-fast + fork skip) | Multi-plugin smoke test fails fast with actionable message |
-| E | Tidalarr: fix “missing Lidarr assemblies” CI (unblock PR #127) | CI can build without local Lidarr assemblies; no behavior change |
+| E | Tidalarr: fix “missing Lidarr assemblies” CI (unblock PR #127) | Merge #130; CI can build without local Lidarr assemblies; no behavior change |
+| E | Tidalarr: merge PR #127 after CI is unblocked | Common submodule bump is on main; workflows green |
 | F | ManifestCheck: opt-in entrypoint type-resolution check | Fails CI when manifest references missing types; has a broken fixture test |
+
+### Extended Backlog (Parallelizable Work)
+
+These are additional PR-sized items that can keep multiple agents busy without file collisions. Prefer “delete-first” changes (duplication removal) over new utilities.
+
+| Lane | PR-sized unit | Dependency | Notes / Guardrails |
+|------|---------------|------------|--------------------|
+| A | AppleMusicarr: fix manifest entryPoint mismatch (net8) | None | Ensure every `entryPoint` resolves in the built net8 assembly; add a packaging guard test |
+| A | AppleMusicarr: adopt `ISecretProtector` and delete legacy crypto wrappers | WS1 + Common #280 | Must delete `DataProtector.cs` / legacy secret wrapper code within 1 PR |
+| B | Brainarr: WS4.2 PR2 registry adapter to Common breaker | Common #283 + Brainarr #371/#372 | Characterization tests must pass unchanged; no behavior drift |
+| B | Brainarr: WS4.2 PR3 delete legacy breaker code | WS4.2 PR2 | Deletion-only PR; keep metrics hooks if needed |
+| C | Qobuzarr: restore disabled unit tests (no network) | None | Convert “disabled files” into `[SkippableFact]` with prereq checks, then re-enable |
+| C | Qobuzarr: remove any remaining duplicated preview/sample detection helpers | Qobuzarr #156 + parity-lint | No local copy of PreviewDetectionUtility remains |
+| D | Abstractions: publish to NuGet + switch at least 1 plugin to `PackageReference` | WS2 | Must remove ProjectReference build of Abstractions in that plugin to guarantee byte-identical binaries |
+| E | Multi-plugin smoke: document `CROSS_REPO_PAT` setup + fail-fast UX | Common #281 | Improve error message with exact repo settings URLs; never log token values |
+| F | Manifest tooling: optional entrypoint type-resolution check | WS8 | Keep opt-in until AppleMusicarr is clean; add broken fixture tests first |
 
 ---
 
