@@ -10,7 +10,7 @@ This document tracks progress toward full structural and behavioral parity acros
 | **Naming/Path** | ✅ | ✅ | N/A | N/A | FileSystemUtilities |
 | **Concurrency** | ✅ | ✅ | N/A | N/A | BaseDownloadOrchestrator |
 | **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | ⚠️ (WS1) | Single-authority pattern |
-| **Token/Secret Protection** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | `ISecretProtector` façade (PR #280) |
+| **Token/Secret Protection** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | `ISecretProtector` facade (PR #280) |
 | **Resilience** | ✅ | ✅ | ⚠️ | ✅ | AdvancedCircuitBreaker (PR #283) |
 | **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | ⚠️ (WS1) | Manifest schema + contracts |
 
