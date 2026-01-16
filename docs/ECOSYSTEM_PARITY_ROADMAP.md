@@ -53,15 +53,15 @@ Suggested parallelism (non-overlapping):
 
 Each Common addition should delete measurable duplication within 1–2 follow-up PRs.
 
-| Milestone | Scope | Goal | Delete Target | Acceptance |
-|----------|-------|------|---------------|------------|
-| **M1** | Qobuzarr | Delete duplicated `PreviewDetectionUtility` and use Common everywhere | Delete `qobuzarr/src/Utilities/PreviewDetectionUtility.cs` | `dotnet build qobuzarr/Qobuzarr.sln -c Release` |
-| **M2** | Common → AppleMusicarr | Add stable protected-string facade + migrate AppleMusicarr off custom crypto | Delete AppleMusicarr `DataProtector` and file-store `SecretProtector` copy | Common + AppleMusicarr tests green; settings decrypt after restart |
-| **M3** | AppleMusicarr | Fix manifest/entrypoint reality (net8) + add entrypoint resolution test | Remove/repair invalid entryPoints in `manifest.json` | Packaging test fails if entrypoint type missing |
-| **M4** | Tidalarr | Move host wiring to `StreamingPlugin<Module, Settings>` where possible | Delete manual manifest/settings host plumbing in `TidalarrPlugin` | `dotnet test tidalarr/Tidalarr.sln -c Release` + E2E bootstrap |
-| **M5** | Qobuzarr | Add modern host entrypoint (no behavior change) for settings/DI parity | Avoid introducing parallel host bootstrap patterns | Plugin loads; legacy behavior unchanged |
-| **M6** | Brainarr | Migrate active circuit breaker to Common (preserve semantics), then delete plugin-local breaker | Delete `brainarr/Brainarr.Plugin/Services/Resilience/CircuitBreaker.cs` | Brainarr tests green; characterization tests still pass |
-| **M7** | Ecosystem | Manifest/schema coherence and tooling | Remove legacy manifest formats where safe; document purpose | All plugin manifests validated by Common tooling |
+| Milestone | Scope | Goal | Delete Target | Acceptance | Status |
+|----------|-------|------|---------------|------------|--------|
+| **M1** | Qobuzarr | Delete duplicated `PreviewDetectionUtility` and use Common everywhere | Delete `qobuzarr/src/Utilities/PreviewDetectionUtility.cs` | `dotnet build qobuzarr/Qobuzarr.sln -c Release` | ✅ Done |
+| **M2** | Common → AppleMusicarr | Add stable protected-string facade + migrate AppleMusicarr off custom crypto | Delete AppleMusicarr `DataProtector` and file-store `SecretProtector` copy | Common + AppleMusicarr tests green; settings decrypt after restart | Open |
+| **M3** | AppleMusicarr | Fix manifest/entrypoint reality (net8) + add entrypoint resolution test | Remove/repair invalid entryPoints in `manifest.json` | Packaging test fails if entrypoint type missing | Open |
+| **M4** | Tidalarr | Move host wiring to `StreamingPlugin<Module, Settings>` where possible | Delete manual manifest/settings host plumbing in `TidalarrPlugin` | `dotnet test tidalarr/Tidalarr.sln -c Release` + E2E bootstrap | Open |
+| **M5** | Qobuzarr | Add modern host entrypoint (no behavior change) for settings/DI parity | Avoid introducing parallel host bootstrap patterns | Plugin loads; legacy behavior unchanged | Open |
+| **M6** | Brainarr | Migrate active circuit breaker to Common (preserve semantics), then delete plugin-local breaker | Delete `brainarr/Brainarr.Plugin/Services/Resilience/CircuitBreaker.cs` | Brainarr tests green; characterization tests still pass | Open |
+| **M7** | Ecosystem | Manifest/schema coherence and tooling | Remove legacy manifest formats where safe; document purpose | All plugin manifests validated by Common tooling | Open |
 
 ### Common-Only Improvements (Must Unlock Deletions)
 
