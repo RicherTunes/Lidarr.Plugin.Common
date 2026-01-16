@@ -197,11 +197,21 @@ jobs:
       matrix: ${{ fromJSON(format('{{"include":[{{"name":"gate","lidarr_tag":"{0}","allow_failure":false,"port":8689}}{1}]}}', inputs.lidarr_tag, ((inputs.run_canary == true || inputs.run_canary == 'true') && ',{"name":"canary","lidarr_tag":"pr-plugins","allow_failure":true,"port":8690}' || ''))) }}
     steps:
       - name: Preflight - Validate CROSS_REPO_PAT secret
+        id: preflight
         shell: bash
         env:
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+          IS_FORK_PR: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.repo.fork }}
         run: |
           set -euo pipefail
+          echo "skip=false" >> "$GITHUB_OUTPUT"
+
+          if [[ "${IS_FORK_PR}" == "true" ]]; then
+            echo "::notice::Skipping multi-plugin smoke test for fork PR (secrets are not available to reusable workflows)."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
           echo "::add-mask::${CROSS_REPO_PAT:-}"
 
           if [[ -z "${CROSS_REPO_PAT:-}" ]]; then
@@ -221,10 +231,18 @@ jobs:
           fi
           echo "CROSS_REPO_PAT secret is configured"
 
+      - name: Fork PR - Skipped (secrets unavailable)
+        if: ${{ steps.preflight.outputs.skip == 'true' }}
+        shell: bash
+        run: |
+          echo "Skipping multi-plugin smoke test for fork PR: CROSS_REPO_PAT is not available."
+
       - name: Checkout Lidarr.Plugin.Common
+        if: ${{ steps.preflight.outputs.skip != 'true' }}
         uses: actions/checkout@v4
 
       - name: Setup .NET SDKs
+        if: ${{ steps.preflight.outputs.skip != 'true' }}
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
@@ -232,6 +250,7 @@ jobs:
             8.0.x
 
       - name: Resolve plugin selection and refs
+        if: ${{ steps.preflight.outputs.skip != 'true' }}
         id: plugin_meta
         shell: bash
         env:
@@ -272,7 +291,7 @@ jobs:
           echo "plugins=$plugins_lc" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Qobuzarr
-        if: ${{ steps.plugin_meta.outputs.include_qobuzarr == 'true' }}
+        if: ${{ steps.preflight.outputs.skip != 'true' && steps.plugin_meta.outputs.include_qobuzarr == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: RicherTunes/Qobuzarr
@@ -282,7 +301,7 @@ jobs:
           submodules: recursive
 
       - name: Checkout Tidalarr
-        if: ${{ steps.plugin_meta.outputs.include_tidalarr == 'true' }}
+        if: ${{ steps.preflight.outputs.skip != 'true' && steps.plugin_meta.outputs.include_tidalarr == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: RicherTunes/Tidalarr
@@ -292,7 +311,7 @@ jobs:
           submodules: recursive
 
       - name: Checkout Brainarr
-        if: ${{ steps.plugin_meta.outputs.include_brainarr == 'true' }}
+        if: ${{ steps.preflight.outputs.skip != 'true' && steps.plugin_meta.outputs.include_brainarr == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: RicherTunes/Brainarr
@@ -302,6 +321,7 @@ jobs:
           submodules: recursive
 
       - name: Extract Lidarr assemblies from Docker image
+        if: ${{ steps.preflight.outputs.skip != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -367,6 +387,7 @@ jobs:
           rm -rf _lidarr_extracted
 
       - name: Sync tools from main checkout to submodules
+        if: ${{ steps.preflight.outputs.skip != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -408,7 +429,7 @@ jobs:
           echo "Tool sync complete"
 
       - name: Build Qobuzarr package
-        if: ${{ steps.plugin_meta.outputs.include_qobuzarr == 'true' }}
+        if: ${{ steps.preflight.outputs.skip != 'true' && steps.plugin_meta.outputs.include_qobuzarr == 'true' }}
         shell: pwsh
         working-directory: qobuzarr
         run: |
@@ -429,7 +450,7 @@ jobs:
           }
 
       - name: Build Tidalarr package
-        if: ${{ steps.plugin_meta.outputs.include_tidalarr == 'true' }}
+        if: ${{ steps.preflight.outputs.skip != 'true' && steps.plugin_meta.outputs.include_tidalarr == 'true' }}
         shell: pwsh
         working-directory: tidalarr
         run: |
@@ -455,7 +476,7 @@ jobs:
           }
 
       - name: Build Brainarr package
-        if: ${{ steps.plugin_meta.outputs.include_brainarr == 'true' }}
+        if: ${{ steps.preflight.outputs.skip != 'true' && steps.plugin_meta.outputs.include_brainarr == 'true' }}
         shell: pwsh
         working-directory: brainarr
         run: |
@@ -476,6 +497,7 @@ jobs:
           }
 
       - name: Locate plugin zips
+        if: ${{ steps.preflight.outputs.skip != 'true' }}
         shell: pwsh
         run: |
           function Find-PluginZip {
@@ -543,7 +565,7 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($brainZip)) { Write-Host "Brainarr zip: $brainZip" }
 
       - name: Validate credentials (if gates enabled)
-        if: ${{ inputs.run_medium_gate || inputs.run_downloadclient_gate || inputs.run_search_gate || inputs.run_grab_gate }}
+        if: ${{ steps.preflight.outputs.skip != 'true' && (inputs.run_medium_gate || inputs.run_downloadclient_gate || inputs.run_search_gate || inputs.run_grab_gate) }}
         shell: bash
         env:
           QOBUZARR_EMAIL: ${{ secrets.QOBUZARR_EMAIL }}
@@ -583,6 +605,7 @@ jobs:
           fi
 
       - name: Run multi-plugin harness
+        if: ${{ steps.preflight.outputs.skip != 'true' }}
         shell: pwsh
         env:
           QOBUZARR_EMAIL: ${{ secrets.QOBUZARR_EMAIL }}
@@ -634,7 +657,7 @@ jobs:
           & ./scripts/multi-plugin-docker-smoke-test.ps1 @params
 
       - name: Collect container diagnostics
-        if: always()
+        if: ${{ always() && steps.preflight.outputs.skip != 'true' }}
         shell: bash
         run: |
           set +e
@@ -659,7 +682,7 @@ jobs:
           fi
 
       - name: Upload smoke artifacts
-        if: always()
+        if: ${{ always() && steps.preflight.outputs.skip != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: multi-plugin-smoke-${{ matrix.name }}-artifacts
