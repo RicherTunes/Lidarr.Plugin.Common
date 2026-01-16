@@ -15,9 +15,45 @@ For handoff/parallel work conventions, see `docs/dev-guide/ECOSYSTEM_HANDOFF.md`
 |------|--------|----------|----------|----------|---------------|
 | Packaging policy | ✅ Canonical | ✅ Adopt | ✅ Adopt | ✅ Adopt | ⚠️ Verify/adopt |
 | E2E platform | ✅ Canonical | ✅ | ✅ | ✅ (ImportList) | ⚠️ Partial |
-| Token/secret protection | ⚠️ In progress | ✅ OAuth tokens | ✅ Session cache | N/A | ❌ Custom crypto |
-| Hosting standard (`StreamingPlugin<>`) | ✅ Available | ⚠️ In progress | ❌ Missing | ✅ Bridge | ✅ |
+| Token/secret protection | ⚠️ PR pending (secret string façade) | ✅ OAuth tokens | ✅ Session cache | N/A | ❌ Custom crypto (migration pending) |
+| Hosting standard (`StreamingPlugin<>`) | ✅ Available | ⚠️ PR pending (migrate `TidalarrPlugin`) | ⚠️ Planned (do not ship stub `IPlugin`) | ✅ Bridge | ✅ |
 | Resilience standard | ✅ Available | ✅ | ✅ | ⚠️ Needs migration | N/A |
+
+## Status Board (What’s Actually Pending)
+
+This section exists to prevent “looks done” drift. Each item should be PR-sized and include the acceptance command(s).
+
+### WS1 — AppleMusicarr Correctness + Security
+
+- [ ] **WS1.1 Manifest entrypoint reality**: fix net8 entrypoint mismatch and add a guard test that resolves all configured entrypoint types from the built assembly.
+- [ ] **WS1.2 Secret storage deletion**: migrate AppleMusicarr string secrets to the Common secret protection façade and delete bespoke crypto/key helpers (must delete ≥200 LOC within ≤2 PRs after the façade lands).
+
+### WS2 — Abstractions Distribution (Byte-Identical Host ABI)
+
+- [ ] **WS2.1 Publish `Lidarr.Plugin.Abstractions`**: configure `NUGET_API_KEY` in the Common repo and publish a versioned package to NuGet.org.
+- [ ] **WS2.2 Migrate consumers**: replace plugin `ProjectReference` → `PackageReference` where feasible and add a CI guard that Abstractions bytes are identical across built zips.
+
+### WS3 — Hosting Convergence (Reduce Drift)
+
+- [ ] **WS3.1 Tidalarr**: migrate `TidalarrPlugin` to `StreamingPlugin<TidalModule, TidalarrSettings>` and delete duplicated hosting/settings wiring.
+- [ ] **WS3.2 Qobuzarr**: do **not** ship an `IPlugin` implementation until it is functional; either:
+  - (A) implement the full Abstractions indexer/download client path, **or**
+  - (B) intentionally keep legacy-only and document that as an exception.
+
+### WS4 — Brainarr Resilience Migration (Not “delete first”)
+
+- [ ] **WS4.1 Characterize current breaker**: lock down Brainarr’s circuit-breaker semantics (provider/model keying, failure classification, timing) with characterization tests.
+- [ ] **WS4.2 Migrate or justify**: either migrate Brainarr to the Common breaker (thin extensions allowed only if followed by deletions) or document why Brainarr must remain custom.
+
+### WS5 — Anti-Drift Guardrails
+
+- [ ] **WS5.1 Parity lint**: ensure `scripts/parity-lint.ps1` scans all 4 plugin repos and enforces expiry-backed baselines.
+- [ ] **WS5.2 “Contract docs are code”**: keep CI coverage so changes to contract docs run the full test suite (no doc-only bypass).
+
+### WS6 — CI / Multi-Repo Smoke (Ergonomics + Safety)
+
+- [ ] **WS6.1 CROSS_REPO_PAT fail-fast**: reusable workflows should produce a single, explicit failure when `CROSS_REPO_PAT` is missing, with remediation steps.
+- [ ] **WS6.2 Standard wrappers**: keep `multi-plugin-smoke-test.yml` wrappers in each plugin repo consistent (paths, schedules, and inputs).
 
 ## Definition Of Done (Parity “As Much As It Makes Sense”)
 
@@ -87,10 +123,10 @@ Each workstream is intended to be PR-sized and parallelizable across multiple ag
 - **Agent A (AppleMusicarr manifests)**: entrypoint/type resolution guard + AppleMusicarr fix + tests.
 - **Agent B (AppleMusicarr secrets)**: migrate to Common secret protection façade + delete crypto helpers.
 - **Agent C (NuGet / ABI)**: publish Abstractions + migrate to PackageReference + add CI byte-identity check.
-- **Agent D (Hosting)**: Qobuzarr `StreamingPlugin<>` entrypoint (non-breaking).
+- **Agent D (Hosting)**: Tidalarr `StreamingPlugin<>` migration + Qobuzarr hosting decision (no stub `IPlugin`).
 - **Agent E (Resilience)**: Brainarr breaker characterization + Common semantics gap analysis.
+- **Agent F (CI ergonomics)**: reusable workflow hardening (CROSS_REPO_PAT fail-fast, wrapper parity).
 
 ## Known Blockers / External Dependencies
 
 - Upstream Lidarr AssemblyLoadContext lifecycle issues can affect multi-plugin loading in certain images; keep E2E “best-effort” mode documented in `docs/MULTI_PLUGIN_SMOKE_TEST.md`.
-
