@@ -24,27 +24,38 @@ This section is the “what do we do next?” view; the milestone checklists bel
 
 **In-flight (work on this branch / pending PRs)**
 - W1 AppleMusicarr: manifest/entryPoint mismatch confirmed (net6-only ImportList entryPoint referenced) and crypto duplication confirmed; implementation work pending.
-- M2 Common token protection facade: code + tests exist locally; requires PR + downstream adoption (delete AppleMusicarr custom crypto within ≤2 follow-up PRs).
-- M2 publishing: `release.yml` supports nuget.org publish, but requires `NUGET_API_KEY` secret (optional; prefer “thin common” even if using GitHub Packages).
+- M2 Common token protection facade: already available via `IStringProtector` / `StringTokenProtector` (versioned prefix `lpc:ps:v1:`). Next step is downstream adoption: delete AppleMusicarr custom crypto within ≤2 follow-up PRs.
+- M2 publishing: `release.yml` supports nuget.org publish, but requires `NUGET_API_KEY` secret (optional; prefer “thin common” even if using GitHub Packages).   
 
 **Known upstream dependency**
 - Lidarr multi-plugin ALC lifecycle fix: tracking `Lidarr/Lidarr#5662` for a published Docker tag that contains the fix.
+
+## Active Workstreams (Multi-Agent Safe)
+| Workstream | Repo(s) | Goal (deletion-driven) | Status | Hot files (avoid overlap) |
+|------------|---------|------------------------|--------|----------------------------|
+| WS1 | AppleMusicarr + Common | Replace custom crypto with `IStringProtector` and delete duplicate protectors | Open | `applemusicarr/src/AppleMusicarr.Plugin/Security/**`, `applemusicarr/src/AppleMusicarr.Plugin/Stores/**` |
+| WS2 | Qobuzarr | Delete local `PreviewDetectionUtility` clone and route all callers to Common | Open | `qobuzarr/src/Utilities/**`, `qobuzarr/src/**/Preview*` |
+| WS3 | Tidalarr | Refactor `TidalarrPlugin` to inherit `StreamingPlugin<Module,Settings>` and delete duplicated host wiring | Open | `tidalarr/src/Tidalarr/Integration/TidalarrPlugin.cs`, `tidalarr/src/Tidalarr/Integration/TidalModule.cs` |
+| WS4 | Brainarr | Consolidate circuit breaker/resilience (pick one authority, delete the other) | Open | `brainarr/Brainarr.Plugin/Resilience/**`, `brainarr/Brainarr.Plugin/Services/Resilience/**` |
+| WS5 | Common tooling | Parity-lint expansion to include AppleMusicarr + low-noise rules | Open | `scripts/parity-lint.ps1`, `scripts/tests/Test-ParityLint.ps1` |
+| WS6 | Ecosystem build | Publish Abstractions/Common via NuGet and migrate plugins from ProjectReference to PackageReference | Blocked on secrets | `.github/workflows/release.yml`, plugin `Directory.Packages.props` / `NuGet.config` |
 
 ## Milestones (PR-Sized)
 
 ### M1 — Remove obvious clones (quick wins)
 **Target:** Delete plugin-local copies of utilities that already exist in Common.
 
-- [ ] Qobuzarr: delete any remaining preview/sample detection clone(s) (if reintroduced) and use `Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility` everywhere.
+- [x] Qobuzarr: delete preview/sample detection clone(s) and use `Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility` everywhere.
+  - Enforcement: `qobuzarr/tests/Qobuzarr.Tests/Unit/Utilities/PreviewDetectionUtilityCloneTests.cs` prevents reintroduction.
   - Acceptance: `dotnet test qobuzarr/Qobuzarr.sln -c Release` passes.
-- [ ] AppleMusicarr: remove dead net6-only legacy ImportList bridge code if it is no longer referenced by manifests or builds.
-  - Acceptance: `dotnet build applemusicarr/src/AppleMusicarr.Plugin/AppleMusicarr.Plugin.csproj -c Release` passes; manifests match compiled types.
+- [ ] AppleMusicarr: prove manifest entryPoints resolve for the TFM(s) they ship (net8 `plugin.json`, optional net6 `manifest.json`) and delete any dead entryPoints/types.
+  - Acceptance: `dotnet test applemusicarr/AppleMusicarr.sln -c Release` passes; entryPoint-resolution tests prevent reintroducing “type does not exist” packaging debt.
 
 ### M2 — Public token protection facade in Common (enables deletion)
 **Target:** Stop downstream plugins from implementing their own encryption primitives.
 
-- [ ] Common: expose a small, stable public API for protecting strings at rest. (in progress)
-  - Deliverable: `IStringProtector` (or similar) + versioned format docs + tests.
+- [x] Common: expose a small, stable public API for protecting strings at rest.
+  - Delivered: `IStringProtector` + `StringTokenProtector` (versioned prefix `lpc:ps:v1:`) registered by `AddTokenProtection()`.
   - Acceptance: Common tests pass; no breaking changes to existing consumers.
 - [ ] AppleMusicarr follow-up: replace `AppleMusicarr.Plugin.Security.DataProtector` with the Common facade.
   - Acceptance: existing encrypted values can be read (dual-read/migration), and new writes use the Common format; E2E secrets redaction still holds.
@@ -86,21 +97,22 @@ This section is the “what do we do next?” view; the milestone checklists bel
 - [ ] Add rules only after proving low false positives (always include an expiry-driven baseline entry when needed).
 
 ## Parallel Work (Non-overlapping)
-- **AI A:** Common M2 (token protection facade + tests).
-- **AI B:** AppleMusicarr M2 follow-up (migrate DataProtector → Common facade).
-- **AI C:** Brainarr M5 (resilience consolidation) with characterization tests first.
-- **AI D:** M3 tooling (entrypoint reality check) + AppleMusicarr manifest/docs cleanup.
+- **AI A:** WS1 AppleMusicarr M2 follow-up (migrate `DataProtector` → `IStringProtector`, delete duplicate crypto).
+- **AI B:** WS2 Qobuzarr M1 clone deletion (remove local `PreviewDetectionUtility`, add parity-lint rule).
+- **AI C:** WS3 Tidalarr M4 hosting convergence (`TidalarrPlugin` → `StreamingPlugin`, delete duplicated host wiring).
+- **AI D:** WS4 Brainarr M5 resilience consolidation (characterization tests first, then delete duplicate circuit breaker).
+- **AI E:** WS5 parity-lint expansion (include AppleMusicarr, add low-noise rules with expiry baselines).
 
 ## Work Queue (6+ weeks, safe parallelism)
 These are intentionally PR-sized and scoped to avoid merge conflicts. Each item lists “hot files” to prevent two agents editing the same core surfaces.
 
 ### W1 — Common token protection (finish + ship)
-- Goal: land M2 in `lidarr.plugin.common` and delete custom crypto in at least one downstream repo within 1–2 follow-up PRs.
+- Goal: treat `IStringProtector` as the canonical at-rest string protection facade and delete custom crypto in at least one downstream repo within 1–2 follow-up PRs.
 - Hot files: `src/Security/TokenProtection/*`, `src/Extensions/ServiceCollectionExtensions.cs`, `docs/dev-guide/TOKEN_PROTECTION.md`.
 - Acceptance: `dotnet test -c Release --no-build` passes; a downstream repo (AppleMusicarr) removes its custom protector.
 
-### W2 — AppleMusicarr correctness (manifest reality + crypto migration)
-- Goal: fix net8 manifest/entrypoint mismatch and converge encryption to Common.
+### W2 — AppleMusicarr correctness (manifest reality + crypto migration)        
+- Goal: ensure shipped entryPoints resolve for the TFM(s) AppleMusicarr builds and converge encryption to `IStringProtector` (with migration + deletion).
 - Hot files: `applemusicarr/src/AppleMusicarr.Plugin/manifest.json`, `applemusicarr/src/AppleMusicarr.Plugin/Security/DataProtector.cs`.
 - Acceptance: `dotnet build applemusicarr/src/AppleMusicarr.Plugin/AppleMusicarr.Plugin.csproj -c Release` passes; manifests match compiled types; old encrypted values migrate.
 
