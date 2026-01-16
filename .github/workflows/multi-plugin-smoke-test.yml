@@ -142,7 +142,7 @@ on:
         default: false
     secrets:
       CROSS_REPO_PAT:
-        required: true
+        required: false
       QOBUZARR_EMAIL:
         required: false
       QOBUZARR_PASSWORD:
@@ -205,16 +205,20 @@ jobs:
           echo "::add-mask::${CROSS_REPO_PAT:-}"
 
           if [[ -z "${CROSS_REPO_PAT:-}" ]]; then
-            echo "::error::CROSS_REPO_PAT secret is missing or empty."
+            echo "::error::CROSS_REPO_PAT secret is missing or empty."    
             echo ""
             echo "This workflow requires a Personal Access Token with 'repo' scope to checkout"
-            echo "the private Qobuzarr and Tidalarr repositories."
+            echo "the private Qobuzarr and Tidalarr repositories."        
             echo ""
             echo "To fix this:"
             echo "  1. Go to: https://github.com/settings/tokens"
             echo "  2. Create a PAT (classic) with 'repo' scope"
-            echo "  3. Go to: https://github.com/RicherTunes/Lidarr.Plugin.Common/settings/secrets/actions"
+            echo "  3. Go to the calling repo secrets page:"
+            echo "     https://github.com/${GITHUB_REPOSITORY}/settings/secrets/actions"
             echo "  4. Add secret named 'CROSS_REPO_PAT' with the token value"
+            echo ""
+            echo "Note: secrets are not available to pull_request workflows from forks."
+            echo "If this is a fork PR, run this workflow from the upstream repo (workflow_dispatch) instead."
             echo ""
             echo "See docs/MULTI_PLUGIN_SMOKE_TEST.md for full setup instructions."
             exit 1
