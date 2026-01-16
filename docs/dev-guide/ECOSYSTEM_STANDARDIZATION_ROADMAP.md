@@ -14,7 +14,7 @@ Non-goals:
 - Packaging preflight + Abstractions SHA mismatch detection.
 - Shared filename/path helpers in `FileSystemUtilities` and shared download payload validation in `DownloadPayloadValidator`.
 
-## Current Status Snapshot (2026-01-15)
+## Current Status Snapshot (2026-01-16)
 This section is the “what do we do next?” view; the milestone checklists below remain the long-term structure.
 
 **Stable + proven (ship behavior)**
@@ -22,10 +22,18 @@ This section is the “what do we do next?” view; the milestone checklists bel
 - E2E runner is safe-by-default: explicit error codes, redaction, deterministic selection, JSON schema validation, and contract tripwires.
 - CI hygiene: change-detection self-test, path normalization tests, docs-only builds still report status.
 
-**In-flight (work on this branch / pending PRs)**
-- W1 AppleMusicarr: manifest/entryPoint mismatch confirmed (net6-only ImportList entryPoint referenced) and crypto duplication confirmed; implementation work pending.
-- M2 Common token protection facade: already available via `IStringProtector` / `StringTokenProtector` (versioned prefix `lpc:ps:v1:`). Next step is downstream adoption: delete AppleMusicarr custom crypto within ≤2 follow-up PRs.
-- M2 publishing: `release.yml` supports nuget.org publish, but requires `NUGET_API_KEY` secret (optional; prefer “thin common” even if using GitHub Packages).   
+**Recently completed (merged / green in CI)**
+- WS1 AppleMusicarr: legacy `manifest.json` / net6 import-list scaffolding removed (net8-only); `plugin.json` is the single source of truth.
+- WS1 AppleMusicarr: custom at-rest crypto deleted in favor of Common `IStringProtector` (legacy `enc:v1:` is read-only for migration when the old `.key` exists).
+- WS2 Qobuzarr: local preview/sample detection clone deleted; `PreviewDetectionUtilityCloneTests` prevents reintroduction.
+- M3: `tools/ManifestCheck.ps1 -ValidateEntryPoints` catches entrypoint/type mismatches early.
+
+**In-flight (next high-ROI work)**
+- WS3 Tidalarr: refactor `TidalarrPlugin` to inherit `StreamingPlugin<Module, Settings>` and delete duplicated host wiring (M4).
+- WS4 Brainarr: consolidate circuit breaker/resilience (“one authority”) and delete the duplicate implementation (M5).
+- WS5 parity-lint: include AppleMusicarr and add low-noise rules that directly delete drift.
+- WS7 CI parity: ensure multi-plugin smoke test wrappers + required secrets (e.g., `CROSS_REPO_PAT`) fail fast with actionable errors; fix pre-existing CI extraction issues where needed.
+- WS6 ecosystem build (optional): publish Abstractions/Common via NuGet and migrate plugins from ProjectReference to PackageReference (blocked on `NUGET_API_KEY` secret if using nuget.org).
 
 **Known upstream dependency**
 - Lidarr multi-plugin ALC lifecycle fix: tracking `Lidarr/Lidarr#5662` for a published Docker tag that contains the fix.
@@ -33,12 +41,36 @@ This section is the “what do we do next?” view; the milestone checklists bel
 ## Active Workstreams (Multi-Agent Safe)
 | Workstream | Repo(s) | Goal (deletion-driven) | Status | Hot files (avoid overlap) |
 |------------|---------|------------------------|--------|----------------------------|
-| WS1 | AppleMusicarr + Common | Replace custom crypto with `IStringProtector` and delete duplicate protectors | Open | `applemusicarr/src/AppleMusicarr.Plugin/Security/**`, `applemusicarr/src/AppleMusicarr.Plugin/Stores/**` |
-| WS2 | Qobuzarr | Delete local `PreviewDetectionUtility` clone and route all callers to Common | Open | `qobuzarr/src/Utilities/**`, `qobuzarr/src/**/Preview*` |
+| WS1 | AppleMusicarr + Common | Replace custom crypto with `IStringProtector` and delete duplicate protectors | Done | `applemusicarr/src/AppleMusicarr.Plugin/Security/**`, `applemusicarr/src/AppleMusicarr.Plugin/Stores/**` |
+| WS2 | Qobuzarr | Delete local `PreviewDetectionUtility` clone and route all callers to Common | Done | `qobuzarr/src/Utilities/**`, `qobuzarr/src/**/Preview*` |
 | WS3 | Tidalarr | Refactor `TidalarrPlugin` to inherit `StreamingPlugin<Module,Settings>` and delete duplicated host wiring | Open | `tidalarr/src/Tidalarr/Integration/TidalarrPlugin.cs`, `tidalarr/src/Tidalarr/Integration/TidalModule.cs` |
 | WS4 | Brainarr | Consolidate circuit breaker/resilience (pick one authority, delete the other) | Open | `brainarr/Brainarr.Plugin/Resilience/**`, `brainarr/Brainarr.Plugin/Services/Resilience/**` |
 | WS5 | Common tooling | Parity-lint expansion to include AppleMusicarr + low-noise rules | Open | `scripts/parity-lint.ps1`, `scripts/tests/Test-ParityLint.ps1` |
 | WS6 | Ecosystem build | Publish Abstractions/Common via NuGet and migrate plugins from ProjectReference to PackageReference | Blocked on secrets | `.github/workflows/release.yml`, plugin `Directory.Packages.props` / `NuGet.config` |
+| WS7 | CI parity | Unify reusable multi-plugin smoke tests + required secrets/permissions across all plugin repos | Open | `.github/workflows/*`, repo settings/secrets |
+
+## Task Board (PR-sized; claim by editing this file)
+Keep items deletion-driven. Each “Common addition” must have a follow-up PR that deletes downstream duplication within 1–2 PRs.
+
+- [ ] **P0 / WS3.1 (Tidalarr)** Refactor `TidalarrPlugin` to inherit `StreamingPlugin<Module, Settings>`; delete duplicated host wiring; keep `OAuthAuthUrl` UX.
+  - Hot files: `tidalarr/src/Tidalarr/Integration/TidalarrPlugin.cs`, `tidalarr/src/Tidalarr/Integration/TidalModule.cs`
+  - Acceptance: Tidalarr unit tests pass; E2E bootstrap still passes with persisted auth.
+- [ ] **P0 / WS7.1 (CI parity)** Multi-plugin smoke test: fail fast with a clear message when `CROSS_REPO_PAT` (or equivalent) is missing (no silent checkout failures).
+  - Hot files: `.github/workflows/multi-plugin-smoke-test.yml`, `.github/actions/init-common-submodule/*`
+  - Acceptance: a repo without the secret fails with an actionable error code/message; a repo with the secret runs end-to-end.
+- [ ] **P0 / WS5.1 (parity-lint)** Include `applemusicarr/` in parity-lint scan list; keep noise low with expiry+owner baselines.
+  - Hot files: `scripts/parity-lint.ps1`, `scripts/tests/Test-ParityLint.ps1`
+  - Acceptance: parity-lint stays quiet on `main`; violations are actionable (why + fix link).
+- [ ] **P1 / WS4.1 (Brainarr)** Add characterization tests that lock current resilience behavior (timeouts, retry counts, circuit open/half-open) and pick one breaker implementation to keep.
+  - Hot files: `brainarr/Brainarr.Plugin/Resilience/**`, `brainarr/Brainarr.Plugin/Services/Resilience/**`
+  - Acceptance: deterministic tests (`FakeTimeProvider`), no `Task.Delay` sleeps.
+- [ ] **P1 / WS4.2 (Brainarr)** Delete the non-authoritative circuit breaker implementation and rewire call sites to the chosen authority.
+  - Hot files: same as WS4.1
+  - Acceptance: behavior matches characterization tests; one breaker remains.
+- [ ] **P1 / M6.1 (Host deps)** Normalize host-coupled dependency versions across plugins (FluentValidation/NLog/Microsoft.Extensions.*) to match host extraction tooling.
+  - Acceptance: packaging preflight stays green; no `MissingMethodException` / `TypeLoadException` in multi-plugin bootstrap.
+- [ ] **P2 / WS6.1 (NuGet)** (Optional) Publish Abstractions/Common to nuget.org (or formalize GitHub Packages usage) and migrate one plugin from ProjectReference → PackageReference to prove byte-identical Abstractions.
+  - Acceptance: multi-plugin Abstractions SHA mismatch cannot occur for that plugin.
 
 ## Milestones (PR-Sized)
 
@@ -48,8 +80,8 @@ This section is the “what do we do next?” view; the milestone checklists bel
 - [x] Qobuzarr: delete preview/sample detection clone(s) and use `Lidarr.Plugin.Common.Utilities.PreviewDetectionUtility` everywhere.
   - Enforcement: `qobuzarr/tests/Qobuzarr.Tests/Unit/Utilities/PreviewDetectionUtilityCloneTests.cs` prevents reintroduction.
   - Acceptance: `dotnet test qobuzarr/Qobuzarr.sln -c Release` passes.
-- [ ] AppleMusicarr: prove manifest entryPoints resolve for the TFM(s) they ship (net8 `plugin.json`, optional net6 `manifest.json`) and delete any dead entryPoints/types.
-  - Acceptance: `dotnet test applemusicarr/AppleMusicarr.sln -c Release` passes; entryPoint-resolution tests prevent reintroducing “type does not exist” packaging debt.
+- [x] AppleMusicarr: remove legacy `manifest.json` / net6-only entrypoint plumbing and treat `plugin.json` as the single source of truth for net8 packaging.
+  - Acceptance: `dotnet test applemusicarr/AppleMusicarr.sln -c Release` passes; scripts validate `plugin.json` only.
 
 ### M2 — Public token protection facade in Common (enables deletion)
 **Target:** Stop downstream plugins from implementing their own encryption primitives.
@@ -57,8 +89,8 @@ This section is the “what do we do next?” view; the milestone checklists bel
 - [x] Common: expose a small, stable public API for protecting strings at rest.
   - Delivered: `IStringProtector` + `StringTokenProtector` (versioned prefix `lpc:ps:v1:`) registered by `AddTokenProtection()`.
   - Acceptance: Common tests pass; no breaking changes to existing consumers.
-- [ ] AppleMusicarr follow-up: replace `AppleMusicarr.Plugin.Security.DataProtector` with the Common facade.
-  - Acceptance: existing encrypted values can be read (dual-read/migration), and new writes use the Common format; E2E secrets redaction still holds.
+- [x] AppleMusicarr follow-up: replace `AppleMusicarr.Plugin.Security.DataProtector` with the Common facade.
+  - Acceptance: legacy `enc:v1:` values are read-only (requires the legacy `.key` file); new writes are `lpc:ps:v1:`; tests pass.
 
 ### M3 — Manifest/entrypoint reality checks (correctness ROI)
 **Target:** Catch “manifest points at a type that does not exist in net8 build” problems early.
@@ -67,7 +99,7 @@ This section is the “what do we do next?” view; the milestone checklists bel
   - Acceptance: `tests/ManifestCheckScriptTests.cs` covers success + `ENT001` missing-type behavior.
 - [x] Common: `tools/ManifestCheck.ps1 -ValidateEntryPoints` supports `manifest.json` `entryPoints` (AppleMusicarr-style `entryPoints: [{ type, implementation }]`) (metadata-only; no `Assembly.Load`).
   - Acceptance: `tests/ManifestCheckScriptTests.cs` covers `plugin.json` and `manifest.json` success + `ENT001` missing-type behavior.
-- [ ] AppleMusicarr follow-up: align `manifest.json` / `plugin.json` with net8 build outputs; fix any stale docs mentioning net6-only types.
+- [x] AppleMusicarr follow-up: remove legacy `manifest.json` and align all packaging/validation to `plugin.json`.
 
 ### M4 — Standardize hosting entrypoint pattern where possible (reduce drift)
 **Target:** converge on `StreamingPlugin<Module, Settings>` for net8 plugin hosts while keeping legacy adapters where required.
@@ -97,24 +129,25 @@ This section is the “what do we do next?” view; the milestone checklists bel
 - [ ] Add rules only after proving low false positives (always include an expiry-driven baseline entry when needed).
 
 ## Parallel Work (Non-overlapping)
-- **AI A:** WS1 AppleMusicarr M2 follow-up (migrate `DataProtector` → `IStringProtector`, delete duplicate crypto).
-- **AI B:** WS2 Qobuzarr M1 clone deletion (remove local `PreviewDetectionUtility`, add parity-lint rule).
-- **AI C:** WS3 Tidalarr M4 hosting convergence (`TidalarrPlugin` → `StreamingPlugin`, delete duplicated host wiring).
-- **AI D:** WS4 Brainarr M5 resilience consolidation (characterization tests first, then delete duplicate circuit breaker).
-- **AI E:** WS5 parity-lint expansion (include AppleMusicarr, add low-noise rules with expiry baselines).
+- **AI A:** WS3 Tidalarr M4 hosting convergence (`TidalarrPlugin` → `StreamingPlugin`, delete duplicated host wiring).
+- **AI B:** WS4 Brainarr M5 resilience consolidation (characterization tests first, then delete duplicate circuit breaker).
+- **AI C:** WS5 parity-lint expansion (include AppleMusicarr, add low-noise rules with expiry baselines).
+- **AI D:** WS7 CI parity (standardize reusable workflow wrapper + required secrets like `CROSS_REPO_PAT`, and fix any pre-existing “missing host assemblies” CI gaps).
+- **AI E:** M6 host-coupled dependency discipline (tighten dependency pins + packaging exclusions where needed; targeted, deletion-driven).
+- **AI F:** WS6 ecosystem build (NuGet publish + PackageReference migration), once secrets/config are ready.
 
 ## Work Queue (6+ weeks, safe parallelism)
 These are intentionally PR-sized and scoped to avoid merge conflicts. Each item lists “hot files” to prevent two agents editing the same core surfaces.
 
-### W1 — Common token protection (finish + ship)
+### ✅ W1 — Common token protection (finish + ship) (done)
 - Goal: treat `IStringProtector` as the canonical at-rest string protection facade and delete custom crypto in at least one downstream repo within 1–2 follow-up PRs.
 - Hot files: `src/Security/TokenProtection/*`, `src/Extensions/ServiceCollectionExtensions.cs`, `docs/dev-guide/TOKEN_PROTECTION.md`.
 - Acceptance: `dotnet test -c Release --no-build` passes; a downstream repo (AppleMusicarr) removes its custom protector.
 
-### W2 — AppleMusicarr correctness (manifest reality + crypto migration)        
-- Goal: ensure shipped entryPoints resolve for the TFM(s) AppleMusicarr builds and converge encryption to `IStringProtector` (with migration + deletion).
-- Hot files: `applemusicarr/src/AppleMusicarr.Plugin/manifest.json`, `applemusicarr/src/AppleMusicarr.Plugin/Security/DataProtector.cs`.
-- Acceptance: `dotnet build applemusicarr/src/AppleMusicarr.Plugin/AppleMusicarr.Plugin.csproj -c Release` passes; manifests match compiled types; old encrypted values migrate.
+### ✅ W2 — AppleMusicarr correctness (plugin.json-only + crypto migration) (done)
+- Goal: keep AppleMusicarr net8-only and remove legacy packaging debt while converging encryption to `IStringProtector` (with migration + deletion).
+- Hot files: `applemusicarr/src/AppleMusicarr.Plugin/plugin.json`, `applemusicarr/src/AppleMusicarr.Plugin/Security/**`, `applemusicarr/scripts/*`.
+- Acceptance: `dotnet test applemusicarr/AppleMusicarr.sln -c Release` passes; scripts validate `plugin.json` only.
 
 ### W3 — Hosting convergence (reduce drift without breaking legacy)
 - Goal: converge on `StreamingPlugin<Module, Settings>` where already structurally aligned.
@@ -136,6 +169,11 @@ These are intentionally PR-sized and scoped to avoid merge conflicts. Each item 
 - Ideas: post-import verification (opt-in), richer metadata assertions (opt-in), provider canary job (continue-on-error).
 - Hot files: `scripts/e2e-runner.ps1`, `scripts/lib/e2e-gates.psm1`, `.github/workflows/e2e-bootstrap.yml`.
 - Acceptance: opt-in gates improve signal without breaking local dev; manifests remain schema-valid.
+
+### W7 — CI parity and repo settings standardization
+- Goal: make “fresh clone → CI green” consistent across plugin repos without manual repo setting drift.
+- Hot files: `.github/workflows/**`, `.github/actions/**` (and repo settings like workflow permissions, required secrets).
+- Acceptance: each plugin repo has the same multi-plugin smoke test wrapper, and missing secrets fail fast with a clear message (not a cryptic checkout error).
 
 ## Coordination (Multi-Agent Safety)
 To keep multiple agents productive without stepping on each other:
