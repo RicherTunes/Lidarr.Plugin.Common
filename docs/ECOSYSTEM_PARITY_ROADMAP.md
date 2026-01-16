@@ -55,6 +55,16 @@ This section exists to prevent “looks done” drift. Each item should be PR-si
 - [ ] **WS6.1 CROSS_REPO_PAT fail-fast**: reusable workflows should produce a single, explicit failure when `CROSS_REPO_PAT` is missing, with remediation steps.
 - [ ] **WS6.2 Standard wrappers**: keep `multi-plugin-smoke-test.yml` wrappers in each plugin repo consistent (paths, schedules, and inputs).
 
+### WS7 — Common Safe-By-Default Logging (Security ROI)
+
+- [ ] **WS7.1 HTTP log redaction**: make request log URLs query-safe by default (no raw query params); add unit tests proving sensitive query keys are redacted.
+- [ ] **WS7.2 Deletion follow-up**: delete any plugin-local “URL-for-logging” redaction helpers within ≤2 PRs after WS7.1 lands.
+
+### WS8 — Manifest Tooling (Correctness ROI)
+
+- [ ] **WS8.1 Entrypoint resolution check**: extend manifest tooling to optionally verify that any declared entrypoint types exist in the built net8 assembly.
+- [ ] **WS8.2 Apply to AppleMusicarr**: add/enable the check in AppleMusicarr CI so entrypoint mismatches cannot regress.
+
 ## Definition Of Done (Parity “As Much As It Makes Sense”)
 
 - [ ] Packaging payload contract enforced everywhere (required/forbidden DLLs).
