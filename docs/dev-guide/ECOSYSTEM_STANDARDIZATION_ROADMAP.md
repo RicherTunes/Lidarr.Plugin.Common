@@ -31,6 +31,7 @@ This section is the “what do we do next?” view; the milestone checklists bel
 **In-flight (next high-ROI work)**
 - WS3 Tidalarr: refactor `TidalarrPlugin` to inherit `StreamingPlugin<Module, Settings>` and delete duplicated host wiring (M4).
 - WS4 Brainarr: consolidate circuit breaker/resilience (“one authority”) and delete the duplicate implementation (M5).
+- WS5 parity-lint: include AppleMusicarr and add low-noise rules that directly delete drift.
 - WS7 CI parity: ensure multi-plugin smoke test wrappers + required secrets (e.g., `CROSS_REPO_PAT`) fail fast with actionable errors; fix pre-existing CI extraction issues where needed.
 - WS6 ecosystem build (optional): publish Abstractions/Common via NuGet and migrate plugins from ProjectReference to PackageReference (blocked on `NUGET_API_KEY` secret if using nuget.org).
 
@@ -44,7 +45,7 @@ This section is the “what do we do next?” view; the milestone checklists bel
 | WS2 | Qobuzarr | Delete local `PreviewDetectionUtility` clone and route all callers to Common | Done | `qobuzarr/src/Utilities/**`, `qobuzarr/src/**/Preview*` |
 | WS3 | Tidalarr | Refactor `TidalarrPlugin` to inherit `StreamingPlugin<Module,Settings>` and delete duplicated host wiring | Open | `tidalarr/src/Tidalarr/Integration/TidalarrPlugin.cs`, `tidalarr/src/Tidalarr/Integration/TidalModule.cs` |
 | WS4 | Brainarr | Consolidate circuit breaker/resilience (pick one authority, delete the other) | Open | `brainarr/Brainarr.Plugin/Resilience/**`, `brainarr/Brainarr.Plugin/Services/Resilience/**` |
-| WS5 | Common tooling | Parity-lint expansion to include AppleMusicarr + low-noise rules | Done | `scripts/parity-lint.ps1`, `scripts/tests/Test-ParityLint.ps1` |
+| WS5 | Common tooling | Parity-lint expansion to include AppleMusicarr + low-noise rules | Open | `scripts/parity-lint.ps1`, `scripts/tests/Test-ParityLint.ps1` |
 | WS6 | Ecosystem build | Publish Abstractions/Common via NuGet and migrate plugins from ProjectReference to PackageReference | Blocked on secrets | `.github/workflows/release.yml`, plugin `Directory.Packages.props` / `NuGet.config` |
 | WS7 | CI parity | Unify reusable multi-plugin smoke tests + required secrets/permissions across all plugin repos | Open | `.github/workflows/*`, repo settings/secrets |
 
@@ -124,8 +125,7 @@ Keep items deletion-driven. Each “Common addition” must have a follow-up PR 
 ### M7 — Parity lint expansion (keep drift from returning)
 **Target:** extend `scripts/parity-lint.ps1` to cover all plugin repos in this workspace.
 
-- [x] Add `applemusicarr/` to the parity-lint repo list.
-- [x] Add a hermetic `-AllRepos` test that proves AppleMusicarr is scanned.
+- [ ] Add `applemusicarr/` to the parity-lint repo list.
 - [ ] Add rules only after proving low false positives (always include an expiry-driven baseline entry when needed).
 
 ## Parallel Work (Non-overlapping)

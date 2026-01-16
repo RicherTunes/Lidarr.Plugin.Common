@@ -3,8 +3,8 @@
 .SYNOPSIS
     Parity lint for plugin repos - detects forbidden re-inventions.
 .DESCRIPTION
-    Scans plugin repos (Qobuzarr, Tidalarr, Brainarr, AppleMusicarr) for patterns
-    that should use shared library utilities instead of being reimplemented.
+    Scans plugin repos (Qobuzarr, Tidalarr, Brainarr) for patterns that should
+    use shared library utilities instead of being reimplemented.
 .PARAMETER RepoPath
     Path to plugin repo to scan.
 .PARAMETER AllRepos
@@ -176,21 +176,11 @@ function Get-PluginRepos {
     param([string]$CommonRoot)
     $parent = Split-Path $CommonRoot -Parent
     $repos = @()
-    $repoCandidates = [ordered]@{
-        qobuzarr = @('qobuzarr', 'Qobuzarr')
-        tidalarr = @('tidalarr', 'Tidalarr')
-        brainarr = @('brainarr', 'Brainarr')
-        applemusicarr = @('applemusicarr', 'AppleMusicarr')
-    }
-
-    foreach ($repoName in $repoCandidates.Keys) {
-        foreach ($dirName in $repoCandidates[$repoName]) {
-            $path = Join-Path $parent $dirName
-            if (Test-Path $path) {
-                $repos += @{ Name = $repoName; Path = $path }
-                break
-            }
-        }
+    foreach ($name in @('qobuzarr', 'tidalarr', 'brainarr')) {
+        $path = Join-Path $parent $name
+        $capPath = Join-Path $parent ($name.Substring(0,1).ToUpper() + $name.Substring(1))
+        if (Test-Path $path) { $repos += @{ Name = $name; Path = $path } }
+        elseif (Test-Path $capPath) { $repos += @{ Name = $name; Path = $capPath } }
     }
     return $repos
 }
