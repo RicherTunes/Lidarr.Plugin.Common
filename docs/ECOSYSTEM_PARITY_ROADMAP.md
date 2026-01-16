@@ -33,6 +33,13 @@ Keep parity work deletion-driven:
 | **WS7: CI parity** | Make multi-plugin smoke tests fail fast with actionable guidance when required secrets/permissions are missing | In review | `.github/workflows/multi-plugin-smoke-test.yml`, `.github/actions/**` |
 | **WS6: Abstractions distribution** | Publish Abstractions/Common as packages and migrate plugins away from `ProjectReference` where it causes ABI/MVID drift | Blocked on secrets/config | `.github/workflows/release.yml`, plugin `NuGet.config`, `Directory.Packages.props` |
 
+### WS4 Prerequisites (Do Not “Delete First”)
+
+Brainarr’s circuit breaker is **active** (protects AI provider invocations keyed by provider:model). WS4 is a migration and requires Common to support Brainarr’s semantics before any deletion:
+- Failure-rate + minimum-throughput windowing (Brainarr uses “last N operations”, not just failure timestamps).
+- Optional cancellation-as-failure (Brainarr often sees timeouts as `TaskCanceledException`; Common currently treats cancellation differently).
+- Characterization tests must prove equivalence for the scenarios Brainarr already relies on before switching the implementation.
+
 Suggested parallelism (non-overlapping):
 - Agent A: WS1 (AppleMusicarr manifest/entrypoints) + tests.
 - Agent B: WS2 (Common protected-string facade) + tests; Agent C follows by deleting AppleMusicarr crypto.
