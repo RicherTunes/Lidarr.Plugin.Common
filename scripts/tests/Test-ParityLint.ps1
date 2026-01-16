@@ -233,9 +233,44 @@ public class BadCode { var chars = Path.GetInvalidFileNameChars(); }
         $failed++
     }
 
+    # Test 8: -AllRepos scans AppleMusicarr (hermetic ecosystem layout)
+    Write-Host "`n[TEST] -AllRepos scans AppleMusicarr..." -ForegroundColor Cyan
+
+    $ecosystemRoot = Join-Path $testRoot "allrepos-$(([guid]::NewGuid().ToString('N').Substring(0,8)))"
+    $tempCommonScriptsDir = Join-Path (Join-Path $ecosystemRoot 'lidarr.plugin.common') 'scripts'
+    New-Item -ItemType Directory -Path $tempCommonScriptsDir -Force | Out-Null
+
+    $tempLintScript = Join-Path $tempCommonScriptsDir 'parity-lint.ps1'
+    Copy-Item -Path $lintScript -Destination $tempLintScript -Force
+
+    foreach ($repoName in @('qobuzarr', 'tidalarr', 'brainarr', 'applemusicarr')) {
+        New-Item -ItemType Directory -Path (Join-Path $ecosystemRoot $repoName) -Force | Out-Null
+    }
+
+    Add-ViolationFile -RepoPath (Join-Path $ecosystemRoot 'applemusicarr') -RelPath 'src\BadApple.cs' -Content @'
+public class BadApple
+{
+    public string Sanitize(string fileName)
+    {
+        var invalidChars = Path.GetInvalidFileNameChars();
+        return string.Concat(fileName.Where(c => !invalidChars.Contains(c)));
+    }
+}
+'@
+
+    & $tempLintScript -AllRepos | Out-Null
+    $exitCode = $LASTEXITCODE
+
+    if ($exitCode -eq 1) {
+        Write-Host "  [PASS] AppleMusicarr violation detected via -AllRepos (exit=1)" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] Expected exit=1, got exit=$exitCode (AppleMusicarr may not be scanned)" -ForegroundColor Red
+        $failed++
+    }
+
     Write-Host "`n========================================" -ForegroundColor Cyan
     if ($failed -gt 0) {
-        Write-Host "FAILED: $failed test(s) failed" -ForegroundColor Red
+        Write-Host "FAILED: $failed test(s) failed" -ForegroundColor Red        
         exit 1
     }
     Write-Host "PASS: Test-ParityLint (all tests passed)" -ForegroundColor Green
