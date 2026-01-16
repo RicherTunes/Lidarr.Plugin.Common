@@ -1,18 +1,55 @@
 # Ecosystem Parity Roadmap
 
-This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr).
+This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr, AppleMusicarr).
 
 ## Current Status
 
-| Dimension | Tidalarr | Qobuzarr | Brainarr | Common |
-|-----------|----------|----------|----------|--------|
-| **Packaging** | ✅ | ✅ | ✅ | Policy complete |
-| **Naming/Path** | ✅ | ✅ | N/A | FileSystemUtilities |
-| **Concurrency** | ✅ | ✅ | N/A | BaseDownloadOrchestrator |
-| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | Single-authority pattern |
-| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | JSON schema (PR #187) |
+| Dimension | Tidalarr | Qobuzarr | Brainarr | AppleMusicarr | Common |
+|-----------|----------|----------|----------|---------------|--------|
+| **Packaging** | ✅ | ✅ | ✅ | ⚠️ (WS1) | Policy complete |
+| **Naming/Path** | ✅ | ✅ | N/A | N/A | FileSystemUtilities |
+| **Concurrency** | ✅ | ✅ | N/A | N/A | BaseDownloadOrchestrator |
+| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | ⚠️ (WS1) | Single-authority pattern |
+| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | ⚠️ (WS1) | Manifest schema + contracts |
 
-**Overall Ecosystem Parity: ~97%**
+**Streaming parity (Tidalarr + Qobuzarr): ~99%**
+
+**Ecosystem parity (incl. Brainarr + AppleMusicarr): ~90-95%**
+
+---
+
+## Status Board (Workstreams)
+
+Rule: Any new `lidarr.plugin.common/` API must delete measurable duplication in at least one plugin within 1-2 follow-up PRs (or it does not land).
+
+| WS | Goal | Status | Dependency | Next PR-sized step |
+|----|------|--------|------------|--------------------|
+| WS1 | AppleMusicarr: manifest reality + crypto deletion | In progress | Common `ISecretProtector` facade | Migrate AppleMusicarr to `ISecretProtector` + delete custom crypto + add entrypoint-resolution test |
+| WS2 | Byte-identical Abstractions distribution | Blocked on secret | `NUGET_API_KEY` in Common | Publish `Lidarr.Plugin.Abstractions` to NuGet + convert at least 1 plugin to `PackageReference` |
+| WS3 | Hosting convergence (streaming plugins) | In progress | None | Tidalarr: `StreamingPlugin<>` migration + deletion; Qobuzarr: no stub adapters (hard stop) |
+| WS4 | Brainarr resilience convergence | In progress | Brainarr PR #371 | Add seam (`IBreakerRegistry`) → add Common breaker w/ Brainarr semantics → adapter → delete old breaker |
+| WS5 | No-drift guardrails | In progress | None | Expand parity-lint rules (clone detection + deletion targets), include AppleMusicarr |
+| WS6 | CI/workflow standardization | In progress | Common reusable workflows | `CROSS_REPO_PAT` fail-fast + fork PR skip for multi-plugin smoke tests |
+| WS7 | HTTP safe-by-default logging | Pending | None | Add redacted URL builder + tests, then delete per-plugin log redaction forks |
+| WS8 | Manifest/entrypoint tooling | Pending | None | Add optional entrypoint-type resolution check (net8) to `tools/ManifestCheck.ps1` |
+
+### Multi-Agent Queue (Weeks of Parallel Work)
+
+Each item below is intended to be an independent, PR-sized unit. Avoid overlapping edits to the same core files (especially `scripts/e2e-runner.ps1` and `scripts/lib/e2e-gates.psm1`).
+
+| Lane | PR-sized unit | Definition of Done |
+|------|---------------|--------------------|
+| A | AppleMusicarr: fix manifest entryPoints to match net8 build | Packaging/manifest check proves all entryPoint types resolve in the built assembly |
+| A | AppleMusicarr: delete custom crypto, migrate to `ISecretProtector` | Removes plugin-local crypto classes and preserves read-compat for existing values |
+| B | Common: safe HTTP logging (`BuildForLogging` redaction) | Unit tests prove query params are redacted; no secrets appear in logs |
+| B | Common: `FileTokenStore`/token-store factory public facade | New API plus deletion in at least one plugin within 2 PRs |
+| C | Brainarr WS4.2 PR0: `IBreakerRegistry` seam | WS4.1 characterization tests still pass unchanged |
+| C | Brainarr WS4.2 PR1: Common breaker w/ Brainarr semantics | Ported subset of WS4.1 tests to Common (hermetic) |
+| C | Brainarr WS4.2 PR2: adapter + swap | WS4.1 tests pass using Common-backed breaker |
+| C | Brainarr WS4.2 PR3: delete old breaker | No Brainarr breaker implementations remain; WS4.1 tests pass |
+| D | Qobuzarr: delete duplicate `PreviewDetectionUtility` | Removes local copy and updates call sites; tests pass |
+| E | Common: manifest entrypoint resolution in `tools/ManifestCheck.ps1` | Fails CI when manifest references missing types (AppleMusicarr regression tripwire) |
+| F | Abstractions distribution (WS2) | Abstractions published + one plugin switches to package reference and passes packaging policy |
 
 ---
 
@@ -191,10 +228,10 @@ Schema → Configure → Search → AlbumSearch → Grab → Persist → Revalid
 - Metadata (opt-in via `-ValidateMetadata`)
 - PostRestartGrab (opt-in via `-PostRestartGrab`)
 
-**PR #187 Enhancements** (pending merge):
-- JSON Schema validation: `manifest.schema.json` with `$schema` fetchable pinning
-- Job summary output for GitHub Actions with per-plugin pass/fail table
-- Expanded gate granularity with Revalidation gate
+**E2E runner platform (merged)**:
+- Manifest output is schema-validated and contract-guarded (golden fixtures + doc-sync tripwires)
+- Explicit-at-source `errorCode` values for high-frequency failures (no inference-by-string)
+- Host capability probing and source provenance recorded in the manifest
 
 ### 3.3 Plugin-Specific Status
 
@@ -225,44 +262,32 @@ Schema → Configure → Search → AlbumSearch → Grab → Persist → Revalid
 
 ---
 
-## Phase 4: Advanced E2E Gates (Future)
+## Phase 4: Optional / Advanced E2E Gates
 
-### 4.1 ReleaseSearch Gate (Level 2)
-**Not yet implemented**
+These gates exist to tighten regressions; they are opt-in due to flake cost and credential requirements.
 
-Design:
-1. Create temporary album via `POST /api/v1/album`
-2. Trigger `AlbumSearch` command
-3. Assert `/api/v1/release?albumId=` contains results with plugin's indexerId
-4. Clean up temporary album
+- **Metadata**: validates core tags after Grab (`-ValidateMetadata`)
+- **PostRestartGrab**: proves end-to-end after Persist restart (`-PostRestartGrab`)
+- **BrainarrLLM**: opt-in functional gate for remote/local LLM endpoints (`-RunBrainarrLLMGate`)
 
-### 4.2 Grab Gate (Level 3)
-**Not yet implemented**
+### Multi-Plugin Operation
+**Status**: ✅ Proven for Schema + streaming Grab (host constraints vary by image tag)
 
-Design:
-1. Pick deterministic release from ReleaseSearch results
-2. Trigger grab via `POST /api/v1/release`
-3. Assert queue contains item
-4. Assert file appears in /downloads (timeout with polling)
-
-### 4.3 3-Plugin Concurrent Operation
-**Status**: ✅ Proven for Schema gate
-
-All three plugins can coexist in the same Lidarr instance and pass Schema gate simultaneously
+All three plugins can coexist in the same Lidarr instance and pass Schema gate simultaneously.
 
 #### ⚠️ Multi-Plugin Stability Caveat
 
-**Port :8691 is "best-effort" until Lidarr AssemblyLoadContext fix.**
+Multi-plugin results are sensitive to host AssemblyLoadContext behavior. The runner records host capability evidence in the manifest (ALC fix present/not present).
 
-Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit intermittent failures due to an upstream Lidarr ALC lifecycle bug. Known symptoms:
+Known symptoms when the host is affected:
 - Plugin schemas occasionally missing after restart
 - Type identity errors when multiple plugins reference shared types
 - Non-deterministic test failures in CI
 
 **Recommendation**:
-- Use dedicated single-plugin instances (`:8690` Tidalarr, `:8692` Qobuzarr) for reliable E2E
-- Treat `:8691` multi-plugin results as informational, not blocking
-- Track upstream: [Lidarr ALC issue](https://github.com/Lidarr/Lidarr/issues) (pending link)
+- Prefer dedicated single-plugin instances for OAuth and focused debugging
+- Use the multi-plugin harness for coexistence regression detection
+- Track upstream host fix: `Lidarr/Lidarr#5662` (ALC load-context lifetime)
 
 ---
 
@@ -290,7 +315,7 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 
 | Date | Change |
 |------|--------|
-| 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary (pending merge) |
+| 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary |
 | 2025-12-31 | Qobuzarr PR4: Dead code deletion + 8 auth characterization tests (incl. DI same-instance) |
 | 2025-12-31 | Tidalarr PR3: TidalOAuthService fallback → FailOnIOTokenStore (no silent temp writes) |
 | 2025-12-31 | Tidalarr PR2: Auth lifecycle unification - single token authority, scoped IStreamingTokenProvider |
