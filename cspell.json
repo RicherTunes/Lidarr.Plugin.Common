@@ -6,6 +6,12 @@
     "Qobuz",
     "Tidal",
     "ALC",
+    "AppleMusicarr",
+    "applemusicarr",
+    "Musicarr",
+    "Workstreams",
+    "ISecretProtector",
+    "AdvancedCircuitBreaker",
     "TestKit",
     "Cobertura",
     "DocFX",
@@ -95,7 +101,13 @@
     "creds",
     "prereqs",
     "pluginloader",
-    "parallelizable"
+    "parallelizable",
+    "entrypoint",
+    "entrypoints",
+    "SkippableFact",
+    "PackageReference",
+    "ProjectReference",
+    "net8"
   ],
   "ignorePaths": [
     "**/bin",
