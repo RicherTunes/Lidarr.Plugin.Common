@@ -1,20 +1,82 @@
 # Ecosystem Parity Roadmap
 
-This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr).
+This document tracks progress toward parity (where it makes sense) across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr, AppleMusicarr) and the shared platform (Lidarr.Plugin.Common).
 
 ## Current Status
 
-| Dimension | Tidalarr | Qobuzarr | Brainarr | Common |
-|-----------|----------|----------|----------|--------|
-| **Packaging** | ✅ | ✅ | ✅ | Policy complete |
-| **Naming/Path** | ✅ | ✅ | N/A | FileSystemUtilities |
-| **Concurrency** | ✅ | ✅ | N/A | BaseDownloadOrchestrator |
-| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | Single-authority pattern |
-| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | JSON schema (PR #187) |
+| Dimension | Tidalarr | Qobuzarr | Brainarr | AppleMusicarr | Common |
+|-----------|----------|----------|----------|---------------|--------|
+| **Packaging** | ✅ | ✅ | ✅ | ⚠️ | Policy complete |
+| **Naming/Path** | ✅ | ✅ | N/A | N/A | FileSystemUtilities |
+| **Concurrency** | ✅ | ✅ | N/A | N/A | BaseDownloadOrchestrator |
+| **Auth Lifecycle** | ✅ | ✅ | N/A | ⚠️ | Single-authority pattern |
+| **Token/Secret Protection** | ⚠️ | ⚠️ | ⚠️ | ⚠️ | ⚠️ (needs stable façade) |
+| **Resilience** | ✅ | ✅ | ⚠️ | ✅ | CircuitBreaker (+ WS4.2 parity) |
+| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | ⚠️ (schema-only) | Manifest schema + explicit codes |
 
 **Overall Ecosystem Parity: ~97%**
 
 ---
+
+## Guiding Rules
+- **Thin platform**: any new Common API must delete real duplication in ≤2 follow-up PRs (or be reverted).
+- **No silent stubs**: adapters must delegate to real behavior; never ship “empty results” as success.
+- **Characterize before refactor**: lock current behavior with tests before rewiring internals.
+- **Explicit failures**: E2E/CI should emit structured error codes at the failure site (not inferred from strings).
+
+## Workstreams (Multi-Agent Queue)
+This section is intentionally PR-sized and parallelizable. Each work item lists an explicit deletion target (to prevent Common bloat).
+
+| WS | Focus | Primary Repo | Status | Deletion Target (≤2 PRs) |
+|----|-------|--------------|--------|---------------------------|
+| WS1 | AppleMusicarr correctness + crypto | `applemusicarr/` + `lidarr.plugin.common/` | 🔜 | Delete `DataProtector.cs` + duplicate SecretProtector |
+| WS2 | Type-identity: Abstractions distribution | `lidarr.plugin.common/` + all plugins | 🔜 | Remove per-plugin Abstractions compilation path |
+| WS3 | Hosting convergence (StreamingPlugin) | `tidalarr/` then `qobuzarr/` | 🔜 | Delete duplicated IPlugin/settings bootstrapping |
+| WS4 | Brainarr breaker parity | `lidarr.plugin.common/` + `brainarr/` | 🔜 | Delete Brainarr circuit breaker implementation |
+| WS5 | De-dup + drift guardrails | `lidarr.plugin.common/` + plugins | 🔜 | Delete duplicated PreviewDetectionUtility + sanitizers |
+| WS6 | Safe-by-default logging + sanitization primitives | `lidarr.plugin.common/` | 🔜 | Delete downstream URL/query redaction copies |
+| WS7 | Manifest/tooling coherence | `lidarr.plugin.common/` + `applemusicarr/` | 🔜 | Delete dead/incorrect manifest entrypoints |
+| WS8 | CI/workflow parity | `lidarr.plugin.common/` + all plugins | 🔜 | Delete per-repo bespoke submodule/auth steps |
+
+### Coordination
+- Claim a work item by replacing `🔜` with an owner handle and PR link (example: `@alex → PR #123`).
+- Keep PRs single-purpose: one work item per PR, one repo per PR unless explicitly required.
+- If a Common change has no deletion follow-up queued, it violates the thin-platform rule; revert or add the deletion PR immediately.
+
+### WS1: AppleMusicarr correctness + crypto
+- [ ] **WS1.1** Fix `manifest.json` entrypoint mismatch for net8 builds (remove dead entryPoint or compile it for net8).
+- [ ] **WS1.2** Add `ManifestCheck` optional entrypoint resolution (manifest entryPoints must exist in built assembly).
+- [ ] **WS1.3** Migrate AppleMusicarr secret storage to Common stable façade and delete custom crypto (~200+ LOC).
+
+### WS2: Abstractions distribution (byte-identical type identity)
+- [ ] **WS2.1** Publish `Lidarr.Plugin.Abstractions` to NuGet.org (requires `NUGET_API_KEY` secret) and document usage.
+- [ ] **WS2.2** Migrate plugins from `ProjectReference` → `PackageReference` and delete the local Abstractions compilation path.
+- [ ] **WS2.3** Add a packaging tripwire: fail if plugins ship non-identical Abstractions bytes when multi-plugin testing.
+
+### WS3: Hosting convergence (StreamingPlugin)
+- [ ] **WS3.1 (Tidalarr)** Move `TidalarrPlugin` to `StreamingPlugin<TidalModule, TidalarrSettings>` and delete duplicated host wiring.
+- [ ] **WS3.2 (Qobuzarr)** Only add a modern entrypoint when it delegates to real behavior; never ship stub adapters.
+
+### WS4: Brainarr circuit breaker parity
+- [ ] **WS4.1** Characterize existing Brainarr breaker behavior (tests; no code changes).
+- [ ] **WS4.2** Implement Common breaker that matches WS4.1 semantics and add parity tests.
+- [ ] **WS4.3** Wire Brainarr to Common breaker behind an injected registry seam; delete Brainarr breaker implementation.
+
+### WS5: De-dup + drift guardrails
+- [ ] **WS5.1** Expand parity-lint to include AppleMusicarr and new “clone” patterns (PreviewDetectionUtility, sanitizers).
+- [ ] **WS5.2** Delete `qobuzarr/src/Utilities/PreviewDetectionUtility.cs` and use Common everywhere.
+
+### WS6: Safe-by-default logging + sanitization primitives
+- [ ] **WS6.1** Add safe HTTP logging in `StreamingApiRequestBuilder` (redact or drop query entirely) + tests.
+- [ ] **WS6.2** Add reusable sanitization primitives (control/zero-width stripping, whitespace collapse, URL/query redaction helpers).
+
+### WS7: Manifest/tooling coherence
+- [ ] **WS7.1** Extend `ManifestCheck.ps1` to validate entrypoints resolve in the built assembly (opt-in, CI-friendly).
+- [ ] **WS7.2** Document what `manifest.json` means vs `plugin.json` and converge to one canonical definition where possible.
+
+### WS8: CI/workflow parity
+- [ ] **WS8.1** Ensure multi-plugin smoke test fails fast with clear message when `CROSS_REPO_PAT` is missing.
+- [ ] **WS8.2** Fix Tidalarr CI “missing Lidarr assemblies” by standardizing host extraction across plugin repos (shared workflow/action).
 
 ## Definition of Done
 
@@ -191,7 +253,7 @@ Schema → Configure → Search → AlbumSearch → Grab → Persist → Revalid
 - Metadata (opt-in via `-ValidateMetadata`)
 - PostRestartGrab (opt-in via `-PostRestartGrab`)
 
-**PR #187 Enhancements** (pending merge):
+**PR #187 Enhancements** (merged):
 - JSON Schema validation: `manifest.schema.json` with `$schema` fetchable pinning
 - Job summary output for GitHub Actions with per-plugin pass/fail table
 - Expanded gate granularity with Revalidation gate
@@ -225,28 +287,16 @@ Schema → Configure → Search → AlbumSearch → Grab → Persist → Revalid
 
 ---
 
-## Phase 4: Advanced E2E Gates (Future)
+## Phase 4: Advanced E2E Gates
 
 ### 4.1 ReleaseSearch Gate (Level 2)
-**Not yet implemented**
-
-Design:
-1. Create temporary album via `POST /api/v1/album`
-2. Trigger `AlbumSearch` command
-3. Assert `/api/v1/release?albumId=` contains results with plugin's indexerId
-4. Clean up temporary album
+✅ Implemented (AlbumSearch + release attribution diagnostics)
 
 ### 4.2 Grab Gate (Level 3)
-**Not yet implemented**
-
-Design:
-1. Pick deterministic release from ReleaseSearch results
-2. Trigger grab via `POST /api/v1/release`
-3. Assert queue contains item
-4. Assert file appears in /downloads (timeout with polling)
+✅ Implemented (queue polling + audio validation + optional metadata gate)
 
 ### 4.3 3-Plugin Concurrent Operation
-**Status**: ✅ Proven for Schema gate
+**Status**: ✅ Proven (best-effort; see caveat)
 
 All three plugins can coexist in the same Lidarr instance and pass Schema gate simultaneously
 
@@ -290,7 +340,7 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 
 | Date | Change |
 |------|--------|
-| 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary (pending merge) |
+| 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary |
 | 2025-12-31 | Qobuzarr PR4: Dead code deletion + 8 auth characterization tests (incl. DI same-instance) |
 | 2025-12-31 | Tidalarr PR3: TidalOAuthService fallback → FailOnIOTokenStore (no silent temp writes) |
 | 2025-12-31 | Tidalarr PR2: Auth lifecycle unification - single token authority, scoped IStreamingTokenProvider |
