@@ -1,18 +1,19 @@
 # Ecosystem Parity Roadmap
 
-This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr).
+This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr, AppleMusicarr).
 
 ## Current Status
 
-| Dimension | Tidalarr | Qobuzarr | Brainarr | Common |
-|-----------|----------|----------|----------|--------|
-| **Packaging** | ✅ | ✅ | ✅ | Policy complete |
-| **Naming/Path** | ✅ | ✅ | N/A | FileSystemUtilities |
-| **Concurrency** | ✅ | ✅ | N/A | BaseDownloadOrchestrator |
-| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | Single-authority pattern |
-| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | JSON schema (PR #187) |
+| Dimension | Tidalarr | Qobuzarr | Brainarr | AppleMusicarr | Common |
+|-----------|----------|----------|----------|---------------|--------|
+| **Packaging** | ✅ | ✅ | ✅ | ⚠️ (manifest/entrypoints drift) | Policy complete |
+| **Naming/Path** | ✅ | ✅ | N/A | N/A | FileSystemUtilities |
+| **Concurrency** | ✅ | ✅ | N/A | N/A | Download orchestrators |
+| **Auth Lifecycle** | ✅ (single authority) | ✅ (single authority) | N/A | N/A | Auth patterns |
+| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | ⚠️ (not yet in harness) | Manifest + gates + fixtures |
 
-**Overall Ecosystem Parity: ~97%**
+**Streaming parity (Tidalarr/Qobuzarr): ~99%**  
+**Ecosystem parity (incl. Brainarr/AppleMusicarr): ~90–95%**
 
 ---
 
@@ -24,17 +25,46 @@ Keep parity work deletion-driven:
 
 | Workstream | Goal | Status | Hot Files (avoid overlap) |
 |-----------|------|--------|----------------------------|
+| **WS1: AppleMusicarr correctness** | Align manifests/entrypoints with net8 builds; remove dead/legacy entrypoints; bring AppleMusicarr into the same packaging/validation contract | Open | `applemusicarr/src/**/manifest.json`, `applemusicarr/src/**/plugin.json`, `tools/ManifestCheck.ps1`, `tests/ManifestCheck*` |
+| **WS2: Secret protection convergence** | Add a stable, versioned protected-string facade in Common, then delete plugin-local crypto (AppleMusicarr) within 1–2 PRs | Open | `src/Security/TokenProtection/**`, `docs/dev-guide/TOKEN_PROTECTION.md`, `applemusicarr/src/**/Security/*` |
 | **WS3: Hosting convergence** | Reduce drift by standardizing plugin host wiring where it already matches `StreamingPlugin<Module, Settings>` patterns | Open | `tidalarr/src/Tidalarr/Integration/TidalarrPlugin.cs`, `qobuzarr/src/**/Settings*`, `lidarr.plugin.common/src/Hosting/**` |
-| **WS4: Brainarr resilience consolidation** | Pick one circuit breaker/resilience path, add characterization tests, then delete the duplicate implementation | Open | `brainarr/Brainarr.Plugin/Resilience/**`, `brainarr/Brainarr.Plugin/Services/Resilience/**` |
-| **WS5: Parity lint expansion** | Prevent drift by scanning all plugin repos and flagging re-invented primitives with low false positives | In review (`PR #278`) | `scripts/parity-lint.ps1`, `scripts/tests/Test-ParityLint.ps1` |
-| **WS7: CI parity** | Make multi-plugin smoke tests fail fast with actionable guidance when required secrets/permissions are missing | In review (`PR #278`) | `.github/workflows/multi-plugin-smoke-test.yml`, `.github/actions/**` |
+| **WS4: Brainarr resilience migration** | Migrate Brainarr’s active circuit breaker to Common (preserving semantics), then delete the plugin-local breaker implementation | Open | `brainarr/Brainarr.Plugin/Services/Resilience/**`, `lidarr.plugin.common/src/Services/Resilience/**` |
+| **WS5: Parity lint expansion** | Prevent drift by scanning all plugin repos and flagging re-invented primitives with low false positives | In review | `scripts/parity-lint.ps1`, `scripts/tests/Test-ParityLint.ps1` |
+| **WS7: CI parity** | Make multi-plugin smoke tests fail fast with actionable guidance when required secrets/permissions are missing | In review | `.github/workflows/multi-plugin-smoke-test.yml`, `.github/actions/**` |
 | **WS6: Abstractions distribution** | Publish Abstractions/Common as packages and migrate plugins away from `ProjectReference` where it causes ABI/MVID drift | Blocked on secrets/config | `.github/workflows/release.yml`, plugin `NuGet.config`, `Directory.Packages.props` |
 
 Suggested parallelism (non-overlapping):
-- Agent A: WS3 (Tidalarr hosting refactor + delete wiring) + gate with E2E bootstrap.
-- Agent B: WS4.1 characterization tests only (no deletions) for Brainarr breaker/policy surfaces.
-- Agent C: WS4.2 delete-after-tests for Brainarr resilience (separate PR).
-- Agent D: WS6 packaging/distribution plan + one-plugin migration pilot.
+- Agent A: WS1 (AppleMusicarr manifest/entrypoints) + tests.
+- Agent B: WS2 (Common protected-string facade) + tests; Agent C follows by deleting AppleMusicarr crypto.
+- Agent D: WS3 (Tidalarr hosting) + E2E bootstrap; Agent E: WS4 Phase A (Common breaker enhancements) + tests.
+- Agent F: WS4 Phase B (Brainarr migration) once WS4 Phase A merges.
+- Agent G: WS6 packaging/distribution plan + one-plugin migration pilot.
+
+---
+
+## Milestones (PR-Sized, Deletion-Driven)
+
+Each Common addition should delete measurable duplication within 1–2 follow-up PRs.
+
+| Milestone | Scope | Goal | Delete Target | Acceptance |
+|----------|-------|------|---------------|------------|
+| **M1** | Qobuzarr | Delete duplicated `PreviewDetectionUtility` and use Common everywhere | Delete `qobuzarr/src/Utilities/PreviewDetectionUtility.cs` | `dotnet build qobuzarr/Qobuzarr.sln -c Release` |
+| **M2** | Common → AppleMusicarr | Add stable protected-string facade + migrate AppleMusicarr off custom crypto | Delete AppleMusicarr `DataProtector` and file-store `SecretProtector` copy | Common + AppleMusicarr tests green; settings decrypt after restart |
+| **M3** | AppleMusicarr | Fix manifest/entrypoint reality (net8) + add entrypoint resolution test | Remove/repair invalid entryPoints in `manifest.json` | Packaging test fails if entrypoint type missing |
+| **M4** | Tidalarr | Move host wiring to `StreamingPlugin<Module, Settings>` where possible | Delete manual manifest/settings host plumbing in `TidalarrPlugin` | `dotnet test tidalarr/Tidalarr.sln -c Release` + E2E bootstrap |
+| **M5** | Qobuzarr | Add modern host entrypoint (no behavior change) for settings/DI parity | Avoid introducing parallel host bootstrap patterns | Plugin loads; legacy behavior unchanged |
+| **M6** | Brainarr | Migrate active circuit breaker to Common (preserve semantics), then delete plugin-local breaker | Delete `brainarr/Brainarr.Plugin/Services/Resilience/CircuitBreaker.cs` | Brainarr tests green; characterization tests still pass |
+| **M7** | Ecosystem | Manifest/schema coherence and tooling | Remove legacy manifest formats where safe; document purpose | All plugin manifests validated by Common tooling |
+
+### Common-Only Improvements (Must Unlock Deletions)
+
+These are “good ideas” only if they enable deletion of plugin-local copies in ≤2 follow-up PRs.
+
+| Item | Goal | Required Deletion Follow-Up |
+|------|------|-----------------------------|
+| Safe HTTP logging | Make `BuildForLogging()`/equivalent redact query params by default | Delete any plugin-local URL/query redaction used only for logging |
+| Reusable token store factory | Make `FileTokenStore`/equivalent storage reusable without copy-paste | Delete any plugin-local token store/locking/atomic-write implementations |
+| Sanitization primitives | Add small, reusable primitives (control/zero-width stripping, whitespace collapse, query redaction) | Delete duplicated sanitizer primitives (keep provider policy local) |
 
 ---
 
@@ -42,10 +72,10 @@ Suggested parallelism (non-overlapping):
 
 Full ecosystem parity is achieved when:
 
-- [ ] All three plugins ship the 5-DLL type-identity contract
+- [ ] All plugin packages follow the minimal packaging contract (plugin assembly + `Lidarr.Plugin.Abstractions.dll` + `plugin.json`; no forbidden host-provided DLLs)
 - [ ] Both streaming plugins produce identical filename format on multi-disc and edge sanitization
 - [ ] Persistent single-plugin E2E gates pass for Qobuzarr and Tidalarr
-- [ ] Multi-plugin schema gate passes for 2 plugins, then 3 plugins (when host supports)
+- [ ] Multi-plugin bootstrap passes for Qobuzarr+Tidalarr+Brainarr (host permitting); AppleMusicarr is at least Schema-valid where applicable
 
 **No-Drift Rule**: Any new filename/path logic must either live in Common or delegate to Common.
 
@@ -53,57 +83,40 @@ Full ecosystem parity is achieved when:
 
 ## Type-Identity Assembly Policy
 
-### Required Assemblies (All Plugins)
-Plugins **MUST** ship these assemblies for proper plugin discovery and type identity:
-- `Lidarr.Plugin.Abstractions.dll` - Plugin discovery contract
-- `Microsoft.Extensions.DependencyInjection.Abstractions.dll` - DI type identity
-- `Microsoft.Extensions.Logging.Abstractions.dll` - Logging type identity
+### Required Package Contents (All Plugins)
+Plugins **MUST** ship:
+- The plugin assembly (typically merged output, e.g. `Lidarr.Plugin.<Name>.dll`)
+- `Lidarr.Plugin.Abstractions.dll`
+- `plugin.json`
+
+Plugins may ship additional assemblies **only** via an explicit allow/keep list (plugin-specific), and should prefer merge/internalize over shipping loose dependencies.
 
 ### Forbidden Assemblies (All Plugins)
 Plugins **MUST NOT** ship these assemblies:
+- `FluentValidation.dll` - Host provides; shipping causes type-identity conflicts (override signatures / `ValidationFailure` identity)
+- `Microsoft.Extensions.DependencyInjection.Abstractions.dll` - Host provides; shipping breaks DI contracts
+- `Microsoft.Extensions.Logging.Abstractions.dll` - Host provides; shipping breaks ILogger contracts
 - `System.Text.Json.dll` - Cross-boundary type identity risk
-- `Lidarr.Core.dll`, `Lidarr.Common.dll`, `Lidarr.Host.dll` - Host assemblies
+- `NLog.dll` - Host provides; shipping causes logging/type identity conflicts
+- `Lidarr.Core.dll`, `Lidarr.Common.dll`, `Lidarr.Host.dll` - Host assemblies   
 - `NzbDrone.*.dll` - Legacy host assemblies
 
-### FluentValidation Exception (Brainarr-Specific)
+### ⚠️ Policy Warning: Changes Must Be Deliberate
 
-**Brainarr MUST NOT ship `FluentValidation.dll`.**
-
-Unlike streaming plugins (Qobuzarr, Tidalarr) that don't override validation methods,
-Brainarr's `BrainarrImportList` overrides `Test(List<ValidationFailure>)` from `ImportListBase`.
-
-When FluentValidation.dll was shipped:
-```
-Method 'Test' in type 'Lidarr.Plugin.Brainarr.BrainarrImportList' does not have an implementation.
-```
-
-**Root cause**: Override signature mismatch due to FluentValidation type identity.
-- Plugin's `ValidationResult` ≠ Host's `ValidationResult` (different ALCs)
-- The override signature doesn't match because return types are technically different types
-- Plugin must use host's FluentValidation for type identity to match
-
-**Guard test**: `brainarr/Brainarr.Tests/Packaging/BrainarrPackagingPolicyTests.cs:Package_Must_Not_Ship_FluentValidation()`
-
-### ⚠️ Policy Warning: Do Not Force Uniformity
-
-FluentValidation shipping is **plugin-specific**. Do NOT attempt to standardize all plugins
-to either ship or not ship FluentValidation.dll without verifying the plugin's override
-signatures against the host.
-
-**Before changing FV policy for any plugin:**
-1. Check if the plugin overrides `Test(List<ValidationFailure>)` or similar methods
-2. If yes, the plugin MUST NOT ship FluentValidation.dll
-3. If no overrides, shipping FV is optional (but adds package size)
+This policy exists to prevent **type identity** failures across the host/plugin boundary and across multiple plugins loaded together.
+If you need a new “allowed/keep” DLL, add it deliberately and pair it with:
+1. A deletion plan (remove duplication elsewhere), and
+2. A packaging preflight test covering the new contract.
 
 ---
 
 ## Phase 1: Lock Contracts with Tests (High Priority)
 
 ### 1.1 Packaging Content Tests
-- [x] **Common**: PluginPackageValidator with TypeIdentityAssemblies
-- [x] **Tidalarr**: PackagingPolicyBaseline updated to 5-DLL contract
-- [x] **Qobuzarr**: PackagingPolicyTests with RequiredTypeIdentityAssemblies
-- [x] **Brainarr**: BrainarrPackagingPolicyTests with 4-DLL contract (no FluentValidation)
+- [x] **Common**: Package preflight validator (required + forbidden DLLs)
+- [x] **Tidalarr**: Packaging policy baseline updated to the minimal contract
+- [x] **Qobuzarr**: Packaging policy tests aligned to the minimal contract
+- [x] **Brainarr**: Packaging policy tests aligned to the minimal contract
 
 ### 1.2 Naming Contract Tests
 - [ ] Multi-disc: D01Txx/D02Txx format validation
@@ -213,7 +226,7 @@ Schema → Configure → Search → AlbumSearch → Grab → Persist → Revalid
 - Metadata (opt-in via `-ValidateMetadata`)
 - PostRestartGrab (opt-in via `-PostRestartGrab`)
 
-**PR #187 Enhancements** (pending merge):
+**Runner capabilities (landed)**:
 - JSON Schema validation: `manifest.schema.json` with `$schema` fetchable pinning
 - Job summary output for GitHub Actions with per-plugin pass/fail table
 - Expanded gate granularity with Revalidation gate
@@ -312,7 +325,7 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 
 | Date | Change |
 |------|--------|
-| 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary (pending merge) |
+| 2025-12-31 | E2E manifest schema + `$schema` pinning + job summary (landed) |
 | 2025-12-31 | Qobuzarr PR4: Dead code deletion + 8 auth characterization tests (incl. DI same-instance) |
 | 2025-12-31 | Tidalarr PR3: TidalOAuthService fallback → FailOnIOTokenStore (no silent temp writes) |
 | 2025-12-31 | Tidalarr PR2: Auth lifecycle unification - single token authority, scoped IStreamingTokenProvider |
@@ -321,12 +334,12 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 | 2025-12-30 | Added multi-plugin stability caveat (:8691 best-effort until Lidarr ALC fix) |
 | 2025-12-30 | PR #186: SimpleDownloadOrchestrator metadata tagging + ILogger + fail-fast |
 | 2025-12-27 | Brainarr PR #346: FluentValidation exclusion fix with guard test |
-| 2025-12-27 | Added Type-Identity Assembly Policy section with FluentValidation exception |
+| 2025-12-27 | Added type-identity packaging policy section (forbidden host-provided DLLs) |
 | 2025-12-27 | E2E gates: credential skip semantics, indexer/test preference, URL redaction |
 | 2025-12-27 | 3-plugin coexistence proven: Qobuzarr, Tidalarr, Brainarr all pass Schema gate |
 | 2025-12-27 | Tidalarr PR #104: sanitization consolidation with 4 unit tests |
 | 2025-12-27 | Tidalarr PR #105: chunk delay configurability with clamping (0-2000ms) |
 | 2025-12-27 | Common PRs #167/#168 merged - packaging policy complete |
-| 2025-12-27 | Tidalarr packaging baseline updated to 5-DLL contract |
+| 2025-12-27 | Packaging baseline updated to minimal contract |
 | 2025-12-27 | Qobuzarr TrackFileNameBuilder delegated to Common |
 | 2025-12-27 | Initial roadmap created |
