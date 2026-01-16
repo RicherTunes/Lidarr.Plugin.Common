@@ -16,6 +16,28 @@ This document tracks progress toward full structural and behavioral parity acros
 
 ---
 
+## Workstreams (Multi-Agent, Weeks-Scale Backlog)
+
+Keep parity work deletion-driven:
+- Any new `lidarr.plugin.common` helper must enable deleting real duplication in a plugin repo within 1–2 follow-up PRs.
+- Prefer characterization tests + deletion over “new shared utilities”.
+
+| Workstream | Goal | Status | Hot Files (avoid overlap) |
+|-----------|------|--------|----------------------------|
+| **WS3: Hosting convergence** | Reduce drift by standardizing plugin host wiring where it already matches `StreamingPlugin<Module, Settings>` patterns | Open | `tidalarr/src/Tidalarr/Integration/TidalarrPlugin.cs`, `qobuzarr/src/**/Settings*`, `lidarr.plugin.common/src/Hosting/**` |
+| **WS4: Brainarr resilience consolidation** | Pick one circuit breaker/resilience path, add characterization tests, then delete the duplicate implementation | Open | `brainarr/Brainarr.Plugin/Resilience/**`, `brainarr/Brainarr.Plugin/Services/Resilience/**` |
+| **WS5: Parity lint expansion** | Prevent drift by scanning all plugin repos and flagging re-invented primitives with low false positives | In review (`PR #278`) | `scripts/parity-lint.ps1`, `scripts/tests/Test-ParityLint.ps1` |
+| **WS7: CI parity** | Make multi-plugin smoke tests fail fast with actionable guidance when required secrets/permissions are missing | In review (`PR #278`) | `.github/workflows/multi-plugin-smoke-test.yml`, `.github/actions/**` |
+| **WS6: Abstractions distribution** | Publish Abstractions/Common as packages and migrate plugins away from `ProjectReference` where it causes ABI/MVID drift | Blocked on secrets/config | `.github/workflows/release.yml`, plugin `NuGet.config`, `Directory.Packages.props` |
+
+Suggested parallelism (non-overlapping):
+- Agent A: WS3 (Tidalarr hosting refactor + delete wiring) + gate with E2E bootstrap.
+- Agent B: WS4.1 characterization tests only (no deletions) for Brainarr breaker/policy surfaces.
+- Agent C: WS4.2 delete-after-tests for Brainarr resilience (separate PR).
+- Agent D: WS6 packaging/distribution plan + one-plugin migration pilot.
+
+---
+
 ## Definition of Done
 
 Full ecosystem parity is achieved when:
