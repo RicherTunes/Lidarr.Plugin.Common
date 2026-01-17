@@ -153,11 +153,14 @@
           OverwriteReadOnlyFiles="true" />
 
     <ItemGroup>
-      <AdditionalFiles Remove="**/PublicAPI.Shipped.txt" />
-      <AdditionalFiles Remove="**/PublicAPI.Unshipped.txt" />
+      <!-- Ensure PublicApiAnalyzers see exactly one shipped/unshipped pair. -->
+      <AdditionalFiles Remove="$(_ApiShippedSrc)" />
+      <AdditionalFiles Remove="$(_ApiUnshippedSrc)" />
+      <AdditionalFiles Remove="$(_ApiShippedObj)" />
+      <AdditionalFiles Remove="$(_ApiUnshippedObj)" />
     </ItemGroup>
 
-    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' == 'true'">
+    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' == 'true'">        
       <AdditionalFiles Include="$(_ApiShippedSrc)" />
       <AdditionalFiles Include="$(_ApiUnshippedSrc)" />
     </ItemGroup>
@@ -187,6 +190,5 @@
     <PackageReference Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
   </ItemGroup>
 </Project>
-
 
 

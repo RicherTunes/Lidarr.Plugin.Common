@@ -95,7 +95,11 @@
     "creds",
     "prereqs",
     "pluginloader",
-    "parallelizable"
+    "parallelizable",
+    "DPAPI",
+    "dpapi",
+    "libsecret",
+    "dataprotection"
   ],
   "ignorePaths": [
     "**/bin",
