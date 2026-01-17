@@ -15,6 +15,21 @@
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
     <Version>1.5.0</Version>
+
+    <!-- NuGet package metadata -->
+    <PackageId>Lidarr.Plugin.Abstractions</PackageId>
+    <Title>Lidarr Plugin Abstractions</Title>
+    <Description>Core abstractions and interfaces for building Lidarr plugins. Provides the contract layer between plugins and the Lidarr host.</Description>
+    <Authors>RicherTunes</Authors>
+    <PackageTags>lidarr;plugin;abstractions;music;streaming</PackageTags>
+    <PackageProjectUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Copyright>Copyright (c) RicherTunes</Copyright>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
   <!-- Make PublicAPI baselines visible to analyzer tools (e.g., dotnet format) without relying on build targets -->
   <ItemGroup>
@@ -85,5 +100,10 @@
     <None Remove="PublicAPI.Unshipped.txt" />
     <AdditionalFiles Remove="PublicAPI.Shipped.txt" />
     <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
+  </ItemGroup>
+
+  <!-- Package README -->
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>
