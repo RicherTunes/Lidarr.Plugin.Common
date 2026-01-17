@@ -121,6 +121,28 @@ function Find-FirstSolutionPath {
   return $null
 }
 
+function Convert-ToContainerRelativePath {
+  param(
+    [Parameter(Mandatory = $true)][string]$repoPath,
+    [Parameter(Mandatory = $true)][string]$path
+  )
+
+  $repoFull = [System.IO.Path]::GetFullPath($repoPath).TrimEnd([System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)
+  $pathFull = [System.IO.Path]::GetFullPath($path)
+
+  $repoPrefix = $repoFull + [System.IO.Path]::DirectorySeparatorChar
+  if (-not $pathFull.StartsWith($repoPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "Cannot compute container-relative path. '$pathFull' is not under repo '$repoFull'."
+  }
+
+  $relative = [System.IO.Path]::GetRelativePath($repoFull, $pathFull)
+  if ($relative.StartsWith('..')) {
+    throw "Computed relative path escapes repo root: $relative"
+  }
+
+  return ($relative -replace '\\', '/')
+}
+
 function Get-RepoChecks {
   param(
     [Parameter(Mandatory = $true)][string]$repoName,
@@ -162,6 +184,7 @@ function Get-RepoChecks {
   if ($slnPath) {
     if ($mode -in @('quick', 'full')) {
       if ($docker) {
+        $slnRelative = Convert-ToContainerRelativePath -repoPath $repoPath -path $slnPath
         $nugetConfigPath = $null
         if ($repoName -eq 'applemusicarr') {
           $nugetConfigDir = Join-Path $logsDir 'nuget-configs'
@@ -179,15 +202,16 @@ function Get-RepoChecks {
         }
 
         $nugetPackagesPath = Join-Path $logsDir "nuget-$repoName"
-        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -dotnetArgs @('build', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo') -nugetConfigPath $nugetConfigPath -nugetPackagesPath $nugetPackagesPath))
+        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -dotnetArgs @('build', $slnRelative, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo') -nugetConfigPath $nugetConfigPath -nugetPackagesPath $nugetPackagesPath))
       } else {
         $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -fileName 'dotnet' -args @('build', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')))
       }
     }
     if ($mode -eq 'full') {
       if ($docker) {
+        $slnRelative = Convert-ToContainerRelativePath -repoPath $repoPath -path $slnPath
         $nugetPackagesPath = Join-Path $logsDir "nuget-$repoName"
-        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs @('test', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo') -nugetPackagesPath $nugetPackagesPath))
+        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs @('test', $slnRelative, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo') -nugetPackagesPath $nugetPackagesPath))
       } else {
         $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args @('test', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')))
       }

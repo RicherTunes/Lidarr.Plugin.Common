@@ -121,7 +121,23 @@ try {
     Write-Host "  [FAIL] Expected dotnet:build fileName=docker, got $($dockerBuild.fileName)" -ForegroundColor Red
     $failed++
   } else {
-    Write-Host "  [PASS] dotnet:build uses docker in plan" -ForegroundColor Green
+    $args = @($dockerBuild.args)
+    $buildIndex = [Array]::IndexOf($args, 'build')
+    if ($buildIndex -lt 0 -or $buildIndex -ge ($args.Length - 1)) {
+      Write-Host "  [FAIL] Could not locate 'build' arg in docker plan" -ForegroundColor Red
+      $failed++
+    } else {
+      $buildTarget = [string]$args[$buildIndex + 1]
+      if ($buildTarget -match '^[a-zA-Z]:') {
+        Write-Host "  [FAIL] Expected container-relative path, got Windows path: $buildTarget" -ForegroundColor Red
+        $failed++
+      } elseif ($buildTarget -match '\\\\') {
+        Write-Host "  [FAIL] Expected forward slashes, got backslashes: $buildTarget" -ForegroundColor Red
+        $failed++
+      } else {
+        Write-Host "  [PASS] dotnet:build uses container-relative path in plan ($buildTarget)" -ForegroundColor Green
+      }
+    }
   }
 }
 finally {
