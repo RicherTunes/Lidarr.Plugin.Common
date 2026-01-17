@@ -70,6 +70,44 @@ jobs:
           dotnet pack src/Abstractions/Lidarr.Plugin.Abstractions.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:UseLidarrTagLib=true
           dotnet pack src/Lidarr.Plugin.Common.csproj -c Release -o dist /p:ContinuousIntegrationBuild=true -p:UseLidarrTagLib=true
 
+      # ═══════════════════════════════════════════════════════════════════════════
+      # Canonical Abstractions DLL for plugin packaging (no NuGet key required)
+      # Plugins download this exact DLL to ensure byte-identical Abstractions
+      # ═══════════════════════════════════════════════════════════════════════════
+      - name: Prepare canonical Abstractions DLL
+        id: abstractions
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF#refs/tags/}"
+          VER="${TAG#v}"
+          SHA=$(git rev-parse --short=7 HEAD)
+
+          # Source paths (Release build output)
+          SRC_DLL="src/Abstractions/bin/Release/net8.0/Lidarr.Plugin.Abstractions.dll"
+          SRC_PDB="src/Abstractions/bin/Release/net8.0/Lidarr.Plugin.Abstractions.pdb"
+
+          # Versioned names for release assets
+          # Format: Lidarr.Plugin.Abstractions-{version}-{sha}.dll
+          DLL_NAME="Lidarr.Plugin.Abstractions-${VER}-${SHA}.dll"
+          PDB_NAME="Lidarr.Plugin.Abstractions-${VER}-${SHA}.pdb"
+
+          # Also provide stable names (latest for this version, no SHA suffix)
+          STABLE_DLL_NAME="Lidarr.Plugin.Abstractions.dll"
+          STABLE_PDB_NAME="Lidarr.Plugin.Abstractions.pdb"
+
+          cp "$SRC_DLL" "dist/$DLL_NAME"
+          cp "$SRC_PDB" "dist/$PDB_NAME"
+          cp "$SRC_DLL" "dist/$STABLE_DLL_NAME"
+          cp "$SRC_PDB" "dist/$STABLE_PDB_NAME"
+
+          echo "dll_name=$DLL_NAME" >> $GITHUB_OUTPUT
+          echo "pdb_name=$PDB_NAME" >> $GITHUB_OUTPUT
+          echo "version=$VER" >> $GITHUB_OUTPUT
+          echo "sha=$SHA" >> $GITHUB_OUTPUT
+
+          echo "✓ Prepared canonical Abstractions DLL: $DLL_NAME"
+
       - name: API compatibility (Abstractions vs previous)
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -104,7 +142,12 @@ jobs:
       - name: Generate SHA256 checksums
         run: |
           cd dist
+          # Checksums for NuGet packages
           for f in *.nupkg; do
+            sha256sum "$f" > "$f.sha256"
+          done
+          # Checksums for canonical Abstractions DLL (for plugin CI verification)
+          for f in Lidarr.Plugin.Abstractions*.dll; do
             sha256sum "$f" > "$f.sha256"
           done
 
@@ -150,6 +193,16 @@ jobs:
             dotnet add package Lidarr.Plugin.Abstractions --version ${{ github.ref_name }}
             ```
 
+            ### Plugin Packaging (Canonical Abstractions DLL)
+            For byte-identical plugin packaging without NuGet:
+            ```bash
+            # Download canonical Abstractions DLL
+            gh release download ${{ github.ref_name }} -p "Lidarr.Plugin.Abstractions.dll" -D output/
+            gh release download ${{ github.ref_name }} -p "Lidarr.Plugin.Abstractions.dll.sha256" -D output/
+            # Verify SHA256
+            sha256sum -c output/Lidarr.Plugin.Abstractions.dll.sha256
+            ```
+
             ### Security
             - SHA256 checksums provided for integrity verification
             - Cosign signatures for artifact authenticity
@@ -159,6 +212,8 @@ jobs:
             See [commit history](https://github.com/${{ github.repository }}/commits/${{ github.ref_name }}) for detailed changes.
           files: |
             dist/*.nupkg
+            dist/*.dll
+            dist/*.pdb
             dist/*.sha256
             dist/*.sig
             dist/sbom.spdx.json
