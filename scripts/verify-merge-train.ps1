@@ -115,15 +115,15 @@ function Get-RepoChecks {
     $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'scripts:entrypoints-validate' -fileName 'pwsh' -args @('-NoProfile', '-File', $entrypointsValidate, '-Configuration', 'Release', '-SkipBuild')))
   }
 
-  $slnPath = Find-FirstSolutionPath -repoPath $repoPath
-  if ($slnPath) {
-    if ($mode -in @('quick', 'full')) {
-      $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -fileName 'dotnet' -args @('build', $slnPath, '-c', 'Release', '--nologo')))
-    }
-    if ($mode -eq 'full') {
+    $slnPath = Find-FirstSolutionPath -repoPath $repoPath
+    if ($slnPath) {
+      if ($mode -in @('quick', 'full')) {
+      $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -fileName 'dotnet' -args @('build', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')))
+      }
+      if ($mode -eq 'full') {
       $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args @('test', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')))
+      }
     }
-  }
 
   return $checks
 }
