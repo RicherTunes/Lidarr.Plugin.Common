@@ -9,6 +9,12 @@ param(
 
     [string]$AbstractionsPackage = 'Lidarr.Plugin.Abstractions',
 
+    [switch]$ResolveEntryPoints,
+
+    # Required when -ResolveEntryPoints is set unless the assembly can be inferred.
+    # Provide the built plugin assembly path to validate that manifest entry point types exist.
+    [string]$EntryAssemblyPath,
+
     [switch]$Strict,
 
     [switch]$JsonOutput
@@ -200,6 +206,61 @@ if ($manifest.targets) {
     }
     if ($missing.Count -gt 0) {
         $errorList += "Project is missing TargetFramework(s): $($missing -join ', ') referenced in manifest.targets."
+    }
+}
+
+if ($ResolveEntryPoints) {
+    $entryPoints = @()
+    if ($null -ne $manifest.entryPoints) {
+        # Normalize to array of objects
+        $entryPoints = @($manifest.entryPoints)
+    }
+
+    if ($entryPoints.Count -eq 0) {
+        $errorList += "MAN003: -ResolveEntryPoints specified but manifest has no 'entryPoints'."
+    } else {
+        $resolvedAssemblyPath = $EntryAssemblyPath
+        if (-not $resolvedAssemblyPath) {
+            $candidateAssemblyName = $null
+            if ($manifest.main) { $candidateAssemblyName = $manifest.main }
+            elseif ($manifest.entryPoint) { $candidateAssemblyName = $manifest.entryPoint }
+            elseif ($manifest.assemblies -and $manifest.assemblies.Count -gt 0) { $candidateAssemblyName = $manifest.assemblies[0] }
+
+            if ($candidateAssemblyName) {
+                $manifestDir = Split-Path -Parent (Resolve-Path -LiteralPath $ManifestPath)
+                $candidate = Join-Path $manifestDir $candidateAssemblyName
+                if (Test-Path -LiteralPath $candidate) {
+                    $resolvedAssemblyPath = $candidate
+                }
+            }
+        }
+
+        if (-not $resolvedAssemblyPath) {
+            $errorList += "MAN003: -ResolveEntryPoints requires -EntryAssemblyPath (or a resolvable 'main'/'entryPoint'/'assemblies[0]' next to the manifest)."
+        } elseif (-not (Test-Path -LiteralPath $resolvedAssemblyPath)) {
+            $errorList += "MAN003: Entry assembly '$resolvedAssemblyPath' not found."
+        } else {
+            try {
+                $asm = [System.Reflection.Assembly]::LoadFrom((Resolve-Path -LiteralPath $resolvedAssemblyPath))
+
+                foreach ($ep in $entryPoints) {
+                    $impl = $null
+                    try { $impl = $ep.implementation } catch { }
+
+                    if ([string]::IsNullOrWhiteSpace($impl)) {
+                        $errorList += "MAN002: entryPoints item missing 'implementation'."
+                        continue
+                    }
+
+                    $t = $asm.GetType($impl, $false, $false)
+                    if (-not $t) {
+                        $errorList += "MAN002: EntryPoint implementation '$impl' not found in '$([System.IO.Path]::GetFileName($resolvedAssemblyPath))'."
+                    }
+                }
+            } catch {
+                $errorList += "MAN003: Failed to load entry assembly '$resolvedAssemblyPath': $($_.Exception.Message)"
+            }
+        }
     }
 }
 
