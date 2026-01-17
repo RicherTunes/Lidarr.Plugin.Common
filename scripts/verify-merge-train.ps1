@@ -37,7 +37,8 @@ param(
   [string]$Mode = 'quick',
   [string[]]$Repos = @('lidarr.plugin.common', 'qobuzarr', 'tidalarr', 'brainarr', 'applemusicarr'),
   [string]$OutDir = 'artifacts/merge-train',
-  [switch]$FailFast
+  [switch]$FailFast,
+  [switch]$Docker
 )
 
 Set-StrictMode -Version Latest
@@ -70,6 +71,46 @@ function New-CheckPlan {
   }
 }
 
+function Convert-ToDockerHostPath {
+  param([Parameter(Mandatory = $true)][string]$path)
+  return ($path -replace '\\', '/')
+}
+
+function New-DockerDotNetPlan {
+  param(
+    [Parameter(Mandatory = $true)][string]$repoName,
+    [Parameter(Mandatory = $true)][string]$repoPath,
+    [Parameter(Mandatory = $true)][string]$name,
+    [Parameter(Mandatory = $true)][string[]]$dotnetArgs,
+    [string]$nugetConfigPath,
+    [string]$nugetPackagesPath
+  )
+
+  $repoPathFull = [System.IO.Path]::GetFullPath($repoPath)
+  $mountRepo = (Convert-ToDockerHostPath $repoPathFull) + ':/repo'
+
+  $args = New-Object System.Collections.Generic.List[string]
+  foreach ($value in @('run', '--rm', '-w', '/repo', '-v', $mountRepo)) { $args.Add([string]$value) }
+
+  if ($nugetPackagesPath) {
+    $nugetPackagesFull = [System.IO.Path]::GetFullPath($nugetPackagesPath)
+    $mountPackages = (Convert-ToDockerHostPath $nugetPackagesFull) + ':/nuget'
+    foreach ($value in @('-v', $mountPackages, '-e', 'NUGET_PACKAGES=/nuget')) { $args.Add([string]$value) }
+  }
+
+  if ($nugetConfigPath) {
+    $nugetConfigFull = [System.IO.Path]::GetFullPath($nugetConfigPath)
+    $mountConfig = (Convert-ToDockerHostPath $nugetConfigFull) + ':/root/.nuget/NuGet/NuGet.Config:ro'
+    foreach ($value in @('-v', $mountConfig)) { $args.Add([string]$value) }
+  }
+
+  $args.Add('mcr.microsoft.com/dotnet/sdk:8.0')
+  $args.Add('dotnet')
+  foreach ($value in $dotnetArgs) { $args.Add([string]$value) }
+
+  return (New-CheckPlan -repoName $repoName -repoPath $repoPath -name $name -fileName 'docker' -args $args.ToArray())
+}
+
 function Find-FirstSolutionPath {
   param([Parameter(Mandatory = $true)][string]$repoPath)
 
@@ -84,7 +125,9 @@ function Get-RepoChecks {
   param(
     [Parameter(Mandatory = $true)][string]$repoName,
     [Parameter(Mandatory = $true)][string]$repoPath,
-    [Parameter(Mandatory = $true)][string]$mode
+    [Parameter(Mandatory = $true)][string]$mode,
+    [Parameter(Mandatory = $true)][bool]$docker,
+    [Parameter(Mandatory = $true)][string]$logsDir
   )
 
   $checks = New-Object System.Collections.Generic.List[object]
@@ -115,15 +158,41 @@ function Get-RepoChecks {
     $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'scripts:entrypoints-validate' -fileName 'pwsh' -args @('-NoProfile', '-File', $entrypointsValidate, '-Configuration', 'Release', '-SkipBuild')))
   }
 
-    $slnPath = Find-FirstSolutionPath -repoPath $repoPath
-    if ($slnPath) {
-      if ($mode -in @('quick', 'full')) {
-      $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -fileName 'dotnet' -args @('build', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')))
-      }
-      if ($mode -eq 'full') {
-      $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args @('test', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')))
+  $slnPath = Find-FirstSolutionPath -repoPath $repoPath
+  if ($slnPath) {
+    if ($mode -in @('quick', 'full')) {
+      if ($docker) {
+        $nugetConfigPath = $null
+        if ($repoName -eq 'applemusicarr') {
+          $nugetConfigDir = Join-Path $logsDir 'nuget-configs'
+          New-Item -ItemType Directory -Force -Path $nugetConfigDir | Out-Null
+          $nugetConfigPath = Join-Path $nugetConfigDir 'applemusicarr.NuGet.Config'
+          @'
+<?xml version="1.0" encoding="utf-8"?>
+<configuration>
+  <packageSources>
+    <clear />
+    <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+  </packageSources>
+</configuration>
+'@ | Out-File -FilePath $nugetConfigPath -Encoding UTF8
+        }
+
+        $nugetPackagesPath = Join-Path $logsDir "nuget-$repoName"
+        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -dotnetArgs @('build', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo') -nugetConfigPath $nugetConfigPath -nugetPackagesPath $nugetPackagesPath))
+      } else {
+        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -fileName 'dotnet' -args @('build', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')))
       }
     }
+    if ($mode -eq 'full') {
+      if ($docker) {
+        $nugetPackagesPath = Join-Path $logsDir "nuget-$repoName"
+        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs @('test', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo') -nugetPackagesPath $nugetPackagesPath))
+      } else {
+        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args @('test', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')))
+      }
+    }
+  }
 
   return $checks
 }
@@ -195,6 +264,50 @@ $repoResults = @()
 $checkPlans = @()
 $modeForChecks = if ($Mode -eq 'plan') { 'quick' } else { $Mode }
 
+if ($Docker -and $Mode -ne 'plan') {
+  $dockerOk = $false
+  try {
+    $null = & docker version 2>$null
+    if ($LASTEXITCODE -eq 0) { $dockerOk = $true }
+  } catch { }
+
+  if (-not $dockerOk) {
+    $result = [pscustomobject]@{
+      repoName = 'global'
+      name = 'docker:available'
+      outcome = 'failed'
+      durationMs = 0
+      exitCode = 1
+      stdoutPath = $null
+      stderrPath = $null
+      message = 'Docker is required but not available. Install Docker Desktop / ensure the daemon is running, or rerun without -Docker.'
+    }
+
+    $report = [pscustomobject]@{
+      schemaVersion = '1.0'
+      runId = $runId
+      startedAt = $startedAt
+      completedAt = [DateTimeOffset]::UtcNow.ToString('o')
+      mode = $Mode
+      docker = $true
+      workspaceRoot = $workspace
+      reportPath = $reportPath
+      logsDir = $logsDir
+      repos = $repoResults
+      results = @($result)
+      summary = [pscustomobject]@{
+        passed = 0
+        failed = 1
+        skipped = 0
+      }
+    }
+
+    $report | ConvertTo-Json -Depth 8 | Out-File -FilePath $reportPath -Encoding UTF8
+    Write-Error $result.message
+    exit 1
+  }
+}
+
 foreach ($repoName in $Repos) {
   $repoPath = Join-Path $workspace $repoName
   if (-not (Test-Path -LiteralPath $repoPath)) {
@@ -208,7 +321,7 @@ foreach ($repoName in $Repos) {
   }
 
   $resolvedRepoPath = (Resolve-Path -LiteralPath $repoPath).Path
-  $checks = Get-RepoChecks -repoName $repoName -repoPath $resolvedRepoPath -mode $modeForChecks
+  $checks = Get-RepoChecks -repoName $repoName -repoPath $resolvedRepoPath -mode $modeForChecks -docker ([bool]$Docker) -logsDir $logsDir
   $checkPlans += $checks
 
   $repoResults += [pscustomobject]@{
@@ -226,6 +339,7 @@ if ($Mode -eq 'plan') {
     startedAt = $startedAt
     mode = $Mode
     plannedMode = $modeForChecks
+    docker = [bool]$Docker
     workspaceRoot = $workspace
     reportPath = $reportPath
     repos = $repoResults

@@ -55,7 +55,7 @@ try {
     Write-Host "  [PASS] Exit code 0" -ForegroundColor Green
   }
 
-  $reportFile = Get-ChildItem -Path $outDir -Filter 'merge-train-*.json' -File | Sort-Object FullName | Select-Object -Last 1
+  $reportFile = Get-ChildItem -Path $outDir -Filter 'merge-train-*.json' -File | Sort-Object LastWriteTime | Select-Object -Last 1
   if (-not $reportFile) {
     Write-Host "  [FAIL] No report file found in $outDir" -ForegroundColor Red
     $failed++
@@ -95,6 +95,33 @@ try {
     $failed++
   } else {
     Write-Host "  [PASS] qobuzarr has no dotnet:build plan without .sln" -ForegroundColor Green
+  }
+
+  Write-Host "`n[TEST] docker plan uses docker for dotnet:build..." -ForegroundColor Cyan
+  & $scriptUnderTest -WorkspaceRoot $workspaceRoot -Mode plan -Docker -Repos $repos -OutDir $outDir | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    Write-Host "  [FAIL] Expected exit=0, got exit=$LASTEXITCODE" -ForegroundColor Red
+    $failed++
+  }
+
+  $dockerReportFile = Get-ChildItem -Path $outDir -Filter 'merge-train-*.json' -File | Sort-Object LastWriteTime | Select-Object -Last 1
+  $dockerReport = Get-Content -Raw -LiteralPath $dockerReportFile.FullName | ConvertFrom-Json
+  if (-not $dockerReport.docker) {
+    Write-Host "  [FAIL] Expected docker=true in report" -ForegroundColor Red
+    $failed++
+  } else {
+    Write-Host "  [PASS] docker=true in report" -ForegroundColor Green
+  }
+
+  $dockerBuild = $dockerReport.plannedChecks | Where-Object { $_.repoName -eq 'lidarr.plugin.common' -and $_.name -eq 'dotnet:build' } | Select-Object -First 1
+  if (-not $dockerBuild) {
+    Write-Host "  [FAIL] Expected dotnet:build planned (docker mode)" -ForegroundColor Red
+    $failed++
+  } elseif ($dockerBuild.fileName -ne 'docker') {
+    Write-Host "  [FAIL] Expected dotnet:build fileName=docker, got $($dockerBuild.fileName)" -ForegroundColor Red
+    $failed++
+  } else {
+    Write-Host "  [PASS] dotnet:build uses docker in plan" -ForegroundColor Green
   }
 }
 finally {
