@@ -38,7 +38,8 @@ param(
   [string[]]$Repos = @('lidarr.plugin.common', 'qobuzarr', 'tidalarr', 'brainarr', 'applemusicarr'),
   [string]$OutDir = 'artifacts/merge-train',
   [switch]$FailFast,
-  [switch]$Docker
+  [switch]$Docker,
+  [switch]$IgnoreWarningsAsErrors
 )
 
 Set-StrictMode -Version Latest
@@ -83,6 +84,7 @@ function New-DockerDotNetPlan {
     [Parameter(Mandatory = $true)][string]$name,
     [Parameter(Mandatory = $true)][string[]]$dotnetArgs,
     [string]$nugetConfigPath,
+    [string]$nugetConfigContainerPath,
     [string]$nugetPackagesPath
   )
 
@@ -100,7 +102,8 @@ function New-DockerDotNetPlan {
 
   if ($nugetConfigPath) {
     $nugetConfigFull = [System.IO.Path]::GetFullPath($nugetConfigPath)
-    $mountConfig = (Convert-ToDockerHostPath $nugetConfigFull) + ':/root/.nuget/NuGet/NuGet.Config:ro'
+    $containerPath = if ([string]::IsNullOrWhiteSpace($nugetConfigContainerPath)) { '/repo/NuGet.config' } else { $nugetConfigContainerPath }
+    $mountConfig = (Convert-ToDockerHostPath $nugetConfigFull) + ':' + $containerPath + ':ro'
     foreach ($value in @('-v', $mountConfig)) { $args.Add([string]$value) }
   }
 
@@ -141,6 +144,26 @@ function Convert-ToContainerRelativePath {
   }
 
   return ($relative -replace '\\', '/')
+}
+
+function Get-DotNetArgs {
+  param(
+    [Parameter(Mandatory = $true)][string]$command,
+    [Parameter(Mandatory = $true)][string]$target,
+    [Parameter(Mandatory = $true)][bool]$ignoreWarningsAsErrors
+  )
+
+  $args = New-Object System.Collections.Generic.List[string]
+  $args.Add($command)
+  $args.Add($target)
+  foreach ($value in @('-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')) { $args.Add([string]$value) }
+
+  if ($ignoreWarningsAsErrors) {
+    # Escape hatch for local merge-train runs; do not use as a substitute for fixing warnings.
+    $args.Add('-p:TreatWarningsAsErrors=false')
+  }
+
+  return $args.ToArray()
 }
 
 function Get-RepoChecks {
@@ -186,10 +209,14 @@ function Get-RepoChecks {
       if ($docker) {
         $slnRelative = Convert-ToContainerRelativePath -repoPath $repoPath -path $slnPath
         $nugetConfigPath = $null
+        $nugetConfigContainerPath = $null
         if ($repoName -eq 'applemusicarr') {
           $nugetConfigDir = Join-Path $logsDir 'nuget-configs'
           New-Item -ItemType Directory -Force -Path $nugetConfigDir | Out-Null
           $nugetConfigPath = Join-Path $nugetConfigDir 'applemusicarr.NuGet.Config'
+          # Override the repo's NuGet.config (repo config takes precedence over user config).
+          # If the repo doesn't have one, still mount at a conventional path to keep behavior stable.
+          $nugetConfigContainerPath = if (Test-Path -LiteralPath (Join-Path $repoPath 'NuGet.config')) { '/repo/NuGet.config' } else { '/repo/NuGet.Config' }
           @'
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
@@ -202,18 +229,18 @@ function Get-RepoChecks {
         }
 
         $nugetPackagesPath = Join-Path $logsDir "nuget-$repoName"
-        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -dotnetArgs @('build', $slnRelative, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo') -nugetConfigPath $nugetConfigPath -nugetPackagesPath $nugetPackagesPath))
+        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -dotnetArgs (Get-DotNetArgs -command 'build' -target $slnRelative -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors)) -nugetConfigPath $nugetConfigPath -nugetConfigContainerPath $nugetConfigContainerPath -nugetPackagesPath $nugetPackagesPath))
       } else {
-        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -fileName 'dotnet' -args @('build', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')))
+        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -fileName 'dotnet' -args (Get-DotNetArgs -command 'build' -target $slnPath -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors))))
       }
     }
     if ($mode -eq 'full') {
       if ($docker) {
         $slnRelative = Convert-ToContainerRelativePath -repoPath $repoPath -path $slnPath
         $nugetPackagesPath = Join-Path $logsDir "nuget-$repoName"
-        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs @('test', $slnRelative, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo') -nugetPackagesPath $nugetPackagesPath))
+        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs (Get-DotNetArgs -command 'test' -target $slnRelative -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors)) -nugetPackagesPath $nugetPackagesPath))
       } else {
-        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args @('test', $slnPath, '-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')))
+        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args (Get-DotNetArgs -command 'test' -target $slnPath -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors))))
       }
     }
   }
