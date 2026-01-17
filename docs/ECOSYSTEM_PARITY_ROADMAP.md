@@ -26,6 +26,111 @@ This document tracks progress toward full structural and behavioral parity acros
 
 ---
 
+## Merge Playbook (When Billing Unblocks)
+
+This section provides exact steps to land the current PR stack safely.
+
+### Phase 1: Common PRs (merge in order)
+
+```bash
+# 1. ManifestCheck -ResolveEntryPoints (enables flag AppleMusicarr uses)
+gh pr merge 290 --squash --repo RicherTunes/Lidarr.Plugin.Common
+
+# 2. B11 filename/path contract tests (locks format)
+gh pr merge 289 --squash --repo RicherTunes/Lidarr.Plugin.Common
+
+# 3. Ecosystem roadmap docs (no code)
+gh pr merge 288 --squash --repo RicherTunes/Lidarr.Plugin.Common
+```
+
+### Phase 2: Tag Common Release
+
+**Wait** until #290 and #289 are merged, then verify the release workflow will attach the canonical Abstractions DLL before tagging.
+
+```bash
+cd lidarr.plugin.common
+git checkout main && git pull
+# Verify src/Abstractions builds and ILRepack produces the expected DLL
+dotnet build src/Abstractions -c Release
+# Then tag
+git tag v1.5.1 && git push origin v1.5.1
+```
+
+### Phase 3: Bump Submodules in Plugins
+
+**Critical**: AppleMusicarr calls `-ResolveEntryPoints`, so its submodule **must** point to a commit that includes #290.
+
+```bash
+# Tidalarr
+cd tidalarr
+git checkout feat/tidalarr-ws3-cleanup
+cd ext/Lidarr.Plugin.Common && git fetch origin && git checkout v1.5.1 && cd ../..
+git add ext/Lidarr.Plugin.Common && git commit -m "chore: bump Common to v1.5.1"
+git push
+
+# Qobuzarr
+cd qobuzarr
+git checkout feat/canonical-abstractions
+cd ext/Lidarr.Plugin.Common && git fetch origin && git checkout v1.5.1 && cd ../..
+git add ext/Lidarr.Plugin.Common && git commit -m "chore: bump Common to v1.5.1"
+git push
+
+# Brainarr
+cd brainarr
+git checkout feat/canonical-abstractions
+cd ext/lidarr.plugin.common && git fetch origin && git checkout v1.5.1 && cd ../..
+git add ext/lidarr.plugin.common && git commit -m "chore: bump Common to v1.5.1"
+git push
+
+# AppleMusicarr (MUST be after #290 merge)
+cd applemusicarr
+git checkout feat/canonical-abstractions
+cd ext/lidarr.plugin.common && git fetch origin && git checkout v1.5.1 && cd ../..
+git add ext/lidarr.plugin.common && git commit -m "chore: bump Common to v1.5.1"
+git push
+```
+
+### Phase 4: Merge Plugin PRs
+
+```bash
+# Tidalarr (WS3.1 cleanup first, then canonical abstractions)
+gh pr merge 134 --squash --repo RicherTunes/Tidalarr
+gh pr merge 133 --squash --repo RicherTunes/Tidalarr
+
+# Qobuzarr
+gh pr merge 157 --squash --repo RicherTunes/Qobuzarr
+
+# Brainarr
+gh pr merge 377 --squash --repo RicherTunes/Brainarr
+
+# AppleMusicarr
+gh pr merge 12 --squash --repo RicherTunes/AppleMusicarr
+```
+
+### Separate Lanes (Do Not Block Merge Train)
+
+| Lane | Status | Notes |
+|------|--------|-------|
+| **CROSS_REPO_PAT** | Separate | Required for multi-plugin smoke only; doesn't block packaging PRs |
+| **Version drift** | Separate | Brainarr (1.3.2 vs 1.3.1), AppleMusicarr (0.3.0-beta.1 vs beta.2) - fix in dedicated PRs to avoid conflicts |
+
+### Local Verification (When CI Blocked)
+
+If billing blocks CI, run packaging-closure locally using Docker:
+
+```bash
+# Per-plugin verification
+cd <plugin-repo>
+./scripts/packaging-closure.ps1  # or equivalent
+
+# Or use the Common tools directly
+pwsh -Command "& ./ext/Lidarr.Plugin.Common/tools/ManifestCheck.ps1 \
+  -ProjectPath ./src/<Plugin>/<Plugin>.csproj \
+  -ManifestPath ./plugin.json"
+```
+
+---
+
 ## Definition of Done
 
 Full ecosystem parity is achieved when:
