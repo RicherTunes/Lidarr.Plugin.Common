@@ -1,18 +1,65 @@
 # Ecosystem Parity Roadmap
 
-This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr).
+This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr, AppleMusicarr), plus `lidarr.plugin.common` as the shared platform.
+
+## Current Blockers (Operational)
+
+### GitHub Actions Billing Lockout (All Plugin Repos)
+Workflows are currently blocked with:
+> “The job was not started because recent account payments have failed or your spending limit needs to be increased.”
+
+Until billing is resolved, PRs that rely on GitHub Actions cannot be validated/merged even if code is ready.
+
+### Multi-Plugin Smoke Test Secret (Manual)
+The reusable multi-plugin smoke workflow requires `CROSS_REPO_PAT` to exist as a repo secret in each caller repo (Qobuzarr/Tidalarr/Brainarr). Without it, the smoke job fails even when code is correct.
 
 ## Current Status
 
-| Dimension | Tidalarr | Qobuzarr | Brainarr | Common |
-|-----------|----------|----------|----------|--------|
-| **Packaging** | ✅ | ✅ | ✅ | Policy complete |
-| **Naming/Path** | ✅ | ✅ | N/A | FileSystemUtilities |
-| **Concurrency** | ✅ | ✅ | N/A | BaseDownloadOrchestrator |
-| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | Single-authority pattern |
-| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | JSON schema (PR #187) |
+| Dimension | Tidalarr | Qobuzarr | Brainarr | AppleMusicarr | Common |
+|-----------|----------|----------|----------|---------------|--------|
+| **Packaging** | ⚠️ (PRs pending; CI blocked) | ⚠️ (PRs pending; CI blocked) | ⚠️ (PRs pending; CI blocked) | ⚠️ (PRs pending; CI blocked) | ✅ Policy complete |
+| **Type Identity (Abstractions)** | ⚠️ Canonical DLL PR pending | ⚠️ Canonical DLL PR pending | ⚠️ Canonical DLL PR pending | ⚠️ Canonical DLL PR pending | ✅ Canonical Abstractions on Releases (`v1.5.0`) |
+| **Naming/Path** | ✅ | ✅ | N/A | N/A | FileSystemUtilities |
+| **Concurrency** | ✅ | ✅ | N/A | N/A | BaseDownloadOrchestrator |
+| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | N/A | Single-authority pattern |
+| **Secret Protection** | ⚠️ Pending consumer deletions | ⚠️ Pending audit | ⚠️ Pending audit | ⚠️ PR pending | ✅ `ISecretProtector` facade |
+| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | ⚠️ (pending CI + run) | ✅ JSON schema + contracts |
 
 **Overall Ecosystem Parity: ~97%**
+
+## Current Wave Plan (2026-01)
+
+### Unblockers
+- Resolve GitHub billing/spending-limit issue so Actions runs again.
+- Add `CROSS_REPO_PAT` secret to each caller repo so reusable multi-plugin smoke tests can run.
+
+### Ready-But-Blocked PRs (Expected to Go Green Once CI Runs)
+- Canonical Abstractions consumption (all plugins): download + SHA256 verify + packaging-closure guard.
+- AppleMusicarr crypto deletion/migration to Common secret protection.
+- Tidalarr hosting parity cleanup (conservative; preserves CLI diagnostics contract).
+
+### Parallelizable Work (No CI Required)
+- Strengthen filename/path contract tests (multi-disc, Unicode normalization, extension normalization) as hermetic unit tests.
+- Expand `ManifestCheck -ResolveEntryPoints` adoption across all plugin packaging-closure workflows (catches “type doesn’t exist” regressions).
+- Add “no drift” tripwires (rg-based) for known deleted duplicates (only when there is a concrete deletion target).
+
+## Extended Backlog (Parallelizable Work)
+This is intentionally “weeks of work” for multiple agents. Items are PR-sized and should follow the Thin Common rule (additions must delete duplication within ≤2 PRs).
+
+| ID | Repo(s) | Task | Prereqs | Done Criteria |
+|----|---------|------|---------|---------------|
+| B1 | Ecosystem | Resolve GitHub Actions billing block | Repo owner access | Workflows start across plugin repos |
+| B2 | Qobuzarr/Tidalarr/Brainarr | Add `CROSS_REPO_PAT` secret | Repo admin | Multi-plugin smoke workflow runs |
+| B3 | All plugins | Canonical Abstractions consumption PRs | B1 + Common `v1.5.0` assets | Packaging closure verifies SHA256 |
+| B4 | AppleMusicarr | Fix manifest/entrypoint reality (`-ResolveEntryPoints`) | B1 | Packaging closure blocks “type missing” |
+| B5 | AppleMusicarr | Delete custom crypto (use Common secret protection) | B1 | No plugin-local AES/DPAPI key logic |
+| B6 | Tidalarr | Hosting parity cleanup (preserve CLI diagnostics contract) | B1 | Dead code deleted + characterization tests |
+| B7 | Tidalarr | Consolidate filename/path sanitization via Common | None | Duplicate sanitizer calls removed |
+| B8 | Qobuzarr | Delete local preview/sample detection clone (if any remains) | None | Only Common `PreviewDetectionUtility` |
+| B9 | Common + plugins | Harden HTTP log redaction as safe-by-default | None | No raw query params in logged URLs |
+| B10 | Common + plugins | Expand parity-lint with a concrete deletion target | None | New rule lands + duplicate removed |
+| B11 | Ecosystem | Add hermetic filename contract tests (multi-disc, Unicode) | None | Golden/parameterized tests in Common |
+| B12 | Ecosystem | Add packaging-closure entrypoint check everywhere | None | Every plugin CI runs `-ResolveEntryPoints` |
 
 ---
 
@@ -93,6 +140,17 @@ signatures against the host.
 - [x] Qobuzarr: Uses ext-common-sha.txt
 - [x] Brainarr: Uses ext-common-sha.txt (fixed format)
 
+### 1.4 Canonical Abstractions Distribution (Option B: GitHub Releases)
+**Status**: In Progress (blocked by GitHub billing)
+
+Goal: eliminate “byte-identical source, different binary” Abstractions drift without NuGet by distributing a canonical `Lidarr.Plugin.Abstractions.dll` from `lidarr.plugin.common` GitHub Releases.
+
+- [x] **Common**: Release `v1.5.0` ships canonical Abstractions + `.sha256`
+- [ ] **Tidalarr**: download + verify canonical Abstractions in packaging closure (PR pending)
+- [ ] **Qobuzarr**: download + verify canonical Abstractions in packaging closure (PR pending)
+- [ ] **Brainarr**: download + verify canonical Abstractions in packaging closure (PR pending)
+- [ ] **AppleMusicarr**: download + verify canonical Abstractions in packaging closure (PR pending)
+
 ---
 
 ## Phase 2: Reduce Code Drift (Tech Debt)
@@ -128,6 +186,13 @@ Current: Fixed `Task.Delay(50)` per chunk (line 49)
 Options:
 1. Set delay to 0 and rely on rate-limit handlers
 2. Make configurable via advanced setting
+
+### 2.5 Brainarr Resilience Consolidation
+**Status**: Complete
+
+- [x] Brainarr circuit breaker behavior locked with characterization tests
+- [x] Brainarr uses Common `AdvancedCircuitBreaker` via adapter
+- [x] Deleted legacy Brainarr breaker implementation
 
 ---
 
@@ -290,7 +355,7 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 
 | Date | Change |
 |------|--------|
-| 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary (pending merge) |
+| 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary (merged) |
 | 2025-12-31 | Qobuzarr PR4: Dead code deletion + 8 auth characterization tests (incl. DI same-instance) |
 | 2025-12-31 | Tidalarr PR3: TidalOAuthService fallback → FailOnIOTokenStore (no silent temp writes) |
 | 2025-12-31 | Tidalarr PR2: Auth lifecycle unification - single token authority, scoped IStreamingTokenProvider |
@@ -308,3 +373,5 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 | 2025-12-27 | Tidalarr packaging baseline updated to 5-DLL contract |
 | 2025-12-27 | Qobuzarr TrackFileNameBuilder delegated to Common |
 | 2025-12-27 | Initial roadmap created |
+| 2026-01-17 | Canonical Abstractions distribution: Common `v1.5.0` release ships `Lidarr.Plugin.Abstractions.dll` + SHA256 |
+| 2026-01-17 | Operational blocker: GitHub Actions billing/spending limit prevents workflow execution in plugin repos |
