@@ -1,2 +1,14 @@
 #nullable enable
 
+M:Lidarr.Plugin.Common.Services.Resilience.CircuitBreaker.#ctor(System.String,Lidarr.Plugin.Common.Services.Resilience.CircuitBreakerOptions,Microsoft.Extensions.Logging.ILogger,System.TimeProvider)
+T:Lidarr.Plugin.Common.Interfaces.IStringProtector
+M:Lidarr.Plugin.Common.Interfaces.IStringProtector.IsProtected(System.String)~System.Boolean
+M:Lidarr.Plugin.Common.Interfaces.IStringProtector.Protect(System.String)~System.String
+M:Lidarr.Plugin.Common.Interfaces.IStringProtector.TryUnprotect(System.String,System.String@)~System.Boolean
+M:Lidarr.Plugin.Common.Interfaces.IStringProtector.Unprotect(System.String)~System.String
+T:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector
+M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.#ctor(Lidarr.Plugin.Common.Interfaces.ITokenProtector)
+M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.IsProtected(System.String)~System.Boolean
+M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.Protect(System.String)~System.String
+M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.TryUnprotect(System.String,System.String@)~System.Boolean
+M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.Unprotect(System.String)~System.String

@@ -1,9 +1,11 @@
 using System;
 using System.Security.Cryptography;
+using System.Runtime.Versioning;
 using Lidarr.Plugin.Common.Interfaces;
 
 namespace Lidarr.Plugin.Common.Security.TokenProtection
 {
+    [SupportedOSPlatform("windows")]
     internal sealed class DpapiTokenProtector : ITokenProtector
     {
         private readonly DataProtectionScope _scope;
@@ -32,4 +34,3 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
         }
     }
 }
-
