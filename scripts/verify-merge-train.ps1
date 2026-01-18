@@ -241,6 +241,7 @@ function Get-RepoChecks {
   <packageSources>
     <clear />
     <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
+    <add key="lidarr-taglib" value="https://pkgs.dev.azure.com/Lidarr/Lidarr/_packaging/Taglib/nuget/v3/index.json" />
   </packageSources>
 </configuration>
 '@ | Out-File -FilePath $nugetConfigPath -Encoding UTF8
