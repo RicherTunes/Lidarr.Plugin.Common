@@ -28,6 +28,10 @@
 
 .PARAMETER FailFast
   Stop at the first failed check.
+
+.PARAMETER SkipIntegration
+  Skip integration tests (tests with 'Integration', 'Live', or 'EndToEnd' in their name).
+  Useful for Docker mode where secrets/live services are unavailable.
 #>
 
 [CmdletBinding()]
@@ -39,7 +43,8 @@ param(
   [string]$OutDir = 'artifacts/merge-train',
   [switch]$FailFast,
   [switch]$Docker,
-  [switch]$IgnoreWarningsAsErrors
+  [switch]$IgnoreWarningsAsErrors,
+  [switch]$SkipIntegration
 )
 
 Set-StrictMode -Version Latest
@@ -152,7 +157,8 @@ function Get-DotNetArgs {
     [Parameter(Mandatory = $true)][string]$target,
     [Parameter(Mandatory = $true)][bool]$ignoreWarningsAsErrors,
     [Parameter(Mandatory = $true)][bool]$noRestore,
-    [Parameter(Mandatory = $true)][bool]$noBuild
+    [Parameter(Mandatory = $true)][bool]$noBuild,
+    [Parameter(Mandatory = $false)][bool]$skipIntegration = $false
   )
 
   $args = New-Object System.Collections.Generic.List[string]
@@ -166,6 +172,13 @@ function Get-DotNetArgs {
   if ($ignoreWarningsAsErrors) {
     # Escape hatch for local merge-train runs; do not use as a substitute for fixing warnings.
     $args.Add('-p:TreatWarningsAsErrors=false')
+  }
+
+  if ($skipIntegration -and $command -eq 'test') {
+    # Exclude integration tests when running without secrets/live services.
+    # Matches: *.Integration.*, *.IntegrationTests.*, *Live*, *EndToEnd*
+    $args.Add('--filter')
+    $args.Add('FullyQualifiedName!~Integration&FullyQualifiedName!~Live&FullyQualifiedName!~EndToEnd')
   }
 
   return $args.ToArray()
@@ -190,7 +203,8 @@ function Get-RepoChecks {
     [Parameter(Mandatory = $true)][string]$repoPath,
     [Parameter(Mandatory = $true)][string]$mode,
     [Parameter(Mandatory = $true)][bool]$docker,
-    [Parameter(Mandatory = $true)][string]$logsDir
+    [Parameter(Mandatory = $true)][string]$logsDir,
+    [Parameter(Mandatory = $false)][bool]$skipIntegration = $false
   )
 
   $checks = New-Object System.Collections.Generic.List[object]
@@ -268,9 +282,9 @@ function Get-RepoChecks {
       if ($docker) {
         $slnRelative = Convert-ToContainerRelativePath -repoPath $repoPath -path $slnPath
         $nugetPackagesPath = Join-Path $logsDir "nuget-$repoName"
-        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs (Get-DotNetArgs -command 'test' -target $slnRelative -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $true -noBuild $true) -nugetPackagesPath $nugetPackagesPath))
+        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs (Get-DotNetArgs -command 'test' -target $slnRelative -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $true -noBuild $true -skipIntegration $skipIntegration) -nugetPackagesPath $nugetPackagesPath))
       } else {
-        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args (Get-DotNetArgs -command 'test' -target $slnPath -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $false -noBuild $false)))
+        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args (Get-DotNetArgs -command 'test' -target $slnPath -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $false -noBuild $false -skipIntegration $skipIntegration)))
       }
     }
   }
@@ -402,7 +416,7 @@ foreach ($repoName in $Repos) {
   }
 
   $resolvedRepoPath = (Resolve-Path -LiteralPath $repoPath).Path
-  $checks = Get-RepoChecks -repoName $repoName -repoPath $resolvedRepoPath -mode $modeForChecks -docker ([bool]$Docker) -logsDir $logsDir
+  $checks = Get-RepoChecks -repoName $repoName -repoPath $resolvedRepoPath -mode $modeForChecks -docker ([bool]$Docker) -logsDir $logsDir -skipIntegration ([bool]$SkipIntegration)
   $checkPlans += $checks
 
   $repoResults += [pscustomobject]@{
