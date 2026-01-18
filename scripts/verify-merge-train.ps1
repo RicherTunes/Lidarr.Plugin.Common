@@ -32,6 +32,10 @@
 .PARAMETER SkipIntegration
   Skip integration tests (tests with 'Integration', 'Live', or 'EndToEnd' in their name).
   Useful for Docker mode where secrets/live services are unavailable.
+
+.PARAMETER SkipPerformance
+  Skip performance tests (tests with [Trait("Category", "Performance")]).
+  Useful for Docker/CI mode where wall-clock timing is unreliable.
 #>
 
 [CmdletBinding()]
@@ -44,7 +48,8 @@ param(
   [switch]$FailFast,
   [switch]$Docker,
   [switch]$IgnoreWarningsAsErrors,
-  [switch]$SkipIntegration
+  [switch]$SkipIntegration,
+  [switch]$SkipPerformance
 )
 
 Set-StrictMode -Version Latest
@@ -158,7 +163,8 @@ function Get-DotNetArgs {
     [Parameter(Mandatory = $true)][bool]$ignoreWarningsAsErrors,
     [Parameter(Mandatory = $true)][bool]$noRestore,
     [Parameter(Mandatory = $true)][bool]$noBuild,
-    [Parameter(Mandatory = $false)][bool]$skipIntegration = $false
+    [Parameter(Mandatory = $false)][bool]$skipIntegration = $false,
+    [Parameter(Mandatory = $false)][bool]$skipPerformance = $false
   )
 
   $args = New-Object System.Collections.Generic.List[string]
@@ -174,11 +180,22 @@ function Get-DotNetArgs {
     $args.Add('-p:TreatWarningsAsErrors=false')
   }
 
-  if ($skipIntegration -and $command -eq 'test') {
-    # Exclude integration tests when running without secrets/live services.
-    # Matches: *.Integration.*, *.IntegrationTests.*, *Live*, *EndToEnd*
+  if (($skipIntegration -or $skipPerformance) -and $command -eq 'test') {
+    # Build filter expression for excluded test categories
+    $filters = @()
+    if ($skipIntegration) {
+      # Exclude integration tests when running without secrets/live services.
+      # Matches: *.Integration.*, *.IntegrationTests.*, *Live*, *EndToEnd*
+      $filters += 'FullyQualifiedName!~Integration'
+      $filters += 'FullyQualifiedName!~Live'
+      $filters += 'FullyQualifiedName!~EndToEnd'
+    }
+    if ($skipPerformance) {
+      # Exclude performance tests with wall-clock assertions (unreliable in CI/Docker)
+      $filters += 'Category!=Performance'
+    }
     $args.Add('--filter')
-    $args.Add('FullyQualifiedName!~Integration&FullyQualifiedName!~Live&FullyQualifiedName!~EndToEnd')
+    $args.Add($filters -join '&')
   }
 
   return $args.ToArray()
@@ -204,7 +221,8 @@ function Get-RepoChecks {
     [Parameter(Mandatory = $true)][string]$mode,
     [Parameter(Mandatory = $true)][bool]$docker,
     [Parameter(Mandatory = $true)][string]$logsDir,
-    [Parameter(Mandatory = $false)][bool]$skipIntegration = $false
+    [Parameter(Mandatory = $false)][bool]$skipIntegration = $false,
+    [Parameter(Mandatory = $false)][bool]$skipPerformance = $false
   )
 
   $checks = New-Object System.Collections.Generic.List[object]
@@ -282,9 +300,9 @@ function Get-RepoChecks {
       if ($docker) {
         $slnRelative = Convert-ToContainerRelativePath -repoPath $repoPath -path $slnPath
         $nugetPackagesPath = Join-Path $logsDir "nuget-$repoName"
-        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs (Get-DotNetArgs -command 'test' -target $slnRelative -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $true -noBuild $true -skipIntegration $skipIntegration) -nugetPackagesPath $nugetPackagesPath))
+        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs (Get-DotNetArgs -command 'test' -target $slnRelative -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $true -noBuild $true -skipIntegration $skipIntegration -skipPerformance $skipPerformance) -nugetPackagesPath $nugetPackagesPath))
       } else {
-        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args (Get-DotNetArgs -command 'test' -target $slnPath -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $false -noBuild $false -skipIntegration $skipIntegration)))
+        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args (Get-DotNetArgs -command 'test' -target $slnPath -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $false -noBuild $false -skipIntegration $skipIntegration -skipPerformance $skipPerformance)))
       }
     }
   }
@@ -416,7 +434,7 @@ foreach ($repoName in $Repos) {
   }
 
   $resolvedRepoPath = (Resolve-Path -LiteralPath $repoPath).Path
-  $checks = Get-RepoChecks -repoName $repoName -repoPath $resolvedRepoPath -mode $modeForChecks -docker ([bool]$Docker) -logsDir $logsDir -skipIntegration ([bool]$SkipIntegration)
+  $checks = Get-RepoChecks -repoName $repoName -repoPath $resolvedRepoPath -mode $modeForChecks -docker ([bool]$Docker) -logsDir $logsDir -skipIntegration ([bool]$SkipIntegration) -skipPerformance ([bool]$SkipPerformance)
   $checkPlans += $checks
 
   $repoResults += [pscustomobject]@{
