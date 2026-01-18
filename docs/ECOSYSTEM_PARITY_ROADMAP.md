@@ -1,18 +1,133 @@
 # Ecosystem Parity Roadmap
 
-This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr).
+This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr, AppleMusicarr).
 
 ## Current Status
 
-| Dimension | Tidalarr | Qobuzarr | Brainarr | Common |
-|-----------|----------|----------|----------|--------|
-| **Packaging** | ✅ | ✅ | ✅ | Policy complete |
-| **Naming/Path** | ✅ | ✅ | N/A | FileSystemUtilities |
-| **Concurrency** | ✅ | ✅ | N/A | BaseDownloadOrchestrator |
-| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | Single-authority pattern |
-| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | JSON schema (PR #187) |
+| Dimension | Tidalarr | Qobuzarr | Brainarr | AppleMusicarr | Common |
+|-----------|----------|----------|----------|---------------|--------|
+| **Packaging Policy** | ✅ | ✅ | ✅ | ✅ | Policy + validators |
+| **Type Identity** | ✅ | ✅ | ✅ (FV exception) | ✅ | Canonical contract |
+| **Naming/Path** | ⚠️ (some drift) | ✅ | N/A | N/A | FileSystemUtilities |
+| **Auth/Secrets** | ✅ | ✅ | N/A | ⚠️ (migration in progress) | Secret protection primitives |
+| **Manifest Tooling** | ✅ | ✅ | ✅ | ⚠️ (entrypoints) | ManifestCheck contract |
+| **Multi-Plugin Smoke** | ⚠️ (needs secrets) | ⚠️ (needs secrets) | ⚠️ (needs secrets) | N/A | Reusable workflow |
+| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | N/A | JSON schema + explicit error codes |
 
-**Overall Ecosystem Parity: ~97%**
+**Overall Ecosystem Parity: ~97% (blocked mostly by CI/secrets + a few remaining drift deletions)**
+
+---
+
+## Blockers (External)
+
+- **GitHub Actions billing/spend**: blocks CI execution and required checks on PRs.
+- **`CROSS_REPO_PAT`**: required for multi-plugin smoke workflow in caller repos (Qobuzarr/Tidalarr/Brainarr).
+- **Upstream Lidarr ALC lifecycle bug**: multi-plugin runs remain best-effort until host fix is shipped in a published image.
+
+---
+
+## Merge Playbook (When Billing Unblocks)
+
+This section provides exact steps to land the current PR stack safely.
+
+### Phase 1: Common PRs (merge in order)
+
+```bash
+# 1. ManifestCheck -ResolveEntryPoints (enables flag AppleMusicarr uses)
+gh pr merge 290 --squash --repo RicherTunes/Lidarr.Plugin.Common
+
+# 2. B11 filename/path contract tests (locks format)
+gh pr merge 289 --squash --repo RicherTunes/Lidarr.Plugin.Common
+
+# 3. Ecosystem roadmap docs (no code)
+gh pr merge 288 --squash --repo RicherTunes/Lidarr.Plugin.Common
+```
+
+### Phase 2: Tag Common Release
+
+**Wait** until #290 and #289 are merged, then verify the release workflow will attach the canonical Abstractions DLL before tagging.
+
+```bash
+cd lidarr.plugin.common
+git checkout main && git pull
+# Verify src/Abstractions builds and ILRepack produces the expected DLL
+dotnet build src/Abstractions -c Release
+# Then tag
+git tag v1.5.1 && git push origin v1.5.1
+```
+
+### Phase 3: Bump Submodules in Plugins
+
+**Critical**: AppleMusicarr calls `-ResolveEntryPoints`, so its submodule **must** point to a commit that includes #290.
+
+```bash
+# Tidalarr
+cd tidalarr
+git checkout feat/tidalarr-ws3-cleanup
+cd ext/Lidarr.Plugin.Common && git fetch origin && git checkout v1.5.1 && cd ../..
+git add ext/Lidarr.Plugin.Common && git commit -m "chore: bump Common to v1.5.1"
+git push
+
+# Qobuzarr
+cd qobuzarr
+git checkout feat/canonical-abstractions
+cd ext/Lidarr.Plugin.Common && git fetch origin && git checkout v1.5.1 && cd ../..
+git add ext/Lidarr.Plugin.Common && git commit -m "chore: bump Common to v1.5.1"
+git push
+
+# Brainarr
+cd brainarr
+git checkout feat/canonical-abstractions
+cd ext/lidarr.plugin.common && git fetch origin && git checkout v1.5.1 && cd ../..
+git add ext/lidarr.plugin.common && git commit -m "chore: bump Common to v1.5.1"
+git push
+
+# AppleMusicarr (MUST be after #290 merge)
+cd applemusicarr
+git checkout feat/canonical-abstractions
+cd ext/lidarr.plugin.common && git fetch origin && git checkout v1.5.1 && cd ../..
+git add ext/lidarr.plugin.common && git commit -m "chore: bump Common to v1.5.1"
+git push
+```
+
+### Phase 4: Merge Plugin PRs
+
+```bash
+# Tidalarr (WS3.1 cleanup first, then canonical abstractions)
+gh pr merge 134 --squash --repo RicherTunes/Tidalarr
+gh pr merge 133 --squash --repo RicherTunes/Tidalarr
+
+# Qobuzarr
+gh pr merge 157 --squash --repo RicherTunes/Qobuzarr
+
+# Brainarr
+gh pr merge 377 --squash --repo RicherTunes/Brainarr
+
+# AppleMusicarr
+gh pr merge 12 --squash --repo RicherTunes/AppleMusicarr
+```
+
+### Separate Lanes (Do Not Block Merge Train)
+
+| Lane | Status | Notes |
+|------|--------|-------|
+| **CROSS_REPO_PAT** | Separate | Required for multi-plugin smoke only; doesn't block packaging PRs |
+| **Version drift** | Separate | Brainarr (1.3.2 vs 1.3.1), AppleMusicarr (0.3.0-beta.1 vs beta.2) - fix in dedicated PRs to avoid conflicts |
+
+### Local Verification (When CI Blocked)
+
+If billing blocks CI, run packaging-closure locally using Docker:
+
+```bash
+# Per-plugin verification
+cd <plugin-repo>
+./scripts/packaging-closure.ps1  # or equivalent
+
+# Or use the Common tools directly
+pwsh -Command "& ./ext/Lidarr.Plugin.Common/tools/ManifestCheck.ps1 \
+  -ProjectPath ./src/<Plugin>/<Plugin>.csproj \
+  -ManifestPath ./plugin.json"
+```
 
 ---
 
@@ -20,10 +135,11 @@ This document tracks progress toward full structural and behavioral parity acros
 
 Full ecosystem parity is achieved when:
 
-- [ ] All three plugins ship the 5-DLL type-identity contract
-- [ ] Both streaming plugins produce identical filename format on multi-disc and edge sanitization
-- [ ] Persistent single-plugin E2E gates pass for Qobuzarr and Tidalarr
-- [ ] Multi-plugin schema gate passes for 2 plugins, then 3 plugins (when host supports)
+- [ ] All plugins ship the required type-identity assemblies and never ship forbidden host assemblies (policy tests + packaging-closure gates)
+- [ ] Streaming plugins converge on a single filename/path contract (Common-first; no duplicate sanitizers)
+- [ ] Persistent single-plugin E2E gates pass for Qobuzarr and Tidalarr (Schema→Configure→Search→AlbumSearch→Grab→Persist→Revalidation)
+- [ ] Multi-plugin smoke test passes (Schema gate at minimum; full chain when host supports) and produces a valid run manifest
+- [ ] Manifest entrypoint references are validated against built assemblies where applicable (no “type doesn’t exist” packaging debt)
 
 **No-Drift Rule**: Any new filename/path logic must either live in Common or delegate to Common.
 
@@ -84,9 +200,11 @@ signatures against the host.
 - [x] **Brainarr**: BrainarrPackagingPolicyTests with 4-DLL contract (no FluentValidation)
 
 ### 1.2 Naming Contract Tests
-- [ ] Multi-disc: D01Txx/D02Txx format validation
-- [ ] Extension normalization: `.flac` and `flac` both produce `.flac`
-- [ ] Unicode normalization: NFC form consistency
+**Status**: In PR (Common PR #289)
+
+- [x] Multi-disc: D01Txx/D02Txx format validation
+- [x] Extension normalization: `.flac` and `flac` both produce `.flac`
+- [x] Unicode normalization: NFC form consistency
 
 ### 1.3 Common SHA Verification
 - [x] Tidalarr: Uses ext-common-sha.txt
@@ -98,13 +216,17 @@ signatures against the host.
 ## Phase 2: Reduce Code Drift (Tech Debt)
 
 ### 2.1 Tidalarr Sanitization Consolidation
-**Status**: In Progress
+**Status**: In PR (Tidalarr PR #134)
 
 Current duplicate paths:
 - `TidalDownloadClient.cs:99-100` - FileNameSanitizer for title/artist
 - `TidalDownloadClient.cs:405` - FileNameSanitizer for temp file path
 
-**Action**: Route through Common FileSystemUtilities where affecting output filenames.
+Done (in PR):
+- `TidalLidarrDownloadClient` routes artist/album path segments through `FileSystemUtilities.SanitizeFileName()` with a tripwire test.
+
+Remaining:
+- Route `TidalDownloadClient` through Common `FileSystemUtilities` anywhere it affects the on-disk path contract.
 
 ### 2.2 Qobuzarr Filename Builder Consolidation
 **Status**: Complete
@@ -191,10 +313,7 @@ Schema → Configure → Search → AlbumSearch → Grab → Persist → Revalid
 - Metadata (opt-in via `-ValidateMetadata`)
 - PostRestartGrab (opt-in via `-PostRestartGrab`)
 
-**PR #187 Enhancements** (pending merge):
-- JSON Schema validation: `manifest.schema.json` with `$schema` fetchable pinning
-- Job summary output for GitHub Actions with per-plugin pass/fail table
-- Expanded gate granularity with Revalidation gate
+**E2E platform status**: Merged and in use (JSON run manifest schema + explicit-at-source error codes + golden fixtures).
 
 ### 3.3 Plugin-Specific Status
 
@@ -225,25 +344,24 @@ Schema → Configure → Search → AlbumSearch → Grab → Persist → Revalid
 
 ---
 
-## Phase 4: Advanced E2E Gates (Future)
+## Phase 4: E2E Hardening (Future)
 
-### 4.1 ReleaseSearch Gate (Level 2)
-**Not yet implemented**
+This phase is about reducing flakes and improving signal, not adding new gates.
 
-Design:
-1. Create temporary album via `POST /api/v1/album`
-2. Trigger `AlbumSearch` command
-3. Assert `/api/v1/release?albumId=` contains results with plugin's indexerId
-4. Clean up temporary album
+### 4.1 Multi-Plugin Readiness
 
-### 4.2 Grab Gate (Level 3)
-**Not yet implemented**
+- [ ] Ensure multi-plugin smoke test runs in all plugin repos (requires `CROSS_REPO_PAT` in each caller repo)
+- [ ] Keep multi-plugin results informational until the upstream Lidarr ALC fix is shipped in a published image
 
-Design:
-1. Pick deterministic release from ReleaseSearch results
-2. Trigger grab via `POST /api/v1/release`
-3. Assert queue contains item
-4. Assert file appears in /downloads (timeout with polling)
+### 4.2 Reduce Flake Sources
+
+- [ ] Replace any remaining `Task.Delay`/sleep-based assertions in tests with `FakeTimeProvider`
+- [ ] Prefer deterministic selection (stable sort + intrinsic hash) anywhere we pick a “first” item in E2E
+
+### 4.3 Manifest Tooling Adoption
+
+- [ ] Wire `tools/ManifestCheck.ps1 -ResolveEntryPoints` into plugin `packaging-closure` where the plugin ships entryPoints (AppleMusicarr)
+- [ ] Keep ManifestCheck usage consistent across plugin repos to prevent drift
 
 ### 4.3 3-Plugin Concurrent Operation
 **Status**: ✅ Proven for Schema gate
@@ -262,7 +380,7 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 **Recommendation**:
 - Use dedicated single-plugin instances (`:8690` Tidalarr, `:8692` Qobuzarr) for reliable E2E
 - Treat `:8691` multi-plugin results as informational, not blocking
-- Track upstream: [Lidarr ALC issue](https://github.com/Lidarr/Lidarr/issues) (pending link)
+- Track upstream: [Lidarr/Lidarr#5662](https://github.com/Lidarr/Lidarr/pull/5662) (ALC lifecycle fix)
 
 ---
 
@@ -277,7 +395,7 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 ### Filename Utilities
 - `lidarr.plugin.common/src/Utilities/FileSystemUtilities.cs`
 - `qobuzarr/src/Utilities/TrackFileNameBuilder.cs` (delegates to Common)
-- `tidalarr/src/Tidalarr/Integration/TidalDownloadClient.cs` (needs consolidation)
+- `tidalarr/src/Tidalarr/Integration/TidalDownloadClient.cs` (remaining consolidation work)
 
 ### E2E Scripts
 - `lidarr.plugin.common/scripts/e2e-runner.ps1` - Main gate runner
@@ -290,7 +408,10 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 
 | Date | Change |
 |------|--------|
-| 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary (pending merge) |
+| 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary |
+| 2026-01-17 | Canonical Abstractions release assets (no NuGet key required) |
+| 2026-01-17 | ManifestCheck entrypoint resolution (`-ResolveEntryPoints`) + tests |
+| 2026-01-17 | Filename/path contract tests expanded (multi-disc + Unicode + reserved names) |
 | 2025-12-31 | Qobuzarr PR4: Dead code deletion + 8 auth characterization tests (incl. DI same-instance) |
 | 2025-12-31 | Tidalarr PR3: TidalOAuthService fallback → FailOnIOTokenStore (no silent temp writes) |
 | 2025-12-31 | Tidalarr PR2: Auth lifecycle unification - single token authority, scoped IStreamingTokenProvider |
@@ -308,3 +429,51 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 | 2025-12-27 | Tidalarr packaging baseline updated to 5-DLL contract |
 | 2025-12-27 | Qobuzarr TrackFileNameBuilder delegated to Common |
 | 2025-12-27 | Initial roadmap created |
+
+---
+
+## Extended Backlog (Parallelizable Work)
+
+This section is intentionally designed to keep multiple agents busy without stepping on each other.
+
+**Anti-bloat rule**: any new API or utility added to Common must delete measurable duplication in at least one plugin within 1–2 follow-up PRs.
+
+### Lane A: Packaging + Manifest Guardrails (No Secrets)
+
+- [ ] **Common**: Land `tools/ManifestCheck.ps1 -ResolveEntryPoints` (branch `feat/manifestcheck-resolve-entrypoints`, commit `24250f6`) and bump submodules in all plugins.
+- [ ] **AppleMusicarr**: Make `manifest.json` reflect the net8 build reality (remove net6-only entrypoint, or compile the type for net8) and keep `packaging-closure` running `-ResolveEntryPoints`.
+- [ ] **All plugins**: Standardize `packaging-closure` steps so each repo runs the same checks (canonical Abstractions hash, forbidden host assemblies, ManifestCheck).
+- [ ] **Common**: Extend parity-lint rules to flag local `PreviewDetectionUtility` clones (and any future “magic bytes” validators) with a required deletion target.
+
+### Lane B: Filename/Path Contract (No Secrets)
+
+- [ ] **Common**: Land filename/path contract tests (PR #289) and bump submodules in all plugins.
+- [ ] **Tidalarr**: Finish consolidation in `TidalDownloadClient.cs` so all on-disk paths are routed through `FileSystemUtilities` (remove remaining `FileNameSanitizer` usage).
+- [ ] **Common**: Add small “contract fixture” helper so plugins can assert path outputs without duplicating formatting logic.
+
+### Lane C: Secret Protection Convergence (Low Secrets)
+
+- [ ] **Common**: Keep the secret protection facade API stable (docs + tests) and explicitly deprecate plugin-local crypto patterns.
+- [ ] **AppleMusicarr**: Complete the migration away from plugin-local crypto and delete duplicate implementations (target: remove `DataProtector.cs` and any embedded keyfile logic).
+- [ ] **Qobuzarr/Tidalarr**: Audit for duplicate secure credential managers / sanitizers; upstream primitives only when they delete plugin-local copies.
+
+### Lane D: Hosting Convergence (Medium Risk)
+
+- [ ] **Tidalarr**: Complete the StreamingPlugin migration without breaking the CLI diagnostics contract (delete host-wiring duplication only once characterization tests pass).
+- [ ] **Qobuzarr**: Avoid “stub adapters”. Only add a modern host entrypoint if it delegates to real legacy functionality (no silent no-ops).
+
+### Lane E: Resilience Parity (No Secrets)
+
+- [ ] **Brainarr**: Verify WS4.2 adapter migration stays behavior-compatible via characterization tests, then delete any remaining legacy resilience helpers.
+- [ ] **Common**: Maintain AdvancedCircuitBreaker as a pure primitive; avoid provider-specific policy.
+
+### Lane F: CI + Multi-Plugin Smoke (Requires Secrets)
+
+- [ ] **Repo admin**: Add `CROSS_REPO_PAT` secret to Qobuzarr/Tidalarr/Brainarr and re-run multi-plugin smoke tests.
+- [ ] **Common**: Improve multi-plugin smoke workflow messages for fork PRs (skip vs fail) and missing secrets (fail-fast, actionable).
+
+### Lane G: “Weeks of Work” Queue (Nice-to-Fix)
+
+- [ ] **All repos**: Reduce flaky tests by replacing time/sleep with `FakeTimeProvider` and making parallel builds deterministic (`--disable-build-servers`, `-m:1` where needed).
+- [ ] **Common**: Expand `E2E_ERROR_CODES.md` contract tables with example `details` payloads and keep the tripwire tests green.
+- [ ] **Common**: Add a one-command “ecosystem verification” script that runs local packaging-closure + minimal E2E schema gate for all plugins (no credentials).
