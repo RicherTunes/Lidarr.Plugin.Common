@@ -154,11 +154,24 @@ try {
   }
 
   Write-Host "`n[TEST] docker plan mounts minimal NuGet.config over /repo for applemusicarr..." -ForegroundColor Cyan
+  $appleDockerRestore = $dockerReport.plannedChecks | Where-Object { $_.repoName -eq 'applemusicarr' -and $_.name -eq 'dotnet:restore' } | Select-Object -First 1
   $appleDockerBuild = $dockerReport.plannedChecks | Where-Object { $_.repoName -eq 'applemusicarr' -and $_.name -eq 'dotnet:build' } | Select-Object -First 1
-  if (-not $appleDockerBuild) {
-    Write-Host "  [FAIL] Expected applemusicarr dotnet:build planned (docker mode)" -ForegroundColor Red
+  if (-not $appleDockerRestore -or -not $appleDockerBuild) {
+    Write-Host "  [FAIL] Expected applemusicarr dotnet:restore and dotnet:build planned (docker mode)" -ForegroundColor Red
     $failed++
   } else {
+    $restoreArgs = @($appleDockerRestore.args)
+    $restoreConfigIndex = [Array]::IndexOf($restoreArgs, '--configfile')
+    if ($restoreConfigIndex -lt 0 -or $restoreConfigIndex -ge ($restoreArgs.Length - 1)) {
+      Write-Host "  [FAIL] Expected dotnet:restore to include --configfile" -ForegroundColor Red
+      $failed++
+    } elseif ([string]$restoreArgs[$restoreConfigIndex + 1] -ne '/repo/NuGet.config') {
+      Write-Host "  [FAIL] Expected dotnet:restore --configfile /repo/NuGet.config, got $($restoreArgs[$restoreConfigIndex + 1])" -ForegroundColor Red
+      $failed++
+    } else {
+      Write-Host "  [PASS] dotnet:restore uses --configfile /repo/NuGet.config" -ForegroundColor Green
+    }
+
     $args = @($appleDockerBuild.args)
     $mountArg = $args | Where-Object { $_ -like '*:/repo/NuGet.config:ro' } | Select-Object -First 1
     if (-not $mountArg) {
@@ -166,6 +179,13 @@ try {
       $failed++
     } else {
       Write-Host "  [PASS] Minimal NuGet.config mounted to /repo (overrides repo config)" -ForegroundColor Green
+    }
+
+    if (-not ($args -contains '--no-restore')) {
+      Write-Host "  [FAIL] Expected dotnet:build to include --no-restore when dotnet:restore is planned" -ForegroundColor Red
+      $failed++
+    } else {
+      Write-Host "  [PASS] dotnet:build includes --no-restore after explicit restore" -ForegroundColor Green
     }
   }
 

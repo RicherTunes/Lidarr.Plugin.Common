@@ -150,7 +150,9 @@ function Get-DotNetArgs {
   param(
     [Parameter(Mandatory = $true)][string]$command,
     [Parameter(Mandatory = $true)][string]$target,
-    [Parameter(Mandatory = $true)][bool]$ignoreWarningsAsErrors
+    [Parameter(Mandatory = $true)][bool]$ignoreWarningsAsErrors,
+    [Parameter(Mandatory = $true)][bool]$noRestore,
+    [Parameter(Mandatory = $true)][bool]$noBuild
   )
 
   $args = New-Object System.Collections.Generic.List[string]
@@ -158,11 +160,27 @@ function Get-DotNetArgs {
   $args.Add($target)
   foreach ($value in @('-c', 'Release', '-m:1', '-p:BuildInParallel=false', '--disable-build-servers', '--nologo')) { $args.Add([string]$value) }
 
+  if ($noRestore) { $args.Add('--no-restore') }
+  if ($noBuild -and $command -eq 'test') { $args.Add('--no-build') }
+
   if ($ignoreWarningsAsErrors) {
     # Escape hatch for local merge-train runs; do not use as a substitute for fixing warnings.
     $args.Add('-p:TreatWarningsAsErrors=false')
   }
 
+  return $args.ToArray()
+}
+
+function Get-DotNetRestoreArgs {
+  param(
+    [Parameter(Mandatory = $true)][string]$target,
+    [Parameter(Mandatory = $true)][string]$configFile
+  )
+
+  $args = New-Object System.Collections.Generic.List[string]
+  $args.Add('restore')
+  $args.Add($target)
+  foreach ($value in @('--configfile', $configFile, '--disable-parallel', '--nologo')) { $args.Add([string]$value) }
   return $args.ToArray()
 }
 
@@ -226,21 +244,32 @@ function Get-RepoChecks {
   </packageSources>
 </configuration>
 '@ | Out-File -FilePath $nugetConfigPath -Encoding UTF8
+        } else {
+          # In docker mode, always prefer an explicit --configfile pointing at the repo-root config
+          # to prevent submodule NuGet.config files from affecting restore.
+          if (Test-Path -LiteralPath (Join-Path $repoPath 'NuGet.config')) {
+            $nugetConfigContainerPath = '/repo/NuGet.config'
+          } elseif (Test-Path -LiteralPath (Join-Path $repoPath 'NuGet.Config')) {
+            $nugetConfigContainerPath = '/repo/NuGet.Config'
+          }
         }
 
         $nugetPackagesPath = Join-Path $logsDir "nuget-$repoName"
-        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -dotnetArgs (Get-DotNetArgs -command 'build' -target $slnRelative -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors)) -nugetConfigPath $nugetConfigPath -nugetConfigContainerPath $nugetConfigContainerPath -nugetPackagesPath $nugetPackagesPath))
+        if ($nugetConfigContainerPath) {
+          $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:restore' -dotnetArgs (Get-DotNetRestoreArgs -target $slnRelative -configFile $nugetConfigContainerPath) -nugetConfigPath $nugetConfigPath -nugetConfigContainerPath $nugetConfigContainerPath -nugetPackagesPath $nugetPackagesPath))
+        }
+        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -dotnetArgs (Get-DotNetArgs -command 'build' -target $slnRelative -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore ([bool]$nugetConfigContainerPath) -noBuild $false) -nugetConfigPath $nugetConfigPath -nugetConfigContainerPath $nugetConfigContainerPath -nugetPackagesPath $nugetPackagesPath))
       } else {
-        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -fileName 'dotnet' -args (Get-DotNetArgs -command 'build' -target $slnPath -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors))))
+        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:build' -fileName 'dotnet' -args (Get-DotNetArgs -command 'build' -target $slnPath -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $false -noBuild $false)))
       }
     }
     if ($mode -eq 'full') {
       if ($docker) {
         $slnRelative = Convert-ToContainerRelativePath -repoPath $repoPath -path $slnPath
         $nugetPackagesPath = Join-Path $logsDir "nuget-$repoName"
-        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs (Get-DotNetArgs -command 'test' -target $slnRelative -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors)) -nugetPackagesPath $nugetPackagesPath))
+        $checks.Add((New-DockerDotNetPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -dotnetArgs (Get-DotNetArgs -command 'test' -target $slnRelative -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $true -noBuild $true) -nugetPackagesPath $nugetPackagesPath))
       } else {
-        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args (Get-DotNetArgs -command 'test' -target $slnPath -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors))))
+        $checks.Add((New-CheckPlan -repoName $repoName -repoPath $repoPath -name 'dotnet:test' -fileName 'dotnet' -args (Get-DotNetArgs -command 'test' -target $slnPath -ignoreWarningsAsErrors ([bool]$IgnoreWarningsAsErrors) -noRestore $false -noBuild $false)))
       }
     }
   }
