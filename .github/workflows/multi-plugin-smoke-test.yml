@@ -197,6 +197,7 @@ jobs:
       matrix: ${{ fromJSON(format('{{"include":[{{"name":"gate","lidarr_tag":"{0}","allow_failure":false,"port":8689}}{1}]}}', inputs.lidarr_tag, ((inputs.run_canary == true || inputs.run_canary == 'true') && ',{"name":"canary","lidarr_tag":"pr-plugins","allow_failure":true,"port":8690}' || ''))) }}
     steps:
       - name: Preflight - Validate CROSS_REPO_PAT secret
+        id: pat
         shell: bash
         env:
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
@@ -205,26 +206,39 @@ jobs:
           echo "::add-mask::${CROSS_REPO_PAT:-}"
 
           if [[ -z "${CROSS_REPO_PAT:-}" ]]; then
-            echo "::error::CROSS_REPO_PAT secret is missing or empty."
+            echo "::notice::Multi-plugin smoke test skipped: CROSS_REPO_PAT secret is missing or empty."
             echo ""
             echo "This workflow requires a Personal Access Token with 'repo' scope to checkout"
-            echo "the private Qobuzarr and Tidalarr repositories."
+            echo "the plugin repositories (Qobuzarr/Tidalarr/Brainarr)."
             echo ""
             echo "To fix this:"
             echo "  1. Go to: https://github.com/settings/tokens"
             echo "  2. Create a PAT (classic) with 'repo' scope"
-            echo "  3. Go to: https://github.com/RicherTunes/Lidarr.Plugin.Common/settings/secrets/actions"
-            echo "  4. Add secret named 'CROSS_REPO_PAT' with the token value"
+            echo "  3. Add repo secret named 'CROSS_REPO_PAT' in the CALLER repo:"
+            echo "     Settings -> Secrets and variables -> Actions"
+            echo "  4. Re-run the workflow"
             echo ""
             echo "See docs/MULTI_PLUGIN_SMOKE_TEST.md for full setup instructions."
-            exit 1
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=missing_cross_repo_pat" >> "$GITHUB_OUTPUT"
+            exit 0
           fi
+          echo "skip=false" >> "$GITHUB_OUTPUT"
           echo "CROSS_REPO_PAT secret is configured"
 
+      - name: Smoke Test Skipped
+        if: ${{ steps.pat.outputs.skip == 'true' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "::notice::Skipping multi-plugin smoke test (reason: ${{ steps.pat.outputs.reason }})."
+
       - name: Checkout Lidarr.Plugin.Common
+        if: ${{ steps.pat.outputs.skip != 'true' }}
         uses: actions/checkout@v4
 
       - name: Setup .NET SDKs
+        if: ${{ steps.pat.outputs.skip != 'true' }}
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: |
@@ -232,6 +246,7 @@ jobs:
             8.0.x
 
       - name: Resolve plugin selection and refs
+        if: ${{ steps.pat.outputs.skip != 'true' }}
         id: plugin_meta
         shell: bash
         env:
@@ -272,7 +287,7 @@ jobs:
           echo "plugins=$plugins_lc" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Qobuzarr
-        if: ${{ steps.plugin_meta.outputs.include_qobuzarr == 'true' }}
+        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_qobuzarr == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: RicherTunes/Qobuzarr
@@ -282,7 +297,7 @@ jobs:
           submodules: recursive
 
       - name: Checkout Tidalarr
-        if: ${{ steps.plugin_meta.outputs.include_tidalarr == 'true' }}
+        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_tidalarr == 'true' }}   
         uses: actions/checkout@v4
         with:
           repository: RicherTunes/Tidalarr
@@ -292,7 +307,7 @@ jobs:
           submodules: recursive
 
       - name: Checkout Brainarr
-        if: ${{ steps.plugin_meta.outputs.include_brainarr == 'true' }}
+        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_brainarr == 'true' }}   
         uses: actions/checkout@v4
         with:
           repository: RicherTunes/Brainarr
@@ -302,6 +317,7 @@ jobs:
           submodules: recursive
 
       - name: Extract Lidarr assemblies from Docker image
+        if: ${{ steps.pat.outputs.skip != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -367,6 +383,7 @@ jobs:
           rm -rf _lidarr_extracted
 
       - name: Sync tools from main checkout to submodules
+        if: ${{ steps.pat.outputs.skip != 'true' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -408,7 +425,7 @@ jobs:
           echo "Tool sync complete"
 
       - name: Build Qobuzarr package
-        if: ${{ steps.plugin_meta.outputs.include_qobuzarr == 'true' }}
+        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_qobuzarr == 'true' }}   
         shell: pwsh
         working-directory: qobuzarr
         run: |
@@ -429,7 +446,7 @@ jobs:
           }
 
       - name: Build Tidalarr package
-        if: ${{ steps.plugin_meta.outputs.include_tidalarr == 'true' }}
+        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_tidalarr == 'true' }}   
         shell: pwsh
         working-directory: tidalarr
         run: |
@@ -455,7 +472,7 @@ jobs:
           }
 
       - name: Build Brainarr package
-        if: ${{ steps.plugin_meta.outputs.include_brainarr == 'true' }}
+        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_brainarr == 'true' }}
         shell: pwsh
         working-directory: brainarr
         run: |
@@ -476,6 +493,7 @@ jobs:
           }
 
       - name: Locate plugin zips
+        if: ${{ steps.pat.outputs.skip != 'true' }}
         shell: pwsh
         run: |
           function Find-PluginZip {
@@ -543,7 +561,7 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($brainZip)) { Write-Host "Brainarr zip: $brainZip" }
 
       - name: Validate credentials (if gates enabled)
-        if: ${{ inputs.run_medium_gate || inputs.run_downloadclient_gate || inputs.run_search_gate || inputs.run_grab_gate }}
+        if: ${{ steps.pat.outputs.skip != 'true' && (inputs.run_medium_gate || inputs.run_downloadclient_gate || inputs.run_search_gate || inputs.run_grab_gate) }}
         shell: bash
         env:
           QOBUZARR_EMAIL: ${{ secrets.QOBUZARR_EMAIL }}
@@ -583,6 +601,7 @@ jobs:
           fi
 
       - name: Run multi-plugin harness
+        if: ${{ steps.pat.outputs.skip != 'true' }}
         shell: pwsh
         env:
           QOBUZARR_EMAIL: ${{ secrets.QOBUZARR_EMAIL }}
@@ -634,7 +653,7 @@ jobs:
           & ./scripts/multi-plugin-docker-smoke-test.ps1 @params
 
       - name: Collect container diagnostics
-        if: always()
+        if: ${{ always() && steps.pat.outputs.skip != 'true' }}
         shell: bash
         run: |
           set +e
@@ -659,7 +678,7 @@ jobs:
           fi
 
       - name: Upload smoke artifacts
-        if: always()
+        if: ${{ always() && steps.pat.outputs.skip != 'true' }}
         uses: actions/upload-artifact@v4
         with:
           name: multi-plugin-smoke-${{ matrix.name }}-artifacts
