@@ -63,7 +63,8 @@ public class FileSystemUtilitiesSanitizeTests
     [InlineData("AUX   ", "_AUX")]              // Reserved + trailing spaces
     [InlineData("NUL._", "_NUL")]               // Reserved + mixed trailing
     [InlineData("prn.", "_prn")]                // Case insensitive
-    [InlineData("COM1.txt", "COM1.txt")]        // Not reserved (has extension content)
+    [InlineData("COM1.txt", "_COM1.txt")]       // Reserved base name (has extension)
+    [InlineData("Con.txt", "_Con.txt")]         // Preserve original case
     public void SanitizeFileName_ReservedWithTrailing_CorrectlyPrefixed(string input, string expected)
     {
         var result = FileSystemUtilities.SanitizeFileName(input);

@@ -287,6 +287,11 @@ public class FileNameContractTests
     // Case insensitive
     [InlineData("con", "_con")]
     [InlineData("Con", "_Con")]
+    // Reserved base names remain reserved even with extensions (Windows portability)
+    [InlineData("NUL.txt", "_NUL.txt")]
+    [InlineData("prn.doc", "_prn.doc")]
+    [InlineData("COM1.txt", "_COM1.txt")]
+    [InlineData("LPT9.doc", "_LPT9.doc")]
     public void SanitizeFileName_ReservedNames_Prefixed(string input, string expected)
     {
         var result = FileSystemUtilities.SanitizeFileName(input);
