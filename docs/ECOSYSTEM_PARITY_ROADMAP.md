@@ -363,32 +363,54 @@ When running `verify-merge-train.ps1 -Docker -Mode full`:
 
 Tests that fail in Docker without prerequisites are considered bugs and must be fixed to self-skip.
 
-### Cross-Platform Test Hygiene (XP Series)
+---
 
-Tracking work items for cross-platform test determinism and proper skip semantics:
+## XP Series: Cross-Platform Test Parity
 
-| ID | Description | Status |
-|----|-------------|--------|
-| XP1 | Common library URI handling unification (Linux/Windows) | Pending |
-| XP3 | Reserved name sanitization tests | ✅ Done |
-| XP4 | AppleMusicarr test hygiene | ✅ Done (Docker+Windows verified) |
-| XP5 | Brainarr top-up test flakiness | ✅ Fixed (PR #387, Docker verified) |
+The XP series tracks issues where tests pass on Windows but fail on Linux/Docker.
 
-**XP5 Fix (Brainarr PR #387 - `BrainarrOrchestratorTopUpTests.FetchRecommendations_WithTopUpEnabled_FillsToTarget`)**:
-- **Root cause:** Flaky test, not algorithm bug
-  - Non-atomic counter: `providerCalls++` → race condition
-  - Brittle mock: exact call-count dependent (call 2 → Phoebe, call 3+ → empty)
-- **Fix:**
-  - `Interlocked.Increment(ref providerCalls)` for thread-safety
-  - Mock changed: call 1 → {Arctic+Lana}, all subsequent → {Phoebe} (robust to extra internal calls)
-- **Verification:** 0 fails / 50 runs (was 2 fails / 20 runs before fix)
+| ID | Issue | Status | Fix Location | PR |
+|----|-------|--------|--------------|-----|
+| XP1 | URI canonicalization: `/v1/endpoint` parsed as `file:///` on Linux | ⏳ Pending merge | AppleMusicarr `BuildRequestUri()` | [#23](https://github.com/RicherTunes/AppleMusicarr/pull/23) |
+| XP2 | (Reserved) | - | - | - |
+| XP3 | Reserved name sanitization tests | ✅ Done | - | - |
+| XP4 | AppleMusicarr test hygiene (hermetic mocks, skip semantics) | ✅ Merged | AppleMusicarr tests | [#22](https://github.com/RicherTunes/AppleMusicarr/pull/22) |
+| XP5 | Brainarr flaky top-up test (non-atomic counter + brittle mock) | ✅ Merged | Brainarr tests | [#387](https://github.com/RicherTunes/Brainarr/pull/387) |
 
-**XP4 Fixes (AppleMusicarr PR #22)**:
+### XP1: Cross-Platform URI Canonicalization
+
+**Root Cause**: `Uri.TryCreate("/v1/endpoint", UriKind.Absolute)` behaves differently:
+- **Windows**: Returns `FALSE` → path treated as relative ✅
+- **Linux**: Returns `TRUE` → `file:///v1/endpoint` ❌
+
+**Fix**: Add scheme check in `AppleMusicApiClient.BuildRequestUri()`:
+```csharp
+if (Uri.TryCreate(target, UriKind.Absolute, out var absolute) &&
+    (absolute.Scheme == Uri.UriSchemeHttp || absolute.Scheme == Uri.UriSchemeHttps))
+```
+
+**Acceptance Tests**: [Common#305](https://github.com/RicherTunes/Lidarr.Plugin.Common/pull/305) - 18 tests verifying Common library is cross-platform safe.
+
+### XP4: AppleMusicarr Test Hygiene (PR #22)
+
+**Issues Fixed**:
 - `[SkippableFact]` + `Skip.If()` for proper skip reporting (not `return;`)
 - Deterministic cache eviction: sort by (AtMs, then Key) for tie-breaking
 - `GatedHandler` pattern for dedup test: barrier-based synchronization, no timing hacks
 - `[Collection("TextCacheIsolated")]` for cache test isolation
 - CatalogId test fix: use 10-digit ID to match `CatalogIdRegex` pattern
+
+### XP5: Brainarr Flaky Top-Up Test (PR #387)
+
+**Root cause**: Flaky test, not algorithm bug
+- Non-atomic counter: `providerCalls++` → race condition
+- Brittle mock: exact call-count dependent (call 2 → Phoebe, call 3+ → empty)
+
+**Fix**:
+- `Interlocked.Increment(ref providerCalls)` for thread-safety
+- Mock changed: call 1 → {Arctic+Lana}, all subsequent → {Phoebe} (robust to extra internal calls)
+
+**Verification**: 0 fails / 50 runs (was 2 fails / 20 runs before fix)
 
 ---
 
@@ -396,8 +418,9 @@ Tracking work items for cross-platform test determinism and proper skip semantic
 
 | Date | Change |
 |------|--------|
-| 2026-01-19 | XP5 fixed + Docker verified: Brainarr top-up test flakiness (PR #387) - atomic counter + robust mock pattern |
-| 2026-01-19 | XP4 complete: AppleMusicarr test hygiene (PR #22) - deterministic dedup/cache tests, proper skip semantics |
+| 2026-01-19 | XP1 root cause identified: file:// URI on Linux; fix in AppleMusicarr#23 (pending merge) |
+| 2026-01-19 | XP5 fixed + Docker verified: Brainarr top-up test flakiness (PR #387) |
+| 2026-01-19 | XP4 complete: AppleMusicarr test hygiene (PR #22) |
 | 2026-01-18 | Added Test Suite Hygiene section: verify-merge-train flags, smoke test behavior, integration quarantine policy |
 | 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary (pending merge) |
 | 2025-12-31 | Qobuzarr PR4: Dead code deletion + 8 auth characterization tests (incl. DI same-instance) |
