@@ -286,10 +286,90 @@ Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit int
 
 ---
 
+## Test Suite Hygiene & Verification
+
+### verify-merge-train.ps1 Flags
+
+The merge train script supports optional flags to skip test categories that require special prerequisites:
+
+| Flag | Purpose | When to Use |
+|------|---------|-------------|
+| `-SkipIntegration` | Skips tests with `Category=Integration` | When env vars (API keys, credentials) are not available |
+| `-SkipPerformance` | Skips tests with `Category=Performance` | When running in Docker/CI where wall-clock assertions are unreliable |
+| `-Docker` | Runs tests in Docker container | For reproducible, isolated verification |
+
+**Example: Full Docker verification without secrets**
+```powershell
+./verify-merge-train.ps1 -Docker -Mode full -SkipIntegration -SkipPerformance
+```
+
+**Expected outcome**: Unit tests must pass; integration/performance are opt-in.
+
+### Smoke Test Behavior (Multi-Plugin)
+
+The multi-plugin smoke test (`multi-plugin-smoke-test.yml`) requires `CROSS_REPO_PAT` to clone plugin repositories.
+
+| Condition | Behavior |
+|-----------|----------|
+| `CROSS_REPO_PAT` set | Full smoke test runs across all plugins |
+| `CROSS_REPO_PAT` missing | Job skips with notice: "CROSS_REPO_PAT not available, skipping smoke test" |
+
+**To enable**: Set `CROSS_REPO_PAT` as a repository secret with `repo` scope access to all plugin repos.
+
+**PR #295**: Made smoke test non-blocking when secret is missing.
+
+### Integration Test Quarantine Policy
+
+Tests requiring external prerequisites (API credentials, live services) **MUST self-skip** when those prerequisites are unavailable.
+
+**Required Pattern** (xUnit with SkippableFact):
+```csharp
+[SkippableFact]
+[Trait("Category", "Integration")]
+public async Task MyLiveApiTest()
+{
+    Skip.If(_client == null,
+        "Qobuz credentials not configured (set QOBUZ_APP_ID, QOBUZ_EMAIL, QOBUZ_PASSWORD)");
+
+    // ... test code
+}
+```
+
+**Policy requirements**:
+1. Use `[SkippableFact]` or `[SkippableTheory]` from `Xunit.SkippableFact` package
+2. Call `Skip.If()` at test start with condition and actionable message
+3. Skip message **MUST list required environment variables** by name
+4. Tag test with `[Trait("Category", "Integration")]` for filter support
+5. No behavior change when prerequisites are present
+
+**Plugin-specific implementations**:
+| Plugin | File | Status |
+|--------|------|--------|
+| Qobuzarr | `QobuzDownloadClientIntegrationTests.cs` | ✅ PR #164 |
+| Brainarr | Tests use `[Trait("Category", "Performance")]` | ✅ PR #294 |
+| Tidalarr | TBD | Pending audit |
+
+### Docker Full Mode Expectations
+
+When running `verify-merge-train.ps1 -Docker -Mode full`:
+
+| Test Category | Expectation | Skip Flag |
+|---------------|-------------|-----------|
+| Unit tests | **MUST pass** | N/A |
+| Integration tests | Should skip (no credentials) | `-SkipIntegration` |
+| Performance tests | Should skip (wall-clock unreliable) | `-SkipPerformance` |
+
+**Clean Docker run = 0 failures, some skips expected.**
+
+Tests that fail in Docker without prerequisites are considered bugs and must be fixed to self-skip.
+
+---
+
 ## Changelog
 
 | Date | Change |
 |------|--------|
+| 2026-01-18 | Added Test Suite Hygiene section: verify-merge-train flags, smoke test behavior, integration quarantine policy |
 | 2025-12-31 | Common PR #187: JSON Schema + $schema fetchable pinning + job summary (pending merge) |
 | 2025-12-31 | Qobuzarr PR4: Dead code deletion + 8 auth characterization tests (incl. DI same-instance) |
 | 2025-12-31 | Tidalarr PR3: TidalOAuthService fallback → FailOnIOTokenStore (no silent temp writes) |
