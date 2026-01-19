@@ -17,11 +17,13 @@ gh workflow run multi-plugin-smoke-test.yml \
 
 ## Required Secrets
 
-### Always Required
+### Required To Run (Otherwise Skips)
 
 | Secret | Description |
 |--------|-------------|
-| `CROSS_REPO_PAT` | GitHub Personal Access Token with `repo` scope for Qobuzarr and Tidalarr checkout |
+| `CROSS_REPO_PAT` | GitHub Personal Access Token with `repo` scope for cross-repo checkout (Qobuzarr/Tidalarr/Brainarr) |
+
+If `CROSS_REPO_PAT` is not configured, the workflow prints a notice and skips the smoke test instead of failing.
 
 ### For Medium/Search Gates
 
@@ -128,7 +130,9 @@ gh workflow run multi-plugin-smoke-test.yml \
 1. **Add CROSS_REPO_PAT secret**
    - Go to: https://github.com/settings/tokens
    - Create a PAT (classic) with `repo` scope
-   - Add to: https://github.com/RicherTunes/Lidarr.Plugin.Common/settings/secrets/actions
+   - If running this workflow directly in `Lidarr.Plugin.Common`, add it to:
+     - https://github.com/RicherTunes/Lidarr.Plugin.Common/settings/secrets/actions
+   - If calling this workflow from a plugin repo via `workflow_call` + `secrets: inherit`, add it to the CALLER repo instead.
 
 2. **Run Basic Gate**
    ```bash
@@ -159,7 +163,7 @@ On failure (or always), the workflow uploads:
 ## Troubleshooting
 
 ### "CROSS_REPO_PAT secret is missing or empty"
-The workflow requires a PAT to checkout private plugin repositories. See "Required Secrets" above.
+The workflow will skip the smoke test (with a notice) when this secret is missing. Configure `CROSS_REPO_PAT` to enable cross-repo checkouts. See "Required Secrets" above.
 
 ### Local validation against an upstream Lidarr fix (host override)
 When the Lidarr host has a known bug (e.g., plugin loader issues) and you want to validate a fix before a new `pr-plugins-*` image is published, you can run the harness locally and **override a host assembly** via a Docker bind mount.
