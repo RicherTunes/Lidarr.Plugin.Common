@@ -371,7 +371,7 @@ The XP series tracks issues where tests pass on Windows but fail on Linux/Docker
 
 | ID | Issue | Status | Fix Location | PR |
 |----|-------|--------|--------------|-----|
-| XP1 | URI canonicalization: `/v1/endpoint` parsed as `file:///` on Linux | ⏳ Pending merge | AppleMusicarr `BuildRequestUri()` | [#23](https://github.com/RicherTunes/AppleMusicarr/pull/23) |
+| XP1 | URI canonicalization: `/v1/endpoint` parsed as `file:///` on Linux | ✅ Merged | AppleMusicarr `BuildRequestUri()` | [#23](https://github.com/RicherTunes/AppleMusicarr/pull/23) |
 | XP2 | (Reserved) | - | - | - |
 | XP3 | Reserved name sanitization tests | ✅ Done | - | - |
 | XP4 | AppleMusicarr test hygiene (hermetic mocks, skip semantics) | ✅ Merged | AppleMusicarr tests | [#22](https://github.com/RicherTunes/AppleMusicarr/pull/22) |
@@ -418,7 +418,7 @@ if (Uri.TryCreate(target, UriKind.Absolute, out var absolute) &&
 
 | Date | Change |
 |------|--------|
-| 2026-01-19 | XP1 root cause identified: file:// URI on Linux; fix in AppleMusicarr#23 (pending merge) |
+| 2026-01-19 | XP1 fixed: file:// URI on Linux; AppleMusicarr#23 merged |
 | 2026-01-19 | XP5 fixed + Docker verified: Brainarr top-up test flakiness (PR #387) |
 | 2026-01-19 | XP4 complete: AppleMusicarr test hygiene (PR #22) |
 | 2026-01-18 | Added Test Suite Hygiene section: verify-merge-train flags, smoke test behavior, integration quarantine policy |
