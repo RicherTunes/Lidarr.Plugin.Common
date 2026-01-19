@@ -12,17 +12,35 @@ namespace Lidarr.Plugin.Common.Tests
     /// <summary>
     /// XP1: Cross-Platform URI Canonicalization Acceptance Tests
     ///
-    /// These tests define the expected behavior for URI handling that MUST work
-    /// identically on Windows and Linux. Currently some tests fail on Linux due to
-    /// differences in how .NET resolves relative URIs against base URIs.
+    /// ╔══════════════════════════════════════════════════════════════════════════╗
+    /// ║  STATUS: EXPECTED TO FAIL ON LINUX/DOCKER                                ║
+    /// ║                                                                          ║
+    /// ║  These tests pass on Windows but fail on Linux due to differences in     ║
+    /// ║  how .NET resolves relative URIs. This is the core XP1 issue.            ║
+    /// ║                                                                          ║
+    /// ║  Run in Docker to see failures:                                          ║
+    /// ║    pwsh scripts/verify-merge-train.ps1 -Docker -Mode full                ║
+    /// ║      -SkipIntegration -SkipPerformance                                   ║
+    /// ║                                                                          ║
+    /// ║  Or target just this class:                                              ║
+    /// ║    docker run --rm -v $(pwd):/src mcr.microsoft.com/dotnet/sdk:8.0       ║
+    /// ║      dotnet test /src/tests --filter XP1                                 ║
+    /// ╚══════════════════════════════════════════════════════════════════════════╝
     ///
-    /// Acceptance Criteria:
+    /// HERMETIC: All tests use EchoUriHandler (no real DNS/HTTP).
+    ///
+    /// Acceptance Criteria (must pass on BOTH Windows and Linux):
     /// 1. Relative URIs with leading slash resolve correctly against BaseAddress
     /// 2. Query parameters are preserved during resolution
     /// 3. URI encoding is consistent across platforms
     /// 4. The resilience layer handles both absolute and relative URIs
     ///
-    /// Tracking: https://github.com/RicherTunes/lidarr.plugin.common/issues/XP1
+    /// Fix Touchpoints (for implementers):
+    /// - HttpClientExtensions.ExecuteWithResilienceAsyncCore (lines 293-302)
+    /// - Centralize URI resolution in one helper
+    /// - Always use new Uri(baseUri, relative), avoid string concatenation
+    ///
+    /// Tracking: https://github.com/RicherTunes/Lidarr.Plugin.Common/pull/305
     /// </summary>
     public class XP1_UriCanonicalizationTests
     {
