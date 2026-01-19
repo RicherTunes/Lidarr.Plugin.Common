@@ -19,6 +19,14 @@ namespace Lidarr.Plugin.Common.Utilities
         // Zero-width characters that should be removed
         private static readonly char[] ZeroWidthChars = { '\u200B', '\u200C', '\u200D', '\uFEFF' };
 
+        // Windows reserved file names (case-insensitive). For portability, we normalize these on all platforms.
+        private static readonly string[] ReservedWindowsDeviceNames =
+        {
+            "CON", "PRN", "AUX", "NUL",
+            "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+            "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9"
+        };
+
         /// <summary>
         /// Sanitizes a file name to be safe for file system storage.
         /// </summary>
@@ -59,8 +67,9 @@ namespace Lidarr.Plugin.Common.Utilities
             sanitized = sanitized.Trim();
 
             // Handle reserved Windows names
-            var reservedNames = new[] { "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9" };
-            if (reservedNames.Contains(sanitized.ToUpperInvariant()))
+            var dotIndex = sanitized.IndexOf('.');
+            var basePart = dotIndex >= 0 ? sanitized[..dotIndex] : sanitized;
+            if (ReservedWindowsDeviceNames.Contains(basePart.ToUpperInvariant()))
             {
                 sanitized = $"_{sanitized}";
             }

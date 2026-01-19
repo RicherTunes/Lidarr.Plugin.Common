@@ -17,6 +17,25 @@ namespace Lidarr.Plugin.Common.Utilities
             "LPT1","LPT2","LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9"
         };
 
+        private static bool IsWindowsReservedDeviceName(string fileName)
+        {
+            if (string.IsNullOrWhiteSpace(fileName))
+            {
+                return false;
+            }
+
+            var dotIndex = fileName.IndexOf('.');
+            var basePart = dotIndex >= 0 ? fileName[..dotIndex] : fileName;
+            basePart = basePart.TrimEnd(' ', '.');
+
+            if (basePart.Length == 0)
+            {
+                return false;
+            }
+
+            return ReservedNames.Contains(basePart.ToUpperInvariant());
+        }
+
         public static void MoveFile(string sourcePath, string destinationPath, bool overwrite)
         {
             if (string.IsNullOrWhiteSpace(sourcePath)) throw new ArgumentNullException(nameof(sourcePath));
@@ -41,8 +60,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
             // Reserved name guard AFTER trimming (defense in depth)
             // Windows treats CON, CON., CON.txt all as reserved
-            var upper = sanitized.ToUpperInvariant();
-            if (ReservedNames.Contains(upper))
+            if (IsWindowsReservedDeviceName(sanitized))
             {
                 sanitized = "_" + sanitized;
             }
@@ -58,8 +76,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 sanitized = sanitized.TrimEnd(' ', '.', '_', '-');
 
                 // Re-check after truncation in case we exposed a reserved name
-                upper = sanitized.ToUpperInvariant();
-                if (ReservedNames.Contains(upper))
+                if (IsWindowsReservedDeviceName(sanitized))
                 {
                     sanitized = "_" + sanitized;
                 }
