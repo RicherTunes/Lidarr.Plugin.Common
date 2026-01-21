@@ -415,6 +415,21 @@ function Invoke-PluginMerge {
         return
     }
 
+    # Verify ilrepack is available before attempting merge
+    $ilrepackPath = Get-Command 'ilrepack' -ErrorAction SilentlyContinue
+    if (-not $ilrepackPath) {
+        throw @"
+ILRepack not found on PATH. The -MergeAssemblies flag requires ILRepack to be installed.
+
+Options:
+  1. (Recommended) Don't use -MergeAssemblies. MSBuild PluginPackaging.targets handles
+     assembly merging during the build step automatically.
+  2. Install an ILRepack CLI and ensure the `ilrepack` executable is on PATH.
+
+Most plugins should NOT use -MergeAssemblies since the csproj build already merges.
+"@
+    }
+
     Write-Host "Merging assemblies:" -ForegroundColor Cyan
     $mergeCandidates | ForEach-Object { Write-Host "  $($_.Name)" -ForegroundColor DarkGray }
 
