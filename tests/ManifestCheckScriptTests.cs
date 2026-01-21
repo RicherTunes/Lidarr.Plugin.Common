@@ -103,6 +103,40 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Contains("MAN001", so + se, StringComparison.OrdinalIgnoreCase);
         }
 
+        [Fact]
+        public async Task ManifestCheck_Warns_On_Legacy_Keys_Man004()
+        {
+            using var dir = new TempDir();
+            var csproj = Path.Combine(dir.Path, "Test.csproj");
+            var manifest = Path.Combine(dir.Path, "plugin.json");
+
+            var csprojXml = """
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <Version>4.0.0</Version>
+    <TargetFramework>net8.0</TargetFramework>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.0.0" />
+  </ItemGroup>
+</Project>
+""";
+            await File.WriteAllTextAsync(csproj, csprojXml);
+
+            var manifestObj = new
+            {
+                version = "4.0.0",
+                apiVersion = "1.x",
+                minHostVersion = "10.0.0",
+                minimumVersion = "10.0.0"
+            };
+            await File.WriteAllTextAsync(manifest, JsonSerializer.Serialize(manifestObj));
+
+            var (code, stdout, stderr) = await RunPwshAsync("tools/ManifestCheck.ps1", $"-ProjectPath \"{csproj}\" -ManifestPath \"{manifest}\"");
+            Assert.Equal(0, code);
+            Assert.Contains("MAN004", stdout + stderr, StringComparison.OrdinalIgnoreCase);
+        }
+
         private static async Task<(int code, string stdout, string stderr)> RunPwshAsync(string scriptRelative, string args)
         {
             var script = Path.Combine(RepoRoot, scriptRelative);
@@ -150,4 +184,3 @@ namespace Lidarr.Plugin.Common.Tests
         }
     }
 }
-

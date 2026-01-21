@@ -146,6 +146,9 @@ if (-not $manifest.version) {
     throw "Manifest at '$ManifestPath' is missing 'version'."
 }
 
+$errorList = @()
+$warningList = @()
+
 # Check for legacy/deprecated manifest keys
 $legacyKeys = @{
     'minimumLidarrVersion' = 'minHostVersion'
@@ -213,9 +216,6 @@ elseif ($packageReference) {
 else {
     throw "Project '$ProjectPath' must reference $AbstractionsPackage either as a PackageReference or ProjectReference."
 }
-
-$errorList = @()
-$warningList = @()
 
 if ($manifest.version -ne $projectVersion) {
     $errorList += "Manifest version '$($manifest.version)' does not match project Version '$projectVersion'."
