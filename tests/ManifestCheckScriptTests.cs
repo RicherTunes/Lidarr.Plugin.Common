@@ -227,10 +227,10 @@ namespace Lidarr.Plugin.Common.Tests
 """;
             await File.WriteAllTextAsync(csprojPath, csprojXml);
 
-            var source = $"""
-namespace {rootNamespace};
+            var source = $$"""
+namespace {{rootNamespace}};
 
-public sealed class MarkerType {{ }}
+public sealed class MarkerType { }
 """;
             await File.WriteAllTextAsync(Path.Combine(root, "MarkerType.cs"), source);
 
