@@ -261,7 +261,7 @@ function New-PluginPackage {
         try {
             Expand-Archive -LiteralPath $zipPath -DestinationPath $verifyDir -Force
             Assert-CanonicalAbstractions -Path $verifyDir -ExpectedSha256 $canonicalResult.Sha256 | Out-Null
-            Write-Host "✓ Package verification passed" -ForegroundColor Green
+            Write-Host "[OK] Package verification passed" -ForegroundColor Green
         }
         finally {
             if (Test-Path $verifyDir) {
@@ -551,7 +551,8 @@ function Install-CanonicalAbstractions {
     }
     if (-not $ExpectedSha256 -and $config) {
         $ExpectedSha256 = $config.AbstractionsSha256
-        Write-Host "Using SHA256 from canonical-abstractions.json: $($ExpectedSha256.Substring(0,16))..." -ForegroundColor DarkGray
+        $sha256Preview = $ExpectedSha256.Substring(0, 16) + '...'
+        Write-Host "Using SHA256 from canonical-abstractions.json: $sha256Preview" -ForegroundColor DarkGray
     }
 
     if (-not $CommonVersion) {
@@ -626,7 +627,7 @@ function Install-CanonicalAbstractions {
         if ($actualHash -ne $expected) {
             throw "CANONICAL ABSTRACTIONS SHA256 MISMATCH!`nExpected: $expected`nActual:   $actualHash`nThis is a HARD GATE failure - packaging cannot proceed."
         }
-        Write-Host "✓ SHA256 verified against expected hash" -ForegroundColor Green
+        Write-Host "[OK] SHA256 verified against expected hash" -ForegroundColor Green
     }
 
     # Replace the build output's Abstractions.dll
@@ -646,7 +647,7 @@ function Install-CanonicalAbstractions {
         Copy-Item -LiteralPath $pdbSource -Destination $targetPdb -Force
     }
 
-    Write-Host "✓ Installed canonical Abstractions.dll (SHA256: $actualHash)" -ForegroundColor Green
+    Write-Host "[OK] Installed canonical Abstractions.dll (SHA256: $actualHash)" -ForegroundColor Green
 
     return @{
         Path = $targetDll
@@ -710,7 +711,8 @@ function Assert-CanonicalAbstractions {
 "@
     }
 
-    Write-Host "✓ Abstractions.dll verified: SHA256 matches canonical ($($expected.Substring(0,16))...)" -ForegroundColor Green
+    $hashPrefix = $expected.Substring(0, 16) + '...'
+    Write-Host "[OK] Abstractions.dll verified: SHA256 matches canonical ($hashPrefix)" -ForegroundColor Green
     return $true
 }
 
