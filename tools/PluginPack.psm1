@@ -64,7 +64,13 @@ function New-PluginPackage {
 
         [switch]$MergeAssemblies,
         [string]$IlRepackRsp = 'tools/ilrepack.rsp',
-        [string]$InternalizeExclude = 'tools/internalize.exclude'
+        [string]$InternalizeExclude = 'tools/internalize.exclude',
+
+        # Canonical Abstractions injection parameters
+        [string]$CanonicalAbstractionsVersion,
+        [string]$CanonicalAbstractionsSha256,
+        [string]$CanonicalAbstractionsPath,
+        [switch]$RequireCanonicalAbstractions
     )
 
     $csprojPath = Resolve-Path -LiteralPath $Csproj
@@ -133,6 +139,29 @@ function New-PluginPackage {
     # This matches PluginPackaging.targets behavior
     Invoke-PluginCleanup -PublishPath $publishPath -AssemblyName $assemblyName
 
+    # Step 3: Inject canonical Abstractions (if requested or required)
+    # This ensures all plugins ship with the exact same Abstractions binary
+    # Priority: 1) explicit parameters, 2) canonical-abstractions.json, 3) skip if not required
+    $doCanonicalInjection = $CanonicalAbstractionsVersion -or $CanonicalAbstractionsPath -or $RequireCanonicalAbstractions
+
+    $canonicalResult = $null
+    if ($doCanonicalInjection) {
+        $installParams = @{
+            PublishPath = $publishPath
+        }
+        if ($CanonicalAbstractionsVersion) {
+            $installParams['CommonVersion'] = $CanonicalAbstractionsVersion
+        }
+        if ($CanonicalAbstractionsSha256) {
+            $installParams['ExpectedSha256'] = $CanonicalAbstractionsSha256
+        }
+        if ($CanonicalAbstractionsPath) {
+            $installParams['CanonicalAbstractionsPath'] = $CanonicalAbstractionsPath
+        }
+        $canonicalResult = Install-CanonicalAbstractions @installParams   
+        Write-Host "Canonical Abstractions installed: v$($canonicalResult.Version)" -ForegroundColor Cyan
+    }
+
     $manifestJson = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
     $pluginId = if ($manifestJson.id) { $manifestJson.id } else { $assemblyName }
 
@@ -175,6 +204,23 @@ function New-PluginPackage {
 
     Compress-Archive -Path (Join-Path $publishPath '*') -DestinationPath $zipPath
     Write-Host "Created plugin package: $zipPath" -ForegroundColor Green
+
+    # Post-package verification: if canonical Abstractions was installed, verify it's in the ZIP
+    if ($doCanonicalInjection -and $canonicalResult) {
+        Write-Host "Verifying canonical Abstractions in package..." -ForegroundColor Cyan
+        $verifyDir = Join-Path ([IO.Path]::GetTempPath()) "verify-package-$(Get-Random)"
+        try {
+            Expand-Archive -LiteralPath $zipPath -DestinationPath $verifyDir -Force
+            Assert-CanonicalAbstractions -Path $verifyDir -ExpectedSha256 $canonicalResult.Sha256
+            Write-Host "✓ Package verification passed" -ForegroundColor Green
+        }
+        finally {
+            if (Test-Path $verifyDir) {
+                Remove-Item -LiteralPath $verifyDir -Recurse -Force -ErrorAction SilentlyContinue
+            }
+        }
+    }
+
     return $zipPath
 }
 
@@ -361,5 +407,263 @@ function Invoke-PluginMerge {
     }
 }
 
-Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage, Invoke-PluginCleanup
+function Get-CanonicalAbstractionsConfig {
+    <#
+    .SYNOPSIS
+    Reads the canonical-abstractions.json configuration file.
+
+    .DESCRIPTION
+    Returns the pinned version, Common SHA, and Abstractions SHA256 from the
+    canonical-abstractions.json file. This ensures reproducible builds.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $scriptRoot = Split-Path -Parent $PSCommandPath
+    $configPath = Join-Path $scriptRoot 'canonical-abstractions.json'
+
+    if (-not (Test-Path $configPath)) {
+        return $null
+    }
+
+    try {
+        $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+        return @{
+            Version = $config.version
+            CommonSha = $config.commonSha
+            AbstractionsSha256 = $config.abstractionsSha256
+            ReleaseUrl = $config.releaseUrl
+        }
+    }
+    catch {
+        Write-Warning "Failed to parse canonical-abstractions.json: $_"
+        return $null
+    }
+}
+
+function Install-CanonicalAbstractions {
+    <#
+    .SYNOPSIS
+    Injects the canonical Lidarr.Plugin.Abstractions.dll into the publish output.
+
+    .DESCRIPTION
+    Downloads the canonical Abstractions DLL from a Common release (or uses a local cache),
+    replaces the build output's copy, and verifies the SHA256 hash matches. This ensures all
+    plugins use the exact same Abstractions binary, eliminating drift.
+
+    HARD GATE: Build fails if verification fails.
+
+    .PARAMETER PublishPath
+        Directory containing the plugin build output.
+
+    .PARAMETER CommonVersion
+        Version of Common to download Abstractions from (e.g., "1.5.0").
+        If not provided, reads from canonical-abstractions.json.
+
+    .PARAMETER ExpectedSha256
+        Expected SHA256 hash. If not provided, reads from canonical-abstractions.json
+        or uses the hash from the release's .sha256 file.
+
+    .PARAMETER CanonicalAbstractionsPath
+        Optional local path to a pre-downloaded Abstractions.dll.
+        Use this for offline builds or Docker environments without GitHub access.
+
+    .PARAMETER CacheDirectory
+        Optional directory to cache downloaded Abstractions. Defaults to $env:TEMP/canonical-abstractions-cache.
+        If the file exists and hash matches, download is skipped.
+
+    .PARAMETER Repository
+        GitHub repository for Common. Defaults to "RicherTunes/Lidarr.Plugin.Common".
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$PublishPath,
+
+        [string]$CommonVersion,
+
+        [string]$ExpectedSha256,
+
+        [string]$CanonicalAbstractionsPath,
+
+        [string]$CacheDirectory,
+
+        [string]$Repository = "RicherTunes/Lidarr.Plugin.Common"
+    )
+
+    $ErrorActionPreference = 'Stop'
+    $scriptRoot = Split-Path -Parent $PSCommandPath
+
+    # Load config from canonical-abstractions.json if parameters not provided
+    $config = Get-CanonicalAbstractionsConfig
+    if (-not $CommonVersion -and $config) {
+        $CommonVersion = $config.Version
+        Write-Host "Using version from canonical-abstractions.json: $CommonVersion" -ForegroundColor DarkGray
+    }
+    if (-not $ExpectedSha256 -and $config) {
+        $ExpectedSha256 = $config.AbstractionsSha256
+        Write-Host "Using SHA256 from canonical-abstractions.json: $($ExpectedSha256.Substring(0,16))..." -ForegroundColor DarkGray
+    }
+
+    if (-not $CommonVersion) {
+        throw "CommonVersion is required. Provide -CommonVersion or ensure canonical-abstractions.json exists."
+    }
+
+    Write-Host "Installing canonical Abstractions from Common v$CommonVersion..." -ForegroundColor Cyan
+
+    # Option 1: Use local path if provided
+    if ($CanonicalAbstractionsPath -and (Test-Path $CanonicalAbstractionsPath)) {
+        Write-Host "Using local Abstractions from: $CanonicalAbstractionsPath" -ForegroundColor DarkGray
+        $canonicalDll = $CanonicalAbstractionsPath
+    }
+    else {
+        # Option 2: Check cache directory
+        if (-not $CacheDirectory) {
+            $CacheDirectory = Join-Path ([IO.Path]::GetTempPath()) 'canonical-abstractions-cache'
+        }
+        $cachedDll = Join-Path $CacheDirectory "v$CommonVersion" 'Lidarr.Plugin.Abstractions.dll'
+
+        if ((Test-Path $cachedDll) -and $ExpectedSha256) {
+            $cachedHash = (Get-FileHash -Path $cachedDll -Algorithm SHA256).Hash.ToLower()
+            if ($cachedHash -eq $ExpectedSha256.ToLower()) {
+                Write-Host "Using cached Abstractions (hash verified)" -ForegroundColor DarkGray
+                $canonicalDll = $cachedDll
+            }
+        }
+
+        # Option 3: Download from GitHub
+        if (-not $canonicalDll -or -not (Test-Path $canonicalDll)) {
+            $tempDir = Join-Path ([IO.Path]::GetTempPath()) "canonical-abstractions-$(Get-Random)"
+            New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+            try {
+                $getCanonicalScript = Join-Path $scriptRoot 'Get-CanonicalAbstractions.ps1'
+
+                if (-not (Test-Path $getCanonicalScript)) {
+                    throw "Get-CanonicalAbstractions.ps1 not found at $getCanonicalScript"
+                }
+
+                $canonicalDll = & $getCanonicalScript -Version $CommonVersion -OutputPath $tempDir -Repository $Repository
+                if (-not $canonicalDll -or -not (Test-Path $canonicalDll)) {
+                    throw "Failed to download canonical Abstractions.dll"
+                }
+
+                # Cache for future use
+                $cacheDir = Join-Path $CacheDirectory "v$CommonVersion"
+                if (-not (Test-Path $cacheDir)) {
+                    New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
+                }
+                Copy-Item -LiteralPath $canonicalDll -Destination (Join-Path $cacheDir 'Lidarr.Plugin.Abstractions.dll') -Force
+                $pdbPath = Join-Path $tempDir 'Lidarr.Plugin.Abstractions.pdb'
+                if (Test-Path $pdbPath) {
+                    Copy-Item -LiteralPath $pdbPath -Destination (Join-Path $cacheDir 'Lidarr.Plugin.Abstractions.pdb') -Force
+                }
+                Write-Host "Cached Abstractions for future builds" -ForegroundColor DarkGray
+            }
+            finally {
+                if ((Test-Path $tempDir) -and $tempDir -ne $CacheDirectory) {
+                    Remove-Item -LiteralPath $tempDir -Recurse -Force -ErrorAction SilentlyContinue
+                }
+            }
+        }
+    }
+
+    # Calculate hash of DLL
+    $actualHash = (Get-FileHash -Path $canonicalDll -Algorithm SHA256).Hash.ToLower()
+
+    # Verify against expected hash if provided
+    if ($ExpectedSha256) {
+        $expected = $ExpectedSha256.ToLower().Trim()
+        if ($actualHash -ne $expected) {
+            throw "CANONICAL ABSTRACTIONS SHA256 MISMATCH!`nExpected: $expected`nActual:   $actualHash`nThis is a HARD GATE failure - packaging cannot proceed."
+        }
+        Write-Host "✓ SHA256 verified against expected hash" -ForegroundColor Green
+    }
+
+    # Replace the build output's Abstractions.dll
+    $targetDll = Join-Path $PublishPath 'Lidarr.Plugin.Abstractions.dll'
+    Copy-Item -LiteralPath $canonicalDll -Destination $targetDll -Force
+
+    # Also copy PDB if available (check cache or local path)
+    $pdbSource = $null
+    if ($CanonicalAbstractionsPath) {
+        $pdbSource = [IO.Path]::ChangeExtension($CanonicalAbstractionsPath, '.pdb')
+    }
+    elseif ($CacheDirectory) {
+        $pdbSource = Join-Path $CacheDirectory "v$CommonVersion" 'Lidarr.Plugin.Abstractions.pdb'
+    }
+    if ($pdbSource -and (Test-Path $pdbSource)) {
+        $targetPdb = Join-Path $PublishPath 'Lidarr.Plugin.Abstractions.pdb'
+        Copy-Item -LiteralPath $pdbSource -Destination $targetPdb -Force
+    }
+
+    Write-Host "✓ Installed canonical Abstractions.dll (SHA256: $actualHash)" -ForegroundColor Green
+
+    return @{
+        Path = $targetDll
+        Sha256 = $actualHash
+        Version = $CommonVersion
+    }
+}
+
+function Assert-CanonicalAbstractions {
+    <#
+    .SYNOPSIS
+    Verifies the Abstractions.dll in publish output matches the canonical hash.
+
+    .DESCRIPTION
+    HARD GATE: Fails the build if the hash doesn't match the expected canonical hash.
+    Use this after packaging to verify the ZIP contains the correct Abstractions.
+
+    .PARAMETER Path
+        Path to the Abstractions.dll to verify (or directory containing it).
+
+    .PARAMETER ExpectedSha256
+        Expected SHA256 hash (canonical hash from Common release).
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$Path,
+
+        [Parameter(Mandatory = $true)]
+        [string]$ExpectedSha256
+    )
+
+    $ErrorActionPreference = 'Stop'
+
+    # Handle both file and directory paths
+    $dllPath = if (Test-Path $Path -PathType Container) {
+        Join-Path $Path 'Lidarr.Plugin.Abstractions.dll'
+    } else {
+        $Path
+    }
+
+    if (-not (Test-Path $dllPath)) {
+        throw "HARD GATE FAILURE: Abstractions.dll not found at $dllPath"
+    }
+
+    $actualHash = (Get-FileHash -Path $dllPath -Algorithm SHA256).Hash.ToLower()
+    $expected = $ExpectedSha256.ToLower().Trim()
+
+    if ($actualHash -ne $expected) {
+        throw @"
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    CANONICAL ABSTRACTIONS SHA256 MISMATCH                  ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  Expected: $expected                         ║
+║  Actual:   $actualHash                         ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║  HARD GATE: Packaging cannot proceed.                                      ║
+║  The Abstractions.dll in the package does not match the canonical binary.  ║
+║  Use Install-CanonicalAbstractions to inject the correct version.          ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+"@
+    }
+
+    Write-Host "✓ Abstractions.dll verified: SHA256 matches canonical ($($expected.Substring(0,16))...)" -ForegroundColor Green
+    return $true
+}
+
+Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage, Invoke-PluginCleanup, Get-CanonicalAbstractionsConfig, Install-CanonicalAbstractions, Assert-CanonicalAbstractions
 # end-snippet

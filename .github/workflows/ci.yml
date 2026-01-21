@@ -196,5 +196,16 @@ jobs:
         shell: pwsh
         run: ./scripts/tests/Test-ParityLint.ps1
 
+  plugin_pack_canonical_abstractions_test:
+    name: PluginPack Canonical Abstractions Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run canonical Abstractions packaging tests
+        shell: pwsh
+        run: ./scripts/tests/Test-PluginPackCanonicalAbstractions.ps1
+
   # Remove separate test publishing to avoid third-party actions
   # pack_dry_run job intentionally omitted for PR CI; release builds handle packing
