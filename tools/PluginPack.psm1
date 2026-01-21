@@ -31,6 +31,25 @@ function Get-PluginOutput {
 }
 
 function Test-PluginManifest {
+    <#
+    .SYNOPSIS
+    Validates plugin manifest against schema and optionally verifies entrypoints.
+
+    .PARAMETER Csproj
+        Path to the .csproj project file.
+
+    .PARAMETER Manifest
+        Path to the plugin.json manifest file.
+
+    .PARAMETER AbstractionsPackage
+        Name of the Abstractions NuGet package. Default: "Lidarr.Plugin.Abstractions"
+
+    .PARAMETER PublishPath
+        Path to the publish output directory (for entrypoint resolution).
+
+    .PARAMETER ResolveEntryPoints
+        When specified, verifies entrypoint types exist in the built assembly.
+    #>
     [CmdletBinding()]
     param(
         [Parameter(Mandatory = $true)]
@@ -39,12 +58,30 @@ function Test-PluginManifest {
         [Parameter(Mandatory = $true)]
         [string]$Manifest,
 
-        [string]$AbstractionsPackage = 'Lidarr.Plugin.Abstractions'
+        [string]$AbstractionsPackage = 'Lidarr.Plugin.Abstractions',
+
+        [string]$PublishPath,
+
+        [switch]$ResolveEntryPoints
     )
 
     $scriptRoot = Split-Path -Parent $PSCommandPath
     $manifestScript = Join-Path $scriptRoot 'ManifestCheck.ps1'
-    & $manifestScript -ProjectPath $Csproj -ManifestPath $Manifest -AbstractionsPackage $AbstractionsPackage
+
+    $params = @{
+        ProjectPath = $Csproj
+        ManifestPath = $Manifest
+        AbstractionsPackage = $AbstractionsPackage
+    }
+
+    if ($PublishPath) {
+        $params['PublishPath'] = $PublishPath
+    }
+    if ($ResolveEntryPoints) {
+        $params['ResolveEntryPoints'] = $true
+    }
+
+    & $manifestScript @params
     if ($LASTEXITCODE -ne 0) {
         throw "Manifest validation failed for $Manifest."
     }
@@ -70,13 +107,17 @@ function New-PluginPackage {
         [string]$CanonicalAbstractionsVersion,
         [string]$CanonicalAbstractionsSha256,
         [string]$CanonicalAbstractionsPath,
-        [switch]$RequireCanonicalAbstractions
+        [switch]$RequireCanonicalAbstractions,
+
+        # Entrypoint validation
+        [switch]$ResolveEntryPoints
     )
 
     $csprojPath = Resolve-Path -LiteralPath $Csproj
     $manifestPath = Resolve-Path -LiteralPath $Manifest
     $publishPath = Get-PluginOutput -Csproj $csprojPath -Framework $Framework -Configuration $Configuration
 
+    # Basic manifest validation first (before any assembly modifications)
     Test-PluginManifest -Csproj $csprojPath -Manifest $manifestPath
 
     # Ensure the validated manifest is included in the final package.
@@ -158,8 +199,16 @@ function New-PluginPackage {
         if ($CanonicalAbstractionsPath) {
             $installParams['CanonicalAbstractionsPath'] = $CanonicalAbstractionsPath
         }
-        $canonicalResult = Install-CanonicalAbstractions @installParams   
+        $canonicalResult = Install-CanonicalAbstractions @installParams
         Write-Host "Canonical Abstractions installed: v$($canonicalResult.Version)" -ForegroundColor Cyan
+    }
+
+    # Step 4: Entrypoint validation (after all assembly modifications)
+    # Verifies that declared entrypoint types exist in the built assembly
+    if ($ResolveEntryPoints) {
+        Write-Host "Validating entrypoint types..." -ForegroundColor Cyan
+        Test-PluginManifest -Csproj $csprojPath -Manifest $manifestPath -PublishPath $publishPath -ResolveEntryPoints
+        Write-Host "Entrypoint validation passed" -ForegroundColor Green
     }
 
     $manifestJson = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json

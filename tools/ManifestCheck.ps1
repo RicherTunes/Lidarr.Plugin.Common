@@ -1,5 +1,57 @@
 # snippet:manifest-ci
 # snippet-skip-compile
+<#
+.SYNOPSIS
+    Validates plugin manifest (plugin.json) against schema and optionally verifies entrypoints exist in built assembly.
+
+.DESCRIPTION
+    Performs multi-level validation of a Lidarr plugin manifest:
+
+    Level 1 - Schema validation:
+      - Required fields present (id, name, version, apiVersion, minHostVersion)
+      - Field formats valid (semver patterns, lowercase id, etc.)
+      - Version matches csproj
+
+    Level 2 - Package alignment:
+      - Abstractions package version aligns with apiVersion
+      - Target frameworks match
+
+    Level 3 - Entrypoint resolution (with -ResolveEntryPoints):
+      - Main DLL exists in publish output
+      - Types in rootNamespace exist in assembly
+      - Plugin interface implementations discoverable
+
+.PARAMETER ProjectPath
+    Path to the .csproj project file.
+
+.PARAMETER ManifestPath
+    Path to the plugin.json manifest file.
+
+.PARAMETER AbstractionsPackage
+    Name of the Abstractions NuGet package. Default: "Lidarr.Plugin.Abstractions"
+
+.PARAMETER Strict
+    Treat warnings as errors.
+
+.PARAMETER JsonOutput
+    Output results as JSON for CI integration.
+
+.PARAMETER PublishPath
+    Path to the publish output directory (for entrypoint resolution).
+
+.PARAMETER ResolveEntryPoints
+    When specified, loads the built assembly and verifies entrypoint types exist.
+    Requires -PublishPath to be specified.
+
+.EXAMPLE
+    # Basic schema validation
+    .\ManifestCheck.ps1 -ProjectPath src/MyPlugin/MyPlugin.csproj -ManifestPath plugin.json
+
+.EXAMPLE
+    # Full validation with entrypoint resolution
+    .\ManifestCheck.ps1 -ProjectPath src/MyPlugin/MyPlugin.csproj -ManifestPath plugin.json `
+        -PublishPath artifacts/publish/net8.0/Release -ResolveEntryPoints
+#>
 param(
     [Parameter(Mandatory = $true)]
     [string]$ProjectPath,
@@ -11,7 +63,11 @@ param(
 
     [switch]$Strict,
 
-    [switch]$JsonOutput
+    [switch]$JsonOutput,
+
+    [string]$PublishPath,
+
+    [switch]$ResolveEntryPoints
 )
 
 $ErrorActionPreference = 'Stop'
@@ -200,6 +256,108 @@ if ($manifest.targets) {
     }
     if ($missing.Count -gt 0) {
         $errorList += "Project is missing TargetFramework(s): $($missing -join ', ') referenced in manifest.targets."
+    }
+}
+
+# ============================================================================
+# Level 3: Entrypoint Resolution (when -ResolveEntryPoints is specified)
+# ============================================================================
+
+if ($ResolveEntryPoints) {
+    if (-not $PublishPath) {
+        $errorList += "MAN002: -PublishPath is required when using -ResolveEntryPoints"
+    }
+    elseif (-not (Test-Path -LiteralPath $PublishPath)) {
+        $errorList += "MAN002: Publish path not found: $PublishPath"
+    }
+    else {
+        # Determine main DLL name
+        $mainDll = $manifest.main
+        if (-not $mainDll) {
+            # Infer from rootNamespace or id
+            if ($manifest.rootNamespace) {
+                $mainDll = "$($manifest.rootNamespace).dll"
+            }
+            else {
+                # Common pattern: Lidarr.Plugin.<Id>.dll
+                $id = $manifest.id
+                $capitalizedId = $id.Substring(0,1).ToUpper() + $id.Substring(1)
+                $mainDll = "Lidarr.Plugin.$capitalizedId.dll"
+            }
+            $warningList += "MAN002: No 'main' field in manifest; inferring: $mainDll"
+        }
+
+        $mainDllPath = Join-Path $PublishPath $mainDll
+        if (-not (Test-Path -LiteralPath $mainDllPath)) {
+            $errorList += "MAN002: Main DLL not found in publish output: $mainDll"
+        }
+        else {
+            # Try to load assembly and inspect types using reflection metadata
+            try {
+                Add-Type -AssemblyName 'System.Reflection.Metadata' -ErrorAction SilentlyContinue
+
+                $assemblyBytes = [System.IO.File]::ReadAllBytes($mainDllPath)
+                $memStream = [System.IO.MemoryStream]::new($assemblyBytes)
+                $peReader = [System.Reflection.PortableExecutable.PEReader]::new($memStream)
+                $metadataReader = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($peReader)
+
+                # Check for expected namespace
+                $rootNamespace = $manifest.rootNamespace
+                if ($rootNamespace) {
+                    $foundNamespace = $false
+                    foreach ($typeHandle in $metadataReader.TypeDefinitions) {
+                        $typeDef = $metadataReader.GetTypeDefinition($typeHandle)
+                        $ns = $metadataReader.GetString($typeDef.Namespace)
+                        if ($ns -eq $rootNamespace -or $ns.StartsWith("$rootNamespace.")) {
+                            $foundNamespace = $true
+                            break
+                        }
+                    }
+                    if (-not $foundNamespace) {
+                        $errorList += "MAN003: No types found in declared rootNamespace: $rootNamespace"
+                    }
+                }
+
+                # Look for plugin interface implementations
+                # These are discoverable by Lidarr's plugin loader
+                $pluginTypePatterns = @(
+                    'Indexer',
+                    'DownloadClient',
+                    'ImportList'
+                )
+
+                $foundPluginTypes = @()
+                foreach ($typeHandle in $metadataReader.TypeDefinitions) {
+                    $typeDef = $metadataReader.GetTypeDefinition($typeHandle)
+                    $typeName = $metadataReader.GetString($typeDef.Name)
+                    $ns = $metadataReader.GetString($typeDef.Namespace)
+
+                    # Skip compiler-generated and nested types
+                    if ($typeName.StartsWith('<') -or $typeName.Contains('+')) { continue }
+
+                    # Check if type name matches plugin patterns
+                    foreach ($pattern in $pluginTypePatterns) {
+                        if ($typeName -match $pattern -and $ns -like "$($manifest.rootNamespace)*") {
+                            $foundPluginTypes += "$ns.$typeName"
+                            break
+                        }
+                    }
+                }
+
+                if ($foundPluginTypes.Count -eq 0) {
+                    $warningList += "MAN003: No obvious plugin types found (Indexer/DownloadClient/ImportList) in $mainDll"
+                }
+                elseif (-not $JsonOutput) {
+                    Write-Host "Found plugin types: $($foundPluginTypes -join ', ')" -ForegroundColor Green
+                }
+
+                $peReader.Dispose()
+                $memStream.Dispose()
+            }
+            catch {
+                $warningList += "MAN002: Could not inspect assembly metadata: $_"
+            }
+        }
     }
 }
 
