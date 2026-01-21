@@ -1,18 +1,30 @@
 # Ecosystem Parity Roadmap
 
-This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr).
+This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr, AppleMusicarr).
 
 ## Current Status
 
-| Dimension | Tidalarr | Qobuzarr | Brainarr | Common |
-|-----------|----------|----------|----------|--------|
-| **Packaging** | ✅ | ✅ | ✅ | Policy complete |
-| **Naming/Path** | ✅ | ✅ | N/A | FileSystemUtilities |
-| **Concurrency** | ✅ | ✅ | N/A | BaseDownloadOrchestrator |
-| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | Single-authority pattern |
-| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | JSON schema (PR #187) |
+| Dimension | Tidalarr | Qobuzarr | Brainarr | AppleMusicarr | Common |
+|-----------|----------|----------|----------|---------------|--------|
+| **Packaging** | ✅ | ✅ | ✅ | ✅ | Policy complete |
+| **Canonical Abstractions** | ✅ | ✅ | ✅ | ✅ | v1.5.0 pinned |
+| **Manifest Entrypoints** | ✅ | ✅ | ✅ | ✅ | -ResolveEntryPoints |
+| **Naming/Path** | ✅ | ✅ | N/A | N/A | FileSystemUtilities |
+| **Concurrency** | ✅ | ✅ | N/A | N/A | BaseDownloadOrchestrator |
+| **Auth Lifecycle** | ✅ | ✅ | N/A | Custom | Single-authority pattern |
+| **Token Protection** | ✅ | ✅ | N/A | Custom | See note below |
+| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | ⚠️ Metadata-only | JSON schema |
 
-**Overall Ecosystem Parity: ~97%**
+**Overall Ecosystem Parity: ~95%**
+
+### AppleMusicarr Notes
+
+AppleMusicarr is a **metadata-only** plugin (no audio downloads) with different characteristics:
+- **Naming/Path**: Not applicable (no file downloads)
+- **Concurrency**: Not applicable (no download orchestration)
+- **Auth Lifecycle**: Uses Apple Music API authentication (different from OAuth2 PKCE)
+- **Token Protection**: Custom implementation in `AppleMusicSecretProtection.cs` (migration target: Common facade)
+- **E2E Gates**: Appropriate gates are schema validation and import list sync (no download/grab gates)
 
 ---
 
@@ -20,10 +32,12 @@ This document tracks progress toward full structural and behavioral parity acros
 
 Full ecosystem parity is achieved when:
 
-- [ ] All three plugins ship the 5-DLL type-identity contract
-- [ ] Both streaming plugins produce identical filename format on multi-disc and edge sanitization
+- [x] All four plugins use canonical Abstractions with SHA256 verification
+- [x] All four plugins validate manifest entrypoints via -ResolveEntryPoints
+- [ ] Both streaming plugins (Qobuzarr, Tidalarr) produce identical filename format on multi-disc and edge sanitization
+- [ ] AppleMusicarr token protection migrated to Common facade (dual-read, new-write)
 - [ ] Persistent single-plugin E2E gates pass for Qobuzarr and Tidalarr
-- [ ] Multi-plugin schema gate passes for 2 plugins, then 3 plugins (when host supports)
+- [ ] Multi-plugin schema gate passes for 2+ plugins (when host supports)
 
 **No-Drift Rule**: Any new filename/path logic must either live in Common or delegate to Common.
 

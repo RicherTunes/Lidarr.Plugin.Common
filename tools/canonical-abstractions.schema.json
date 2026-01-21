@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Canonical Abstractions Configuration",
+  "description": "Pinned configuration for Lidarr.Plugin.Abstractions.dll to ensure all plugins use identical binaries.",
+  "type": "object",
+  "required": ["version", "commonSha", "abstractionsSha256"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference."
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of this configuration."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(?:-.+)?$",
+      "description": "Common release version (semver)."
+    },
+    "commonSha": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{40}$",
+      "description": "Full Git SHA of the Common commit this version is built from."
+    },
+    "abstractionsSha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$",
+      "description": "SHA256 hash (lowercase hex) of the canonical Abstractions.dll."
+    },
+    "releaseUrl": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the GitHub release containing this version."
+    },
+    "lastUpdated": {
+      "type": "string",
+      "format": "date",
+      "description": "Date this configuration was last updated (YYYY-MM-DD)."
+    }
+  },
+  "additionalProperties": false
+}

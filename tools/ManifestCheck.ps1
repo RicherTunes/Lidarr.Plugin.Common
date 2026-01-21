@@ -146,6 +146,19 @@ if (-not $manifest.version) {
     throw "Manifest at '$ManifestPath' is missing 'version'."
 }
 
+# Check for legacy/deprecated manifest keys
+$legacyKeys = @{
+    'minimumLidarrVersion' = 'minHostVersion'
+    'minimumVersion' = 'minHostVersion'
+    'entryPoint' = 'main'
+    'dll' = 'main'
+}
+foreach ($legacy in $legacyKeys.GetEnumerator()) {
+    if ($manifest.PSObject.Properties[$legacy.Key]) {
+        $warningList += "MAN004: Manifest uses deprecated key '$($legacy.Key)'; use '$($legacy.Value)' instead."
+    }
+}
+
 # Check for ProjectReference first (preferred for development with submodules)
 # Also check for Lidarr.Plugin.Common which transitively includes Abstractions
 $projectReference = $project.SelectSingleNode("//msb:Project/msb:ItemGroup/msb:ProjectReference[contains(@Include, 'Lidarr.Plugin.Abstractions.csproj') or contains(@Include, 'Abstractions') or contains(@Include, 'Lidarr.Plugin.Common.csproj')]", $nsmgr)
