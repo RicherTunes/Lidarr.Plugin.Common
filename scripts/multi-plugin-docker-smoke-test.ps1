@@ -534,6 +534,102 @@ function Wait-DirectoryHasAnyFiles {
     return $null
 }
 
+function Invoke-InContainerApiGet {
+    param(
+        [Parameter(Mandatory = $true)][string]$ContainerName,
+        [Parameter(Mandatory = $true)][string]$ApiPath,
+        [Parameter(Mandatory = $true)][hashtable]$Headers,
+        [Parameter()][int]$RetryCount = 3,
+        [Parameter()][int]$BaseDelayMs = 500
+    )
+
+    $url = "http://localhost:8686${ApiPath}"
+    $headerArgs = @()
+    foreach ($key in $Headers.Keys) {
+        $headerArgs += @("-H", "${key}: $($Headers[$key])")
+    }
+
+    $attempt = 0
+    while ($attempt -le $RetryCount) {
+        $attempt++
+
+        try {
+            $output = & docker exec $ContainerName curl -sS -w "`n%{http_code}" -X GET @headerArgs $url 2>&1
+            $lines = $output -split "`n"
+            $statusCode = [int]$lines[-1].Trim()
+            $body = $lines[0..($lines.Count - 2)] -join "`n"
+
+            if ($statusCode -eq 200) {
+                return $body
+            }
+
+            if ($statusCode -eq 404 -or $statusCode -eq 500 -or $statusCode -ge 501) {
+                throw "HTTP $statusCode (non-retryable): $body"
+            }
+        }
+        catch {
+            if ($attempt -gt $RetryCount) { throw }
+        }
+
+        $delay = [Math]::Pow(2, $attempt - 1) * $BaseDelayMs
+        $delayMs = [Math]::Min($delay, 5000)
+        Start-Sleep -Milliseconds $delayMs
+    }
+
+    throw "Failed after ${RetryCount} retries for $ApiPath"
+}
+
+function Test-LidarrApiWithBackoff {
+    param(
+        [Parameter(Mandatory = $true)][string]$ContainerName,
+        [Parameter(Mandatory = $true)][string]$LidarrUrl,
+        [Parameter(Mandatory = $true)][hashtable]$Headers,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds,
+        [Parameter()][switch]$UseInContainerProbe = $true
+    )
+
+    $start = Get-Date
+    $attempt = 0
+
+    while (((Get-Date) - $start).TotalSeconds -lt $TimeoutSeconds) {
+        $attempt++
+        $elapsed = ((Get-Date) - $start).TotalSeconds
+        Write-Host "[$attempt] Checking Lidarr API... (${elapsed:F1}s elapsed)" -ForegroundColor DarkGray
+
+        try {
+            if ($UseInContainerProbe) {
+                try {
+                    $body = Invoke-InContainerApiGet -ContainerName $ContainerName -ApiPath "/api/v1/system/status" -Headers $Headers -RetryCount 2 -BaseDelayMs 200
+                    if (-not [string]::IsNullOrWhiteSpace($body)) {
+                        $status = $body | ConvertFrom-Json
+                        if ($status -and $status.version) {
+                            Write-Host "In-container probe succeeded: v$($status.version)" -ForegroundColor Green
+                            return $status
+                        }
+                    }
+                }
+                catch {
+                    Write-Host "In-container probe failed (fallback to host): $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+            }
+
+            $resp = Invoke-WebRequest -Uri "$LidarrUrl/api/v1/system/status" -Headers $headers -TimeoutSec 5 -ErrorAction Stop
+            if ($resp.StatusCode -eq 200) {
+                $status = $resp.Content | ConvertFrom-Json
+                Write-Host "Host-side probe succeeded: v$($status.version)" -ForegroundColor Green
+                return $status
+            }
+        }
+        catch {
+            $backoff = [Math]::Min([Math]::Pow(2, $attempt - 1) * 1, 10)
+            Write-Host "  Retry in ${backoff}s..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds $backoff
+        }
+    }
+
+    return $null
+}
+
 function Cleanup {
     if (-not $KeepRunning) {
         & docker rm -f $ContainerName 2>$null | Out-Null
@@ -713,20 +809,7 @@ try {
     $headers = @{ "X-Api-Key" = $apiKey.Trim() }
 
     Write-Host "Waiting for Lidarr API..." -ForegroundColor Yellow
-    $start = Get-Date
-    $status = $null
-    while (((Get-Date) - $start).TotalSeconds -lt $StartupTimeoutSeconds) {
-        try {
-            $resp = Invoke-WebRequest -Uri "$lidarrUrl/api/v1/system/status" -Headers $headers -TimeoutSec 5 -ErrorAction Stop
-            if ($resp.StatusCode -eq 200) {
-                $status = $resp.Content | ConvertFrom-Json
-                break
-            }
-        }
-        catch {
-            Start-Sleep -Seconds 3
-        }
-    }
+    $status = Test-LidarrApiWithBackoff -ContainerName $ContainerName -LidarrUrl $lidarrUrl -Headers $headers -TimeoutSeconds $StartupTimeoutSeconds -UseInContainerProbe
 
     if ($status -eq $null) {
         Write-Host "=== Container logs ===" -ForegroundColor Yellow
@@ -751,8 +834,33 @@ try {
         }
     }
 
+    $schemaAttempt = 0
     while (((Get-Date) - $schemaStart).TotalSeconds -lt $SchemaTimeoutSeconds) {
+        $schemaAttempt++
+        $elapsed = ((Get-Date) - $schemaStart).TotalSeconds
+        Write-Host "[$schemaAttempt] Fetching schemas... (${elapsed:F1}s elapsed)" -ForegroundColor DarkGray
+
         try {
+            try {
+                $indexerBody = Invoke-InContainerApiGet -ContainerName $ContainerName -ApiPath "/api/v1/indexer/schema" -Headers $headers -RetryCount 2 -BaseDelayMs 300
+                $downloadBody = Invoke-InContainerApiGet -ContainerName $ContainerName -ApiPath "/api/v1/downloadclient/schema" -Headers $headers -RetryCount 2 -BaseDelayMs 300
+                if ($anyImportListsExpected) {
+                    $importListBody = Invoke-InContainerApiGet -ContainerName $ContainerName -ApiPath "/api/v1/importlist/schema" -Headers $headers -RetryCount 2 -BaseDelayMs 300
+                }
+
+                $indexerSchemas = $indexerBody | ConvertFrom-Json
+                $downloadClientSchemas = $downloadBody | ConvertFrom-Json
+                if ($anyImportListsExpected) {
+                    $importListSchemas = $importListBody | ConvertFrom-Json
+                }
+
+                Write-Host "In-container schema fetch succeeded" -ForegroundColor Green
+                break
+            }
+            catch {
+                Write-Host "In-container schema fetch failed (fallback to host): $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+
             $indexerResponse = Invoke-WebRequest -Uri "$lidarrUrl/api/v1/indexer/schema" -Headers $headers -TimeoutSec 10 -ErrorAction Stop
             $downloadResponse = Invoke-WebRequest -Uri "$lidarrUrl/api/v1/downloadclient/schema" -Headers $headers -TimeoutSec 10 -ErrorAction Stop
             if ($anyImportListsExpected) {
@@ -765,12 +873,13 @@ try {
                 $importListSchemas = $importListResponse.Content | ConvertFrom-Json
             }
 
-            if ($indexerSchemas -and $downloadClientSchemas -and (-not $anyImportListsExpected -or $importListSchemas)) {
-                break
-            }
+            Write-Host "Host-side schema fetch succeeded" -ForegroundColor Green
+            break
         }
         catch {
-            Start-Sleep -Seconds 5
+            $backoff = [Math]::Min([Math]::Pow(2, $schemaAttempt - 1) * 2, 10)
+            Write-Host "  Retry in ${backoff}s..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds $backoff
         }
     }
 
