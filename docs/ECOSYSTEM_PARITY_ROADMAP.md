@@ -100,9 +100,9 @@ signatures against the host.
 - [ ] **All Plugins**: Packaging tests assert the Common policy (and fail on host-shared assemblies in the ZIP)
 
 ### 1.2 Naming Contract Tests
-- [ ] Multi-disc: D01Txx/D02Txx format validation
-- [ ] Extension normalization: `.flac` and `flac` both produce `.flac`
-- [ ] Unicode normalization: NFC form consistency
+- [x] **Qobuzarr**: Multi-disc prefix + extension mapping + NFC normalization (`qobuzarr/src/Utilities/TrackFileNameBuilder.cs`, `qobuzarr/tests/Qobuzarr.Tests/Unit/Utilities/TrackFileNameBuilderTests.cs`)
+- [x] **Tidalarr**: Multi-disc prefix + extension mapping + NFC normalization (`tidalarr/src/Tidalarr/Integration/TidalDownloadClient.cs`, `tidalarr/tests/Tidalarr.Tests/TidalDownloadClientFileNameTests.cs`)
+- [x] **Common**: Extracted `FileNameAssertions.cs` into `testkit/Assertions/` with shared contract helpers (NFC normalization, invalid chars, reserved names, multi-disc prefix, extension validation)
 
 ### 1.3 Common SHA Verification
 - [x] Tidalarr: Uses ext-common-sha.txt
@@ -115,13 +115,13 @@ signatures against the host.
 
 ### 2.0 Blockers / Drift Dragons (Must Fix)
 
-- [ ] **Brainarr**: Remove committed local state (`brainarr/.worktrees/`, `brainarr/_plugins/`) and add `.gitignore` + CI guard (fail if reintroduced).
-- [ ] **Brainarr**: Fix `brainarr/build.ps1` corruption (parsing errors at `brainarr/build.ps1:56` and `brainarr/build.ps1:180`) and add CI "parse check" step (`pwsh -File build.ps1 -Help`).
-- [ ] **Brainarr**: Align `brainarr/.github/workflows/plugin-package.yml` with packaging policy (stop copying `FluentValidation.dll` and `Microsoft.Extensions.*.Abstractions.dll`; use the unified `New-PluginPackage` pipeline).
-- [ ] **AppleMusicarr**: Fix non-portable submodule URL (`applemusicarr/.gitmodules` contains a local drive path for `ext/AppleMusiSharp`).
-- [ ] **AppleMusicarr**: Audit/deprecate legacy packaging script (`applemusicarr/scripts/pack-plugin.ps1` builds `net6.0` and packages `manifest.json`) to avoid split-brain packaging routes.
-- [ ] **Qobuzarr**: Treat `AppSecret` as a secret in UI (`qobuzarr/src/Indexers/QobuzIndexerSettings.cs:~77` should use `FieldType.Password` + `PrivacyLevel.Password`).
-- [ ] **Common**: Make `New-PluginPackage -MergeAssemblies` deterministic in clean CI (currently `tools/PluginPack.psm1` invokes an external `ilrepack` executable); either provision it explicitly or remove the code path in favor of `build/PluginPackaging.targets`.
+- [x] **Brainarr**: Remove committed local state (`brainarr/.worktrees/`, `brainarr/_plugins/`) and add `.gitignore` + CI guard (commit 09fef6c).
+- [x] **Brainarr**: Fix `brainarr/build.ps1` corruption (was failing at `brainarr/build.ps1:56` and `brainarr/build.ps1:180`) and add CI "parse check" step (`brainarr/.github/workflows/sanity-build.yml`).
+- [x] **Brainarr**: Align `brainarr/.github/workflows/packaging-closure.yml` with packaging policy (commit 1d0144e - now uses unified `New-PluginPackage` pipeline).
+- [x] **AppleMusicarr**: Fix non-portable submodule URL (commit 4b171cc - `.gitmodules` now uses HTTPS URL for `ext/AppleMusiSharp`).
+- [x] **AppleMusicarr**: Removed legacy packaging script (commit 7912a09 - deleted `scripts/pack-plugin.ps1`, CI now uses `build.ps1 Release -Package`).
+- [x] **Qobuzarr**: Treat `AppSecret` as a secret in UI (commit 45c4d3f - now uses `FieldType.Password` + `PrivacyLevel.Password`).
+- [x] **Common**: Make `New-PluginPackage -MergeAssemblies` deterministic (commit 06e476e - added fail-fast guard when ilrepack missing; no one uses this flag so effectively deprecated).
 
 **Note**: These are parity items because they cause drift, make local builds non-reproducible, or produce packages that can diverge from the canonical policy.
 
