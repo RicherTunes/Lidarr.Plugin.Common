@@ -34,6 +34,7 @@ Full ecosystem parity is achieved when:
 
 - [x] All four plugins use canonical Abstractions with SHA256 verification
 - [x] All four plugins validate manifest entrypoints via -ResolveEntryPoints
+- [ ] All four plugins enforce non-negotiable CI gates via the reusable workflow in `lidarr.plugin.common` (`.github/workflows/packaging-gates.yml`)
 - [ ] Both streaming plugins (Qobuzarr, Tidalarr) produce identical filename format on multi-disc and edge sanitization
 - [ ] AppleMusicarr token protection migrated to Common facade (dual-read, new-write)
 - [ ] Persistent single-plugin E2E gates pass for Qobuzarr and Tidalarr
@@ -46,10 +47,13 @@ Full ecosystem parity is achieved when:
 ## Type-Identity Assembly Policy
 
 ### Required Assemblies (All Plugins)
-Plugins **MUST** ship these assemblies for proper plugin discovery and type identity:
-- `Lidarr.Plugin.Abstractions.dll` - Plugin discovery contract
-- `Microsoft.Extensions.DependencyInjection.Abstractions.dll` - DI type identity
-- `Microsoft.Extensions.Logging.Abstractions.dll` - Logging type identity
+Plugins **MUST** ship these assemblies in the plugin payload:
+- `Lidarr.Plugin.Abstractions.dll` - Canonical ABI contract (all plugins must ship identical bytes; enforced by `tools/canonical-abstractions.json`)
+
+### Host-Shared Assemblies (Do Not Ship)
+Plugins **MUST NOT** ship these assemblies (host provides them; shipping causes cross-ALC type identity breakage):
+- `Microsoft.Extensions.DependencyInjection.Abstractions.dll` - breaks `IServiceProvider`/DI contracts
+- `Microsoft.Extensions.Logging.Abstractions.dll` - breaks `ILogger` contracts
 
 ### Forbidden Assemblies (All Plugins)
 Plugins **MUST NOT** ship these assemblies:
@@ -92,10 +96,8 @@ signatures against the host.
 ## Phase 1: Lock Contracts with Tests (High Priority)
 
 ### 1.1 Packaging Content Tests
-- [x] **Common**: PluginPackageValidator with TypeIdentityAssemblies
-- [x] **Tidalarr**: PackagingPolicyBaseline updated to 5-DLL contract
-- [x] **Qobuzarr**: PackagingPolicyTests with RequiredTypeIdentityAssemblies
-- [x] **Brainarr**: BrainarrPackagingPolicyTests with 4-DLL contract (no FluentValidation)
+- [x] **Common**: `tools/PluginPack.psm1` enforces the DLL cleanup/merge policy (packages must ship the plugin DLL + canonical `Lidarr.Plugin.Abstractions.dll`; non-DLL artifacts like `plugin.json`, `manifest.json`, `.lidarr.plugin` may also be present depending on plugin/host needs)
+- [ ] **All Plugins**: Packaging tests assert the Common policy (and fail on host-shared assemblies in the ZIP)
 
 ### 1.2 Naming Contract Tests
 - [ ] Multi-disc: D01Txx/D02Txx format validation
@@ -110,6 +112,18 @@ signatures against the host.
 ---
 
 ## Phase 2: Reduce Code Drift (Tech Debt)
+
+### 2.0 Blockers / Drift Dragons (Must Fix)
+
+- [ ] **Brainarr**: Remove committed local state (`brainarr/.worktrees/`, `brainarr/_plugins/`) and add `.gitignore` + CI guard (fail if reintroduced).
+- [ ] **Brainarr**: Fix `brainarr/build.ps1` corruption (parsing errors at `brainarr/build.ps1:56` and `brainarr/build.ps1:180`) and add CI "parse check" step (`pwsh -File build.ps1 -Help`).
+- [ ] **Brainarr**: Align `brainarr/.github/workflows/plugin-package.yml` with packaging policy (stop copying `FluentValidation.dll` and `Microsoft.Extensions.*.Abstractions.dll`; use the unified `New-PluginPackage` pipeline).
+- [ ] **AppleMusicarr**: Fix non-portable submodule URL (`applemusicarr/.gitmodules` contains a local drive path for `ext/AppleMusiSharp`).
+- [ ] **AppleMusicarr**: Audit/deprecate legacy packaging script (`applemusicarr/scripts/pack-plugin.ps1` builds `net6.0` and packages `manifest.json`) to avoid split-brain packaging routes.
+- [ ] **Qobuzarr**: Treat `AppSecret` as a secret in UI (`qobuzarr/src/Indexers/QobuzIndexerSettings.cs:~77` should use `FieldType.Password` + `PrivacyLevel.Password`).
+- [ ] **Common**: Make `New-PluginPackage -MergeAssemblies` deterministic in clean CI (currently `tools/PluginPack.psm1` invokes an external `ilrepack` executable); either provision it explicitly or remove the code path in favor of `build/PluginPackaging.targets`.
+
+**Note**: These are parity items because they cause drift, make local builds non-reproducible, or produce packages that can diverge from the canonical policy.
 
 ### 2.1 Tidalarr Sanitization Consolidation
 **Status**: In Progress

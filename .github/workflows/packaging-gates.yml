@@ -1,0 +1,212 @@
+name: Packaging Gates (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      common-path:
+        description: "Path to lidarr.plugin.common submodule in the caller repo"
+        required: true
+        type: string
+      plugin-csproj:
+        description: "Path to the plugin .csproj to build/package"
+        required: true
+        type: string
+      manifest-path:
+        description: "Path to plugin.json to validate"
+        required: true
+        type: string
+      framework:
+        description: "Target framework to package"
+        required: false
+        type: string
+        default: "net8.0"
+      configuration:
+        description: "Build configuration"
+        required: false
+        type: string
+        default: "Release"
+      publish-path:
+        description: "Publish output path (optional). If omitted, derived from plugin-csproj/framework/configuration."
+        required: false
+        type: string
+        default: ""
+      packages-path:
+        description: "Packages output folder (optional). If omitted, derived from plugin-csproj."
+        required: false
+        type: string
+        default: ""
+      man004-cutoff:
+        description: "Date (YYYY-MM-DD) after which MAN004 legacy manifest keys become a hard error"
+        required: false
+        type: string
+        default: "2026-03-01"
+      parity-lint:
+        description: "Run parity lint (recommended)"
+        required: false
+        type: boolean
+        default: true
+    secrets:
+      submodules-token:
+        description: "Optional token to checkout private submodules"
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  packaging-gates:
+    name: Packaging Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout (with submodules)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+          token: ${{ secrets.submodules-token || github.token }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Package (Common tooling)
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $commonPath = '${{ inputs.common-path }}'
+          $csproj = '${{ inputs.plugin-csproj }}'
+          $manifest = '${{ inputs.manifest-path }}'
+          $framework = '${{ inputs.framework }}'
+          $configuration = '${{ inputs.configuration }}'
+
+          if (-not (Test-Path -LiteralPath $commonPath)) { throw "Common path not found: $commonPath" }
+          $pluginPack = Join-Path $commonPath 'tools/PluginPack.psm1'
+          if (-not (Test-Path -LiteralPath $pluginPack)) { throw "PluginPack.psm1 not found: $pluginPack" }
+
+          Import-Module $pluginPack -Force
+
+          $zipPath = (New-PluginPackage `
+            -Csproj $csproj `
+            -Manifest $manifest `
+            -Framework $framework `
+            -Configuration $configuration `
+            -RequireCanonicalAbstractions `
+            -ResolveEntryPoints | Select-Object -Last 1)
+
+          if (-not $zipPath) { throw "New-PluginPackage returned an empty path." }
+          if (-not (Test-Path -LiteralPath $zipPath)) { throw "Package not found at: $zipPath" }
+
+          "zipPath=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
+      - name: Manifest gates (MAN004 escalation)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $commonPath = '${{ inputs.common-path }}'
+          $csproj = '${{ inputs.plugin-csproj }}'
+          $manifest = '${{ inputs.manifest-path }}'
+          $framework = '${{ inputs.framework }}'
+          $configuration = '${{ inputs.configuration }}'
+
+          $publishPath = '${{ inputs.publish-path }}'
+          if ([string]::IsNullOrWhiteSpace($publishPath)) {
+            $projectDir = Split-Path -Parent (Resolve-Path -LiteralPath $csproj)
+            $publishPath = Join-Path $projectDir "artifacts/publish/$framework/$configuration"
+          }
+
+          $manifestScript = Join-Path $commonPath 'tools/ManifestCheck.ps1'
+          if (-not (Test-Path -LiteralPath $manifestScript)) { throw "ManifestCheck.ps1 not found: $manifestScript" }
+
+          $jsonText = & $manifestScript `
+            -ProjectPath $csproj `
+            -ManifestPath $manifest `
+            -PublishPath $publishPath `
+            -ResolveEntryPoints `
+            -JsonOutput
+
+          $exitCode = $LASTEXITCODE
+          $diags = @()
+          $rawJson = if ($jsonText -is [array]) { $jsonText -join "`n" } else { [string]$jsonText }
+          if (-not [string]::IsNullOrWhiteSpace($rawJson)) { $diags = @($rawJson | ConvertFrom-Json) }
+
+          if ($exitCode -ne 0) {
+            $errors = @($diags | Where-Object { $_.severity -eq 'Error' } | ForEach-Object { $_.message })
+            if ($errors.Count -gt 0) {
+              $errors | ForEach-Object { Write-Host "::error::$_" }
+            }
+            throw "ManifestCheck failed (exit code $exitCode)."
+          }
+
+          $man004 = @(
+            $diags | Where-Object {
+              ($_.id -eq 'MAN004') -or ($_.message -match '^MAN004:')
+            }
+          )
+
+          if ($man004.Count -gt 0) {
+            $cutoffRaw = '${{ inputs.man004-cutoff }}'
+            try {
+              $cutoff = [DateTime]::ParseExact($cutoffRaw, 'yyyy-MM-dd', [Globalization.CultureInfo]::InvariantCulture)
+            } catch {
+              throw "Invalid man004-cutoff '$cutoffRaw'. Expected YYYY-MM-DD."
+            }
+
+            $now = Get-Date
+            $messages = $man004 | ForEach-Object { $_.message }
+
+            if ($now -ge $cutoff) {
+              $messages | ForEach-Object { Write-Host "::error::$_" }
+              throw "MAN004 legacy manifest keys are no longer allowed after $cutoffRaw."
+            } else {
+              $messages | ForEach-Object { Write-Host "::warning::$_" }
+              Write-Host "MAN004 is currently a warning until $cutoffRaw." -ForegroundColor Yellow
+            }
+          }
+
+      - name: Canonical Abstractions gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $commonPath = '${{ inputs.common-path }}'
+          $zipPath = '${{ steps.package.outputs.zipPath }}'
+          if (-not (Test-Path -LiteralPath $zipPath)) { throw "Package not found: $zipPath" }
+
+          $configPath = Join-Path $commonPath 'tools/canonical-abstractions.json'
+          if (-not (Test-Path -LiteralPath $configPath)) { throw "Canonical config not found: $configPath" }
+          $config = Get-Content -LiteralPath $configPath -Raw | ConvertFrom-Json
+          $expected = [string]$config.abstractionsSha256
+          if ([string]::IsNullOrWhiteSpace($expected)) { throw "canonical-abstractions.json missing 'abstractionsSha256'." }
+
+          $verifyScript = Join-Path $commonPath 'scripts/Verify-CanonicalAbstractions.ps1'
+          if (-not (Test-Path -LiteralPath $verifyScript)) { throw "Verify-CanonicalAbstractions.ps1 not found: $verifyScript" }
+
+          & $verifyScript -PackagePaths @($zipPath) -ExpectedSha256 $expected | Out-Null
+
+      - name: Parity lint
+        if: ${{ inputs.parity-lint }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $commonPath = '${{ inputs.common-path }}'
+          $lint = Join-Path $commonPath 'scripts/parity-lint.ps1'
+          if (-not (Test-Path -LiteralPath $lint)) { throw "parity-lint.ps1 not found: $lint" }
+
+          & $lint -RepoPath . -Mode ci
+
+      - name: Upload package artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: plugin-package
+          path: ${{ steps.package.outputs.zipPath }}
