@@ -211,7 +211,7 @@ function New-PluginPackage {
         $verifyDir = Join-Path ([IO.Path]::GetTempPath()) "verify-package-$(Get-Random)"
         try {
             Expand-Archive -LiteralPath $zipPath -DestinationPath $verifyDir -Force
-            Assert-CanonicalAbstractions -Path $verifyDir -ExpectedSha256 $canonicalResult.Sha256
+            Assert-CanonicalAbstractions -Path $verifyDir -ExpectedSha256 $canonicalResult.Sha256 | Out-Null
             Write-Host "✓ Package verification passed" -ForegroundColor Green
         }
         finally {
