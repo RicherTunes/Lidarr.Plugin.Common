@@ -14,7 +14,7 @@
     <!-- Map project directories to a stable root to avoid leaking developer paths in PDBs -->
     <PathMap>$(MSBuildProjectDirectory)=/src</PathMap>
     <!-- Some scripts/tools emit per-run intermediates under .tmp/ or alternate bin/obj directories; exclude from default item globs. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);**/.tmp/**;**\.tmp\**;**/obj.*/**;**\obj.*\**;**/bin.*/**;**\bin.*\**</DefaultItemExcludes>
+    <DefaultItemExcludes>$(DefaultItemExcludes);**/.tmp/**;**\.tmp\**;**/obj/**;**\obj\**;**/bin/**;**\bin\**;**/obj.*/**;**\obj.*\**;**/bin.*/**;**\bin.*\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
