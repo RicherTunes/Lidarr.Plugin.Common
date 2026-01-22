@@ -34,9 +34,9 @@ Full ecosystem parity is achieved when:
 
 - [x] All four plugins use canonical Abstractions with SHA256 verification
 - [x] All four plugins validate manifest entrypoints via -ResolveEntryPoints
-- [ ] All four plugins enforce non-negotiable CI gates via the reusable workflow in `lidarr.plugin.common` (`.github/workflows/packaging-gates.yml`)
+- [x] All four plugins enforce non-negotiable CI gates via the reusable workflow in `lidarr.plugin.common` (`.github/workflows/packaging-gates.yml`)
 - [ ] Both streaming plugins (Qobuzarr, Tidalarr) produce identical filename format on multi-disc and edge sanitization
-- [ ] AppleMusicarr token protection migrated to Common facade (dual-read, new-write)
+- [x] AppleMusicarr token protection migrated to Common facade (Common-encrypted; no legacy formats)
 - [x] Persistent single-plugin E2E gate is enforced in CI for Qobuzarr, Tidalarr, and Brainarr (Schema gate required; higher gates opt-in with credentials)
 - [ ] Multi-plugin schema gate passes for 2+ plugins (when host supports)
 
