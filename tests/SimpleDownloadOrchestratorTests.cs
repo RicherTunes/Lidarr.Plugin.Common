@@ -17,6 +17,91 @@ namespace Lidarr.Plugin.Common.Tests
 {
     public class SimpleDownloadOrchestratorTests
     {
+        private sealed class FakeStreamProvider : IAudioStreamProvider
+        {
+            private readonly byte[] _payload;
+            private readonly string _extension;
+
+            public FakeStreamProvider(byte[] payload, string extension)
+            {
+                _payload = payload ?? Array.Empty<byte>();
+                _extension = extension;
+            }
+
+            public Task<AudioStreamResult> GetStreamAsync(string trackId, StreamingQuality? quality = null, CancellationToken cancellationToken = default)
+            {
+                return Task.FromResult(new AudioStreamResult
+                {
+                    Stream = new MemoryStream(_payload, writable: false),
+                    TotalBytes = _payload.Length,
+                    SuggestedExtension = _extension
+                });
+            }
+        }
+
+        private sealed class ExtensionSwapPostProcessor : IAudioPostProcessor
+        {
+            private readonly string _extension;
+
+            public ExtensionSwapPostProcessor(string extension)
+            {
+                _extension = extension.TrimStart('.');
+            }
+
+            public Task<string> PostProcessAsync(string filePath, StreamingTrack track, StreamingQuality? quality, CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+
+                var nextPath = Path.ChangeExtension(filePath, _extension);
+                if (string.Equals(nextPath, filePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    return Task.FromResult(filePath);
+                }
+
+                File.Move(filePath, nextPath, overwrite: true);
+                return Task.FromResult(nextPath);
+            }
+        }
+
+        [Fact]
+        public async Task DownloadTrack_WithStreamProvider_RunsPostProcessorAndUpdatesResultPath()
+        {
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 1, supportRange: false));
+            var streamProvider = new FakeStreamProvider(payload: new byte[] { 1, 2, 3, 4 }, extension: "m4a");
+            var postProcessor = new ExtensionSwapPostProcessor("flac");
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("http://unused", "bin")),
+                streamProvider: streamProvider,
+                postProcessor: postProcessor);
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_test_post_{Guid.NewGuid():N}.bin");
+            var expectedFlac = Path.ChangeExtension(temp, "flac");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 });
+
+                Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
+                Assert.Equal(expectedFlac, result.FilePath);
+                Assert.True(File.Exists(result.FilePath));
+                Assert.False(File.Exists(Path.ChangeExtension(temp, "m4a")));
+                Assert.Equal(4, new FileInfo(result.FilePath).Length);
+            }
+            finally
+            {
+                TryDelete(temp);
+                TryDelete(Path.ChangeExtension(temp, "m4a"));
+                TryDelete(expectedFlac);
+                TryDelete(temp + ".partial");
+                TryDelete(temp + ".partial.resume.json");
+            }
+        }
+
         [Fact]
         public async Task DownloadTrack_ReportsProgress_WithSpeedAndEta()
         {

@@ -28,6 +28,7 @@ namespace Lidarr.Plugin.Common.Services.Download
         private readonly Func<string, Task<IReadOnlyList<string>>> _getAlbumTrackIdsAsync;
         private readonly Func<string, StreamingQuality?, Task<(string Url, string Extension)>> _getStreamAsync;
         private readonly IAudioStreamProvider? _streamProvider;
+        private readonly IAudioPostProcessor? _postProcessor;
         private readonly IAudioMetadataApplier? _metadataApplier;
         private readonly ILogger _logger;
         private readonly int _maxConcurrentTracks;
@@ -44,7 +45,8 @@ namespace Lidarr.Plugin.Common.Services.Download
             int maxConcurrentTracks = 1,
             IAudioStreamProvider? streamProvider = null,
             IAudioMetadataApplier? metadataApplier = null,
-            ILogger? logger = null)
+            ILogger? logger = null,
+            IAudioPostProcessor? postProcessor = null)
         {
             ServiceName = serviceName;
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -54,6 +56,7 @@ namespace Lidarr.Plugin.Common.Services.Download
             _getStreamAsync = getStreamAsync ?? throw new ArgumentNullException(nameof(getStreamAsync));
             _maxConcurrentTracks = Math.Max(1, maxConcurrentTracks);
             _streamProvider = streamProvider;
+            _postProcessor = postProcessor;
             _metadataApplier = metadataApplier ?? new TagLibAudioMetadataApplier();
             _logger = logger ?? NullLogger.Instance;
         }
@@ -239,6 +242,9 @@ namespace Lidarr.Plugin.Common.Services.Download
                         return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Downloaded file is empty" };
                     }
 
+                    outputPath = await PostProcessAsync(outputPath, track, quality, cancellationToken).ConfigureAwait(false);
+                    fileSize = new FileInfo(outputPath).Length;
+
                     // Apply metadata tags after successful download
                     await ApplyMetadataAsync(outputPath, track, cancellationToken).ConfigureAwait(false);
 
@@ -345,6 +351,9 @@ namespace Lidarr.Plugin.Common.Services.Download
                     return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Downloaded file is empty" };
                 }
 
+                outputPath = await PostProcessAsync(outputPath, track, quality, cancellationToken).ConfigureAwait(false);
+                fileSize = new FileInfo(outputPath).Length;
+
                 // Apply metadata tags after successful download
                 await ApplyMetadataAsync(outputPath, track, cancellationToken).ConfigureAwait(false);
 
@@ -357,6 +366,35 @@ namespace Lidarr.Plugin.Common.Services.Download
             catch (Exception ex)
             {
                 return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {ex.Message}" };
+            }
+        }
+
+        private async Task<string> PostProcessAsync(string filePath, StreamingTrack track, StreamingQuality? quality, CancellationToken cancellationToken)
+        {
+            if (_postProcessor == null || string.IsNullOrWhiteSpace(filePath) || track == null)
+            {
+                return filePath;
+            }
+
+            try
+            {
+                string processedPath = await _postProcessor.PostProcessAsync(filePath, track, quality, cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(processedPath) || !File.Exists(processedPath))
+                {
+                    return filePath;
+                }
+
+                if (!string.Equals(processedPath, filePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    TryDelete(filePath);
+                }
+
+                return processedPath;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Post-processing failed for track {TrackId}: {FilePath}", track.Id, filePath);
+                return filePath;
             }
         }
 
