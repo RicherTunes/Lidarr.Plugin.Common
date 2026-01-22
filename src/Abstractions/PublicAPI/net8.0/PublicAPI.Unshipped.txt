@@ -1,2 +1,2 @@
 #nullable enable
-P:Lidarr.Plugin.Abstractions.Manifest.PluginManifest.Main
+
