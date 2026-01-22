@@ -1,18 +1,2 @@
 #nullable enable
 
-M:Lidarr.Plugin.Common.Services.Resilience.CircuitBreaker.#ctor(System.String,Lidarr.Plugin.Common.Services.Resilience.CircuitBreakerOptions,Microsoft.Extensions.Logging.ILogger,System.TimeProvider)
-T:Lidarr.Plugin.Common.Interfaces.IStringProtector
-M:Lidarr.Plugin.Common.Interfaces.IStringProtector.IsProtected(System.String)~System.Boolean
-M:Lidarr.Plugin.Common.Interfaces.IStringProtector.Protect(System.String)~System.String
-M:Lidarr.Plugin.Common.Interfaces.IStringProtector.TryUnprotect(System.String,System.String@)~System.Boolean
-M:Lidarr.Plugin.Common.Interfaces.IStringProtector.Unprotect(System.String)~System.String
-T:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector
-M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.#ctor(Lidarr.Plugin.Common.Interfaces.ITokenProtector)
-M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.IsProtected(System.String)~System.Boolean
-M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.Protect(System.String)~System.String
-M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.TryUnprotect(System.String,System.String@)~System.Boolean
-M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.Unprotect(System.String)~System.String
-M:Lidarr.Plugin.Common.Utilities.HttpClientExtensions.ExecuteWithRetryAsync(System.Net.Http.HttpClient,System.Net.Http.HttpRequestMessage,System.Net.Http.HttpCompletionOption,System.Int32,System.Int32,System.Threading.CancellationToken)~System.Threading.Tasks.Task{System.Net.Http.HttpResponseMessage}
-T:Lidarr.Plugin.Common.Interfaces.IAudioPostProcessor
-M:Lidarr.Plugin.Common.Interfaces.IAudioPostProcessor.PostProcessAsync(System.String,Lidarr.Plugin.Abstractions.Models.StreamingTrack,Lidarr.Plugin.Abstractions.Models.StreamingQuality,System.Threading.CancellationToken)~System.Threading.Tasks.Task{System.String}
-M:Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.#ctor(System.String,System.Net.Http.HttpClient,System.Func{System.String,System.Threading.Tasks.Task{Lidarr.Plugin.Abstractions.Models.StreamingAlbum}},System.Func{System.String,System.Threading.Tasks.Task{Lidarr.Plugin.Abstractions.Models.StreamingTrack}},System.Func{System.String,System.Threading.Tasks.Task{System.Collections.Generic.IReadOnlyList{System.String}}},System.Func{System.String,Lidarr.Plugin.Abstractions.Models.StreamingQuality,System.Threading.Tasks.Task{System.ValueTuple{System.String,System.String}}},System.Int32,Lidarr.Plugin.Common.Interfaces.IAudioStreamProvider,Lidarr.Plugin.Common.Interfaces.IAudioMetadataApplier,Microsoft.Extensions.Logging.ILogger,Lidarr.Plugin.Common.Interfaces.IAudioPostProcessor)

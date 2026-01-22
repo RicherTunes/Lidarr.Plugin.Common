@@ -67,6 +67,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
                         if (!response.IsSuccessStatusCode && RetryUtilities.IsRetryableStatusCode(response.StatusCode))
                         {
+                            DownloadTelemetryContext.RecordRetry(response.StatusCode);
                             // Dispose the response before throwing so we don't leak connections on retries.
                             response.Dispose();
                             throw new HttpRequestException(
@@ -553,6 +554,7 @@ namespace Lidarr.Plugin.Common.Utilities
                         return response;
                     }
 
+                    DownloadTelemetryContext.RecordRetry(response.StatusCode);
                     var now = DateTime.UtcNow;
                     // Prefer Retry-After absolute date over delta; do not add jitter when an absolute date is provided
                     TimeSpan delay;
@@ -1290,7 +1292,6 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
-
 
 
 
