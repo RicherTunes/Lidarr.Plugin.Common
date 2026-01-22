@@ -15,6 +15,22 @@ namespace Lidarr.Plugin.Common.Tests
 {
     public class HttpClientExtensionsTests
     {
+        private static async Task<bool> WaitUntilAsync(Func<bool> condition, TimeSpan timeout)
+        {
+            var start = DateTime.UtcNow;
+            while (DateTime.UtcNow - start < timeout)
+            {
+                if (condition())
+                {
+                    return true;
+                }
+
+                await Task.Delay(TimeSpan.FromMilliseconds(10));
+            }
+
+            return condition();
+        }
+
         private sealed class StubHandler : DelegatingHandler
         {
             private readonly Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>> _handler;
@@ -39,6 +55,42 @@ namespace Lidarr.Plugin.Common.Tests
         private sealed class ProblemDocument
         {
             public string Title { get; set; } = string.Empty;
+        }
+
+        private sealed class BlockingHttpContent : HttpContent
+        {
+            private readonly byte[] _payload;
+            private readonly TaskCompletionSource<bool> _gate = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            public BlockingHttpContent(byte[] payload)
+            {
+                _payload = payload ?? Array.Empty<byte>();
+            }
+
+            public bool SerializeCalled { get; private set; }
+
+            public void Release()
+            {
+                _gate.TrySetResult(true);
+            }
+
+            protected override async Task SerializeToStreamAsync(Stream stream, TransportContext? context, CancellationToken cancellationToken)
+            {
+                SerializeCalled = true;
+                await _gate.Task.WaitAsync(cancellationToken);
+                await stream.WriteAsync(_payload, cancellationToken);
+            }
+
+            protected override Task SerializeToStreamAsync(Stream stream, TransportContext? context)
+            {
+                return SerializeToStreamAsync(stream, context, CancellationToken.None);
+            }
+
+            protected override bool TryComputeLength(out long length)
+            {
+                length = _payload.Length;
+                return true;
+            }
         }
 
         // snippet:guard-stream
@@ -461,6 +513,70 @@ namespace Lidarr.Plugin.Common.Tests
             };
 
             Assert.True(HttpClientExtensions.IsJsonContent(response));
+        }
+
+        [Fact]
+        public async Task ExecuteWithRetryAsync_ResponseHeadersRead_DoesNotBufferContentBeforeReturning()
+        {
+            var content = new BlockingHttpContent(Encoding.UTF8.GetBytes("payload"));
+
+            var handler = new StubHandler((_, __) =>
+            {
+                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = content
+                };
+                return Task.FromResult(response);
+            });
+
+            using var client = new HttpClient(handler);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "http://example.com/slow");
+
+            var task = client.ExecuteWithRetryAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+            var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.Same(task, completed);
+
+            using var response = await task;
+            Assert.False(content.SerializeCalled);
+        }
+
+        [Fact]
+        public async Task ExecuteWithRetryAsync_ResponseContentRead_BuffersContentBeforeReturning()
+        {
+            var content = new BlockingHttpContent(Encoding.UTF8.GetBytes("payload"));
+
+            var handler = new StubHandler((_, __) =>
+            {
+                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = content
+                };
+                return Task.FromResult(response);
+            });
+
+            using var client = new HttpClient(handler);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "http://example.com/slow-buffer");
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(3));
+
+            var task = client.ExecuteWithRetryAsync(request, HttpCompletionOption.ResponseContentRead, cancellationToken: cts.Token);
+            try
+            {
+                // If buffering is happening, this should not complete until we release the content gate.
+                var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromMilliseconds(250), cts.Token));
+                Assert.NotSame(task, completed);
+
+                // The buffering path should have started serializing the content by now.
+                var serializeObserved = await WaitUntilAsync(() => content.SerializeCalled, TimeSpan.FromSeconds(1));
+                Assert.True(serializeObserved);
+            }
+            finally
+            {
+                content.Release();
+            }
+
+            using var response = await task;
+            Assert.True(content.SerializeCalled);
         }
     }
 }

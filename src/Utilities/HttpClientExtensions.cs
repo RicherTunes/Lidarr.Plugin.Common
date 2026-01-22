@@ -34,12 +34,34 @@ namespace Lidarr.Plugin.Common.Utilities
             int initialDelayMs = 1000,
             CancellationToken cancellationToken = default)
         {
+            return await ExecuteWithRetryAsync(
+                httpClient,
+                request,
+                HttpCompletionOption.ResponseContentRead,
+                maxRetries,
+                initialDelayMs,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Executes an HTTP request with built-in retry logic and error handling, allowing
+        /// the caller to control response buffering behavior via <see cref="HttpCompletionOption"/>.
+        /// </summary>
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public static async Task<HttpResponseMessage> ExecuteWithRetryAsync(
+            this HttpClient httpClient,
+            HttpRequestMessage request,
+            HttpCompletionOption completionOption,
+            int maxRetries = 3,
+            int initialDelayMs = 1000,
+            CancellationToken cancellationToken = default)
+        {
             return await RetryUtilities.ExecuteWithRetryAsync(
                 async () =>
                 {
                     // Clone the request for retry attempts
                     var clonedRequest = await CloneHttpRequestMessageAsync(request);
-                    return await httpClient.SendAsync(clonedRequest, cancellationToken);
+                    return await httpClient.SendAsync(clonedRequest, completionOption, cancellationToken);
                 },
                 maxRetries,
                 initialDelayMs,
@@ -1249,7 +1271,6 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
-
 
 
 
