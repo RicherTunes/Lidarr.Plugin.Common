@@ -9,6 +9,7 @@ using Lidarr.Plugin.Abstractions.Hosting;
 using Lidarr.Plugin.Abstractions.Manifest;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
+using System.Runtime.Loader;
 
 namespace IsolationHostSample
 {
@@ -20,6 +21,7 @@ namespace IsolationHostSample
             var hostVersion = new Version(2, 12, 0, 0);
             var ciMode = false;
             var createComponents = false;
+            string? hostAssembliesDir = null;
 
             for (var i = 0; i < args.Length; i++)
             {
@@ -57,6 +59,20 @@ namespace IsolationHostSample
                     continue;
                 }
 
+                if (string.Equals(arg, "--host-assemblies-dir", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Missing value for --host-assemblies-dir.");
+                        Environment.ExitCode = 2;
+                        return;
+                    }
+
+                    hostAssembliesDir = args[i + 1];
+                    i++;
+                    continue;
+                }
+
                 if (!arg.StartsWith("--", StringComparison.Ordinal) && pluginsRoot == Path.Combine(AppContext.BaseDirectory, "plugins"))
                 {
                     pluginsRoot = arg;
@@ -73,6 +89,22 @@ namespace IsolationHostSample
                 Console.Error.WriteLine($"No plugins folder found at '{pluginsRoot}'.");
                 Environment.ExitCode = 1;
                 return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(hostAssembliesDir))
+            {
+                if (!Directory.Exists(hostAssembliesDir))
+                {
+                    Console.Error.WriteLine($"Host assemblies directory not found at '{hostAssembliesDir}'.");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
+                AssemblyLoadContext.Default.Resolving += (_, name) =>
+                {
+                    var candidate = Path.Combine(hostAssembliesDir, $"{name.Name}.dll");
+                    return File.Exists(candidate) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(candidate) : null;
+                };
             }
 
             using var loggerFactory = LoggerFactory.Create(builder =>

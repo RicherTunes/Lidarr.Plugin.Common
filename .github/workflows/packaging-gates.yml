@@ -55,6 +55,11 @@ on:
         required: false
         type: string
         default: ""
+      lidarr-docker-version:
+        description: "Lidarr docker tag to extract host assemblies for plugin-load gate (e.g. 'pr-plugins-3.1.1.4884')"
+        required: false
+        type: string
+        default: "pr-plugins-3.1.1.4884"
     secrets:
       submodules-token:
         description: "Optional token to checkout private submodules"
@@ -217,6 +222,7 @@ jobs:
           $commonPath = '${{ inputs.common-path }}'
           $manifestPath = '${{ inputs.manifest-path }}'
           $zipPath = '${{ steps.package.outputs.zipPath }}'
+          $lidarrTag = '${{ inputs.lidarr-docker-version }}'
 
           if (-not (Test-Path -LiteralPath $zipPath)) { throw "Package not found: $zipPath" }
           if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Manifest not found: $manifestPath" }
@@ -239,7 +245,30 @@ jobs:
           $sampleProj = Join-Path $commonPath 'examples/IsolationHostSample/IsolationHostSample.csproj'
           if (-not (Test-Path -LiteralPath $sampleProj)) { throw "IsolationHostSample.csproj not found: $sampleProj" }
 
-          dotnet run --project $sampleProj -c Release -- $pluginsRoot --ci --create-components --host-version 99.0.0.0
+          $hostRoot = Join-Path $env:RUNNER_TEMP 'plugin-load-gate/host'
+          New-Item -ItemType Directory -Force -Path $hostRoot | Out-Null
+
+          if (-not [string]::IsNullOrWhiteSpace($lidarrTag)) {
+            $image = "ghcr.io/hotio/lidarr:$lidarrTag"
+            Write-Host "Extracting host assemblies from $image..." -ForegroundColor Cyan
+            $cid = (& docker create $image 2>$null).Trim()
+            if (-not $cid) { throw "Failed to create Lidarr container for $image." }
+            try {
+              & docker cp "$cid`:/app/bin/." $hostRoot | Out-Null
+            } finally {
+              & docker rm $cid | Out-Null
+            }
+          }
+
+          $lidarrCore = Get-ChildItem -LiteralPath $hostRoot -Recurse -Filter 'Lidarr.Core.dll' -File -ErrorAction SilentlyContinue | Select-Object -First 1
+          $hostAssembliesDir = if ($lidarrCore) { $lidarrCore.Directory.FullName } else { $hostRoot }
+
+          dotnet run --project $sampleProj -c Release -- `
+            $pluginsRoot `
+            --ci `
+            --create-components `
+            --host-version 99.0.0.0 `
+            --host-assemblies-dir $hostAssembliesDir
 
       - name: Parity lint
         if: ${{ inputs.parity-lint }}
