@@ -45,6 +45,11 @@ on:
         required: false
         type: boolean
         default: true
+      plugin-load-gate:
+        description: "Load plugin package via Abstractions PluginLoader and create components (Abstractions-based plugins only)"
+        required: false
+        type: boolean
+        default: false
     secrets:
       submodules-token:
         description: "Optional token to checkout private submodules"
@@ -190,6 +195,38 @@ jobs:
           if (-not (Test-Path -LiteralPath $verifyScript)) { throw "Verify-CanonicalAbstractions.ps1 not found: $verifyScript" }
 
           & $verifyScript -PackagePaths @($zipPath) -ExpectedSha256 $expected | Out-Null
+
+      - name: Plugin load gate
+        if: ${{ inputs.plugin-load-gate }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $commonPath = '${{ inputs.common-path }}'
+          $manifestPath = '${{ inputs.manifest-path }}'
+          $zipPath = '${{ steps.package.outputs.zipPath }}'
+
+          if (-not (Test-Path -LiteralPath $zipPath)) { throw "Package not found: $zipPath" }
+          if (-not (Test-Path -LiteralPath $manifestPath)) { throw "Manifest not found: $manifestPath" }
+
+          $manifest = Get-Content -LiteralPath $manifestPath -Raw | ConvertFrom-Json
+          $pluginId = [string]$manifest.id
+          if ([string]::IsNullOrWhiteSpace($pluginId)) { throw "Manifest missing 'id'." }
+
+          $pluginsRoot = Join-Path $env:RUNNER_TEMP 'plugin-load-gate/plugins'
+          New-Item -ItemType Directory -Force -Path $pluginsRoot | Out-Null
+
+          $pluginDir = Join-Path $pluginsRoot $pluginId
+          if (Test-Path -LiteralPath $pluginDir) { Remove-Item -Recurse -Force -LiteralPath $pluginDir }
+          New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
+
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $pluginDir -Force
+
+          $sampleProj = Join-Path $commonPath 'examples/IsolationHostSample/IsolationHostSample.csproj'
+          if (-not (Test-Path -LiteralPath $sampleProj)) { throw "IsolationHostSample.csproj not found: $sampleProj" }
+
+          dotnet run --project $sampleProj -c Release -- $pluginsRoot --ci --create-components --host-version 99.0.0.0
 
       - name: Parity lint
         if: ${{ inputs.parity-lint }}
