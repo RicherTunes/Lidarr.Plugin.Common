@@ -500,33 +500,41 @@ namespace Lidarr.Plugin.Common.Services.Download
         }
         private static async Task CopyWithProgressAsync(Stream input, Stream output, long totalExpected, CancellationToken cancellationToken, Action<double, long, TimeSpan?> onProgress)
         {
-            var buffer = new byte[8192];
+            const int BufferSize = 64 * 1024;
+            var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(BufferSize);
             long written = 0;
             long windowBytes = 0;
             var interval = 500;
             var last = System.Diagnostics.Stopwatch.StartNew();
             int read;
-            while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
+            try
             {
-                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                written += read;
-                windowBytes += read;
-
-                if (last.ElapsedMilliseconds >= interval)
+                while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
                 {
-                    var seconds = Math.Max(0.001, last.Elapsed.TotalSeconds);
-                    var bps = (long)(windowBytes / seconds);
-                    var fraction = totalExpected > 0 ? Math.Min(1, (double)written / totalExpected) : 0;
-                    TimeSpan? eta = null;
-                    if (totalExpected > 0 && bps > 0)
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    written += read;
+                    windowBytes += read;
+
+                    if (last.ElapsedMilliseconds >= interval)
                     {
-                        var remain = totalExpected - written;
-                        eta = TimeSpan.FromSeconds(Math.Max(0, remain / (double)bps));
+                        var seconds = Math.Max(0.001, last.Elapsed.TotalSeconds);
+                        var bps = (long)(windowBytes / seconds);
+                        var fraction = totalExpected > 0 ? Math.Min(1, (double)written / totalExpected) : 0;
+                        TimeSpan? eta = null;
+                        if (totalExpected > 0 && bps > 0)
+                        {
+                            var remain = totalExpected - written;
+                            eta = TimeSpan.FromSeconds(Math.Max(0, remain / (double)bps));
+                        }
+                        onProgress(fraction, bps, eta);
+                        windowBytes = 0;
+                        last.Restart();
                     }
-                    onProgress(fraction, bps, eta);
-                    windowBytes = 0;
-                    last.Restart();
                 }
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
             }
 
             onProgress(1, 0, TimeSpan.Zero);
