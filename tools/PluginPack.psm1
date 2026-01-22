@@ -322,6 +322,12 @@ function Invoke-PluginCleanup {
     }
 
     # Guardrail: refuse to keep assemblies that are explicitly forbidden by the packaging policy.
+    foreach ($pattern in $AdditionalKeep) {
+        if ($pattern -like 'Lidarr.*.dll' -or $pattern -like 'NzbDrone.*.dll') {
+            throw "Refusing to keep host assembly pattern '$pattern'. Host assemblies (Lidarr.* / NzbDrone.*) must never be shipped."
+        }
+    }
+
     $forbiddenNames = @(
         'FluentValidation.dll',
         'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
