@@ -12,3 +12,4 @@ M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.IsProtected
 M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.Protect(System.String)~System.String
 M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.TryUnprotect(System.String,System.String@)~System.Boolean
 M:Lidarr.Plugin.Common.Security.TokenProtection.StringTokenProtector.Unprotect(System.String)~System.String
+M:Lidarr.Plugin.Common.Utilities.HttpClientExtensions.ExecuteWithRetryAsync(System.Net.Http.HttpClient,System.Net.Http.HttpRequestMessage,System.Net.Http.HttpCompletionOption,System.Int32,System.Int32,System.Threading.CancellationToken)~System.Threading.Tasks.Task{System.Net.Http.HttpResponseMessage}
