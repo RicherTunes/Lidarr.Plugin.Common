@@ -578,5 +578,65 @@ namespace Lidarr.Plugin.Common.Tests
             using var response = await task;
             Assert.True(content.SerializeCalled);
         }
+
+        [Fact]
+        public async Task ExecuteWithRetryAsync_RetriesOnRetryableStatusCodes()
+        {
+            var attempts = 0;
+            var handler = new StubHandler((_, __) =>
+            {
+                attempts++;
+                if (attempts == 1)
+                {
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError)
+                    {
+                        Content = new StringContent("server error")
+                    });
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("ok")
+                });
+            });
+
+            using var client = new HttpClient(handler);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "http://example.com/retry-500");
+
+            using var response = await client.ExecuteWithRetryAsync(request, HttpCompletionOption.ResponseHeadersRead, maxRetries: 2, initialDelayMs: 1);
+
+            Assert.Equal(2, attempts);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
+
+        [Fact]
+        public async Task ExecuteWithRetryAsync_RetriesOnTooManyRequests()
+        {
+            var attempts = 0;
+            var handler = new StubHandler((_, __) =>
+            {
+                attempts++;
+                if (attempts == 1)
+                {
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+                    {
+                        Content = new StringContent("rate limited")
+                    });
+                }
+
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("ok")
+                });
+            });
+
+            using var client = new HttpClient(handler);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "http://example.com/retry-429");
+
+            using var response = await client.ExecuteWithRetryAsync(request, HttpCompletionOption.ResponseHeadersRead, maxRetries: 2, initialDelayMs: 1);
+
+            Assert.Equal(2, attempts);
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+        }
     }
 }

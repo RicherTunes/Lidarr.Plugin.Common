@@ -60,8 +60,27 @@ namespace Lidarr.Plugin.Common.Utilities
                 async () =>
                 {
                     // Clone the request for retry attempts
-                    var clonedRequest = await CloneHttpRequestMessageAsync(request);
-                    return await httpClient.SendAsync(clonedRequest, completionOption, cancellationToken);
+                    var clonedRequest = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
+                    try
+                    {
+                        var response = await httpClient.SendAsync(clonedRequest, completionOption, cancellationToken).ConfigureAwait(false);
+
+                        if (!response.IsSuccessStatusCode && RetryUtilities.IsRetryableStatusCode(response.StatusCode))
+                        {
+                            // Dispose the response before throwing so we don't leak connections on retries.
+                            response.Dispose();
+                            throw new HttpRequestException(
+                                $"Retryable HTTP status code {(int)response.StatusCode} ({response.StatusCode})",
+                                inner: null,
+                                statusCode: response.StatusCode);
+                        }
+
+                        return response;
+                    }
+                    finally
+                    {
+                        clonedRequest.Dispose();
+                    }
                 },
                 maxRetries,
                 initialDelayMs,
@@ -1271,7 +1290,6 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
-
 
 
 
