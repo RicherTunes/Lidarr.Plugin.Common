@@ -149,13 +149,71 @@ Check for direct filename building outside FileSystemUtilities:
 - [ ] Any other helpers creating paths
 
 ### 2.4 TidalChunkDownloader Delay Configuration
-**Status**: Pending
+**Status**: Complete
 
-Current: Fixed `Task.Delay(50)` per chunk (line 49)
+Current: Configurable per-chunk delay with default `0` (max speed). Socket-leak-safe chunk downloads.
 
 Options:
 1. Set delay to 0 and rely on rate-limit handlers
 2. Make configurable via advanced setting
+
+### 2.5 Download Parity (Streaming) (PR1-PR3)
+**Status**: Planned
+
+This slice targets the remaining, measurable performance gap between streaming plugins while keeping `lidarr.plugin.common` "thin" (primitives, not provider policy).
+
+#### 2.5.1 Common: Streaming-friendly retry (`HttpCompletionOption`)
+**Goal**: Allow plugins to use Common retry logic while streaming large payloads efficiently.
+
+- [ ] Add `ExecuteWithRetryAsync(..., HttpCompletionOption, ...)` overload (keep existing overload behavior unchanged).
+- [ ] Add a test proving `ResponseHeadersRead` returns promptly vs buffered reads.
+
+**Fix location**: `lidarr.plugin.common/src/Utilities/HttpClientExtensions.cs`
+
+**Acceptance criteria**:
+- Existing call sites compile and behave unchanged.
+- New test demonstrates `ResponseHeadersRead` does not force full buffering before returning.
+
+#### 2.5.2 Tidalarr: File-backed stream provider + controlled track concurrency
+**Goal**: Enable memory-safe parallelism (default remains serial) and avoid in-memory track assembly.
+
+- [ ] Manifest-path chunk assembly returns a file-backed stream (use `FileOptions.DeleteOnClose` lifecycle, like the legacy stream-info path).
+- [ ] Add `MaxConcurrentTrackDownloads` (advanced) with safe bounds; default `1`.
+- [ ] Pass `maxConcurrentTracks` into `SimpleDownloadOrchestrator` from `TidalModule`.
+- [ ] Adopt `ResponseHeadersRead` for chunk downloads via the Common overload from 2.5.1.
+
+**Fix locations**:
+- `tidalarr/src/Tidalarr/Integration/TidalChunkStreamProvider.cs`
+- `tidalarr/src/Tidalarr/Domain/Streaming/TidalChunkDownloader.cs`
+- `tidalarr/src/Tidalarr/Integration/TidalModule.cs`
+
+**Acceptance criteria** (manual / local perf verification):
+- With `MaxConcurrentTrackDownloads=2` and `DownloadDelay=0`, a 10-track album download completes in < 120s on a typical broadband connection (or shows >= 2x speedup vs `MaxConcurrentTrackDownloads=1` on the same machine/network).
+- With `MaxConcurrentTrackDownloads=2`, process/container RSS remains < 350MB during a 10-track album download and does not monotonically grow across multiple albums.
+
+#### 2.5.3 Tidalarr: Re-enable OAuth state validation
+**Goal**: Security hardening + fewer stale/cross-tab auth failures now that ConfigPath defaults are stable.
+
+- [ ] Validate callback `state` matches stored `PKCEState.State` and fail with a clear user-facing message on mismatch.
+- [ ] On mismatch, regenerate OAuth URL (do not silently proceed).
+- [ ] Add unit tests for (a) mismatch, (b) missing state, (c) happy path.
+
+**Fix locations**:
+- `tidalarr/src/Tidalarr/Integration/LidarrNative/TidalLidarrIndexer.cs`
+- `tidalarr/src/Tidalarr/Infrastructure/Storage/PKCEStateStore.cs` (if required for clean access)
+
+**Acceptance criteria**:
+- Happy path OAuth flow still works.
+- Stale/cross-tab OAuth flow fails deterministically with actionable guidance and no secret leakage in logs.
+
+#### 2.5.4 Follow-up: Adopt streaming retry overload in other plugins (2.5.1 rollout)
+**Goal**: Ensure all plugins benefit from 2.5.1 when they have streaming/large-payload HTTP paths.
+
+- [ ] Qobuzarr: audit for any Common retry usage on large responses and adopt `ResponseHeadersRead` where appropriate.
+- [ ] Brainarr: audit for any large streaming downloads (if any) and adopt the overload where applicable.
+
+**Acceptance criteria**:
+- No functional change (behavior-preserving), only reduced buffering/peak memory where applicable.
 
 ---
 
