@@ -207,6 +207,7 @@ namespace IsolationHostSample
                 SharedAssemblies = new[]
                 {
                     "Lidarr.Plugin.Abstractions",
+                    "Microsoft.Extensions.DependencyInjection.Abstractions",
                     "Microsoft.Extensions.Logging.Abstractions"
                 }
             };

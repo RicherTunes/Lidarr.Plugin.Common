@@ -50,6 +50,11 @@ on:
         required: false
         type: boolean
         default: false
+      additional-keep-assemblies:
+        description: "Semicolon-separated list of additional runtime DLL name patterns to keep (advanced; e.g. 'My.Plugin.Core.dll;Vendor.*.dll')"
+        required: false
+        type: string
+        default: ""
     secrets:
       submodules-token:
         description: "Optional token to checkout private submodules"
@@ -88,6 +93,11 @@ jobs:
           $manifest = '${{ inputs.manifest-path }}'
           $framework = '${{ inputs.framework }}'
           $configuration = '${{ inputs.configuration }}'
+          $additionalKeepRaw = '${{ inputs.additional-keep-assemblies }}'
+          $additionalKeep = @()
+          if (-not [string]::IsNullOrWhiteSpace($additionalKeepRaw)) {
+            $additionalKeep = ($additionalKeepRaw -split '[;\\r\\n]+' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+          }
 
           if (-not (Test-Path -LiteralPath $commonPath)) { throw "Common path not found: $commonPath" }
           $pluginPack = Join-Path $commonPath 'tools/PluginPack.psm1'
@@ -101,7 +111,8 @@ jobs:
             -Framework $framework `
             -Configuration $configuration `
             -RequireCanonicalAbstractions `
-            -ResolveEntryPoints | Select-Object -Last 1)
+            -ResolveEntryPoints `
+            -AdditionalKeepAssemblies $additionalKeep | Select-Object -Last 1)
 
           if (-not $zipPath) { throw "New-PluginPackage returned an empty path." }
           if (-not (Test-Path -LiteralPath $zipPath)) { throw "Package not found at: $zipPath" }
@@ -222,6 +233,8 @@ jobs:
           New-Item -ItemType Directory -Force -Path $pluginDir | Out-Null
 
           Expand-Archive -LiteralPath $zipPath -DestinationPath $pluginDir -Force
+          $packagedManifest = Join-Path $pluginDir 'plugin.json'
+          if (-not (Test-Path -LiteralPath $packagedManifest)) { throw "plugin.json missing from extracted package (expected: $packagedManifest)" }
 
           $sampleProj = Join-Path $commonPath 'examples/IsolationHostSample/IsolationHostSample.csproj'
           if (-not (Test-Path -LiteralPath $sampleProj)) { throw "IsolationHostSample.csproj not found: $sampleProj" }

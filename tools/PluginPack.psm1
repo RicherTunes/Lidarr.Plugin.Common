@@ -13,9 +13,12 @@ function Get-PluginOutput {
     $projectPath = Resolve-Path -LiteralPath $Csproj
     $projectDirectory = Split-Path -Parent $projectPath
     $publishDirectory = Join-Path $projectDirectory "artifacts/publish/$Framework/$Configuration"
-    if (-not (Test-Path -LiteralPath $publishDirectory)) {
-        New-Item -ItemType Directory -Path $publishDirectory -Force | Out-Null
+    # Always start from a clean publish folder. `dotnet build -o` does not remove
+    # stale files from previous runs, which can accidentally ship old manifests or assets.
+    if (Test-Path -LiteralPath $publishDirectory) {
+        Remove-Item -LiteralPath $publishDirectory -Recurse -Force -ErrorAction SilentlyContinue
     }
+    New-Item -ItemType Directory -Path $publishDirectory -Force | Out-Null
 
     # Use `dotnet build` instead of `dotnet publish` so projects using PluginPackaging.targets
     # (ILRepack) produce the same merged output that is used in real plugin deployment.
@@ -110,7 +113,11 @@ function New-PluginPackage {
         [switch]$RequireCanonicalAbstractions,
 
         # Entrypoint validation
-        [switch]$ResolveEntryPoints
+        [switch]$ResolveEntryPoints,
+
+        # Optional: keep additional runtime assemblies as separate DLLs (advanced).
+        # Most plugins should prefer merging/internalizing via PluginPackaging.targets.
+        [string[]]$AdditionalKeepAssemblies = @()
     )
 
     $csprojPath = Resolve-Path -LiteralPath $Csproj
@@ -178,7 +185,7 @@ function New-PluginPackage {
 
     # Step 2: Clean up publish output AFTER merge - removes extra deps, keeps runtime deps
     # This matches PluginPackaging.targets behavior
-    Invoke-PluginCleanup -PublishPath $publishPath -AssemblyName $assemblyName
+    Invoke-PluginCleanup -PublishPath $publishPath -AssemblyName $assemblyName -AdditionalKeep $AdditionalKeepAssemblies
 
     # Step 3: Inject canonical Abstractions (if requested or required)
     # This ensures all plugins ship with the exact same Abstractions binary
@@ -304,20 +311,41 @@ function Invoke-PluginCleanup {
 
     # Canonical keep list - these assemblies belong in the package.
     # Everything else is either merged/internalized or host-provided.
-    $keepAssemblies = @(
+    $keepPatterns = @(
         "$AssemblyName.dll",                                    # Plugin itself (merged)
         'Lidarr.Plugin.Abstractions.dll'                        # Required - host does NOT provide this
     )
 
     # Add any plugin-specific additional assemblies (maps to PluginPackagingAdditionalKeep)
     if ($AdditionalKeep.Count -gt 0) {
-        $keepAssemblies += $AdditionalKeep
+        $keepPatterns += $AdditionalKeep
+    }
+
+    # Guardrail: refuse to keep assemblies that are explicitly forbidden by the packaging policy.
+    $forbiddenNames = @(
+        'FluentValidation.dll',
+        'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
+        'Microsoft.Extensions.Logging.Abstractions.dll',
+        'System.Text.Json.dll'
+    )
+    foreach ($forbidden in $forbiddenNames) {
+        $shouldKeepForbidden = $keepPatterns | Where-Object { $forbidden -like $_ } | Select-Object -First 1
+        if ($shouldKeepForbidden) {
+            throw "Refusing to keep forbidden host-shared assembly '$forbidden' (matches keep pattern '$shouldKeepForbidden')."
+        }
     }
 
     # Remove everything except kept assemblies
     $allDlls = Get-ChildItem -LiteralPath $PublishPath -Filter '*.dll'
     foreach ($dll in $allDlls) {
-        if ($keepAssemblies -notcontains $dll.Name) {
+        $isKept = $false
+        foreach ($pattern in $keepPatterns) {
+            if ($dll.Name -like $pattern) {
+                $isKept = $true
+                break
+            }
+        }
+        if (-not $isKept) {
             Write-Host "  Removing: $($dll.Name)" -ForegroundColor DarkGray
             Remove-Item -LiteralPath $dll.FullName -Force -ErrorAction SilentlyContinue
             
