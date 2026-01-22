@@ -12,7 +12,7 @@ This document tracks progress toward full structural and behavioral parity acros
 | **Naming/Path** | ✅ | ✅ | N/A | N/A | FileSystemUtilities |
 | **Concurrency** | ✅ | ✅ | N/A | N/A | BaseDownloadOrchestrator |
 | **Auth Lifecycle** | ✅ | ✅ | N/A | Custom | Single-authority pattern |
-| **Token Protection** | ✅ | ✅ | N/A | Custom | See note below |
+| **Token Protection** | ✅ | ✅ | N/A | ✅ | Common token protection |
 | **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | ⚠️ Metadata-only | JSON schema |
 
 **Overall Ecosystem Parity: ~95%**
@@ -23,7 +23,7 @@ AppleMusicarr is a **metadata-only** plugin (no audio downloads) with different 
 - **Naming/Path**: Not applicable (no file downloads)
 - **Concurrency**: Not applicable (no download orchestration)
 - **Auth Lifecycle**: Uses Apple Music API authentication (different from OAuth2 PKCE)
-- **Token Protection**: Custom implementation in `AppleMusicSecretProtection.cs` (migration target: Common facade)
+- **Token Protection**: Uses Common token protection (see `AppleMusicSecretProtection.cs`)
 - **E2E Gates**: Appropriate gates are schema validation and import list sync (no download/grab gates)
 
 ---
