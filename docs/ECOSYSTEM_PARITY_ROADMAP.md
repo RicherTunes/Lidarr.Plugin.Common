@@ -24,7 +24,7 @@ AppleMusicarr is a **metadata-only** plugin (no audio downloads) with different 
 - **Concurrency**: Not applicable (no download orchestration)
 - **Auth Lifecycle**: Uses Apple Music API authentication (different from OAuth2 PKCE)
 - **Token Protection**: Uses Common token protection (see `AppleMusicSecretProtection.cs`)
-- **E2E Gates**: Appropriate gates are schema validation and import list sync (no download/grab gates)
+- **E2E Gates**: Appropriate gates are packaging + plugin-load validation (no download/grab gates). ImportList support remains legacy-host-only until the upstream Abstractions model it.
 
 ---
 
