@@ -68,6 +68,63 @@ namespace Lidarr.Plugin.Common.Security
             if (string.IsNullOrEmpty(value)) return string.Empty;
             return System.Net.WebUtility.HtmlEncode(value);
         }
+
+        /// <summary>
+        /// Redacts sensitive parts of URLs (query strings, auth tokens) for safe logging.
+        /// Use this when including exception messages or URLs in logs/error messages.
+        /// </summary>
+        /// <param name="text">Text that may contain URLs or sensitive data.</param>
+        /// <returns>Text with URLs redacted to scheme://host/path[?...]</returns>
+        public static string RedactUrls(string? text)
+        {
+            if (string.IsNullOrEmpty(text)) return string.Empty;
+
+            // Pattern matches http(s) URLs and redacts query strings
+            return System.Text.RegularExpressions.Regex.Replace(
+                text,
+                @"(https?://[^\s?#]+)(\?[^\s]*)?",
+                m =>
+                {
+                    var baseUrl = m.Groups[1].Value;
+                    var hasQuery = m.Groups[2].Success && !string.IsNullOrEmpty(m.Groups[2].Value);
+                    return hasQuery ? $"{baseUrl}?[REDACTED]" : baseUrl;
+                },
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        }
+
+        /// <summary>
+        /// Creates a safe error message by redacting URLs and sensitive patterns.
+        /// Use this when surfacing exception messages to logs or users.
+        /// </summary>
+        /// <param name="message">Original error message.</param>
+        /// <returns>Sanitized error message safe for logging.</returns>
+        public static string SafeErrorMessage(string? message)
+        {
+            if (string.IsNullOrEmpty(message)) return string.Empty;
+
+            var redacted = RedactUrls(message);
+
+            // Redact common auth patterns: Bearer tokens, API keys in common formats
+            redacted = System.Text.RegularExpressions.Regex.Replace(
+                redacted,
+                @"(Bearer\s+)[A-Za-z0-9\-_\.]+",
+                "$1[REDACTED]",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            redacted = System.Text.RegularExpressions.Regex.Replace(
+                redacted,
+                @"(api[_-]?key[=:]\s*)[A-Za-z0-9\-_]+",
+                "$1[REDACTED]",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            redacted = System.Text.RegularExpressions.Regex.Replace(
+                redacted,
+                @"(token[=:]\s*)[A-Za-z0-9\-_\.]+",
+                "$1[REDACTED]",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+
+            return redacted;
+        }
     }
 }
 

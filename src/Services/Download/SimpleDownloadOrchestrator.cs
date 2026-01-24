@@ -10,6 +10,7 @@ using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Common.Services.Metadata;
+using Lidarr.Plugin.Common.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using System.Diagnostics;
@@ -283,7 +284,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                     }
                     catch (Exception ex)
                     {
-                        result = new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {ex.Message}" };
+                        result = new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
                     }
                 }
                 else
@@ -441,7 +442,7 @@ namespace Lidarr.Plugin.Common.Services.Download
             }
             catch (Exception ex)
             {
-                return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {ex.Message}" };
+                return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
             }
         }
 
