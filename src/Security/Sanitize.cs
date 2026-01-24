@@ -93,6 +93,22 @@ namespace Lidarr.Plugin.Common.Security
         }
 
         /// <summary>
+        /// Extracts a URL host for safe logging (no scheme, no path, no query, no credentials).
+        /// Returns "unknown" if the input is null/empty/invalid.
+        /// </summary>
+        public static string UrlHostOnly(string? url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) return "unknown";
+
+            if (!Uri.TryCreate(url, UriKind.Absolute, out var uri) || string.IsNullOrWhiteSpace(uri.Host))
+            {
+                return "unknown";
+            }
+
+            return uri.Host;
+        }
+
+        /// <summary>
         /// Creates a safe error message by redacting URLs and sensitive patterns.
         /// Use this when surfacing exception messages to logs or users.
         /// </summary>
@@ -127,4 +143,3 @@ namespace Lidarr.Plugin.Common.Security
         }
     }
 }
-
