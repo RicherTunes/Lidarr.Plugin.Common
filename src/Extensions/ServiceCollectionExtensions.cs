@@ -1,5 +1,6 @@
 using System;
 using Lidarr.Plugin.Common.Interfaces;
+using Lidarr.Plugin.Common.Security.SecretProtection;
 using Lidarr.Plugin.Common.Security.TokenProtection;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -18,6 +19,23 @@ namespace Lidarr.Plugin.Common.Extensions
         {
             services.AddSingleton<ITokenProtector>(factory);
             services.AddSingleton<IStringProtector>(sp => new StringTokenProtector(sp.GetRequiredService<ITokenProtector>()));
+            return services;
+        }
+
+        public static IServiceCollection AddSecretProtection(this IServiceCollection services)
+        {
+            services.AddSingleton<ISecretProtector>(sp => new SecretProtector(sp.GetRequiredService<ITokenProtector>()));
+            return services;
+        }
+
+        public static IServiceCollection AddSecretProtection(this IServiceCollection services, Func<IServiceProvider, byte[]?> legacyAesGcmKeyFactory)
+        {
+            services.AddSingleton<ISecretProtector>(sp =>
+            {
+                var tokenProtector = sp.GetRequiredService<ITokenProtector>();
+                var legacyKey = legacyAesGcmKeyFactory(sp);
+                return new SecretProtector(tokenProtector, legacyKey);
+            });
             return services;
         }
     }
