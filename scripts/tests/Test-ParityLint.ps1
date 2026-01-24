@@ -27,9 +27,19 @@ function Add-ViolationFile {
 }
 
 try {
-    Write-Host "========================================" -ForegroundColor Cyan
-    Write-Host "Test-ParityLint: Seeded Violation Tests" -ForegroundColor Cyan
-    Write-Host "========================================" -ForegroundColor Cyan
+    # Test 0: Tripwire - -AllRepos must include applemusicarr when present in workspace
+    Write-Host "`n[TEST] Includes applemusicarr in -AllRepos scanning set..." -ForegroundColor Cyan
+    $lintSource = Get-Content -Path $lintScript -Raw
+    if ($lintSource -match "'applemusicarr'") {
+        Write-Host "  [PASS] parity-lint includes applemusicarr in repo list" -ForegroundColor Green
+    } else {
+        Write-Host "  [FAIL] parity-lint does not include applemusicarr in repo list" -ForegroundColor Red
+        $failed++
+    }
+
+    Write-Host "========================================" -ForegroundColor Cyan 
+    Write-Host "Test-ParityLint: Seeded Violation Tests" -ForegroundColor Cyan  
+    Write-Host "========================================" -ForegroundColor Cyan 
 
     # Create temp test structure
     $testRoot = Join-Path ([System.IO.Path]::GetTempPath()) "parity-lint-test-$([guid]::NewGuid().ToString('N').Substring(0,8))"
