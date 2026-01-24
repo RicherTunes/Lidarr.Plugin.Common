@@ -322,8 +322,10 @@ function Invoke-PluginCleanup {
     }
 
     # Guardrail: refuse to keep assemblies that are explicitly forbidden by the packaging policy.
+    # Exception: Lidarr.Plugin.*.dll are plugin-specific assemblies, NOT host assemblies.
     foreach ($pattern in $AdditionalKeep) {
-        if ($pattern -like 'Lidarr.*.dll' -or $pattern -like 'NzbDrone.*.dll') {
+        $isHostAssembly = ($pattern -like 'Lidarr.*.dll' -and $pattern -notlike 'Lidarr.Plugin.*.dll') -or $pattern -like 'NzbDrone.*.dll'
+        if ($isHostAssembly) {
             throw "Refusing to keep host assembly pattern '$pattern'. Host assemblies (Lidarr.* / NzbDrone.*) must never be shipped."
         }
     }
