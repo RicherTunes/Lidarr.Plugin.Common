@@ -1,10 +1,17 @@
 using System;
+using System.ComponentModel;
 using System.Net;
 using System.Threading;
 
 namespace Lidarr.Plugin.Common.Utilities
 {
-    internal sealed class DownloadTelemetryCounters
+    /// <summary>
+    /// Internal counter storage for download telemetry.
+    /// Plugins should use DownloadTelemetryContext.RecordRetry() to record retries,
+    /// not manipulate counters directly.
+    /// </summary>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public sealed class DownloadTelemetryCounters
     {
         private long _retryCount;
         private long _tooManyRequestsCount;
@@ -22,12 +29,30 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 
-    internal static class DownloadTelemetryContext
+    /// <summary>
+    /// AsyncLocal context for download telemetry during a download operation.
+    /// Automatically propagated through async/await boundaries.
+    /// </summary>
+    /// <remarks>
+    /// This is an advanced API for plugins that implement custom retry logic outside
+    /// of Common's resilience pipelines. Most plugins should use IStreamingStreamProvider
+    /// or HttpClientExtensions.ExecuteWithResilienceAsync which handle telemetry automatically.
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Advanced)]
+    public static class DownloadTelemetryContext
     {
         private static readonly AsyncLocal<DownloadTelemetryCounters?> Current = new();
 
+        /// <summary>
+        /// Gets the current telemetry context for this async operation.
+        /// </summary>
+        [EditorBrowsable(EditorBrowsableState.Advanced)]
         public static DownloadTelemetryCounters? Get() => Current.Value;
 
+        /// <summary>
+        /// Begins a telemetry scope for a download operation.
+        /// </summary>
+        [EditorBrowsable(EditorBrowsableState.Advanced)]
         public static IDisposable Begin(DownloadTelemetryCounters counters)
         {
             if (counters == null) throw new ArgumentNullException(nameof(counters));
@@ -37,6 +62,12 @@ namespace Lidarr.Plugin.Common.Utilities
             return new Scope(prior);
         }
 
+        /// <summary>
+        /// Records a retry attempt for telemetry. Call this in custom retry loops
+        /// when using raw HttpClient instead of Common's resilience helpers.
+        /// </summary>
+        /// <param name="statusCode">The HTTP status code that triggered the retry.</param>
+        [EditorBrowsable(EditorBrowsableState.Advanced)]
         public static void RecordRetry(HttpStatusCode statusCode)
         {
             Current.Value?.RecordRetry(statusCode);
