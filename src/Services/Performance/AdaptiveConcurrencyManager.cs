@@ -197,10 +197,12 @@ namespace Lidarr.Plugin.Common.Services.Performance
         {
             var localSemaphore = semaphore ?? GetConcurrencySemaphore();
             var shouldDispose = semaphore != null; // Only dispose if caller provided their own
+            var semaphoreAcquired = false;
 
             try
             {
                 await localSemaphore.WaitAsync(cancellationToken);
+                semaphoreAcquired = true;
 
                 var stopwatch = Stopwatch.StartNew();
                 Exception? operationError = null;
@@ -226,7 +228,10 @@ namespace Lidarr.Plugin.Common.Services.Performance
             }
             finally
             {
-                localSemaphore.Release();
+                if (semaphoreAcquired)
+                {
+                    localSemaphore.Release();
+                }
                 if (shouldDispose)
                 {
                     localSemaphore.Dispose();
