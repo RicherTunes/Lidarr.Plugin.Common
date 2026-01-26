@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Generic;
 using System.Net.Http;
+using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Resilience;
 using Lidarr.Plugin.Common.TestKit.Testing;

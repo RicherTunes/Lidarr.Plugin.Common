@@ -513,10 +513,15 @@ namespace Lidarr.Plugin.Common.Tests
             // Assert
             Assert.True(result.IsSuccessful);
             // Progress<T> may coalesce reports, so we check that we got at least some
-            // and that the final report shows all items completed
+            // and that the final report shows completion
             Assert.True(progressReports.Count >= 1);
             var finalReport = progressReports[^1];
-            Assert.Equal(3, finalReport.CompletedItems);
+            // Stable assertions: TotalItems is deterministic, and completion means all processed
+            Assert.Equal(3, finalReport.TotalItems);
+            Assert.Equal(finalReport.TotalItems, finalReport.SuccessfulItems + finalReport.FailedItems);
+            // In success case, all items should be successful with no failures
+            Assert.Equal(3, finalReport.SuccessfulItems);
+            Assert.Equal(0, finalReport.FailedItems);
         }
 
         [Fact]
