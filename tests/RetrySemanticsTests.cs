@@ -5,7 +5,9 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
+using Lidarr.Plugin.Common.Services.Resilience;
 using Lidarr.Plugin.Common.Utilities;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Lidarr.Plugin.Common.Tests
