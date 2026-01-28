@@ -132,6 +132,37 @@ function New-PluginPackage {
     # which would otherwise pass validation but never be shipped.
     Copy-Item -LiteralPath $manifestPath -Destination (Join-Path $publishPath 'plugin.json') -Force
 
+    # MANDATORY: Inject gitSha and buildTimestamp into plugin.json for artifact freshness validation.
+    # - gitSha: Short git commit hash (8 chars) or "unknown" if git unavailable
+    # - buildTimestamp: ISO 8601 UTC timestamp of when the package was built
+    $packageManifestPath = Join-Path $publishPath 'plugin.json'
+    $packageManifest = Get-Content -LiteralPath $packageManifestPath -Raw | ConvertFrom-Json
+
+    # Get git SHA with fallback to "unknown" (CI without git, exported archives)
+    $gitSha = 'unknown'
+    try {
+        $gitOutput = & git rev-parse --short=8 HEAD 2>$null
+        if ($LASTEXITCODE -eq 0 -and $gitOutput) {
+            $gitSha = $gitOutput.Trim()
+        }
+    } catch {
+        # Git not available - use "unknown"
+    }
+    # Fallback to GITHUB_SHA environment variable (GitHub Actions provides this)
+    if ($gitSha -eq 'unknown' -and $env:GITHUB_SHA) {
+        $gitSha = $env:GITHUB_SHA.Substring(0, 8)
+    }
+
+    # ISO 8601 UTC timestamp
+    $buildTimestamp = [DateTime]::UtcNow.ToString('o')
+
+    # Add build metadata to manifest
+    $packageManifest | Add-Member -NotePropertyName 'gitSha' -NotePropertyValue $gitSha -Force
+    $packageManifest | Add-Member -NotePropertyName 'buildTimestamp' -NotePropertyValue $buildTimestamp -Force
+    $packageManifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $packageManifestPath -Encoding UTF8
+
+    Write-Host "Injected build metadata: gitSha=$gitSha, buildTimestamp=$buildTimestamp" -ForegroundColor Cyan
+
     # Parse project metadata FIRST (before any cleanup/merge operations)  
     $projectXml = [xml](Get-Content -LiteralPath $csprojPath)
     $assemblyName = $projectXml.Project.PropertyGroup.AssemblyName | Select-Object -Last 1

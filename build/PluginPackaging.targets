@@ -154,7 +154,58 @@
     <Message Text="[ILRepack] Assembly merging completed." Importance="high" />
   </Target>
 
-  <Target Name="DeployPluginArtifacts" AfterTargets="RepackPlugin" Condition="'$(EnablePluginDeployment)' == 'true' and '$(LidarrPluginDeployPath)' != ''">
+  <!--
+    MANDATORY: Inject gitSha and buildTimestamp into plugin.json
+
+    These fields are required for artifact freshness validation:
+    - gitSha: Short git commit hash (8 chars) or "unknown" if git unavailable
+    - buildTimestamp: ISO 8601 UTC timestamp of when the package was built
+
+    This target runs after RepackPlugin to ensure plugin.json in the output
+    directory gets the build metadata injected before deployment or packaging.
+  -->
+  <Target Name="InjectPluginBuildMetadata" AfterTargets="RepackPlugin" Condition="'$(PluginPackagingDisable)' != 'true'">
+    <PropertyGroup>
+      <_PluginManifestPath>$(TargetDir)$(PluginManifestFileName)</_PluginManifestPath>
+    </PropertyGroup>
+
+    <!-- Get git SHA with fallback to "unknown" if git is not available -->
+    <Exec Command="git rev-parse --short=8 HEAD"
+          ConsoleToMsBuild="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low"
+          IgnoreExitCode="true"
+          Condition="Exists('$(_PluginManifestPath)')">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitShaRaw" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
+    </Exec>
+
+    <PropertyGroup>
+      <!-- Use git SHA if available, otherwise "unknown" (CI without git, exported archives) -->
+      <_PluginGitSha Condition="'$(_GitExitCode)' == '0' and '$(_GitShaRaw)' != ''">$(_GitShaRaw.Trim())</_PluginGitSha>
+      <_PluginGitSha Condition="'$(_PluginGitSha)' == ''">unknown</_PluginGitSha>
+      <!-- ISO 8601 UTC timestamp -->
+      <_PluginBuildTimestamp>$([System.DateTime]::UtcNow.ToString("o"))</_PluginBuildTimestamp>
+    </PropertyGroup>
+
+    <!-- Inject gitSha and buildTimestamp into plugin.json using PowerShell (cross-platform) -->
+    <Exec Command="pwsh -NoProfile -NonInteractive -Command &quot;$manifest = Get-Content -LiteralPath '$(_PluginManifestPath)' -Raw | ConvertFrom-Json; $manifest | Add-Member -NotePropertyName 'gitSha' -NotePropertyValue '$(_PluginGitSha)' -Force; $manifest | Add-Member -NotePropertyName 'buildTimestamp' -NotePropertyValue '$(_PluginBuildTimestamp)' -Force; $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath '$(_PluginManifestPath)' -Encoding UTF8&quot;"
+          Condition="Exists('$(_PluginManifestPath)')"
+          StandardOutputImportance="low"
+          IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="_PwshExitCode" />
+    </Exec>
+
+    <!-- Fallback to powershell.exe on Windows if pwsh is not available -->
+    <Exec Command="powershell -NoProfile -NonInteractive -Command &quot;$manifest = Get-Content -LiteralPath '$(_PluginManifestPath)' -Raw | ConvertFrom-Json; $manifest | Add-Member -NotePropertyName 'gitSha' -NotePropertyValue '$(_PluginGitSha)' -Force; $manifest | Add-Member -NotePropertyName 'buildTimestamp' -NotePropertyValue '$(_PluginBuildTimestamp)' -Force; $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath '$(_PluginManifestPath)' -Encoding UTF8&quot;"
+          Condition="Exists('$(_PluginManifestPath)') and '$(_PwshExitCode)' != '0'"
+          StandardOutputImportance="low"
+          IgnoreExitCode="true" />
+
+    <Message Text="[PluginPackaging] Injected build metadata: gitSha=$(_PluginGitSha), buildTimestamp=$(_PluginBuildTimestamp)" Importance="high" Condition="Exists('$(_PluginManifestPath)')" />
+  </Target>
+
+  <Target Name="DeployPluginArtifacts" AfterTargets="InjectPluginBuildMetadata" Condition="'$(EnablePluginDeployment)' == 'true' and '$(LidarrPluginDeployPath)' != ''">
     <ItemGroup>
       <PluginDeploymentFiles Include="$(OutputPath)$(PluginAssemblyFileName)" />
       <PluginDeploymentFiles Include="$(OutputPath)$(PluginSymbolFileName)" Condition="Exists('$(OutputPath)$(PluginSymbolFileName)')" />
