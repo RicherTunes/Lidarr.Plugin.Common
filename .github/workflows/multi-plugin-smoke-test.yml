@@ -67,6 +67,39 @@ on:
         type: boolean
         required: true
         default: false
+      run_golden_persist_gate:
+        description: Restart container and verify persistence (requires grab gate)
+        type: boolean
+        required: false
+        default: false
+      run_authfail_redaction_gate:
+        description: Test auth failure handling and log redaction (no creds needed)
+        type: boolean
+        required: false
+        default: false
+      run_drift_sentinel_gate:
+        description: Validate stub-vs-live API field expectations (nightly only)
+        type: boolean
+        required: false
+        default: false
+      drift_sentinel_fail_on_drift:
+        description: Fail if drift detected (warning mode if false)
+        type: boolean
+        required: false
+        default: false
+      drift_sentinel_include_success_mode:
+        description: Also validate authenticated success payloads (requires credentials)
+        type: boolean
+        required: false
+        default: false
+      e2e_mode:
+        description: "E2E mode: hermetic (stubbed, PR-safe) or live (real APIs, nightly)"
+        type: choice
+        required: false
+        default: live
+        options:
+          - live
+          - hermetic
 
   workflow_call:
     inputs:
@@ -140,6 +173,36 @@ on:
         type: boolean
         required: false
         default: false
+      run_golden_persist_gate:
+        description: Restart container and verify persistence (requires grab gate)
+        type: boolean
+        required: false
+        default: false
+      run_authfail_redaction_gate:
+        description: Test auth failure handling and log redaction (no creds needed)
+        type: boolean
+        required: false
+        default: false
+      run_drift_sentinel_gate:
+        description: Validate stub-vs-live API field expectations (nightly only)
+        type: boolean
+        required: false
+        default: false
+      drift_sentinel_fail_on_drift:
+        description: Fail if drift detected (warning mode if false)
+        type: boolean
+        required: false
+        default: false
+      drift_sentinel_include_success_mode:
+        description: Also validate authenticated success payloads (requires credentials)
+        type: boolean
+        required: false
+        default: false
+      e2e_mode:
+        description: "E2E mode: hermetic (stubbed, PR-safe) or live (real APIs, nightly)"
+        type: string
+        required: false
+        default: live
     secrets:
       CROSS_REPO_PAT:
         required: true
@@ -223,8 +286,37 @@ jobs:
             echo "reason=missing_cross_repo_pat" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+
+          # Health check: verify PAT is valid and has correct scopes
+          echo "Verifying CROSS_REPO_PAT health..."
+          response=$(curl -s -w "\n%{http_code}" -H "Authorization: token ${CROSS_REPO_PAT}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/user" 2>/dev/null || echo -e "\n000")
+
+          http_code=$(echo "$response" | tail -n1)
+          body=$(echo "$response" | sed '$d')
+
+          if [[ "$http_code" == "401" ]]; then
+            echo "::error::CROSS_REPO_PAT is expired or invalid (HTTP 401)."
+            echo "The token may have expired. Please generate a new PAT and update the secret."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=pat_expired" >> "$GITHUB_OUTPUT"
+            exit 0
+          elif [[ "$http_code" == "403" ]]; then
+            echo "::error::CROSS_REPO_PAT has insufficient permissions (HTTP 403)."
+            echo "Ensure the token has 'repo' scope for cross-repository access."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "reason=pat_insufficient_scope" >> "$GITHUB_OUTPUT"
+            exit 0
+          elif [[ "$http_code" != "200" ]]; then
+            echo "::warning::CROSS_REPO_PAT health check failed (HTTP $http_code). Proceeding anyway."
+          else
+            username=$(echo "$body" | grep -o '"login":"[^"]*"' | head -1 | cut -d'"' -f4)
+            echo "PAT validated: authenticated as ${username:-unknown}"
+          fi
+
           echo "skip=false" >> "$GITHUB_OUTPUT"
-          echo "CROSS_REPO_PAT secret is configured"
+          echo "CROSS_REPO_PAT secret is configured and valid"
 
       - name: Smoke Test Skipped
         if: ${{ steps.pat.outputs.skip == 'true' }}
@@ -560,8 +652,8 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($tidalZip)) { Write-Host "Tidalarr zip: $tidalZip" }
           if (-not [string]::IsNullOrWhiteSpace($brainZip)) { Write-Host "Brainarr zip: $brainZip" }
 
-      - name: Validate credentials (if gates enabled)
-        if: ${{ steps.pat.outputs.skip != 'true' && (inputs.run_medium_gate || inputs.run_downloadclient_gate || inputs.run_search_gate || inputs.run_grab_gate) }}
+      - name: Validate credentials (if live gates enabled)
+        if: ${{ steps.pat.outputs.skip != 'true' && (inputs.run_medium_gate || inputs.run_downloadclient_gate || inputs.run_search_gate || inputs.run_grab_gate || inputs.run_golden_persist_gate) }}
         shell: bash
         env:
           QOBUZARR_EMAIL: ${{ secrets.QOBUZARR_EMAIL }}
@@ -649,6 +741,11 @@ jobs:
           if ("${{ inputs.require_downloaded_files }}" -eq "true") { $params.RequireDownloadedFiles = $true }
           if (-not [string]::IsNullOrWhiteSpace("${{ inputs.grab_timeout_seconds }}")) { $params.GrabTimeoutSeconds = [int]"${{ inputs.grab_timeout_seconds }}" }
           if ("${{ inputs.require_all_indexers_in_search }}" -eq "true") { $params.RequireAllConfiguredIndexersInSearch = $true }
+          if ("${{ inputs.run_golden_persist_gate }}" -eq "true") { $params.RunGoldenPersistGate = $true }
+          if ("${{ inputs.run_authfail_redaction_gate }}" -eq "true") { $params.RunAuthFailRedactionGate = $true }
+          if ("${{ inputs.run_drift_sentinel_gate }}" -eq "true") { $params.RunDriftSentinelGate = $true }
+          if ("${{ inputs.drift_sentinel_fail_on_drift }}" -eq "true") { $params.DriftSentinelFailOnDrift = $true }
+          if ("${{ inputs.drift_sentinel_include_success_mode }}" -eq "true") { $params.DriftSentinelIncludeSuccessMode = $true }
 
           & ./scripts/multi-plugin-docker-smoke-test.ps1 @params
 

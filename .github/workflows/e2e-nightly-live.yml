@@ -1,0 +1,145 @@
+# Nightly E2E with live APIs - comprehensive, requires credentials
+# Runs: all gates including golden-persist and authfail-redaction
+# Schedule: 02:00 UTC (before plugin nightlies at 03:00/04:00 UTC)
+
+name: E2E Nightly Live
+
+on:
+  schedule:
+    # Run at 02:00 UTC daily (before plugin-specific nightlies)
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_plugins:
+        description: "Comma-separated plugins (default: qobuzarr,tidalarr)"
+        type: string
+        required: false
+        default: qobuzarr,tidalarr
+      run_canary:
+        description: "Also run against pr-plugins tag (allowed to fail)"
+        type: boolean
+        required: false
+        default: true
+      grab_timeout_seconds:
+        description: "Grab gate timeout (nightly can be longer)"
+        type: string
+        required: false
+        default: "600"
+  # Allow plugins to call this workflow
+  workflow_call:
+    inputs:
+      test_plugins:
+        description: "Comma-separated plugins (default: qobuzarr,tidalarr)"
+        type: string
+        required: false
+        default: qobuzarr,tidalarr
+      run_canary:
+        description: "Also run against pr-plugins tag (allowed to fail)"
+        type: boolean
+        required: false
+        default: true
+      grab_timeout_seconds:
+        description: "Grab gate timeout (nightly can be longer)"
+        type: string
+        required: false
+        default: "600"
+    secrets:
+      CROSS_REPO_PAT:
+        required: true
+      QOBUZARR_EMAIL:
+        required: false
+      QOBUZARR_PASSWORD:
+        required: false
+      QOBUZARR_USER_ID:
+        required: false
+      QOBUZARR_AUTH_TOKEN:
+        required: false
+      QOBUZARR_APP_ID:
+        required: false
+      QOBUZARR_APP_SECRET:
+        required: false
+      QOBUZARR_COUNTRY_CODE:
+        required: false
+      QOBUZ_EMAIL:
+        required: false
+      QOBUZ_PASSWORD:
+        required: false
+      QOBUZ_USER_ID:
+        required: false
+      QOBUZ_AUTH_TOKEN:
+        required: false
+      QOBUZ_APP_ID:
+        required: false
+      QOBUZ_APP_SECRET:
+        required: false
+      QOBUZ_COUNTRY_CODE:
+        required: false
+      TIDALARR_REDIRECT_URL:
+        required: false
+      TIDALARR_MARKET:
+        required: false
+      TIDAL_REDIRECT_URL:
+        required: false
+      TIDAL_MARKET:
+        required: false
+
+# Prevent overlapping nightly runs
+concurrency:
+  group: e2e-nightly-live-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  live-e2e:
+    name: Live E2E (Full Suite)
+    timeout-minutes: 45
+    uses: ./.github/workflows/multi-plugin-smoke-test.yml
+    with:
+      test_plugins: ${{ inputs.test_plugins || 'qobuzarr,tidalarr' }}
+      lidarr_tag: pr-plugins-3.1.1.4884
+      # Enable all live gates
+      run_medium_gate: true
+      run_downloadclient_gate: true
+      run_search_gate: true
+      run_grab_gate: true
+      require_downloaded_files: true
+      grab_timeout_seconds: ${{ inputs.grab_timeout_seconds || '600' }}
+      # Persistence + security gates
+      run_golden_persist_gate: true
+      run_authfail_redaction_gate: true
+      # Drift sentinel: validate stub-vs-live field expectations (warning mode for now)
+      run_drift_sentinel_gate: true
+      drift_sentinel_fail_on_drift: false
+      drift_sentinel_include_success_mode: true
+      # Canary for early warning
+      run_canary: ${{ inputs.run_canary || true }}
+      e2e_mode: live
+    secrets:
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+      # Qobuz credentials (use prefixed names)
+      QOBUZARR_EMAIL: ${{ secrets.QOBUZARR_EMAIL }}
+      QOBUZARR_PASSWORD: ${{ secrets.QOBUZARR_PASSWORD }}
+      QOBUZARR_USER_ID: ${{ secrets.QOBUZARR_USER_ID }}
+      QOBUZARR_AUTH_TOKEN: ${{ secrets.QOBUZARR_AUTH_TOKEN }}
+      QOBUZARR_APP_ID: ${{ secrets.QOBUZARR_APP_ID }}
+      QOBUZARR_APP_SECRET: ${{ secrets.QOBUZARR_APP_SECRET }}
+      QOBUZARR_COUNTRY_CODE: ${{ secrets.QOBUZARR_COUNTRY_CODE }}
+      # Fallback names
+      QOBUZ_EMAIL: ${{ secrets.QOBUZ_EMAIL }}
+      QOBUZ_PASSWORD: ${{ secrets.QOBUZ_PASSWORD }}
+      QOBUZ_USER_ID: ${{ secrets.QOBUZ_USER_ID }}
+      QOBUZ_AUTH_TOKEN: ${{ secrets.QOBUZ_AUTH_TOKEN }}
+      QOBUZ_APP_ID: ${{ secrets.QOBUZ_APP_ID }}
+      QOBUZ_APP_SECRET: ${{ secrets.QOBUZ_APP_SECRET }}
+      QOBUZ_COUNTRY_CODE: ${{ secrets.QOBUZ_COUNTRY_CODE }}
+      # Tidal credentials
+      TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
+      TIDALARR_MARKET: ${{ secrets.TIDALARR_MARKET }}
+      TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
+      TIDAL_MARKET: ${{ secrets.TIDAL_MARKET }}

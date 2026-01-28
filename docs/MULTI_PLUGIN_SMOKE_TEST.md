@@ -55,6 +55,12 @@ Secrets can use either `QOBUZARR_*` or `QOBUZ_*` prefix (and similarly `TIDALARR
 | `grab_timeout_seconds` | string | `300` | Grab gate timeout for queue/files checks |
 | `require_all_indexers_in_search` | boolean | `false` | Fail if releases don't include all configured indexers |
 | `run_canary` | boolean | `false` | Also run against moving `pr-plugins` tag (allowed to fail) |
+| `run_golden_persist_gate` | boolean | `false` | Restart container and verify state persistence (requires grab gate) |
+| `run_authfail_redaction_gate` | boolean | `false` | Test auth failure handling and log redaction (no creds needed) |
+| `run_drift_sentinel_gate` | boolean | `false` | Validate stub-vs-live API field expectations (nightly only) |
+| `drift_sentinel_fail_on_drift` | boolean | `false` | Fail workflow if drift detected (warning mode if false) |
+| `drift_sentinel_include_success_mode` | boolean | `false` | Also validate authenticated success payloads (requires credentials) |
+| `e2e_mode` | string | `live` | E2E mode: `hermetic` (stubbed, PR-safe) or `live` (real APIs, nightly) |
 
 ## Gates
 
@@ -85,10 +91,56 @@ Secrets can use either `QOBUZARR_*` or `QOBUZ_*` prefix (and similarly `TIDALARR
 - Optionally requires files to exist on disk (`require_downloaded_files=true`)
 - If only one provider is configured, the gate runs for that provider and skips the others
 
+### Golden-Persist Gate (`run_golden_persist_gate=true`)
+- Runs after grab gate completes (requires grab + downloaded files)
+- Restarts the Lidarr container
+- Verifies after restart:
+  - Plugin still loads (schemas available)
+  - Queue/history state persists (no duplicate grabs)
+  - Telemetry signal still emitted (if telemetry gate was also enabled)
+- Catches the most common real-world regression: data loss on restart
+
+### AuthFail-Redaction Gate (`run_authfail_redaction_gate=true`)
+- Tests auth failure handling and secret redaction
+- Configures plugin with intentionally bad credentials
+- Verifies:
+  - Operation fails gracefully (HTTP 401/403/429, no crash)
+  - Error responses do not leak secrets
+  - Container logs do not leak secrets (query strings, bearer tokens redacted)
+- **Does NOT require real credentials** - safe for PR CI
+
 ### Canary (`run_canary=true`)
 - Runs all enabled gates against the moving `pr-plugins` Docker tag
 - Allowed to fail (detects breaking changes early)
 - Matrix entry with `continue-on-error: true`
+
+### Drift Sentinel Gate (`run_drift_sentinel_gate=true`)
+- Validates stub-vs-live API field expectations
+- Makes minimal live probes per provider (auth + search endpoints)
+- Compares response structure against what stubs depend on
+- **Error mode** (default): Probes auth endpoints with invalid creds - no secrets needed
+- **Success mode** (`drift_sentinel_include_success_mode=true`): Also validates authenticated search payloads - requires credentials, auto-skips if missing
+- **Warning mode** (`drift_sentinel_fail_on_drift=false`): logs drift but doesn't fail
+- **Strict mode** (`drift_sentinel_fail_on_drift=true`): fails workflow on drift
+- Rate limiting: Uses exponential backoff, respects Retry-After headers, treats 429 as inconclusive (not failure)
+- Field validation: "Required" fields must be present; "AtLeastOne" fields need at least one item to have the field
+- Versioned expectations: Tracks expectations version for drift triage
+- Catches API breaking changes before they break hermetic E2E
+- Runs in nightly E2E (not PR E2E - needs live API access)
+
+## E2E Modes
+
+### Live Mode (Default)
+- Uses real service APIs (Qobuz, Tidal, etc.)
+- Requires valid credentials in secrets
+- Recommended for: nightly runs, manual validation
+
+### Hermetic Mode (`e2e_mode=hermetic`)
+- Uses stub HTTP server for API responses
+- **No credentials required** - safe for PR CI
+- Verifies plugin behavior without external dependencies
+- Limited to: basic gate, authfail-redaction gate
+- Recommended for: PR validation, cost-sensitive CI
 
 ## Copy-Paste Examples
 
@@ -101,6 +153,18 @@ Only requires `CROSS_REPO_PAT`:
 gh workflow run multi-plugin-smoke-test.yml \
   --repo RicherTunes/Lidarr.Plugin.Common \
   --ref main
+```
+
+### AuthFail-Redaction Gate (PR-Safe)
+
+Only requires `CROSS_REPO_PAT` - no service credentials needed:
+
+```bash
+# AuthFail gate - test failure handling and log redaction
+gh workflow run multi-plugin-smoke-test.yml \
+  --repo RicherTunes/Lidarr.Plugin.Common \
+  --ref main \
+  -f run_authfail_redaction_gate=true
 ```
 
 ### Full Search Gate Run
@@ -123,6 +187,41 @@ gh workflow run multi-plugin-smoke-test.yml \
   -f run_medium_gate=true \
   -f run_search_gate=true \
   -f run_canary=true
+```
+
+### Golden-Persist Gate (Full Durability Test)
+
+Requires all credentials plus downloaded files:
+
+```bash
+# Golden-persist gate - restart + verify persistence
+gh workflow run multi-plugin-smoke-test.yml \
+  --repo RicherTunes/Lidarr.Plugin.Common \
+  --ref main \
+  -f run_medium_gate=true \
+  -f run_search_gate=true \
+  -f run_grab_gate=true \
+  -f require_downloaded_files=true \
+  -f run_golden_persist_gate=true \
+  -f grab_timeout_seconds=600
+```
+
+### Nightly Full E2E (All Gates)
+
+```bash
+# Full nightly - all gates including persistence and security
+gh workflow run multi-plugin-smoke-test.yml \
+  --repo RicherTunes/Lidarr.Plugin.Common \
+  --ref main \
+  -f run_medium_gate=true \
+  -f run_downloadclient_gate=true \
+  -f run_search_gate=true \
+  -f run_grab_gate=true \
+  -f require_downloaded_files=true \
+  -f run_golden_persist_gate=true \
+  -f run_authfail_redaction_gate=true \
+  -f run_canary=true \
+  -f grab_timeout_seconds=600
 ```
 
 ## Activation Checklist
@@ -195,6 +294,63 @@ This is intended for local debugging only; the workflow continues to use publish
 ### Credential validation failed
 - Verify secret names match expected prefixes (`QOBUZ_*` or `QOBUZARR_*`)
 - Check that email/password OR user_id/auth_token are provided (not partial)
+
+## Plugin Workflow Integration
+
+Each plugin repository has two E2E workflows that call Common's reusable workflows:
+
+### PR E2E (Hermetic Mode)
+
+**File**: `.github/workflows/multi-plugin-smoke-test.yml`
+
+```yaml
+jobs:
+  hermetic-e2e:
+    uses: RicherTunes/Lidarr.Plugin.Common/.github/workflows/e2e-pr-hermetic.yml@main
+    with:
+      test_plugins: 'qobuzarr,tidalarr'
+      caller_plugin: 'your-plugin'
+    secrets:
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+```
+
+**Triggers**: Push to main, PRs, manual dispatch
+**Gates**: Basic gate + AuthFail-Redaction
+**Credentials**: Only `CROSS_REPO_PAT` required
+
+### Nightly E2E (Live Mode)
+
+**File**: `.github/workflows/e2e-nightly.yml`
+
+```yaml
+jobs:
+  live-e2e:
+    uses: RicherTunes/Lidarr.Plugin.Common/.github/workflows/e2e-nightly-live.yml@main
+    with:
+      test_plugins: 'qobuzarr,tidalarr'
+    secrets:
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+      # Plugin-specific credentials...
+```
+
+**Triggers**: Scheduled (03:00-04:00 UTC daily), manual dispatch
+**Gates**: All gates including Golden-Persist and AuthFail-Redaction
+**Credentials**: Full credentials for each plugin
+
+### Schedule Staggering
+
+To avoid rate limit conflicts and Docker cache collisions:
+- **Common's canonical nightly E2E**: 02:00 UTC (runs first)
+- **Qobuzarr nightly E2E**: 03:00 UTC
+- **Tidalarr nightly E2E**: 04:00 UTC
+- **Unit test nightlies**: 06:00 UTC
+
+### Concurrency Controls
+
+All E2E workflows have concurrency groups to prevent pile-up:
+- **PR E2E**: `cancel-in-progress: true` - newer pushes cancel older runs
+- **Nightly E2E**: `cancel-in-progress: false` - runs complete without interruption
+- **Timeouts**: PR E2E = 20min, Nightly E2E = 45min
 
 ## See Also
 
