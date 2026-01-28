@@ -152,7 +152,23 @@ public sealed class CliRunner : ICliRunner
 
     private static Command BuildCommand(string command, IReadOnlyList<string> arguments, CliRunnerOptions options)
     {
-        var cmd = Cli.Wrap(command).WithArguments(arguments);
+        Command cmd;
+
+        // Windows .cmd/.bat files must be executed via cmd.exe /c
+        if (System.Runtime.InteropServices.RuntimeInformation.IsOSPlatform(
+                System.Runtime.InteropServices.OSPlatform.Windows) &&
+            (command.EndsWith(".cmd", StringComparison.OrdinalIgnoreCase) ||
+             command.EndsWith(".bat", StringComparison.OrdinalIgnoreCase)))
+        {
+            // Build combined args: /c "command" arg1 arg2 ...
+            var cmdArgs = new List<string> { "/c", command };
+            cmdArgs.AddRange(arguments);
+            cmd = Cli.Wrap("cmd.exe").WithArguments(cmdArgs);
+        }
+        else
+        {
+            cmd = Cli.Wrap(command).WithArguments(arguments);
+        }
 
         if (options.WorkingDirectory is not null)
         {
