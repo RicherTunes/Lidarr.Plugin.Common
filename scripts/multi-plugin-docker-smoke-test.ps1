@@ -1868,11 +1868,29 @@ try {
                     }
                 }
 
-                # Tidal - would need access token from OAuth flow
-                # For now, success mode for Tidal requires manual token
+                # Tidal - try OAuth client credentials flow, fall back to manual token
+                $tidalClientId = $env:TIDALARR_CLIENT_ID ?? $env:TIDAL_CLIENT_ID
+                $tidalClientSecret = $env:TIDALARR_CLIENT_SECRET ?? $env:TIDAL_CLIENT_SECRET
                 $tidalAccessToken = $env:TIDALARR_ACCESS_TOKEN ?? $env:TIDAL_ACCESS_TOKEN
                 $tidalMarket = $env:TIDALARR_MARKET ?? $env:TIDAL_MARKET ?? "US"
-                if ($tidalAccessToken) {
+
+                if ($tidalClientId -and $tidalClientSecret) {
+                    # Acquire token via OAuth client credentials flow
+                    Write-Host "  Acquiring Tidal access token via OAuth..." -ForegroundColor DarkGray
+                    $tokenResult = Get-TidalAccessToken -ClientId $tidalClientId -ClientSecret $tidalClientSecret
+                    if ($tokenResult.Success) {
+                        Write-Host "  Tidal token acquired (expires in $($tokenResult.ExpiresIn)s)" -ForegroundColor DarkGray
+                        $driftCredentials["tidal"] = @{
+                            AccessToken = $tokenResult.AccessToken
+                            Market = $tidalMarket
+                        }
+                    }
+                    else {
+                        Write-Host "  Tidal OAuth failed: $($tokenResult.Error)" -ForegroundColor Yellow
+                    }
+                }
+                elseif ($tidalAccessToken) {
+                    # Fall back to manually provided token
                     $driftCredentials["tidal"] = @{
                         AccessToken = $tidalAccessToken
                         Market = $tidalMarket

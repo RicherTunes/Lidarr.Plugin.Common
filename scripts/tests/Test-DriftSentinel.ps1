@@ -298,6 +298,23 @@ Assert-True ($null -ne $qobuzExpectations._expectationsVersion) "Expectations ve
 
 #endregion
 
+#endregion
+
+#region Tidal OAuth Tests
+
+Write-Host "`n--- Tidal OAuth Tests ---" -ForegroundColor Yellow
+
+# Test 21: Get-TidalAccessToken returns expected structure
+# Note: We can't test actual OAuth without real credentials, but we can test the function exists and returns proper structure
+$tokenResult = Get-TidalAccessToken -ClientId "invalid" -ClientSecret "invalid" -TimeoutSeconds 5
+Assert-True ($null -ne $tokenResult) "Get-TidalAccessToken returns result object"
+Assert-True ($null -ne $tokenResult.Success) "Token result has Success property"
+Assert-True ($null -ne $tokenResult.Error -or $tokenResult.Success) "Token result has Error or Success"
+Assert-Equal $false $tokenResult.Success "Invalid credentials return Success=false"
+Assert-True ($tokenResult.Error -match "Invalid|credentials|401|400") "Error message indicates auth failure"
+
+#endregion
+
 #region Summary
 
 Write-Host "`n=== Test Summary ===" -ForegroundColor Cyan

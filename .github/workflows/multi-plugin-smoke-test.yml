@@ -238,9 +238,17 @@ on:
         required: false
       TIDALARR_MARKET:
         required: false
+      TIDALARR_CLIENT_ID:
+        required: false
+      TIDALARR_CLIENT_SECRET:
+        required: false
       TIDAL_REDIRECT_URL:
         required: false
       TIDAL_MARKET:
+        required: false
+      TIDAL_CLIENT_ID:
+        required: false
+      TIDAL_CLIENT_SECRET:
         required: false
 
 permissions:
@@ -712,8 +720,12 @@ jobs:
           QOBUZ_COUNTRY_CODE: ${{ secrets.QOBUZ_COUNTRY_CODE }}
           TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
           TIDALARR_MARKET: ${{ secrets.TIDALARR_MARKET }}
+          TIDALARR_CLIENT_ID: ${{ secrets.TIDALARR_CLIENT_ID }}
+          TIDALARR_CLIENT_SECRET: ${{ secrets.TIDALARR_CLIENT_SECRET }}
           TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
           TIDAL_MARKET: ${{ secrets.TIDAL_MARKET }}
+          TIDAL_CLIENT_ID: ${{ secrets.TIDAL_CLIENT_ID }}
+          TIDAL_CLIENT_SECRET: ${{ secrets.TIDAL_CLIENT_SECRET }}
         run: |
           $containerName = "lidarr-multi-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}"
           "SMOKE_CONTAINER_NAME=$containerName" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8

@@ -37,6 +37,8 @@ If `CROSS_REPO_PAT` is not configured, the workflow prints a notice and skips th
 | `QOBUZ_APP_SECRET` | Qobuz application secret | Medium/Search gates |
 | `TIDAL_REDIRECT_URL` | Tidal OAuth redirect URL | Medium/Search gates |
 | `TIDAL_MARKET` | Tidal market code (e.g., `US`) | Medium/Search gates |
+| `TIDAL_CLIENT_ID` | Tidal API client ID | Drift sentinel success mode |
+| `TIDAL_CLIENT_SECRET` | Tidal API client secret | Drift sentinel success mode |
 
 Secrets can use either `QOBUZARR_*` or `QOBUZ_*` prefix (and similarly `TIDALARR_*` or `TIDAL_*`).
 
@@ -127,6 +129,31 @@ Secrets can use either `QOBUZARR_*` or `QOBUZ_*` prefix (and similarly `TIDALARR
 - Versioned expectations: Tracks expectations version for drift triage
 - Catches API breaking changes before they break hermetic E2E
 - Runs in nightly E2E (not PR E2E - needs live API access)
+- **Auto-issue**: Creates/updates a GitHub issue when drift is detected (nightly only)
+
+#### Tidal OAuth Token Acquisition
+
+For Tidal success-mode probes, the drift sentinel can automatically acquire OAuth tokens:
+
+1. **Client Credentials Flow** (preferred): Set `TIDAL_CLIENT_ID` and `TIDAL_CLIENT_SECRET`
+   - Token is acquired automatically before success-mode probes
+   - Short-lived tokens, no manual refresh needed
+
+2. **Manual Token** (fallback): Set `TIDAL_ACCESS_TOKEN` directly
+   - Requires manual token refresh when expired
+   - Use for testing when client credentials unavailable
+
+#### Strictness Promotion Timeline
+
+The drift sentinel follows a gradual strictness promotion:
+
+| Phase | Duration | Mode | Action on Drift |
+|-------|----------|------|-----------------|
+| Warning | Week 1-2 | `drift_sentinel_fail_on_drift=false` | Log + create issue |
+| Strict (Qobuz) | Week 3+ | Qobuz strict, Tidal warning | Fail on Qobuz drift |
+| Strict (All) | Week 5+ | All providers strict | Fail on any drift |
+
+To promote to strict mode, change `drift_sentinel_fail_on_drift: true` in `e2e-nightly-live.yml`.
 
 ## E2E Modes
 

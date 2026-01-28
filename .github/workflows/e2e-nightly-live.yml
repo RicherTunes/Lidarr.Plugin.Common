@@ -78,9 +78,17 @@ on:
         required: false
       TIDALARR_MARKET:
         required: false
+      TIDALARR_CLIENT_ID:
+        required: false
+      TIDALARR_CLIENT_SECRET:
+        required: false
       TIDAL_REDIRECT_URL:
         required: false
       TIDAL_MARKET:
+        required: false
+      TIDAL_CLIENT_ID:
+        required: false
+      TIDAL_CLIENT_SECRET:
         required: false
 
 # Prevent overlapping nightly runs
@@ -90,6 +98,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write
 
 env:
   DOTNET_NOLOGO: "true"
@@ -141,5 +150,138 @@ jobs:
       # Tidal credentials
       TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
       TIDALARR_MARKET: ${{ secrets.TIDALARR_MARKET }}
+      TIDALARR_CLIENT_ID: ${{ secrets.TIDALARR_CLIENT_ID }}
+      TIDALARR_CLIENT_SECRET: ${{ secrets.TIDALARR_CLIENT_SECRET }}
       TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
       TIDAL_MARKET: ${{ secrets.TIDAL_MARKET }}
+      TIDAL_CLIENT_ID: ${{ secrets.TIDAL_CLIENT_ID }}
+      TIDAL_CLIENT_SECRET: ${{ secrets.TIDAL_CLIENT_SECRET }}
+
+  # Create/update drift tracking issue when drift is detected
+  drift-issue:
+    name: Update Drift Tracking Issue
+    needs: live-e2e
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download drift artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: multi-plugin-smoke-*-artifacts
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Check for drift and update issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = require('path');
+
+            // Find drift-sentinel.json in downloaded artifacts
+            let driftData = null;
+            const artifactDirs = ['.docker-multi-smoke-test'];
+
+            for (const dir of artifactDirs) {
+              const searchPaths = [
+                `${dir}/artifacts/e2e/drift-sentinel.json`,
+                `artifacts/e2e/drift-sentinel.json`,
+                'drift-sentinel.json'
+              ];
+
+              for (const searchPath of searchPaths) {
+                try {
+                  // Search recursively
+                  const files = require('child_process')
+                    .execSync(`find . -name "drift-sentinel.json" 2>/dev/null || true`)
+                    .toString()
+                    .trim()
+                    .split('\n')
+                    .filter(f => f);
+
+                  if (files.length > 0) {
+                    const content = fs.readFileSync(files[0], 'utf8');
+                    driftData = JSON.parse(content);
+                    console.log(`Found drift data at: ${files[0]}`);
+                    break;
+                  }
+                } catch (e) {
+                  // Continue searching
+                }
+              }
+              if (driftData) break;
+            }
+
+            if (!driftData) {
+              console.log('No drift-sentinel.json found in artifacts. Skipping issue update.');
+              return;
+            }
+
+            const { summary, warnings, probes, expectationsVersion, timestamp } = driftData;
+
+            // Only create/update issue if drift was detected
+            if (summary.driftCount === 0) {
+              console.log('No drift detected. Skipping issue update.');
+              return;
+            }
+
+            const issueTitle = `[Drift Sentinel] API schema drift detected (v${expectationsVersion})`;
+
+            // Build issue body
+            const probeDetails = probes
+              .filter(p => p.driftDetected)
+              .map(p => `- **${p.provider}/${p.endpoint}** (${p.mode} mode): ${p.details || 'drift detected'}`)
+              .join('\n');
+
+            const issueBody = `## Drift Sentinel Report
+
+            **Timestamp:** ${timestamp}
+            **Expectations Version:** ${expectationsVersion}
+
+            ### Summary
+            - Drift detected: ${summary.driftCount}
+            - Errors: ${summary.errorCount}
+            - Inconclusive: ${summary.inconclusiveCount}
+            - Skipped: ${summary.skippedCount}
+
+            ### Drift Details
+            ${probeDetails || 'No specific details available'}
+
+            ### Warnings
+            ${warnings.map(w => `- ${w}`).join('\n') || 'None'}
+
+            ---
+            *This issue is automatically updated by the nightly E2E workflow.*
+            *Run: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}*
+            `.split('\n').map(l => l.trim()).join('\n');
+
+            // Search for existing drift issue
+            const { data: issues } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'drift-sentinel',
+              state: 'open'
+            });
+
+            const existingIssue = issues.find(i => i.title.includes('[Drift Sentinel]'));
+
+            if (existingIssue) {
+              // Update existing issue
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: existingIssue.number,
+                body: issueBody
+              });
+              console.log(`Updated existing drift issue #${existingIssue.number}`);
+            } else {
+              // Create new issue
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title: issueTitle,
+                body: issueBody,
+                labels: ['drift-sentinel', 'automated']
+              });
+              console.log('Created new drift tracking issue');
+            }

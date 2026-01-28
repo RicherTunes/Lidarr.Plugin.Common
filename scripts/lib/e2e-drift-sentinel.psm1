@@ -156,6 +156,93 @@ function Get-RedactedHeaders {
 
 #endregion
 
+#region Tidal OAuth Token Acquisition
+
+<#
+.SYNOPSIS
+    Acquires a Tidal OAuth access token using client credentials flow.
+.PARAMETER ClientId
+    Tidal API client ID.
+.PARAMETER ClientSecret
+    Tidal API client secret.
+.PARAMETER TimeoutSeconds
+    Request timeout.
+.OUTPUTS
+    PSCustomObject with Success, AccessToken, ExpiresIn, Error properties.
+.NOTES
+    Tidal's client credentials flow requires a registered application.
+    The returned token can be used for API calls that don't require user context.
+#>
+function Get-TidalAccessToken {
+    param(
+        [Parameter(Mandatory)]
+        [string]$ClientId,
+
+        [Parameter(Mandatory)]
+        [string]$ClientSecret,
+
+        [int]$TimeoutSeconds = 30
+    )
+
+    $result = [PSCustomObject]@{
+        Success = $false
+        AccessToken = $null
+        TokenType = $null
+        ExpiresIn = 0
+        Error = $null
+    }
+
+    $tokenEndpoint = "https://auth.tidal.com/v1/oauth2/token"
+
+    # Build form-encoded body for OAuth token request
+    $body = @{
+        grant_type = "client_credentials"
+        client_id = $ClientId
+        client_secret = $ClientSecret
+    }
+
+    try {
+        # Use form encoding for OAuth token endpoint
+        $response = Invoke-RestMethod `
+            -Uri $tokenEndpoint `
+            -Method POST `
+            -Body $body `
+            -ContentType "application/x-www-form-urlencoded" `
+            -TimeoutSec $TimeoutSeconds `
+            -ErrorAction Stop
+
+        if ($response.access_token) {
+            $result.Success = $true
+            $result.AccessToken = $response.access_token
+            $result.TokenType = $response.token_type
+            $result.ExpiresIn = $response.expires_in
+        }
+        else {
+            $result.Error = "Token response missing access_token field"
+        }
+    }
+    catch {
+        $statusCode = 0
+        if ($_.Exception.Response) {
+            $statusCode = [int]$_.Exception.Response.StatusCode
+        }
+
+        if ($statusCode -eq 401 -or $statusCode -eq 400) {
+            $result.Error = "Invalid client credentials (HTTP $statusCode)"
+        }
+        elseif ($statusCode -eq 429) {
+            $result.Error = "Rate limited (HTTP 429)"
+        }
+        else {
+            $result.Error = "Token request failed: $($_.Exception.Message)"
+        }
+    }
+
+    return $result
+}
+
+#endregion
+
 #region Rate Limiting and Backoff
 
 $script:RequestState = @{
@@ -975,6 +1062,7 @@ Export-ModuleMember -Function @(
     'Get-RedactedHeaders',
     'Get-MissingRequiredFields',
     'Get-MissingAtLeastOneFields',
+    'Get-TidalAccessToken',
     'Test-AuthEndpointDrift',
     'Test-SuccessPayloadDrift',
     'ConvertTo-DriftArtifact',
