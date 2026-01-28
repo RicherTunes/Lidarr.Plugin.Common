@@ -1884,12 +1884,16 @@ try {
                 }
             }
 
+            # Write JSON artifact for triage/trending
+            $driftArtifactPath = Join-Path $WorkRoot "artifacts/e2e/drift-sentinel.json"
+
             $driftResult = Invoke-DriftSentinel `
                 -Providers $driftProviders `
                 -FailOnDrift:$DriftSentinelFailOnDrift `
                 -Credentials $driftCredentials `
                 -IncludeSuccessMode:$DriftSentinelIncludeSuccessMode `
-                -TimeoutSeconds 30
+                -TimeoutSeconds 30 `
+                -ArtifactPath $driftArtifactPath
 
             if (-not $driftResult.Success) {
                 Write-Host "✗ drift sentinel gate failed" -ForegroundColor Red

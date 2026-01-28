@@ -96,6 +96,66 @@ $script:ProviderFieldExpectations = @{
 
 #endregion
 
+#region URL/Secret Redaction
+
+<#
+.SYNOPSIS
+    Redacts sensitive parts of URLs (query strings, tokens) for safe logging.
+.PARAMETER Url
+    The URL to redact.
+.OUTPUTS
+    URL with query string parameters redacted.
+#>
+function Get-RedactedUrl {
+    param(
+        [Parameter(Mandatory)]
+        [string]$Url
+    )
+
+    # Remove query string entirely for safety
+    $uri = [Uri]$Url
+    $baseUrl = "$($uri.Scheme)://$($uri.Host)$($uri.AbsolutePath)"
+
+    if ($uri.Query) {
+        return "$baseUrl?[REDACTED]"
+    }
+    return $baseUrl
+}
+
+<#
+.SYNOPSIS
+    Redacts sensitive values from headers for safe logging.
+.PARAMETER Headers
+    Headers hashtable to redact.
+.OUTPUTS
+    Headers with sensitive values masked.
+#>
+function Get-RedactedHeaders {
+    param(
+        [hashtable]$Headers
+    )
+
+    if (-not $Headers -or $Headers.Count -eq 0) {
+        return @{}
+    }
+
+    $redacted = @{}
+    $sensitiveKeys = @("Authorization", "X-User-Auth-Token", "X-Auth-Token", "Cookie", "Set-Cookie")
+
+    foreach ($key in $Headers.Keys) {
+        if ($sensitiveKeys -contains $key) {
+            $redacted[$key] = "[REDACTED]"
+        }
+        else {
+            $redacted[$key] = $Headers[$key]
+        }
+    }
+
+    return $redacted
+}
+
+#endregion
+
 #region Rate Limiting and Backoff
 
 $script:RequestState = @{
@@ -620,6 +680,88 @@ function Test-SuccessPayloadDrift {
 
 <#
 .SYNOPSIS
+    Converts drift sentinel results to a JSON-serializable artifact for trending/triage.
+.PARAMETER Result
+    The result object from Invoke-DriftSentinel.
+.PARAMETER Providers
+    Array of providers that were checked.
+.OUTPUTS
+    Hashtable suitable for JSON serialization.
+#>
+function ConvertTo-DriftArtifact {
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$Result,
+
+        [string[]]$Providers
+    )
+
+    $artifact = @{
+        timestamp = [datetime]::UtcNow.ToString("o")
+        expectationsVersion = $script:ExpectationsVersion
+        expectationsLastUpdated = $script:ExpectationsLastUpdated
+        providers = $Providers
+        summary = @{
+            success = $Result.Success
+            driftCount = $Result.DriftCount
+            errorCount = $Result.ErrorCount
+            inconclusiveCount = $Result.InconclusiveCount
+            skippedCount = $Result.SkippedCount
+        }
+        warnings = $Result.Warnings
+        probes = @()
+    }
+
+    foreach ($probe in $Result.Results) {
+        $probeData = @{
+            provider = $probe.Provider
+            endpoint = $probe.Endpoint
+            mode = $probe.Mode
+            success = $probe.Success
+            driftDetected = $probe.DriftDetected
+            isInconclusive = $probe.IsInconclusive
+            details = $probe.Details
+        }
+
+        # Include field analysis (redacted - no actual values)
+        if ($probe.MissingFields -and $probe.MissingFields.Count -gt 0) {
+            $probeData.missingFields = $probe.MissingFields
+        }
+        if ($probe.AtLeastOneMissing -and $probe.AtLeastOneMissing.Count -gt 0) {
+            $probeData.atLeastOneMissing = $probe.AtLeastOneMissing
+        }
+        if ($probe.ExpectedFields) {
+            $probeData.expectedFieldCount = ($probe.ExpectedFields | Get-Member -MemberType NoteProperty).Count
+        }
+        if ($probe.ActualFields) {
+            if ($probe.ActualFields -is [hashtable]) {
+                $probeData.actualFieldCounts = @{}
+                foreach ($key in $probe.ActualFields.Keys) {
+                    $probeData.actualFieldCounts[$key] = $probe.ActualFields[$key].Count
+                }
+            }
+            elseif ($probe.ActualFields -is [array]) {
+                $probeData.actualFieldCount = $probe.ActualFields.Count
+            }
+        }
+
+        # Error info (redacted)
+        if ($probe.Error) {
+            # Don't include raw error which might contain URLs/tokens
+            $probeData.hasError = $true
+        }
+        if ($probe.SkippedReason) {
+            $probeData.skippedReason = $probe.SkippedReason
+        }
+
+        $artifact.probes += $probeData
+    }
+
+    return $artifact
+}
+
+<#
+.SYNOPSIS
     Runs drift sentinel for all configured providers.
 .PARAMETER Providers
     Array of provider names to check (default: all configured).
@@ -632,6 +774,8 @@ function Test-SuccessPayloadDrift {
     If true and credentials available, also run success-payload validation.
 .PARAMETER TimeoutSeconds
     HTTP request timeout per endpoint.
+.PARAMETER ArtifactPath
+    Optional path to write JSON artifact for triage/trending.
 .OUTPUTS
     PSCustomObject with Success, DriftCount, Warnings, and Results properties.
 #>
@@ -645,7 +789,9 @@ function Invoke-DriftSentinel {
 
         [switch]$IncludeSuccessMode,
 
-        [int]$TimeoutSeconds = 30
+        [int]$TimeoutSeconds = 30,
+
+        [string]$ArtifactPath = $null
     )
 
     $result = [PSCustomObject]@{
@@ -750,6 +896,17 @@ function Invoke-DriftSentinel {
         Write-Host "`n  DRIFT SENTINEL PASSED: No drift detected" -ForegroundColor Green
     }
 
+    # Write JSON artifact for triage/trending
+    if ($ArtifactPath) {
+        $artifact = ConvertTo-DriftArtifact -Result $result -Providers $Providers
+        $artifactDir = Split-Path -Parent $ArtifactPath
+        if ($artifactDir -and -not (Test-Path $artifactDir)) {
+            New-Item -ItemType Directory -Path $artifactDir -Force | Out-Null
+        }
+        $artifact | ConvertTo-Json -Depth 10 | Set-Content -Path $ArtifactPath -Encoding UTF8
+        Write-Host "  Artifact written: $ArtifactPath" -ForegroundColor DarkGray
+    }
+
     return $result
 }
 
@@ -804,8 +961,11 @@ function Get-DriftSentinelVersion {
 #endregion
 
 Export-ModuleMember -Function @(
+    'Get-RedactedUrl',
+    'Get-RedactedHeaders',
     'Test-AuthEndpointDrift',
     'Test-SuccessPayloadDrift',
+    'ConvertTo-DriftArtifact',
     'Invoke-DriftSentinel',
     'Get-DriftSentinelProviders',
     'Get-ProviderFieldExpectations',
