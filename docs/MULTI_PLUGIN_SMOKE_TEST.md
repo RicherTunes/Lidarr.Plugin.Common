@@ -143,17 +143,32 @@ For Tidal success-mode probes, the drift sentinel can automatically acquire OAut
    - Requires manual token refresh when expired
    - Use for testing when client credentials unavailable
 
-#### Strictness Promotion Timeline
+#### Strictness Promotion Policy
 
-The drift sentinel follows a gradual strictness promotion:
+Promotion to strict mode is based on **consecutive clean runs**, not calendar time:
 
-| Phase | Duration | Mode | Action on Drift |
-|-------|----------|------|-----------------|
-| Warning | Week 1-2 | `drift_sentinel_fail_on_drift=false` | Log + create issue |
-| Strict (Qobuz) | Week 3+ | Qobuz strict, Tidal warning | Fail on Qobuz drift |
-| Strict (All) | Week 5+ | All providers strict | Fail on any drift |
+| Provider | Threshold | Criteria |
+|----------|-----------|----------|
+| Qobuz | 5 consecutive nights | No drift, no errors, ≤10% inconclusive |
+| Tidal | 7 consecutive nights | No drift, no errors, ≤10% inconclusive |
 
-To promote to strict mode, change `drift_sentinel_fail_on_drift: true` in `e2e-nightly-live.yml`.
+**Blockers for promotion:**
+- Open reliability issue (consecutive 429s)
+- Any drift in the pass streak window
+- Inconclusive rate > 10%
+
+**Check promotion readiness:**
+```bash
+./scripts/drift-strictness-check.ps1
+```
+
+**To promote:**
+1. Verify `drift-strictness-check.ps1` shows READY
+2. Edit `e2e-nightly-live.yml`:
+   ```yaml
+   drift_sentinel_fail_on_drift: true
+   ```
+3. Monitor first strict run for unexpected failures
 
 ## E2E Modes
 

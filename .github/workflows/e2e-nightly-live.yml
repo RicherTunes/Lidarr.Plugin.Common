@@ -275,24 +275,49 @@ jobs:
             if (summary.driftCount > 0) {
               const issueTitle = `[Drift Sentinel] API schema drift detected (v${expectationsVersion})`;
 
+              // Build drift details with missing fields
+              const driftDetails = probes.filter(p => p.driftDetected).map(p => {
+                const lines = [`- **${p.provider}/${p.endpoint}** (${p.mode} mode)`];
+                if (p.details) lines.push(`  - ${p.details}`);
+                if (p.missingFields?.length) lines.push(`  - Missing fields: \`${p.missingFields.join('`, `')}\``);
+                return lines.join('\n');
+              });
+
               const issueBody = [
                 '## Drift Sentinel Report',
                 '',
-                `**Latest Run:** ${timestamp}`,
-                `**Expectations Version:** ${expectationsVersion}`,
-                '',
-                '### Summary',
-                `- Drift detected: ${summary.driftCount}`,
-                `- Errors: ${summary.errorCount}`,
-                `- Inconclusive: ${summary.inconclusiveCount}`,
+                `| Property | Value |`,
+                `|----------|-------|`,
+                `| **Run** | [${new Date(timestamp).toISOString().split('T')[0]}](${runUrl}) |`,
+                `| **Expectations Version** | \`${expectationsVersion}\` |`,
+                `| **Drift Count** | ${summary.driftCount} |`,
+                `| **Errors** | ${summary.errorCount} |`,
+                `| **Inconclusive** | ${summary.inconclusiveCount} |`,
                 '',
                 '### Drift Details',
-                ...probes.filter(p => p.driftDetected).map(p =>
-                  `- **${p.provider}/${p.endpoint}** (${p.mode}): ${p.details || 'drift'}`
-                ),
+                '',
+                ...driftDetails,
                 '',
                 '### Warnings',
+                '',
                 ...(warnings.length ? warnings.map(w => `- ${w}`) : ['None']),
+                '',
+                '### Local Rerun',
+                '',
+                'To reproduce locally:',
+                '```bash',
+                '# Clone and run drift sentinel',
+                'cd Lidarr.Plugin.Common',
+                './scripts/multi-plugin-docker-smoke-test.ps1 \\',
+                '  -RunDriftSentinelGate \\',
+                '  -DriftSentinelIncludeSuccessMode',
+                '```',
+                '',
+                '### Action Items',
+                '',
+                '- [ ] Investigate which API fields changed',
+                '- [ ] Update `e2e-drift-sentinel.psm1` expectations if API change is intentional',
+                '- [ ] If breaking: update stub responses in hermetic E2E',
                 '',
                 '---',
                 `*Auto-updated by nightly E2E. [View run](${runUrl})*`,
