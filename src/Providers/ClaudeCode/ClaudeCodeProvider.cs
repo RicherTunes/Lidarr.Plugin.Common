@@ -110,7 +110,7 @@ public class ClaudeCodeProvider : ILlmProvider
         {
             var authResult = await _cliRunner.ExecuteAsync(
                 cliPath,
-                ["-p", "Reply with only the word OK", "--output-format", "json", "--max-turns", "1"],
+                ["-p", "Reply with only the word OK", "--output-format", "json", "--max-turns", "1", "--allowedTools", string.Empty],
                 new CliRunnerOptions
                 {
                     Timeout = _settings.HealthCheckTimeout,
@@ -151,12 +151,13 @@ public class ClaudeCodeProvider : ILlmProvider
             throw new ProviderException(ProviderId, LlmErrorCode.ProviderUnavailable, "Claude Code CLI not found");
         }
 
-        // Build arguments
+        // Build arguments with safe defaults
         var args = new List<string>
         {
             "-p", request.Prompt,
             "--output-format", "json",
             "--max-turns", "1",
+            "--allowedTools", string.Empty,  // Disable tool access for safety
         };
 
         if (!string.IsNullOrEmpty(request.SystemPrompt))
@@ -203,7 +204,7 @@ public class ClaudeCodeProvider : ILlmProvider
         }
         catch (Exception ex)
         {
-            throw new ProviderException(ProviderId, LlmErrorCode.InvalidRequest, $"Unexpected error: {ex.Message}", ex);
+            throw new ProviderException(ProviderId, LlmErrorCode.Unknown, $"Unexpected error: {ex.Message}", ex);
         }
     }
 
