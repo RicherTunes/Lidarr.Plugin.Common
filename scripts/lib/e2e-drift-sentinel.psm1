@@ -117,7 +117,7 @@ function Get-RedactedUrl {
     $baseUrl = "$($uri.Scheme)://$($uri.Host)$($uri.AbsolutePath)"
 
     if ($uri.Query) {
-        return "$baseUrl?[REDACTED]"
+        return "${baseUrl}?[REDACTED]"
     }
     return $baseUrl
 }
@@ -731,13 +731,23 @@ function ConvertTo-DriftArtifact {
             $probeData.atLeastOneMissing = $probe.AtLeastOneMissing
         }
         if ($probe.ExpectedFields) {
-            $probeData.expectedFieldCount = ($probe.ExpectedFields | Get-Member -MemberType NoteProperty).Count
+            if ($probe.ExpectedFields -is [hashtable]) {
+                $probeData.expectedFieldCount = $probe.ExpectedFields.Count
+            }
+            elseif ($probe.ExpectedFields -is [array]) {
+                $probeData.expectedFieldCount = $probe.ExpectedFields.Count
+            }
+            else {
+                $members = @($probe.ExpectedFields | Get-Member -MemberType NoteProperty)
+                $probeData.expectedFieldCount = $members.Count
+            }
         }
         if ($probe.ActualFields) {
             if ($probe.ActualFields -is [hashtable]) {
                 $probeData.actualFieldCounts = @{}
                 foreach ($key in $probe.ActualFields.Keys) {
-                    $probeData.actualFieldCounts[$key] = $probe.ActualFields[$key].Count
+                    $fields = @($probe.ActualFields[$key])
+                    $probeData.actualFieldCounts[$key] = $fields.Count
                 }
             }
             elseif ($probe.ActualFields -is [array]) {
@@ -963,6 +973,8 @@ function Get-DriftSentinelVersion {
 Export-ModuleMember -Function @(
     'Get-RedactedUrl',
     'Get-RedactedHeaders',
+    'Get-MissingRequiredFields',
+    'Get-MissingAtLeastOneFields',
     'Test-AuthEndpointDrift',
     'Test-SuccessPayloadDrift',
     'ConvertTo-DriftArtifact',
