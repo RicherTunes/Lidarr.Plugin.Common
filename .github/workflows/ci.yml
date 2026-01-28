@@ -207,5 +207,21 @@ jobs:
         shell: pwsh
         run: ./scripts/tests/Test-PluginPackCanonicalAbstractions.ps1
 
+  # Runner self-tests: prevents breakage from cascading to all plugin repos
+  runner_self_test:
+    name: Runner Self-Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test unified runner filter composition
+        shell: pwsh
+        run: ./scripts/tests/Test-UnifiedRunner.ps1
+
+      - name: Test lint-ci-uses-runner on fixtures
+        shell: pwsh
+        run: ./scripts/tests/Test-LintCiUsesRunner.ps1
+
   # Remove separate test publishing to avoid third-party actions
   # pack_dry_run job intentionally omitted for PR CI; release builds handle packing
