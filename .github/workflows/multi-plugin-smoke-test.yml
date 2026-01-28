@@ -700,6 +700,57 @@ jobs:
             exit 1
           fi
 
+      - name: Validate drift sentinel secrets (if strict success mode)
+        if: ${{ steps.pat.outputs.skip != 'true' && inputs.run_drift_sentinel_gate && inputs.drift_sentinel_include_success_mode && inputs.drift_sentinel_fail_on_drift }}
+        shell: bash
+        env:
+          QOBUZARR_APP_ID: ${{ secrets.QOBUZARR_APP_ID }}
+          QOBUZARR_AUTH_TOKEN: ${{ secrets.QOBUZARR_AUTH_TOKEN }}
+          QOBUZ_APP_ID: ${{ secrets.QOBUZ_APP_ID }}
+          QOBUZ_AUTH_TOKEN: ${{ secrets.QOBUZ_AUTH_TOKEN }}
+          TIDALARR_CLIENT_ID: ${{ secrets.TIDALARR_CLIENT_ID }}
+          TIDALARR_CLIENT_SECRET: ${{ secrets.TIDALARR_CLIENT_SECRET }}
+          TIDAL_CLIENT_ID: ${{ secrets.TIDAL_CLIENT_ID }}
+          TIDAL_CLIENT_SECRET: ${{ secrets.TIDAL_CLIENT_SECRET }}
+        run: |
+          set -euo pipefail
+
+          echo "Drift sentinel is in STRICT SUCCESS MODE."
+          echo "Validating required secrets for authenticated probes..."
+
+          # Check Qobuz credentials
+          has_qobuz=false
+          if [[ -n "${QOBUZARR_APP_ID:-}" ]] || [[ -n "${QOBUZ_APP_ID:-}" ]]; then
+            has_qobuz=true
+            echo "  ✓ Qobuz APP_ID configured"
+          fi
+
+          # Check Tidal client credentials
+          has_tidal=false
+          if [[ -n "${TIDALARR_CLIENT_ID:-}" && -n "${TIDALARR_CLIENT_SECRET:-}" ]]; then
+            has_tidal=true
+            echo "  ✓ Tidal client credentials (TIDALARR_*) configured"
+          elif [[ -n "${TIDAL_CLIENT_ID:-}" && -n "${TIDAL_CLIENT_SECRET:-}" ]]; then
+            has_tidal=true
+            echo "  ✓ Tidal client credentials (TIDAL_*) configured"
+          fi
+
+          if [[ "$has_qobuz" != "true" && "$has_tidal" != "true" ]]; then
+            echo ""
+            echo "::error::Drift sentinel strict success mode requires credentials, but none found."
+            echo ""
+            echo "To fix, configure at least one of:"
+            echo "  - QOBUZ_APP_ID (+ optionally QOBUZ_AUTH_TOKEN for search)"
+            echo "  - TIDAL_CLIENT_ID + TIDAL_CLIENT_SECRET (for OAuth token acquisition)"
+            echo ""
+            echo "Or disable strict success mode:"
+            echo "  - Set drift_sentinel_fail_on_drift: false (warning mode)"
+            echo "  - Or set drift_sentinel_include_success_mode: false"
+            exit 1
+          fi
+
+          echo "Drift sentinel secrets validation passed."
+
       - name: Run multi-plugin harness
         if: ${{ steps.pat.outputs.skip != 'true' }}
         shell: pwsh

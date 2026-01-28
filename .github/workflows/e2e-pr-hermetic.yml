@@ -64,6 +64,9 @@ jobs:
       run_golden_persist_gate: false
       # AuthFail is safe for PR - uses bad credentials intentionally
       run_authfail_redaction_gate: true
+      # SECURITY: Never enable drift sentinel success-mode on PRs (uses real credentials)
+      run_drift_sentinel_gate: false
+      drift_sentinel_include_success_mode: false
       e2e_mode: hermetic
     secrets:
       CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
