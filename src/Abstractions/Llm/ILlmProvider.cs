@@ -108,8 +108,9 @@ public interface ILlmProvider
     /// <returns>
     /// The complete response from the LLM.
     /// </returns>
-    /// <exception cref="Lidarr.Plugin.Common.Errors.LlmProviderException">
+    /// <exception cref="LlmProviderException">
     /// Thrown when the request fails due to authentication, rate limiting, or provider errors.
+    /// (See Lidarr.Plugin.Common.Errors namespace for concrete exception types.)
     /// </exception>
     Task<LlmResponse> CompleteAsync(LlmRequest request, CancellationToken cancellationToken = default);
 
