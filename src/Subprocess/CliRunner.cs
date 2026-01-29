@@ -180,6 +180,12 @@ public sealed class CliRunner : ICliRunner
             cmd = cmd.WithEnvironmentVariables(options.EnvironmentVariables);
         }
 
+        // Pipe stdin if provided (for secure prompt passing)
+        if (options.StandardInput is not null)
+        {
+            cmd = cmd.WithStandardInputPipe(PipeSource.FromString(options.StandardInput));
+        }
+
         return cmd;
     }
 }

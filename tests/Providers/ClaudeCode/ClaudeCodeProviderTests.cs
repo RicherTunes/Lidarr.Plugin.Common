@@ -27,7 +27,7 @@ namespace Lidarr.Plugin.Common.Tests.Providers.ClaudeCode;
 /// test machine, the tests are designed to work with any discovered CLI path.
 /// Mock setups use flexible matchers to handle the actual system path.
 /// </remarks>
-public class ClaudeCodeProviderTests
+public class ClaudeCodeProviderTests : IDisposable
 {
     private readonly Mock<ICliRunner> _mockCliRunner;
     private readonly ClaudeCodeDetector _detector;
@@ -40,6 +40,12 @@ public class ClaudeCodeProviderTests
         _detector = new ClaudeCodeDetector(_mockCliRunner.Object);
         _settings = new ClaudeCodeSettings();
         _provider = new ClaudeCodeProvider(_mockCliRunner.Object, _detector, _settings);
+    }
+
+    public void Dispose()
+    {
+        // Clear capability cache between tests to ensure isolation
+        ClaudeCodeCapabilities.InvalidateCache();
     }
 
     #region Capabilities and Metadata
@@ -276,6 +282,7 @@ public class ClaudeCodeProviderTests
         // Arrange
         SetupAllCliCallsForPath();
         SetupVersionCheckSuccess();
+        SetupCapabilityProbeSuccess();
         SetupAuthCheckSuccess();
 
         // Act
@@ -371,6 +378,7 @@ public class ClaudeCodeProviderTests
     {
         // Arrange
         SetupAllCliCallsForPath();
+        SetupCapabilityProbeSuccess();
         IReadOnlyList<string>? capturedArgs = null;
 
         _mockCliRunner
@@ -718,6 +726,36 @@ public class ClaudeCodeProviderTests
             {
                 ExitCode = 0,
                 StandardOutput = "claude-code 1.0.0",
+                StandardError = "",
+                Duration = TimeSpan.FromMilliseconds(50)
+            });
+    }
+
+    private void SetupCapabilityProbeSuccess()
+    {
+        // Mock --help command for capability probing
+        var helpOutput = """
+            Usage: claude [options] [prompt]
+
+            Options:
+              --allowedTools <tools>      Restrict tool access
+              --max-turns <n>             Maximum conversation turns
+              --output-format <fmt>       Output format (text, json, stream-json)
+              --append-system-prompt <p>  Append to system prompt
+              --model <model>             Model to use
+              --no-session-persistence    Don't persist session
+            """;
+
+        _mockCliRunner
+            .Setup(r => r.ExecuteAsync(
+                It.IsAny<string>(),
+                It.Is<IReadOnlyList<string>>(a => a.Count == 1 && a[0] == "--help"),
+                It.IsAny<CliRunnerOptions>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new CliResult
+            {
+                ExitCode = 0,
+                StandardOutput = helpOutput,
                 StandardError = "",
                 Duration = TimeSpan.FromMilliseconds(50)
             });
