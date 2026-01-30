@@ -53,10 +53,15 @@ function Get-TrxTestSummary {
         $counters = $trxXml.TestRun.ResultSummary.Counters
 
         $total = [int]$counters.total
+        $executed = [int]$counters.executed
         $passed = [int]$counters.passed
         $failed = [int]$counters.failed
-        # TRX uses notExecuted for skipped tests, NOT inconclusive
-        $skipped = [int]$counters.notExecuted
+
+        # xUnit adapter doesn't populate notExecuted reliably (reports 0 even with skips).
+        # Fall back to max(0, total - executed) which is always correct.
+        $notExecuted = 0
+        try { $notExecuted = [int]$counters.notExecuted } catch { }
+        $skipped = if ($notExecuted -gt 0) { $notExecuted } else { [Math]::Max(0, $total - $executed) }
 
         $passRate = if ($total -gt 0) {
             [math]::Round(($passed / $total) * 100, 2)
@@ -66,6 +71,7 @@ function Get-TrxTestSummary {
 
         return [PSCustomObject]@{
             Total    = $total
+            Executed = $executed
             Passed   = $passed
             Failed   = $failed
             Skipped  = $skipped
@@ -102,6 +108,80 @@ function Write-TestSummary {
                  elseif ($Summary.PassRate -ge 60) { "Yellow" }
                  else { "Red" }
     Write-Host "  Pass Rate: $($Summary.PassRate)%" -ForegroundColor $rateColor
+}
+
+# ============================================================================
+# BUILD SERVER HARDENING
+# ============================================================================
+
+<#
+.SYNOPSIS
+    Sets environment variables to prevent file-lock issues on Windows.
+
+.DESCRIPTION
+    Disables MSBuild node reuse and .NET CLI build servers which can hold
+    locks on DLLs (especially in submodules like Lidarr.Plugin.Abstractions.dll).
+    This trades some build speed for determinism.
+
+.NOTES
+    Call this at the start of test scripts that build shared projects.
+    The settings persist for the current process and child processes.
+#>
+function Set-BuildServerHardening {
+    [CmdletBinding()]
+    param()
+
+    $env:DOTNET_CLI_DISABLE_BUILD_SERVERS = "1"
+    $env:MSBUILDDISABLENODEREUSE = "1"
+
+    Write-Verbose "Build server hardening enabled: DOTNET_CLI_DISABLE_BUILD_SERVERS=1, MSBUILDDISABLENODEREUSE=1"
+}
+
+<#
+.SYNOPSIS
+    Gets standard MSBuild arguments to prevent parallel build issues.
+
+.DESCRIPTION
+    Returns arguments that disable parallelism and shared compilation
+    to prevent file lock issues when building projects with shared dependencies.
+
+.OUTPUTS
+    Array of MSBuild arguments.
+#>
+function Get-BuildHardeningArgs {
+    [CmdletBinding()]
+    param()
+
+    return @(
+        "/m:1",
+        "/p:BuildInParallel=false",
+        "/p:UseSharedCompilation=false"
+    )
+}
+
+<#
+.SYNOPSIS
+    Removes stale TRX files from the output directory.
+
+.PARAMETER OutputDir
+    Directory containing TRX files.
+
+.DESCRIPTION
+    Ensures the final summary reflects only the current test run,
+    not results from previous runs.
+#>
+function Clear-StaleTrxFiles {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [string]$OutputDir
+    )
+
+    if (Test-Path $OutputDir) {
+        Get-ChildItem -Path $OutputDir -Filter "*.trx" -ErrorAction SilentlyContinue |
+            Remove-Item -Force -ErrorAction SilentlyContinue
+        Write-Verbose "Cleared stale TRX files from $OutputDir"
+    }
 }
 
 # ============================================================================
@@ -578,6 +658,9 @@ $script:ExtractDir = $null
 Export-ModuleMember -Function @(
     'Get-TrxTestSummary',
     'Write-TestSummary',
+    'Set-BuildServerHardening',
+    'Get-BuildHardeningArgs',
+    'Clear-StaleTrxFiles',
     'Test-ArtifactFreshness',
     'Find-PluginAssembly',
     'Expand-PluginPackage',

@@ -206,6 +206,16 @@ function Build-TestFilter {
 
 #region Main Execution
 
+# Apply build server hardening to prevent file-lock issues on Windows
+if ($ModuleLoaded) {
+    Set-BuildServerHardening
+}
+else {
+    # Fallback if module not loaded
+    $env:DOTNET_CLI_DISABLE_BUILD_SERVERS = "1"
+    $env:MSBUILDDISABLENODEREUSE = "1"
+}
+
 Write-Host ""
 Write-Host "========================================" -ForegroundColor Cyan
 Write-Host "Lidarr Plugin Test Runner" -ForegroundColor Cyan
@@ -250,6 +260,15 @@ if (-not (Test-Path $OutputDir)) {
     New-Item -ItemType Directory -Path $OutputDir -Force | Out-Null
 }
 
+# Clear stale TRX files so summary reflects only this run
+if ($ModuleLoaded) {
+    Clear-StaleTrxFiles -OutputDir $OutputDir
+}
+else {
+    Get-ChildItem -Path $OutputDir -Filter "*.trx" -ErrorAction SilentlyContinue |
+        Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
 # Build if needed
 if (-not $NoBuild) {
     Write-Host "Building project..." -ForegroundColor Cyan
@@ -260,6 +279,14 @@ if (-not $NoBuild) {
         "-p:EnableNETAnalyzers=false",
         "-p:TreatWarningsAsErrors=false"
     )
+
+    # Add hardening args to prevent file-lock issues on Windows
+    if ($ModuleLoaded) {
+        $buildArgs += Get-BuildHardeningArgs
+    }
+    else {
+        $buildArgs += @("/m:1", "/p:BuildInParallel=false", "/p:UseSharedCompilation=false")
+    }
 
     if (-not $VerboseOutput) {
         $buildArgs += @("--verbosity", "minimal")
