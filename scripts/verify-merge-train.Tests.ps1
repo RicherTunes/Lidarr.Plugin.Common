@@ -43,7 +43,8 @@ BeforeAll {
                 $filters += 'FullyQualifiedName!~EndToEnd'
             }
             if ($skipPerformance) {
-                $filters += 'Category!=Performance'
+                $filters += 'Category!=Benchmark'
+                $filters += 'Category!=Slow'
             }
             $args.Add('--filter')
             $args.Add($filters -join '&')
@@ -55,7 +56,7 @@ BeforeAll {
 
 Describe 'Get-DotNetArgs filter generation' {
     Context 'when -skipPerformance is true' {
-        It 'includes Category!=Performance filter without backslashes' {
+        It 'includes Benchmark/Slow category filters without backslashes' {
             $args = Get-DotNetArgs `
                 -command 'test' `
                 -target 'test.csproj' `
@@ -70,7 +71,7 @@ Describe 'Get-DotNetArgs filter generation' {
             $filterIndex | Should -BeGreaterOrEqual 0 -Because '--filter should be present'
 
             $filterValue = $args[$filterIndex + 1]
-            $filterValue | Should -Be 'Category!=Performance' -Because 'filter should contain exact string without escaping'
+            $filterValue | Should -Be 'Category!=Benchmark&Category!=Slow' -Because 'filter should contain exact string without escaping'
             $filterValue | Should -Not -Match '\\' -Because 'filter should not contain backslashes'
         }
     }
@@ -90,7 +91,8 @@ Describe 'Get-DotNetArgs filter generation' {
             $filterIndex | Should -BeGreaterOrEqual 0
 
             $filterValue = $args[$filterIndex + 1]
-            $filterValue | Should -Match 'Category!=Performance' -Because 'Performance filter should be present'
+            $filterValue | Should -Match 'Category!=Benchmark' -Because 'Benchmark filter should be present'
+            $filterValue | Should -Match 'Category!=Slow' -Because 'Slow filter should be present'
             $filterValue | Should -Match 'FullyQualifiedName!~Integration' -Because 'Integration filter should be present'
             $filterValue | Should -Not -Match '\\' -Because 'combined filter should not contain backslashes'
         }

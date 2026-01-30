@@ -1,0 +1,72 @@
+# Hermetic E2E for PRs - fast, cheap, no credentials required
+# Runs: basic gate + authfail-redaction gate
+# Does NOT run: medium, search, grab, golden-persist (require live credentials)
+
+name: E2E PR Hermetic
+
+on:
+  workflow_call:
+    inputs:
+      test_plugins:
+        description: "Comma-separated plugins to test (default: qobuzarr,tidalarr)"
+        type: string
+        required: false
+        default: qobuzarr,tidalarr
+      caller_plugin:
+        description: "Caller plugin name to default that plugin ref to caller SHA"
+        type: string
+        required: false
+        default: ""
+      lidarr_tag:
+        description: "Lidarr Docker image tag"
+        type: string
+        required: false
+        default: pr-plugins-3.1.1.4884
+      qobuzarr_ref:
+        description: "Qobuzarr branch/tag/SHA"
+        type: string
+        required: false
+        default: main
+      tidalarr_ref:
+        description: "Tidalarr branch/tag/SHA"
+        type: string
+        required: false
+        default: main
+      brainarr_ref:
+        description: "Brainarr branch/tag/SHA"
+        type: string
+        required: false
+        default: main
+    secrets:
+      CROSS_REPO_PAT:
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  hermetic-e2e:
+    name: Hermetic E2E (PR-safe)
+    timeout-minutes: 20
+    uses: ./.github/workflows/multi-plugin-smoke-test.yml
+    with:
+      test_plugins: ${{ inputs.test_plugins }}
+      caller_plugin: ${{ inputs.caller_plugin }}
+      lidarr_tag: ${{ inputs.lidarr_tag }}
+      qobuzarr_ref: ${{ inputs.qobuzarr_ref }}
+      tidalarr_ref: ${{ inputs.tidalarr_ref }}
+      brainarr_ref: ${{ inputs.brainarr_ref }}
+      # Hermetic mode: no live API calls
+      run_medium_gate: false
+      run_downloadclient_gate: false
+      run_search_gate: false
+      run_grab_gate: false
+      run_golden_persist_gate: false
+      # AuthFail is safe for PR - uses bad credentials intentionally
+      run_authfail_redaction_gate: true
+      # SECURITY: Never enable drift sentinel success-mode on PRs (uses real credentials)
+      run_drift_sentinel_gate: false
+      drift_sentinel_include_success_mode: false
+      e2e_mode: hermetic
+    secrets:
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}

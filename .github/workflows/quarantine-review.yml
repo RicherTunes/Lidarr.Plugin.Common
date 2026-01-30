@@ -1,0 +1,158 @@
+name: Weekly Quarantine Review
+
+on:
+  schedule:
+    # Run every Monday at 07:00 UTC
+    - cron: '0 7 * * 1'
+  workflow_dispatch:
+    inputs:
+      max_quarantined:
+        description: 'Maximum allowed quarantined tests'
+        required: false
+        default: '20'
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  quarantine-review:
+    name: Quarantine Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Generate Quarantine Report
+        id: report
+        shell: pwsh
+        run: |
+          $maxQuarantined = [int]"${{ inputs.max_quarantined || '20' }}"
+
+          # Generate markdown report
+          $report = ./scripts/manage-quarantine.ps1 -Mode report -OutputFormat markdown -MaxQuarantined $maxQuarantined
+
+          # Save report to file for artifact
+          $report | Out-File -FilePath quarantine-report.md -Encoding utf8
+
+          # Get summary stats
+          $summary = ./scripts/manage-quarantine.ps1 -Mode summary
+
+          # Count quarantined tests
+          $result = ./scripts/manage-quarantine.ps1 -Mode report -OutputFormat json | ConvertFrom-Json
+          $count = $result.summary.total
+          $longQuarantined = $result.summary.longQuarantined
+
+          echo "count=$count" >> $env:GITHUB_OUTPUT
+          echo "long_quarantined=$longQuarantined" >> $env:GITHUB_OUTPUT
+          echo "threshold_exceeded=$($count -gt $maxQuarantined)" >> $env:GITHUB_OUTPUT
+
+      - name: Build Test Projects
+        shell: bash
+        run: |
+          dotnet build -c Release -v minimal
+
+      - name: Run Quarantined Tests
+        id: run_quarantined
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          # Run only quarantined tests to check if any now pass
+          $result = ./scripts/test.ps1 -IncludeQuarantined -Category @() -ExcludeCategories @() `
+            -Configuration Release -NoBuild -OutputDir TestResults/Quarantine -CI 2>&1
+
+          # Check for passing tests in TRX
+          $trxFiles = Get-ChildItem -Path TestResults/Quarantine -Filter "*.trx" -Recurse -ErrorAction SilentlyContinue
+          $passingTests = @()
+
+          foreach ($trx in $trxFiles) {
+            [xml]$xml = Get-Content $trx.FullName
+            $passed = $xml.TestRun.Results.UnitTestResult | Where-Object { $_.outcome -eq 'Passed' }
+            if ($passed) {
+              $passingTests += $passed | ForEach-Object { $_.testName }
+            }
+          }
+
+          $passCount = $passingTests.Count
+          echo "passing_count=$passCount" >> $env:GITHUB_OUTPUT
+
+          if ($passCount -gt 0) {
+            Write-Host ""
+            Write-Host "========================================" -ForegroundColor Yellow
+            Write-Host "QUARANTINED TESTS NOW PASSING" -ForegroundColor Yellow
+            Write-Host "========================================" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "The following tests are quarantined but now pass:" -ForegroundColor Yellow
+            $passingTests | ForEach-Object { Write-Host "  - $_" -ForegroundColor White }
+            Write-Host ""
+            Write-Host "These tests should be un-quarantined." -ForegroundColor Cyan
+
+            # Save passing tests to file
+            $passingTests | Out-File -FilePath passing-quarantined.txt -Encoding utf8
+          } else {
+            Write-Host "No quarantined tests are passing (expected behavior)." -ForegroundColor Green
+          }
+
+      - name: Upload Quarantine Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: quarantine-report
+          path: |
+            quarantine-report.md
+            passing-quarantined.txt
+            TestResults/Quarantine/**/*.trx
+          if-no-files-found: warn
+
+      - name: Summary
+        shell: pwsh
+        run: |
+          $count = "${{ steps.report.outputs.count }}"
+          $longQuarantined = "${{ steps.report.outputs.long_quarantined }}"
+          $passingCount = "${{ steps.run_quarantined.outputs.passing_count }}"
+          $thresholdExceeded = "${{ steps.report.outputs.threshold_exceeded }}"
+
+          Write-Host ""
+          Write-Host "========================================" -ForegroundColor Cyan
+          Write-Host "Quarantine Review Summary" -ForegroundColor Cyan
+          Write-Host "========================================" -ForegroundColor Cyan
+          Write-Host ""
+          Write-Host "Total quarantined tests: $count" -ForegroundColor White
+          Write-Host "Long-quarantined (>30 days): $longQuarantined" -ForegroundColor $(if ([int]$longQuarantined -gt 0) { 'Yellow' } else { 'Green' })
+          Write-Host "Now passing (should un-quarantine): $passingCount" -ForegroundColor $(if ([int]$passingCount -gt 0) { 'Yellow' } else { 'Green' })
+          Write-Host "Threshold exceeded: $thresholdExceeded" -ForegroundColor $(if ($thresholdExceeded -eq 'true') { 'Red' } else { 'Green' })
+          Write-Host ""
+
+          # Determine overall status
+          $needsAction = ([int]$passingCount -gt 0) -or ($thresholdExceeded -eq 'true') -or ([int]$longQuarantined -gt 5)
+
+          if ($needsAction) {
+            Write-Host "ACTION REQUIRED:" -ForegroundColor Red
+            if ([int]$passingCount -gt 0) {
+              Write-Host "  - Un-quarantine $passingCount test(s) that now pass" -ForegroundColor Yellow
+            }
+            if ($thresholdExceeded -eq 'true') {
+              Write-Host "  - Quarantine count exceeds threshold - fix or remove tests" -ForegroundColor Yellow
+            }
+            if ([int]$longQuarantined -gt 5) {
+              Write-Host "  - Review $longQuarantined test(s) quarantined for >30 days" -ForegroundColor Yellow
+            }
+          } else {
+            Write-Host "Quarantine status is healthy." -ForegroundColor Green
+          }
+
+      - name: Fail if action required
+        if: steps.report.outputs.threshold_exceeded == 'true' || steps.run_quarantined.outputs.passing_count > 0
+        shell: bash
+        run: |
+          echo "::error::Quarantine review requires attention. See workflow summary."
+          exit 1

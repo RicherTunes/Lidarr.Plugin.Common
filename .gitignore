@@ -13,6 +13,13 @@ bld/
 [Ll]og/
 [Ll]ogs/
 
+# Alternate build output dirs (tooling/scripts)
+[Bb]in.*/
+[Bb]in-*/
+[Oo]bj.*/
+[Oo]bj-*/
+**/.tmp/
+
 # Visual Studio cache/options
 .vs/
 .vscode/

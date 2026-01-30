@@ -113,6 +113,12 @@ namespace Lidarr.Plugin.Abstractions.Manifest
         public string? EntryAssembly { get; init; }
 
         /// <summary>
+        /// Canonical packaging key used by ecosystem tooling (alias for <see cref="EntryAssembly"/>).
+        /// </summary>
+        [JsonPropertyName("main")]
+        public string? Main { get; init; }
+
+        /// <summary>
         /// Loads and parses plugin.json from disk.
         /// </summary>
         public static PluginManifest Load(string manifestPath)

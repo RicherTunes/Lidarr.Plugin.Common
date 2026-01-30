@@ -1,0 +1,480 @@
+# Nightly E2E with live APIs - comprehensive, requires credentials
+# Runs: all gates including golden-persist and authfail-redaction
+# Schedule: 02:00 UTC (before plugin nightlies at 03:00/04:00 UTC)
+
+name: E2E Nightly Live
+
+on:
+  schedule:
+    # Run at 02:00 UTC daily (before plugin-specific nightlies)
+    - cron: '0 2 * * *'
+  workflow_dispatch:
+    inputs:
+      test_plugins:
+        description: "Comma-separated plugins (default: qobuzarr,tidalarr)"
+        type: string
+        required: false
+        default: qobuzarr,tidalarr
+      run_canary:
+        description: "Also run against pr-plugins tag (allowed to fail)"
+        type: boolean
+        required: false
+        default: true
+      grab_timeout_seconds:
+        description: "Grab gate timeout (nightly can be longer)"
+        type: string
+        required: false
+        default: "600"
+  # Allow plugins to call this workflow
+  workflow_call:
+    inputs:
+      test_plugins:
+        description: "Comma-separated plugins (default: qobuzarr,tidalarr)"
+        type: string
+        required: false
+        default: qobuzarr,tidalarr
+      run_canary:
+        description: "Also run against pr-plugins tag (allowed to fail)"
+        type: boolean
+        required: false
+        default: true
+      grab_timeout_seconds:
+        description: "Grab gate timeout (nightly can be longer)"
+        type: string
+        required: false
+        default: "600"
+    secrets:
+      CROSS_REPO_PAT:
+        required: true
+      QOBUZARR_EMAIL:
+        required: false
+      QOBUZARR_PASSWORD:
+        required: false
+      QOBUZARR_USER_ID:
+        required: false
+      QOBUZARR_AUTH_TOKEN:
+        required: false
+      QOBUZARR_APP_ID:
+        required: false
+      QOBUZARR_APP_SECRET:
+        required: false
+      QOBUZARR_COUNTRY_CODE:
+        required: false
+      QOBUZ_EMAIL:
+        required: false
+      QOBUZ_PASSWORD:
+        required: false
+      QOBUZ_USER_ID:
+        required: false
+      QOBUZ_AUTH_TOKEN:
+        required: false
+      QOBUZ_APP_ID:
+        required: false
+      QOBUZ_APP_SECRET:
+        required: false
+      QOBUZ_COUNTRY_CODE:
+        required: false
+      TIDALARR_REDIRECT_URL:
+        required: false
+      TIDALARR_MARKET:
+        required: false
+      TIDALARR_CLIENT_ID:
+        required: false
+      TIDALARR_CLIENT_SECRET:
+        required: false
+      TIDAL_REDIRECT_URL:
+        required: false
+      TIDAL_MARKET:
+        required: false
+      TIDAL_CLIENT_ID:
+        required: false
+      TIDAL_CLIENT_SECRET:
+        required: false
+
+# Prevent overlapping nightly runs
+concurrency:
+  group: e2e-nightly-live-${{ github.repository }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  DOTNET_NOLOGO: "true"
+  DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+
+jobs:
+  live-e2e:
+    name: Live E2E (Full Suite)
+    timeout-minutes: 45
+    uses: ./.github/workflows/multi-plugin-smoke-test.yml
+    with:
+      test_plugins: ${{ inputs.test_plugins || 'qobuzarr,tidalarr' }}
+      lidarr_tag: pr-plugins-3.1.1.4884
+      # Enable all live gates
+      run_medium_gate: true
+      run_downloadclient_gate: true
+      run_search_gate: true
+      run_grab_gate: true
+      require_downloaded_files: true
+      grab_timeout_seconds: ${{ inputs.grab_timeout_seconds || '600' }}
+      # Persistence + security gates
+      run_golden_persist_gate: true
+      run_authfail_redaction_gate: true
+      # Drift sentinel: validate stub-vs-live field expectations (warning mode for now)
+      run_drift_sentinel_gate: true
+      drift_sentinel_fail_on_drift: false
+      drift_sentinel_include_success_mode: true
+      # Canary for early warning
+      run_canary: ${{ inputs.run_canary || true }}
+      e2e_mode: live
+    secrets:
+      CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+      # Qobuz credentials (use prefixed names)
+      QOBUZARR_EMAIL: ${{ secrets.QOBUZARR_EMAIL }}
+      QOBUZARR_PASSWORD: ${{ secrets.QOBUZARR_PASSWORD }}
+      QOBUZARR_USER_ID: ${{ secrets.QOBUZARR_USER_ID }}
+      QOBUZARR_AUTH_TOKEN: ${{ secrets.QOBUZARR_AUTH_TOKEN }}
+      QOBUZARR_APP_ID: ${{ secrets.QOBUZARR_APP_ID }}
+      QOBUZARR_APP_SECRET: ${{ secrets.QOBUZARR_APP_SECRET }}
+      QOBUZARR_COUNTRY_CODE: ${{ secrets.QOBUZARR_COUNTRY_CODE }}
+      # Fallback names
+      QOBUZ_EMAIL: ${{ secrets.QOBUZ_EMAIL }}
+      QOBUZ_PASSWORD: ${{ secrets.QOBUZ_PASSWORD }}
+      QOBUZ_USER_ID: ${{ secrets.QOBUZ_USER_ID }}
+      QOBUZ_AUTH_TOKEN: ${{ secrets.QOBUZ_AUTH_TOKEN }}
+      QOBUZ_APP_ID: ${{ secrets.QOBUZ_APP_ID }}
+      QOBUZ_APP_SECRET: ${{ secrets.QOBUZ_APP_SECRET }}
+      QOBUZ_COUNTRY_CODE: ${{ secrets.QOBUZ_COUNTRY_CODE }}
+      # Tidal credentials
+      TIDALARR_REDIRECT_URL: ${{ secrets.TIDALARR_REDIRECT_URL }}
+      TIDALARR_MARKET: ${{ secrets.TIDALARR_MARKET }}
+      TIDALARR_CLIENT_ID: ${{ secrets.TIDALARR_CLIENT_ID }}
+      TIDALARR_CLIENT_SECRET: ${{ secrets.TIDALARR_CLIENT_SECRET }}
+      TIDAL_REDIRECT_URL: ${{ secrets.TIDAL_REDIRECT_URL }}
+      TIDAL_MARKET: ${{ secrets.TIDAL_MARKET }}
+      TIDAL_CLIENT_ID: ${{ secrets.TIDAL_CLIENT_ID }}
+      TIDAL_CLIENT_SECRET: ${{ secrets.TIDAL_CLIENT_SECRET }}
+
+  # Create/update drift tracking issue when drift is detected
+  # Also tracks consecutive inconclusive runs and creates reliability issue
+  drift-issue:
+    name: Update Drift Tracking Issue
+    needs: live-e2e
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download drift artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: multi-plugin-smoke-*-artifacts
+          merge-multiple: true
+        continue-on-error: true
+
+      - name: Generate summary and manage issues
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const { execSync } = require('child_process');
+
+            // Configuration
+            const COOLDOWN_HOURS = 24;
+            const INCONCLUSIVE_THRESHOLD = 3; // consecutive runs before reliability issue
+
+            // Find drift-sentinel.json
+            let driftData = null;
+            try {
+              const files = execSync('find . -name "drift-sentinel.json" 2>/dev/null || true')
+                .toString().trim().split('\n').filter(f => f);
+              if (files.length > 0) {
+                driftData = JSON.parse(fs.readFileSync(files[0], 'utf8'));
+                console.log(`Found drift data at: ${files[0]}`);
+              }
+            } catch (e) {
+              console.log('Error searching for drift artifact:', e.message);
+            }
+
+            if (!driftData) {
+              console.log('No drift-sentinel.json found. Skipping issue management.');
+              return;
+            }
+
+            const { summary, warnings, probes, expectationsVersion, timestamp } = driftData;
+            const runUrl = `${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}`;
+
+            // Generate summary.md artifact
+            const summaryMd = [
+              '# Drift Sentinel Summary',
+              '',
+              `**Run:** [${new Date(timestamp).toISOString().split('T')[0]}](${runUrl})`,
+              `**Expectations Version:** ${expectationsVersion}`,
+              '',
+              '## Results',
+              '',
+              `| Metric | Count |`,
+              `|--------|-------|`,
+              `| Drift Detected | ${summary.driftCount} |`,
+              `| Errors | ${summary.errorCount} |`,
+              `| Inconclusive (429) | ${summary.inconclusiveCount} |`,
+              `| Skipped | ${summary.skippedCount} |`,
+              '',
+            ];
+
+            if (summary.driftCount > 0) {
+              summaryMd.push('## Drift Details', '');
+              probes.filter(p => p.driftDetected).forEach(p => {
+                summaryMd.push(`### ${p.provider}/${p.endpoint} (${p.mode} mode)`);
+                summaryMd.push(`- ${p.details || 'drift detected'}`);
+                if (p.missingFields?.length) summaryMd.push(`- Missing: ${p.missingFields.join(', ')}`);
+                summaryMd.push('');
+              });
+            }
+
+            if (warnings.length > 0) {
+              summaryMd.push('## Warnings', '', ...warnings.map(w => `- ${w}`), '');
+            }
+
+            // Write summary.md to artifacts directory
+            try {
+              fs.mkdirSync('artifacts/e2e', { recursive: true });
+              fs.writeFileSync('artifacts/e2e/drift-summary.md', summaryMd.join('\n'));
+              console.log('Generated drift-summary.md');
+            } catch (e) {
+              console.log('Could not write summary:', e.message);
+            }
+
+            // Helper: compute drift signature for dedup
+            const driftSignature = probes
+              .filter(p => p.driftDetected)
+              .map(p => `${p.provider}:${p.endpoint}:${p.mode}:${(p.missingFields || []).sort().join(',')}`)
+              .sort().join('|');
+
+            // Helper: check cooldown (issue not updated within COOLDOWN_HOURS)
+            async function shouldUpdateIssue(issue) {
+              if (!issue) return true;
+              const lastUpdate = new Date(issue.updated_at);
+              const hoursSince = (Date.now() - lastUpdate.getTime()) / (1000 * 60 * 60);
+
+              // Always update if signature changed (check body for old signature)
+              const oldSignatureMatch = issue.body?.match(/<!-- drift-signature: (.+?) -->/);
+              if (oldSignatureMatch && oldSignatureMatch[1] !== driftSignature) {
+                console.log('Drift signature changed, updating issue');
+                return true;
+              }
+
+              if (hoursSince < COOLDOWN_HOURS) {
+                console.log(`Cooldown active: last update ${hoursSince.toFixed(1)}h ago (< ${COOLDOWN_HOURS}h)`);
+                return false;
+              }
+              return true;
+            }
+
+            // Handle DRIFT issues
+            if (summary.driftCount > 0) {
+              const issueTitle = `[Drift Sentinel] API schema drift detected (v${expectationsVersion})`;
+
+              // Build drift details with missing fields
+              const driftDetails = probes.filter(p => p.driftDetected).map(p => {
+                const lines = [`- **${p.provider}/${p.endpoint}** (${p.mode} mode)`];
+                if (p.details) lines.push(`  - ${p.details}`);
+                if (p.missingFields?.length) lines.push(`  - Missing fields: \`${p.missingFields.join('`, `')}\``);
+                return lines.join('\n');
+              });
+
+              const issueBody = [
+                '## Drift Sentinel Report',
+                '',
+                `| Property | Value |`,
+                `|----------|-------|`,
+                `| **Run** | [${new Date(timestamp).toISOString().split('T')[0]}](${runUrl}) |`,
+                `| **Expectations Version** | \`${expectationsVersion}\` |`,
+                `| **Drift Count** | ${summary.driftCount} |`,
+                `| **Errors** | ${summary.errorCount} |`,
+                `| **Inconclusive** | ${summary.inconclusiveCount} |`,
+                '',
+                '### Drift Details',
+                '',
+                ...driftDetails,
+                '',
+                '### Warnings',
+                '',
+                ...(warnings.length ? warnings.map(w => `- ${w}`) : ['None']),
+                '',
+                '### Local Rerun',
+                '',
+                'To reproduce locally:',
+                '```bash',
+                '# Clone and run drift sentinel',
+                'cd Lidarr.Plugin.Common',
+                './scripts/multi-plugin-docker-smoke-test.ps1 \\',
+                '  -RunDriftSentinelGate \\',
+                '  -DriftSentinelIncludeSuccessMode',
+                '```',
+                '',
+                '### Action Items',
+                '',
+                '- [ ] Investigate which API fields changed',
+                '- [ ] Update `e2e-drift-sentinel.psm1` expectations if API change is intentional',
+                '- [ ] If breaking: update stub responses in hermetic E2E',
+                '',
+                '---',
+                `*Auto-updated by nightly E2E. [View run](${runUrl})*`,
+                `<!-- drift-signature: ${driftSignature} -->`,
+              ].join('\n');
+
+              const { data: issues } = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: 'drift-sentinel',
+                state: 'open'
+              });
+
+              const existingIssue = issues.find(i => i.title.includes('[Drift Sentinel]'));
+
+              if (existingIssue) {
+                if (await shouldUpdateIssue(existingIssue)) {
+                  await github.rest.issues.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: existingIssue.number,
+                    body: issueBody
+                  });
+                  console.log(`Updated drift issue #${existingIssue.number}`);
+                }
+              } else {
+                await github.rest.issues.create({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  title: issueTitle,
+                  body: issueBody,
+                  labels: ['drift-sentinel', 'automated']
+                });
+                console.log('Created new drift issue');
+              }
+            } else {
+              console.log('No drift detected.');
+
+              // Close existing drift issue if drift resolved
+              const { data: issues } = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: 'drift-sentinel',
+                state: 'open'
+              });
+              const existingIssue = issues.find(i => i.title.includes('[Drift Sentinel]'));
+              if (existingIssue) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existingIssue.number,
+                  body: `Drift resolved as of ${timestamp}. [View run](${runUrl})`
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: existingIssue.number,
+                  state: 'closed'
+                });
+                console.log(`Closed resolved drift issue #${existingIssue.number}`);
+              }
+            }
+
+            // Handle RELIABILITY issues (consecutive inconclusive)
+            if (summary.inconclusiveCount > 0) {
+              const reliabilityTitle = '[E2E Reliability] Consecutive rate-limited runs';
+
+              const { data: relIssues } = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: 'e2e-reliability',
+                state: 'open'
+              });
+
+              const relIssue = relIssues.find(i => i.title.includes('[E2E Reliability]'));
+
+              // Count consecutive inconclusive from issue body or start at 1
+              let consecutiveCount = 1;
+              if (relIssue) {
+                const countMatch = relIssue.body?.match(/Consecutive inconclusive runs: (\d+)/);
+                consecutiveCount = countMatch ? parseInt(countMatch[1]) + 1 : consecutiveCount;
+              }
+
+              const relBody = [
+                '## E2E Reliability Alert',
+                '',
+                `**Consecutive inconclusive runs:** ${consecutiveCount}`,
+                `**Threshold for alert:** ${INCONCLUSIVE_THRESHOLD}`,
+                `**Latest run:** ${timestamp}`,
+                '',
+                '### Details',
+                `The drift sentinel received HTTP 429 (rate limited) responses.`,
+                `This doesn't indicate API drift, but affects E2E reliability.`,
+                '',
+                '### Affected Probes',
+                ...probes.filter(p => p.isInconclusive).map(p => `- ${p.provider}/${p.endpoint}`),
+                '',
+                '### Action Items',
+                '- [ ] Check if provider rate limits have changed',
+                '- [ ] Consider increasing backoff delays',
+                '- [ ] Review request frequency in drift sentinel',
+                '',
+                `*[View latest run](${runUrl})*`,
+              ].join('\n');
+
+              if (consecutiveCount >= INCONCLUSIVE_THRESHOLD) {
+                if (relIssue) {
+                  await github.rest.issues.update({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: relIssue.number,
+                    body: relBody
+                  });
+                  console.log(`Updated reliability issue #${relIssue.number} (${consecutiveCount} consecutive)`);
+                } else {
+                  await github.rest.issues.create({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    title: reliabilityTitle,
+                    body: relBody,
+                    labels: ['e2e-reliability', 'automated']
+                  });
+                  console.log(`Created reliability issue (${consecutiveCount} consecutive)`);
+                }
+              } else {
+                console.log(`Inconclusive count: ${consecutiveCount} (threshold: ${INCONCLUSIVE_THRESHOLD})`);
+              }
+            } else if (summary.inconclusiveCount === 0) {
+              // Close reliability issue if resolved
+              const { data: relIssues } = await github.rest.issues.listForRepo({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                labels: 'e2e-reliability',
+                state: 'open'
+              });
+              const relIssue = relIssues.find(i => i.title.includes('[E2E Reliability]'));
+              if (relIssue) {
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: relIssue.number,
+                  body: `Rate limiting resolved. [View run](${runUrl})`
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: relIssue.number,
+                  state: 'closed'
+                });
+                console.log(`Closed resolved reliability issue #${relIssue.number}`);
+              }
+            }
+
+      - name: Upload summary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-summary
+          path: artifacts/e2e/drift-summary.md
+        if: always()
+        continue-on-error: true

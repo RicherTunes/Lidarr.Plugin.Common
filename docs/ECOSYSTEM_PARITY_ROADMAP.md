@@ -1,18 +1,30 @@
 # Ecosystem Parity Roadmap
 
-This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr).
+This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr, AppleMusicarr).
 
 ## Current Status
 
-| Dimension | Tidalarr | Qobuzarr | Brainarr | Common |
-|-----------|----------|----------|----------|--------|
-| **Packaging** | ✅ | ✅ | ✅ | Policy complete |
-| **Naming/Path** | ✅ | ✅ | N/A | FileSystemUtilities |
-| **Concurrency** | ✅ | ✅ | N/A | BaseDownloadOrchestrator |
-| **Auth Lifecycle** | ✅ (PR2/PR3) | ✅ (PR4) | N/A | Single-authority pattern |
-| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | JSON schema (PR #187) |
+| Dimension | Tidalarr | Qobuzarr | Brainarr | AppleMusicarr | Common |
+|-----------|----------|----------|----------|---------------|--------|
+| **Packaging** | ✅ | ✅ | ✅ | ✅ | Policy complete |
+| **Canonical Abstractions** | ✅ | ✅ | ✅ | ✅ | v1.5.0 pinned |
+| **Manifest Entrypoints** | ✅ | ✅ | ✅ | ✅ | -ResolveEntryPoints |
+| **Naming/Path** | ✅ | ✅ | N/A | N/A | FileSystemUtilities |
+| **Concurrency** | ✅ | ✅ | N/A | N/A | BaseDownloadOrchestrator |
+| **Auth Lifecycle** | ✅ | ✅ | N/A | Custom | Single-authority pattern |
+| **Token Protection** | ✅ | ✅ | N/A | ✅ | Common token protection |
+| **E2E Gates** | ✅ Proven | ✅ Proven | ✅ Schema+ImportList | ⚠️ Metadata-only | JSON schema |
 
-**Overall Ecosystem Parity: ~97%**
+**Overall Ecosystem Parity: ~95%**
+
+### AppleMusicarr Notes
+
+AppleMusicarr is a **metadata-only** plugin (no audio downloads) with different characteristics:
+- **Naming/Path**: Not applicable (no file downloads)
+- **Concurrency**: Not applicable (no download orchestration)
+- **Auth Lifecycle**: Uses Apple Music API authentication (different from OAuth2 PKCE)
+- **Token Protection**: Uses Common token protection (see `AppleMusicSecretProtection.cs`)
+- **E2E Gates**: Appropriate gates are packaging + plugin-load validation (no download/grab gates). ImportList support remains legacy-host-only until the upstream Abstractions model it.
 
 ---
 
@@ -20,10 +32,14 @@ This document tracks progress toward full structural and behavioral parity acros
 
 Full ecosystem parity is achieved when:
 
-- [ ] All three plugins ship the 5-DLL type-identity contract
-- [ ] Both streaming plugins produce identical filename format on multi-disc and edge sanitization
-- [ ] Persistent single-plugin E2E gates pass for Qobuzarr and Tidalarr
-- [ ] Multi-plugin schema gate passes for 2 plugins, then 3 plugins (when host supports)
+- [x] All four plugins use canonical Abstractions with SHA256 verification
+- [x] All four plugins validate manifest entrypoints via -ResolveEntryPoints
+- [x] All four plugins enforce non-negotiable CI gates via the reusable workflow in `lidarr.plugin.common` (`.github/workflows/packaging-gates.yml`)
+- [ ] Abstractions plugin-load gate (`IPlugin`) is enforced in CI for Tidalarr and AppleMusicarr
+- [ ] Both streaming plugins (Qobuzarr, Tidalarr) produce identical filename format on multi-disc and edge sanitization
+- [x] AppleMusicarr token protection migrated to Common facade (Common-encrypted; no legacy formats)
+- [x] Persistent single-plugin E2E gate is enforced in CI for Qobuzarr, Tidalarr, and Brainarr (Schema gate required; higher gates opt-in with credentials)
+- [ ] Multi-plugin schema gate passes for 2+ plugins (when host supports)
 
 **No-Drift Rule**: Any new filename/path logic must either live in Common or delegate to Common.
 
@@ -32,10 +48,13 @@ Full ecosystem parity is achieved when:
 ## Type-Identity Assembly Policy
 
 ### Required Assemblies (All Plugins)
-Plugins **MUST** ship these assemblies for proper plugin discovery and type identity:
-- `Lidarr.Plugin.Abstractions.dll` - Plugin discovery contract
-- `Microsoft.Extensions.DependencyInjection.Abstractions.dll` - DI type identity
-- `Microsoft.Extensions.Logging.Abstractions.dll` - Logging type identity
+Plugins **MUST** ship these assemblies in the plugin payload:
+- `Lidarr.Plugin.Abstractions.dll` - Canonical ABI contract (all plugins must ship identical bytes; enforced by `tools/canonical-abstractions.json`)
+
+### Host-Shared Assemblies (Do Not Ship)
+Plugins **MUST NOT** ship these assemblies (host provides them; shipping causes cross-ALC type identity breakage):
+- `Microsoft.Extensions.DependencyInjection.Abstractions.dll` - breaks `IServiceProvider`/DI contracts
+- `Microsoft.Extensions.Logging.Abstractions.dll` - breaks `ILogger` contracts
 
 ### Forbidden Assemblies (All Plugins)
 Plugins **MUST NOT** ship these assemblies:
@@ -78,15 +97,13 @@ signatures against the host.
 ## Phase 1: Lock Contracts with Tests (High Priority)
 
 ### 1.1 Packaging Content Tests
-- [x] **Common**: PluginPackageValidator with TypeIdentityAssemblies
-- [x] **Tidalarr**: PackagingPolicyBaseline updated to 5-DLL contract
-- [x] **Qobuzarr**: PackagingPolicyTests with RequiredTypeIdentityAssemblies
-- [x] **Brainarr**: BrainarrPackagingPolicyTests with 4-DLL contract (no FluentValidation)
+- [x] **Common**: `tools/PluginPack.psm1` enforces the DLL cleanup/merge policy (packages must ship the plugin DLL + canonical `Lidarr.Plugin.Abstractions.dll`; non-DLL artifacts like `plugin.json`, `manifest.json`, `.lidarr.plugin` may also be present depending on plugin/host needs)
+- [ ] **All Plugins**: Packaging tests assert the Common policy (and fail on host-shared assemblies in the ZIP)
 
 ### 1.2 Naming Contract Tests
-- [ ] Multi-disc: D01Txx/D02Txx format validation
-- [ ] Extension normalization: `.flac` and `flac` both produce `.flac`
-- [ ] Unicode normalization: NFC form consistency
+- [x] **Qobuzarr**: Multi-disc prefix + extension mapping + NFC normalization (`qobuzarr/src/Utilities/TrackFileNameBuilder.cs`, `qobuzarr/tests/Qobuzarr.Tests/Unit/Utilities/TrackFileNameBuilderTests.cs`)
+- [x] **Tidalarr**: Multi-disc prefix + extension mapping + NFC normalization (`tidalarr/src/Tidalarr/Integration/TidalDownloadClient.cs`, `tidalarr/tests/Tidalarr.Tests/TidalDownloadClientFileNameTests.cs`)
+- [x] **Common**: Extracted `FileNameAssertions.cs` into `testkit/Assertions/` with shared contract helpers (NFC normalization, invalid chars, reserved names, multi-disc prefix, extension validation)
 
 ### 1.3 Common SHA Verification
 - [x] Tidalarr: Uses ext-common-sha.txt
@@ -96,6 +113,18 @@ signatures against the host.
 ---
 
 ## Phase 2: Reduce Code Drift (Tech Debt)
+
+### 2.0 Blockers / Drift Dragons (Must Fix)
+
+- [x] **Brainarr**: Remove committed local state (`brainarr/.worktrees/`, `brainarr/_plugins/`) and add `.gitignore` + CI guard (commit 09fef6c).
+- [x] **Brainarr**: Fix `brainarr/build.ps1` corruption (was failing at `brainarr/build.ps1:56` and `brainarr/build.ps1:180`) and add CI "parse check" step (`brainarr/.github/workflows/sanity-build.yml`).
+- [x] **Brainarr**: Align `brainarr/.github/workflows/packaging-closure.yml` with packaging policy (commit 1d0144e - now uses unified `New-PluginPackage` pipeline).
+- [x] **AppleMusicarr**: Fix non-portable submodule URL (commit 4b171cc - `.gitmodules` now uses HTTPS URL for `ext/AppleMusiSharp`).
+- [x] **AppleMusicarr**: Removed legacy packaging script (commit 7912a09 - deleted `scripts/pack-plugin.ps1`, CI now uses `build.ps1 Release -Package`).
+- [x] **Qobuzarr**: Treat `AppSecret` as a secret in UI (commit 45c4d3f - now uses `FieldType.Password` + `PrivacyLevel.Password`).
+- [x] **Common**: Make `New-PluginPackage -MergeAssemblies` deterministic (commit 06e476e - added fail-fast guard when ilrepack missing; no one uses this flag so effectively deprecated).
+
+**Note**: These are parity items because they cause drift, make local builds non-reproducible, or produce packages that can diverge from the canonical policy.
 
 ### 2.1 Tidalarr Sanitization Consolidation
 **Status**: In Progress
@@ -121,13 +150,71 @@ Check for direct filename building outside FileSystemUtilities:
 - [ ] Any other helpers creating paths
 
 ### 2.4 TidalChunkDownloader Delay Configuration
-**Status**: Pending
+**Status**: Complete
 
-Current: Fixed `Task.Delay(50)` per chunk (line 49)
+Current: Configurable per-chunk delay with default `0` (max speed). Socket-leak-safe chunk downloads.
 
 Options:
 1. Set delay to 0 and rely on rate-limit handlers
 2. Make configurable via advanced setting
+
+### 2.5 Download Parity (Streaming) (PR1-PR3)
+**Status**: Planned
+
+This slice targets the remaining, measurable performance gap between streaming plugins while keeping `lidarr.plugin.common` "thin" (primitives, not provider policy).
+
+#### 2.5.1 Common: Streaming-friendly retry (`HttpCompletionOption`)
+**Goal**: Allow plugins to use Common retry logic while streaming large payloads efficiently.
+
+- [ ] Add `ExecuteWithRetryAsync(..., HttpCompletionOption, ...)` overload (keep existing overload behavior unchanged).
+- [ ] Add a test proving `ResponseHeadersRead` returns promptly vs buffered reads.
+
+**Fix location**: `lidarr.plugin.common/src/Utilities/HttpClientExtensions.cs`
+
+**Acceptance criteria**:
+- Existing call sites compile and behave unchanged.
+- New test demonstrates `ResponseHeadersRead` does not force full buffering before returning.
+
+#### 2.5.2 Tidalarr: File-backed stream provider + controlled track concurrency
+**Goal**: Enable memory-safe parallelism (default remains serial) and avoid in-memory track assembly.
+
+- [ ] Manifest-path chunk assembly returns a file-backed stream (use `FileOptions.DeleteOnClose` lifecycle, like the legacy stream-info path).
+- [ ] Add `MaxConcurrentTrackDownloads` (advanced) with safe bounds; default `1`.
+- [ ] Pass `maxConcurrentTracks` into `SimpleDownloadOrchestrator` from `TidalModule`.
+- [ ] Adopt `ResponseHeadersRead` for chunk downloads via the Common overload from 2.5.1.
+
+**Fix locations**:
+- `tidalarr/src/Tidalarr/Integration/TidalChunkStreamProvider.cs`
+- `tidalarr/src/Tidalarr/Domain/Streaming/TidalChunkDownloader.cs`
+- `tidalarr/src/Tidalarr/Integration/TidalModule.cs`
+
+**Acceptance criteria** (manual / local perf verification):
+- With `MaxConcurrentTrackDownloads=2` and `DownloadDelay=0`, a 10-track album download completes in < 120s on a typical broadband connection (or shows >= 2x speedup vs `MaxConcurrentTrackDownloads=1` on the same machine/network).
+- With `MaxConcurrentTrackDownloads=2`, process/container RSS remains < 350MB during a 10-track album download and does not monotonically grow across multiple albums.
+
+#### 2.5.3 Tidalarr: Re-enable OAuth state validation
+**Goal**: Security hardening + fewer stale/cross-tab auth failures now that ConfigPath defaults are stable.
+
+- [ ] Validate callback `state` matches stored `PKCEState.State` and fail with a clear user-facing message on mismatch.
+- [ ] On mismatch, regenerate OAuth URL (do not silently proceed).
+- [ ] Add unit tests for (a) mismatch, (b) missing state, (c) happy path.
+
+**Fix locations**:
+- `tidalarr/src/Tidalarr/Integration/LidarrNative/TidalLidarrIndexer.cs`
+- `tidalarr/src/Tidalarr/Infrastructure/Storage/PKCEStateStore.cs` (if required for clean access)
+
+**Acceptance criteria**:
+- Happy path OAuth flow still works.
+- Stale/cross-tab OAuth flow fails deterministically with actionable guidance and no secret leakage in logs.
+
+#### 2.5.4 Follow-up: Adopt streaming retry overload in other plugins (2.5.1 rollout)
+**Goal**: Ensure all plugins benefit from 2.5.1 when they have streaming/large-payload HTTP paths.
+
+- [ ] Qobuzarr: audit for any Common retry usage on large responses and adopt `ResponseHeadersRead` where appropriate.
+- [ ] Brainarr: audit for any large streaming downloads (if any) and adopt the overload where applicable.
+
+**Acceptance criteria**:
+- No functional change (behavior-preserving), only reduced buffering/peak memory where applicable.
 
 ---
 
