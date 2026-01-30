@@ -5,11 +5,13 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Abstractions.Llm;
 using Lidarr.Plugin.Common.Errors;
 using Lidarr.Plugin.Common.Observability;
+using Lidarr.Plugin.Common.Streaming;
 using Lidarr.Plugin.Common.Subprocess;
 using Microsoft.Extensions.Logging;
 
@@ -48,7 +50,7 @@ public class ClaudeCodeProvider : ILlmProvider
     /// <inheritdoc />
     public LlmProviderCapabilities Capabilities => new()
     {
-        Flags = LlmCapabilityFlags.TextCompletion | LlmCapabilityFlags.SystemPrompt | LlmCapabilityFlags.ExtendedThinking,
+        Flags = LlmCapabilityFlags.TextCompletion | LlmCapabilityFlags.SystemPrompt | LlmCapabilityFlags.ExtendedThinking | LlmCapabilityFlags.Streaming,
         MaxContextTokens = 200_000,
         MaxOutputTokens = 8_192,
         SupportedModels = ["sonnet", "opus", "haiku"],
@@ -251,15 +253,229 @@ public class ClaudeCodeProvider : ILlmProvider
     }
 
     /// <inheritdoc />
-    /// <returns>
-    /// Always returns <c>null</c> because streaming is not supported in v1.
-    /// Could be implemented with --output-format stream-json in v2.
-    /// </returns>
     public IAsyncEnumerable<LlmStreamChunk>? StreamAsync(LlmRequest request, CancellationToken cancellationToken = default)
     {
-        // Streaming not supported in v1
-        // Could implement with --output-format stream-json in v2
-        return null;
+        // Return the streaming implementation
+        // This method is sync but returns an async enumerable that will execute lazily
+        return StreamAsyncCore(request, cancellationToken);
+    }
+
+    private async IAsyncEnumerable<LlmStreamChunk> StreamAsyncCore(
+        LlmRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var correlationId = Activity.Current?.Id ?? Guid.NewGuid().ToString("N")[..8];
+        var sw = Stopwatch.StartNew();
+
+        // Ensure CLI path is known
+        var cliPath = _cachedCliPath ?? await _detector.FindClaudeCliAsync(cancellationToken).ConfigureAwait(false);
+        if (cliPath == null)
+        {
+            _logger?.LogRequestError(PluginName, ProviderId, "StreamAsync", correlationId, "CLI_NOT_FOUND", "Claude Code CLI not found");
+            throw new ProviderException(ProviderId, LlmErrorCode.ProviderUnavailable, "Claude Code CLI not found");
+        }
+
+        // Ensure capabilities are probed
+        var caps = _cachedCapabilities ?? await _capabilities.GetCapabilitiesAsync(cliPath, cancellationToken).ConfigureAwait(false);
+        _cachedCapabilities = caps;
+
+        // Check if streaming is supported
+        var model = request.Model ?? _settings.Model;
+        var args = caps.BuildStreamingArguments(request.Prompt, request.SystemPrompt, model);
+
+        if (args == null)
+        {
+            // Streaming not supported by this CLI version - fall back to non-streaming
+            _logger?.LogDebug("Streaming not supported by CLI, falling back to non-streaming");
+            var response = await CompleteAsync(request, cancellationToken).ConfigureAwait(false);
+            yield return new LlmStreamChunk
+            {
+                ContentDelta = response.Content,
+                IsComplete = true,
+                FinalUsage = response.Usage,
+            };
+            yield break;
+        }
+
+        // Configure timeout policy for streaming
+        var timeoutPolicy = StreamingTimeoutPolicy.ForClaudeCode();
+        if (request.Timeout.HasValue)
+        {
+            timeoutPolicy = timeoutPolicy with { TotalStreamTimeout = request.Timeout.Value };
+        }
+
+        var options = new CliRunnerOptions
+        {
+            Timeout = timeoutPolicy.TotalStreamTimeout,
+            GracefulShutdownTimeout = _settings.GracefulShutdownTimeout,
+            ThrowOnNonZeroExitCode = false,
+        };
+
+        _logger?.LogRequestStart(PluginName, ProviderId, "StreamAsync", correlationId, model);
+
+        // Use a wrapper to handle exceptions outside the yield block
+        var chunks = StreamWithErrorHandlingAsync(
+            cliPath, args, options, timeoutPolicy, cancellationToken, correlationId, sw);
+
+        await foreach (var chunk in chunks)
+        {
+            yield return chunk;
+        }
+    }
+
+    private async IAsyncEnumerable<LlmStreamChunk> StreamWithErrorHandlingAsync(
+        string cliPath,
+        List<string> args,
+        CliRunnerOptions options,
+        StreamingTimeoutPolicy timeoutPolicy,
+        [EnumeratorCancellation] CancellationToken cancellationToken,
+        string correlationId,
+        Stopwatch sw)
+    {
+        await using var streamCancellation = new StreamingCancellation(timeoutPolicy, cancellationToken);
+
+        // Create rate-limited logger for unknown events to prevent log spam
+        var eventLogger = new RateLimitedEventLogger(
+            msg => _logger?.LogWarning("Stream event drift: {Message}", msg),
+            maxUniqueEvents: 3);
+
+        // Create parser with tolerant mode - log unknown event types instead of failing
+        var parser = new ClaudeCodeStreamParser(unknownEventLogger: eventLogger.CreateLoggerAction());
+
+        var hasYielded = false;
+        var chunkCount = 0;
+        var totalInputTokens = 0;
+        var totalOutputTokens = 0;
+        TimeSpan? timeToFirstChunk = null;
+        Exception? caughtException = null;
+
+        var enumerator = parser.ParseAsync(
+            _cliRunner.StreamAsync(cliPath, args, options, streamCancellation.Token),
+            streamCancellation.Token).GetAsyncEnumerator(streamCancellation.Token);
+
+        try
+        {
+            while (true)
+            {
+                LlmStreamChunk chunk;
+                try
+                {
+                    if (!await enumerator.MoveNextAsync().ConfigureAwait(false))
+                    {
+                        break;
+                    }
+
+                    chunk = enumerator.Current;
+                }
+                catch (OperationCanceledException) when (streamCancellation.CancellationReason != StreamingCancellationReason.ExternalCancellation)
+                {
+                    var reason = streamCancellation.CancellationReason ?? StreamingCancellationReason.TotalStreamTimeout;
+                    var diagnostics = StreamingDiagnostics.Cancelled(
+                        decoderId: "claude-code",
+                        providerId: ProviderId,
+                        reason: reason,
+                        elapsed: sw.Elapsed,
+                        chunkCount: chunkCount);
+
+                    var timeoutEx = streamCancellation.CreateTimeoutException();
+                    _logger?.LogRequestError(PluginName, ProviderId, "StreamAsync", correlationId, "TIMEOUT", timeoutEx.Message);
+                    caughtException = new ProviderException(ProviderId, LlmErrorCode.Timeout, timeoutEx.Message, timeoutEx)
+                    {
+                        Data = { ["Diagnostics"] = diagnostics },
+                    };
+                    break;
+                }
+                catch (OperationCanceledException)
+                {
+                    _logger?.LogDebug("Stream cancelled for correlation {CorrelationId}", correlationId);
+                    throw;
+                }
+                catch (InvalidOperationException ex) when (ex.Message.Contains("streaming error"))
+                {
+                    _logger?.LogRequestError(PluginName, ProviderId, "StreamAsync", correlationId, "STREAM_ERROR", ex.Message);
+                    caughtException = new ProviderException(ProviderId, LlmErrorCode.InvalidRequest, ex.Message, ex);
+                    break;
+                }
+                catch (LlmProviderException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogRequestError(PluginName, ProviderId, "StreamAsync", correlationId, "UNKNOWN", ex.Message, ex);
+                    caughtException = new ProviderException(ProviderId, LlmErrorCode.Unknown, $"Streaming error: {ex.Message}", ex);
+                    break;
+                }
+
+                chunkCount++;
+
+                // Only reset timeout on meaningful chunks (content or reasoning)
+                // Metadata-only chunks (keepalives, structural events) should not reset the timer
+                var hasMeaningfulContent = !string.IsNullOrEmpty(chunk.ContentDelta)
+                    || !string.IsNullOrEmpty(chunk.ReasoningDelta);
+
+                if (hasMeaningfulContent)
+                {
+                    streamCancellation.OnChunkReceived();
+
+                    // Track time to first meaningful chunk
+                    timeToFirstChunk ??= sw.Elapsed;
+                }
+
+                hasYielded = true;
+
+                if (chunk.FinalUsage != null)
+                {
+                    totalInputTokens = chunk.FinalUsage.InputTokens;
+                    totalOutputTokens = chunk.FinalUsage.OutputTokens;
+                }
+
+                yield return chunk;
+
+                if (chunk.IsComplete)
+                {
+                    break;
+                }
+            }
+        }
+        finally
+        {
+            await enumerator.DisposeAsync().ConfigureAwait(false);
+        }
+
+        // Log suppressed unknown events summary (if any)
+        eventLogger.LogSuppressedSummary();
+
+        if (caughtException != null)
+        {
+            throw caughtException;
+        }
+
+        if (!hasYielded)
+        {
+            yield return new LlmStreamChunk { IsComplete = true };
+        }
+        else
+        {
+            // Log completion with diagnostics summary
+            _logger?.LogRequestComplete(
+                PluginName, ProviderId, "StreamAsync", correlationId, sw.ElapsedMilliseconds,
+                totalInputTokens > 0 ? totalInputTokens : null,
+                totalOutputTokens > 0 ? totalOutputTokens : null);
+
+            // Log streaming diagnostics summary (single line, no payload)
+            if (_logger?.IsEnabled(LogLevel.Debug) == true)
+            {
+                _logger.LogDebug(
+                    "Stream diagnostics: chunks={ChunkCount}, ttfc={TimeToFirstChunkMs}ms, " +
+                    "elapsed={ElapsedMs}ms, tokens={InputTokens}/{OutputTokens}",
+                    chunkCount,
+                    timeToFirstChunk?.TotalMilliseconds ?? 0,
+                    sw.ElapsedMilliseconds,
+                    totalInputTokens,
+                    totalOutputTokens);
+            }
+        }
     }
 
     private LlmProviderException MapCliError(CliResult result, string? correlationId = null)

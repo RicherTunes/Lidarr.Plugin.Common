@@ -618,13 +618,13 @@ public class ClaudeCodeProviderTests : IDisposable
     #region StreamAsync
 
     [Fact]
-    public void StreamAsync_ReturnsNull()
+    public void StreamAsync_ReturnsAsyncEnumerable()
     {
         // Act
         var result = _provider.StreamAsync(new LlmRequest { Prompt = "test" });
 
-        // Assert - v1 doesn't support streaming
-        Assert.Null(result);
+        // Assert - v2 supports streaming, returns async enumerable
+        Assert.NotNull(result);
     }
 
     #endregion

@@ -93,11 +93,15 @@ public sealed class ClaudeCodeCapabilities
 
         var text = helpText.ToLowerInvariant();
 
+        // Check for stream-json format support (indicates streaming capability)
+        var supportsStreamJson = text.Contains("stream-json");
+
         return new CapabilitySet
         {
             SupportsAllowedTools = text.Contains("--allowedtools") || text.Contains("--allowed-tools"),
             SupportsMaxTurns = text.Contains("--max-turns"),
             SupportsOutputFormat = text.Contains("--output-format"),
+            SupportsStreamJson = supportsStreamJson,
             SupportsAppendSystemPrompt = text.Contains("--append-system-prompt"),
             SupportsModel = text.Contains("--model"),
             SupportsNoSessionPersistence = text.Contains("--no-session-persistence") || text.Contains("--nosessionpersistence"),
@@ -122,6 +126,7 @@ public sealed class CapabilitySet
         SupportsAllowedTools = false, // Don't assume - could cause errors
         SupportsMaxTurns = false,
         SupportsOutputFormat = true, // Required for JSON parsing
+        SupportsStreamJson = false, // Don't assume streaming support
         SupportsAppendSystemPrompt = true, // Generally available
         SupportsModel = true, // Generally available
         SupportsNoSessionPersistence = false, // Don't assume
@@ -144,6 +149,12 @@ public sealed class CapabilitySet
     /// Gets or sets a value indicating whether --output-format flag is supported.
     /// </summary>
     public bool SupportsOutputFormat { get; init; }
+
+    /// <summary>
+    /// Gets or sets a value indicating whether --output-format stream-json is supported.
+    /// This enables streaming responses with NDJSON output.
+    /// </summary>
+    public bool SupportsStreamJson { get; init; }
 
     /// <summary>
     /// Gets or sets a value indicating whether --append-system-prompt flag is supported.
@@ -194,6 +205,62 @@ public sealed class CapabilitySet
         {
             args.AddRange(["--output-format", "json"]);
         }
+
+        // Safety: limit to single turn
+        if (SupportsMaxTurns)
+        {
+            args.AddRange(["--max-turns", "1"]);
+        }
+
+        // Safety: disable tool access
+        if (SupportsAllowedTools)
+        {
+            args.AddRange(["--allowedTools", string.Empty]);
+        }
+
+        // Prevent session state bleeding across requests
+        if (SupportsNoSessionPersistence)
+        {
+            args.Add("--no-session-persistence");
+        }
+
+        // System prompt
+        if (!string.IsNullOrEmpty(systemPrompt) && SupportsAppendSystemPrompt)
+        {
+            args.AddRange(["--append-system-prompt", systemPrompt]);
+        }
+
+        // Model selection
+        if (!string.IsNullOrEmpty(model) && SupportsModel)
+        {
+            args.AddRange(["--model", model]);
+        }
+
+        return args;
+    }
+
+    /// <summary>
+    /// Builds the argument list for streaming mode.
+    /// </summary>
+    /// <param name="prompt">The user prompt.</param>
+    /// <param name="systemPrompt">Optional system prompt.</param>
+    /// <param name="model">Optional model selection.</param>
+    /// <returns>List of CLI arguments configured for streaming, or null if streaming not supported.</returns>
+    public List<string>? BuildStreamingArguments(string prompt, string? systemPrompt = null, string? model = null)
+    {
+        // Streaming requires stream-json output format support
+        if (!SupportsStreamJson || !SupportsOutputFormat)
+        {
+            return null;
+        }
+
+        var args = new List<string>();
+
+        // Prompt (always required)
+        args.AddRange(["-p", prompt]);
+
+        // Output format for streaming
+        args.AddRange(["--output-format", "stream-json"]);
 
         // Safety: limit to single turn
         if (SupportsMaxTurns)
