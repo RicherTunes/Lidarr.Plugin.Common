@@ -40,8 +40,14 @@ function Get-TrxTestSummary {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
         [string]$TrxPath
     )
+
+    if ([string]::IsNullOrWhiteSpace($TrxPath)) {
+        Write-Warning "TRX path cannot be empty or whitespace"
+        return $null
+    }
 
     if (-not (Test-Path $TrxPath)) {
         Write-Warning "TRX file not found: $TrxPath"
@@ -174,8 +180,14 @@ function Clear-StaleTrxFiles {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
         [string]$OutputDir
     )
+
+    if ([string]::IsNullOrWhiteSpace($OutputDir)) {
+        Write-Warning "OutputDir cannot be empty or whitespace"
+        return
+    }
 
     if (Test-Path $OutputDir) {
         Get-ChildItem -Path $OutputDir -Filter "*.trx" -ErrorAction SilentlyContinue |
@@ -211,12 +223,15 @@ function Test-ArtifactFreshness {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
         [string]$PluginJsonPath,
 
         [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
         [string]$CsprojPath,
 
         [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ -PathType Container })]
         [string]$ProjectRoot,
 
         [switch]$RequireMatch = $false
@@ -334,16 +349,20 @@ function Find-PluginAssembly {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ -PathType Container })]
         [string]$ProjectRoot,
 
         [Parameter(Mandatory)]
+        [ValidatePattern('^[\w\.\-]+\.dll$')]
         [string]$AssemblyName,
 
         [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
         [string]$PackagePrefix,
 
         [string[]]$SearchPaths = @(),
 
+        [ValidateSet('Debug', 'Release')]
         [string]$Configuration = "Release"
     )
 
@@ -477,8 +496,10 @@ function Get-StandardBuildArgs {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ })]
         [string]$TestProject,
 
+        [ValidateSet('Debug', 'Release')]
         [string]$Configuration = "Debug",
 
         [switch]$Verbose = $false,
@@ -541,13 +562,17 @@ function Get-StandardTestArgs {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ })]
         [string]$TestProject,
 
+        [ValidateSet('Debug', 'Release')]
         [string]$Configuration = "Debug",
 
         [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
         [string]$OutputDir,
 
+        [ValidatePattern('^[\w\.\-]+\.trx$')]
         [string]$TrxFileName = "Tests.trx",
 
         [string]$Filter = "",
@@ -618,11 +643,14 @@ function Get-PackagingTestArgs {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
+        [ValidateScript({ Test-Path $_ })]
         [string]$TestProject,
 
+        [ValidateSet('Debug', 'Release')]
         [string]$Configuration = "Release",
 
         [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
         [string]$OutputDir,
 
         [switch]$Verbose = $false

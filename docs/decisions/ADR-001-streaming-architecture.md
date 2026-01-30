@@ -59,7 +59,7 @@ Lidarr's `NzbDrone.Common.Http.IHttpClient` buffers complete HTTP responses befo
 - `GeminiStreamDecoder` - Google Gemini SSE format
 - `ZaiStreamDecoder` - Z.AI GLM SSE format (OpenAI-compatible with extensions)
 - `StreamingTimeoutPolicy`, `StreamingCancellation` - Timeout management
-- 225 decoder contract tests (all passing)
+- 230+ decoder and streaming tests (all passing)
 
 **Brainarr:**
 - HTTP providers remain non-streaming

@@ -15,17 +15,19 @@ This document tracks technical debt items across the Lidarr Plugin Ecosystem.
 
 | File | Lines | Priority | Notes |
 |------|-------|----------|-------|
-| `LibraryAwarePromptBuilder.cs` | 1924 | P2 | Prompt building could be split by concern |
-| `LibraryAnalyzer.cs` | 1412 | P2 | Analysis logic could be extracted |
-| `BrainarrSettings.cs` | 1230 | P3 | Settings container - large but cohesive |
-| `BrainarrOrchestrator.cs` | 903 | P1 | Main orchestration - consider extracting strategies |
-| `EnhancedRecommendationCache.cs` | 808 | P2 | Cache logic could use strategy pattern |
+| `Brainarr.Plugin/Services/LibraryAwarePromptBuilder.cs` | 1924 | P2 | Prompt building could be split by concern |
+| `Brainarr.Plugin/Services/Core/LibraryAnalyzer.cs` | 1412 | P2 | Analysis logic could be extracted |
+| `Brainarr.Plugin/BrainarrSettings.cs` | 1230 | P3 | Settings container - large but cohesive |
+| `Brainarr.Plugin/Services/Core/BrainarrOrchestrator.cs` | 903 | P1 | Main orchestration - consider extracting strategies |
+| `Brainarr.Plugin/Services/Caching/EnhancedRecommendationCache.cs` | 808 | P2 | Cache logic could use strategy pattern |
 
 ### Overlapping Provider Bases
 
-- `BaseCloudProvider`
-- `HttpChatProviderBase`
-- `SecureProviderBase`
+| Base Class | Path | Purpose |
+|------------|------|---------|
+| `BaseCloudProvider` | `Brainarr.Plugin/Services/Providers/BaseCloudProvider.cs` | Generic cloud API abstraction |
+| `HttpChatProviderBase` | `Brainarr.Plugin/Services/Providers/Core/HttpChatProviderBase.cs` | HTTP-based chat providers |
+| `SecureProviderBase` | `Brainarr.Plugin/Services/Providers/SecureProviderBase.cs` | Providers with credential handling |
 
 **Recommendation:** Pick one abstraction and migrate. Currently creates confusion about which to extend.
 
