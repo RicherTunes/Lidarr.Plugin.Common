@@ -129,6 +129,22 @@ If OpenAI or Google release official OAuth flows for consumer subscriptions:
 
 Until then, API key authentication remains the compliant path.
 
+## Decision Criteria for Future Auth Modes
+
+Before implementing any subscription-based auth:
+
+| Criterion | Requirement |
+|-----------|-------------|
+| **Official Documentation** | Provider must document the auth flow publicly |
+| **ToS Explicit Permit** | Terms of Service must not prohibit programmatic access |
+| **Stable API Surface** | Auth endpoints must be versioned or declared stable |
+| **No Web Scraping** | Implementation must not rely on browser session cookies |
+| **Revocation Path** | Users must be able to revoke access without provider support |
+| **Secret Handling** | No long-lived refresh tokens stored unencrypted; must use OS keychain or CLI-managed credentials |
+| **Supportability** | Must provide deterministic health check and clear "how to revoke" documentation |
+
+**Go/No-Go Gate**: All 7 criteria must pass before any code is written.
+
 ## References
 
 - [OpenAI API Authentication](https://platform.openai.com/docs/api-reference/authentication)

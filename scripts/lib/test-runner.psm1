@@ -17,6 +17,11 @@
 
     $CommonScripts = Join-Path $PSScriptRoot "../../ext/Lidarr.Plugin.Common/scripts/lib"
     Import-Module (Join-Path $CommonScripts "test-runner.psm1") -Force
+
+    CANONICAL IMPORT PATH (TRX Drift Prevention):
+    All plugin repositories MUST import this module from the Common submodule path
+    (ext/Lidarr.Plugin.Common/scripts/lib/test-runner.psm1). Do NOT copy this file
+    locally - always reference the canonical source to prevent parsing drift.
 #>
 
 Set-StrictMode -Version Latest
