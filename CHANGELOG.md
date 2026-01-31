@@ -3,6 +3,11 @@
 
 All notable changes to the shared library are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Quick Links
+- **Documentation**: [README.md](README.md) | [Quickstart](docs/quickstart/) | [Architecture](docs/concepts/)
+- **Testing**: [TestKit Guide](docs/how-to/TEST_WITH_TESTKIT.md) | [Testing Strategy](docs/testing/)
+- **Ecosystem**: [Consuming Plugins](https://github.com/RicherTunes/.github/blob/main/docs/ECOSYSTEM.md)
+
 ## Release entry format
 
 Each release entry should include:
