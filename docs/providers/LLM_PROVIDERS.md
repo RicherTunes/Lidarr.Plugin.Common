@@ -21,7 +21,36 @@ public interface ILlmProvider
 
 ## Available Providers
 
-### Claude Code CLI Provider
+### Cloud Providers (API Key Auth)
+
+| Provider | Provider ID | Default Model | Max Context | Notes |
+|----------|-------------|---------------|-------------|-------|
+| OpenAI | `openai` | gpt-4o | 128K | |
+| Anthropic | `anthropic` | claude-3-5-sonnet-20241022 | 200K | |
+| Gemini | `gemini` | gemini-2.0-flash-exp | 1M | |
+| Z.AI GLM | `zai` | glm-4.7-flash | 128K-200K | Free tier available |
+| Perplexity | `perplexity` | sonnet-small | - | Web-aware fallback |
+| Groq | `groq` | llama-3.3-70b | - | Low-latency batches |
+| DeepSeek | `deepseek` | deepseek-chat | - | Budget-friendly option |
+| OpenRouter | `openrouter` | anthropic/claude-3-sonnet | - | Gateway to many models |
+
+### Local Providers
+
+| Provider | Provider ID | Default Model | Setup |
+|----------|-------------|---------------|-------|
+| Ollama | `ollama` | qwen2.5:latest | `ollama pull <model>` |
+| LM Studio | `lmstudio` | (user selected) | Run LM Studio API server |
+
+### Subscription Providers (CLI Auth)
+
+| Provider | Provider ID | Models | Credentials |
+|----------|-------------|--------|-------------|
+| Claude Code | `claude-code` | sonnet, opus, haiku | `~/.claude/.credentials.json` |
+| OpenAI Codex | `openai-codex` | gpt-4o | `~/.codex/auth.json` |
+
+---
+
+## Claude Code CLI Provider
 
 | Property | Value |
 |----------|-------|
