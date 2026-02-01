@@ -1,0 +1,100 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/RicherTunes/Lidarr.Plugin.Common/schemas/test-runner-allowlist.schema.json",
+  "title": "Test Runner Allowlist",
+  "description": "Schema for allowlisting raw dotnet test calls in CI workflows. Permanent exemptions MUST include owner and should be reviewed quarterly.",
+  "type": "object",
+  "required": ["patterns"],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "JSON Schema reference"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of this allowlist's purpose"
+    },
+    "lastReviewed": {
+      "type": "string",
+      "format": "date",
+      "description": "Date of last quarterly review (YYYY-MM-DD). Update this when reviewing permanent exemptions."
+    },
+    "patterns": {
+      "type": "array",
+      "description": "List of allowlist patterns for raw dotnet test calls",
+      "items": {
+        "type": "object",
+        "required": ["reason"],
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "Workflow filename pattern (supports * glob). Example: 'ci.yml' or '*.yml'"
+          },
+          "line_pattern": {
+            "type": "string",
+            "description": "Pattern that must appear on the same line as dotnet test. Example: '--list-tests' or '/p:Threshold='"
+          },
+          "reason": {
+            "type": "string",
+            "description": "Technical justification for why unified runner cannot be used. REQUIRED for all entries."
+          },
+          "owner": {
+            "type": "string",
+            "description": "Owner responsible for this exemption. REQUIRED for permanent exemptions. Use GitHub username or team name."
+          },
+          "expiresOn": {
+            "type": "string",
+            "format": "date",
+            "description": "Expiration date in YYYY-MM-DD format. After this date, the exemption is no longer valid. Temporary exemptions SHOULD have this set."
+          },
+          "issueLink": {
+            "type": "string",
+            "format": "uri",
+            "description": "Link to GitHub issue tracking this exemption or the migration work."
+          }
+        },
+        "if": {
+          "not": {
+            "required": ["expiresOn"]
+          }
+        },
+        "then": {
+          "required": ["owner"],
+          "properties": {
+            "owner": {
+              "description": "REQUIRED for permanent exemptions (those without expiresOn). Owner is responsible for quarterly review."
+            }
+          }
+        }
+      }
+    }
+  },
+  "additionalProperties": false,
+  "examples": [
+    {
+      "$schema": "../ext/lidarr.plugin.common/schemas/test-runner-allowlist.schema.json",
+      "description": "Permanent allowlist for raw dotnet test calls",
+      "lastReviewed": "2026-01-27",
+      "patterns": [
+        {
+          "file": "*.yml",
+          "line_pattern": "--list-tests",
+          "reason": "Test discovery for reporting, not execution",
+          "owner": "infrastructure"
+        },
+        {
+          "file": "mutation-tests.yml",
+          "reason": "Stryker.NET requires STRYKER_DOTNET_TEST_FILTER env var",
+          "owner": "testing-infra",
+          "issueLink": "https://github.com/RicherTunes/Lidarr.Plugin.Common/issues/123"
+        },
+        {
+          "file": "ci.yml",
+          "expiresOn": "2026-03-01",
+          "owner": "migration",
+          "reason": "Temporary exemption during unified runner migration"
+        }
+      ]
+    }
+  ]
+}

@@ -39,6 +39,7 @@ Pick the guide that matches what you need to do.
 - [Public API baselines](reference/PUBLIC_API_BASELINES.md)
 - [Key services and utilities](reference/KEY_SERVICES.md)
 - [Resilience policy reference](reference/RESILIENCE_POLICY.md)
+- [LLM provider system](providers/LLM_PROVIDERS.md) - Claude Code and other AI providers
 - [Streaming plugins glossary](GLOSSARY.md) - Common terminology
 
 ## Migration

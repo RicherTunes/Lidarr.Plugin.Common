@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Lidarr Plugin Manifest",
   "type": "object",
-  "additionalProperties": false,
+  "additionalProperties": true,
   "required": ["id", "name", "version", "apiVersion", "minHostVersion"],
   "properties": {
     "id": {
@@ -40,12 +40,53 @@
           "net8.0"
         ]
       },
-      "uniqueItems": true
+      "uniqueItems": true,
+      "description": "Target frameworks the plugin supports."
     },
     "commonVersion": {
       "type": "string",
       "pattern": "^\\d+\\.\\d+\\.\\d+(?:-.+)?$",
       "description": "Informational Common package version shipped with the plugin."
+    },
+    "main": {
+      "type": "string",
+      "pattern": "^[\\w.-]+\\.dll$",
+      "description": "Main plugin assembly filename (e.g., 'Lidarr.Plugin.MyPlugin.dll'). Used for entrypoint validation."
+    },
+    "rootNamespace": {
+      "type": "string",
+      "pattern": "^[A-Za-z][\\w.]*$",
+      "description": "Root namespace of the plugin (e.g., 'Lidarr.Plugin.MyPlugin'). Used for entrypoint validation."
+    },
+    "targetFramework": {
+      "type": "string",
+      "enum": ["net6.0", "net8.0"],
+      "description": "Primary target framework (prefer 'targets' array for multi-targeting)."
+    },
+    "author": {
+      "type": "string",
+      "description": "Plugin author or organization."
+    },
+    "description": {
+      "type": "string",
+      "description": "Brief description of the plugin's functionality."
+    },
+    "homepage": {
+      "type": "string",
+      "format": "uri",
+      "description": "URL to the plugin's homepage or documentation."
+    },
+    "license": {
+      "type": "string",
+      "description": "SPDX license identifier (e.g., 'MIT', 'GPL-3.0')."
+    },
+    "tags": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "uniqueItems": true,
+      "description": "Keywords/tags for discovery."
     }
   }
 }

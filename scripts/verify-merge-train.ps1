@@ -34,7 +34,7 @@
   Useful for Docker mode where secrets/live services are unavailable.
 
 .PARAMETER SkipPerformance
-  Skip performance tests (tests with [Trait("Category", "Performance")]).
+  Skip timing-sensitive tests (tests with [Trait("Category", "Benchmark")] or [Trait("Category", "Slow")]).
   Useful for Docker/CI mode where wall-clock timing is unreliable.
 #>
 
@@ -191,8 +191,9 @@ function Get-DotNetArgs {
       $filters += 'FullyQualifiedName!~EndToEnd'
     }
     if ($skipPerformance) {
-      # Exclude performance tests with wall-clock assertions (unreliable in CI/Docker)
-      $filters += 'Category!=Performance'
+      # Exclude timing-sensitive tests with wall-clock assertions (unreliable in CI/Docker)
+      $filters += 'Category!=Benchmark'
+      $filters += 'Category!=Slow'
     }
     $args.Add('--filter')
     $args.Add($filters -join '&')

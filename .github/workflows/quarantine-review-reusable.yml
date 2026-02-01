@@ -1,0 +1,210 @@
+name: Quarantine Review (Reusable)
+
+on:
+  workflow_call:
+    inputs:
+      test_project:
+        description: 'Path to test project or solution'
+        required: false
+        type: string
+        default: ''
+      max_quarantined:
+        description: 'Maximum allowed quarantined tests'
+        required: false
+        type: number
+        default: 20
+      dotnet_version:
+        description: '.NET SDK version'
+        required: false
+        type: string
+        default: '8.0.x'
+      submodule_path:
+        description: 'Path to Common submodule'
+        required: false
+        type: string
+        default: 'ext/lidarr.plugin.common'
+      additional_properties:
+        description: 'Additional MSBuild properties (JSON array)'
+        required: false
+        type: string
+        default: '[]'
+    secrets:
+      SUBMODULES_TOKEN:
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  quarantine-review:
+    name: Quarantine Review
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          submodules: false
+
+      - name: Init Common submodule
+        shell: bash
+        env:
+          SUBMODULE_PATH: ${{ inputs.submodule_path }}
+        run: |
+          # Configure git to use token if provided
+          if [ -n "${{ secrets.SUBMODULES_TOKEN }}" ]; then
+            git config --local url."https://x-access-token:${{ secrets.SUBMODULES_TOKEN }}@github.com/".insteadOf "https://github.com/"
+          fi
+          git submodule sync -- "$SUBMODULE_PATH"
+          git submodule update --init --depth=1 -- "$SUBMODULE_PATH"
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ inputs.dotnet_version }}
+
+      - name: Generate Quarantine Report
+        id: report
+        shell: pwsh
+        env:
+          SUBMODULE_PATH: ${{ inputs.submodule_path }}
+          MAX_QUARANTINED: ${{ inputs.max_quarantined }}
+        run: |
+          $script = Join-Path $env:SUBMODULE_PATH "scripts/manage-quarantine.ps1"
+          if (-not (Test-Path $script)) {
+            Write-Error "manage-quarantine.ps1 not found at $script"
+            exit 1
+          }
+
+          $maxQuarantined = [int]$env:MAX_QUARANTINED
+
+          # Generate markdown report
+          $report = & $script -Mode report -OutputFormat markdown -MaxQuarantined $maxQuarantined
+          $report | Out-File -FilePath quarantine-report.md -Encoding utf8
+
+          # Get JSON stats
+          $jsonResult = & $script -Mode report -OutputFormat json
+          $result = $jsonResult | ConvertFrom-Json
+          $count = $result.summary.total
+          $longQuarantined = $result.summary.longQuarantined
+
+          echo "count=$count" >> $env:GITHUB_OUTPUT
+          echo "long_quarantined=$longQuarantined" >> $env:GITHUB_OUTPUT
+          echo "threshold_exceeded=$($count -gt $maxQuarantined)" >> $env:GITHUB_OUTPUT
+
+      - name: Build
+        shell: bash
+        run: dotnet build -c Release -v minimal
+
+      - name: Run Quarantined Tests
+        id: run_quarantined
+        continue-on-error: true
+        shell: pwsh
+        env:
+          SUBMODULE_PATH: ${{ inputs.submodule_path }}
+          TEST_PROJECT: ${{ inputs.test_project }}
+          ADDITIONAL_PROPS: ${{ inputs.additional_properties }}
+        run: |
+          $script = Join-Path $env:SUBMODULE_PATH "scripts/test.ps1"
+          if (-not (Test-Path $script)) {
+            Write-Error "test.ps1 not found at $script"
+            exit 1
+          }
+
+          # Parse additional properties
+          $props = @()
+          if ($env:ADDITIONAL_PROPS -and $env:ADDITIONAL_PROPS -ne '[]') {
+            try {
+              $props = $env:ADDITIONAL_PROPS | ConvertFrom-Json
+            } catch {
+              Write-Warning "Failed to parse additional_properties as JSON"
+            }
+          }
+
+          # Build test args
+          $testArgs = @{
+            IncludeQuarantined = $true
+            Category = @()
+            ExcludeCategories = @()
+            Configuration = 'Release'
+            NoBuild = $true
+            OutputDir = 'TestResults/Quarantine'
+            CI = $true
+          }
+
+          if ($env:TEST_PROJECT) {
+            $testArgs['TestProject'] = $env:TEST_PROJECT
+          }
+
+          if ($props.Count -gt 0) {
+            $testArgs['Properties'] = $props
+          }
+
+          # Run quarantined tests
+          & $script @testArgs 2>&1 | Tee-Object -Variable output
+
+          # Check for passing tests in TRX
+          $trxFiles = Get-ChildItem -Path TestResults/Quarantine -Filter "*.trx" -Recurse -ErrorAction SilentlyContinue
+          $passingTests = @()
+
+          foreach ($trx in $trxFiles) {
+            [xml]$xml = Get-Content $trx.FullName
+            $passed = $xml.TestRun.Results.UnitTestResult | Where-Object { $_.outcome -eq 'Passed' }
+            if ($passed) {
+              $passingTests += $passed | ForEach-Object { $_.testName }
+            }
+          }
+
+          $passCount = $passingTests.Count
+          echo "passing_count=$passCount" >> $env:GITHUB_OUTPUT
+
+          if ($passCount -gt 0) {
+            Write-Host ""
+            Write-Host "QUARANTINED TESTS NOW PASSING:" -ForegroundColor Yellow
+            $passingTests | ForEach-Object { Write-Host "  - $_" -ForegroundColor White }
+            $passingTests | Out-File -FilePath passing-quarantined.txt -Encoding utf8
+          }
+
+      - name: Upload Results
+        uses: actions/upload-artifact@v4
+        with:
+          name: quarantine-review-${{ github.repository_owner }}-${{ github.event.repository.name }}
+          path: |
+            quarantine-report.md
+            passing-quarantined.txt
+            TestResults/Quarantine/**/*.trx
+          if-no-files-found: warn
+
+      - name: Summary
+        shell: pwsh
+        run: |
+          $count = "${{ steps.report.outputs.count }}"
+          $longQuarantined = "${{ steps.report.outputs.long_quarantined }}"
+          $passingCount = "${{ steps.run_quarantined.outputs.passing_count }}"
+          $thresholdExceeded = "${{ steps.report.outputs.threshold_exceeded }}"
+
+          Write-Host ""
+          Write-Host "Quarantine Review Summary" -ForegroundColor Cyan
+          Write-Host "=========================" -ForegroundColor Cyan
+          Write-Host "Total quarantined: $count"
+          Write-Host "Long-quarantined (>30d): $longQuarantined"
+          Write-Host "Now passing: $passingCount"
+          Write-Host "Threshold exceeded: $thresholdExceeded"
+          Write-Host ""
+
+          $needsAction = ([int]$passingCount -gt 0) -or ($thresholdExceeded -eq 'true') -or ([int]$longQuarantined -gt 5)
+          if ($needsAction) {
+            Write-Host "ACTION REQUIRED - see details above" -ForegroundColor Red
+          } else {
+            Write-Host "Quarantine status is healthy." -ForegroundColor Green
+          }
+
+      - name: Fail if action required
+        if: steps.report.outputs.threshold_exceeded == 'true' || steps.run_quarantined.outputs.passing_count > 0
+        shell: bash
+        run: |
+          echo "::error::Quarantine review requires attention"
+          exit 1

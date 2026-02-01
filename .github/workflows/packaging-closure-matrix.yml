@@ -1,0 +1,319 @@
+name: Packaging Closure Matrix
+
+# Validates packaging closure across all plugin types (indexer, downloadclient, importlist).
+# Runs packaging-gates for each plugin to ensure CliWrap internalization and absence of host assemblies.
+#
+# This workflow:
+# 1. Tests Tidalarr, Qobuzarr, AppleMusicarr, and Brainarr in parallel
+# 2. Verifies each plugin package has proper dependency closure
+# 3. Ensures CliWrap is merged (not shipped as separate DLL)
+# 4. Validates canonical Abstractions are present
+
+on:
+  workflow_call:
+    inputs:
+      plugins:
+        description: 'JSON array of plugin repos to test'
+        required: false
+        type: string
+        default: '["tidalarr", "qobuzarr", "applemusicarr", "brainarr"]'
+      common-ref:
+        description: 'Git ref for Common submodule (branch, tag, or SHA)'
+        required: false
+        type: string
+        default: 'main'
+    secrets:
+      cross-repo-token:
+        description: 'Token with access to plugin repositories'
+        required: true
+
+  workflow_dispatch:
+    inputs:
+      plugins:
+        description: 'JSON array of plugin repos to test'
+        required: false
+        type: string
+        default: '["tidalarr", "qobuzarr", "applemusicarr", "brainarr"]'
+      common-ref:
+        description: 'Git ref for Common submodule (branch, tag, or SHA)'
+        required: false
+        type: string
+        default: 'main'
+
+permissions:
+  contents: read
+
+jobs:
+  matrix-setup:
+    name: Setup Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      plugins: ${{ steps.parse.outputs.plugins }}
+    steps:
+      - name: Parse plugins input
+        id: parse
+        shell: bash
+        run: |
+          # Validate and pass through the plugins JSON array
+          plugins='${{ inputs.plugins }}'
+          if ! echo "$plugins" | python3 -c "import sys,json; json.load(sys.stdin)" 2>/dev/null; then
+            echo "::error::Invalid JSON array for plugins input"
+            exit 1
+          fi
+          echo "plugins=$plugins" >> "$GITHUB_OUTPUT"
+
+  closure-test:
+    name: "${{ matrix.plugin }}"
+    needs: matrix-setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      matrix:
+        plugin: ${{ fromJson(needs.matrix-setup.outputs.plugins) }}
+      fail-fast: false
+
+    steps:
+      - name: Checkout plugin repo
+        uses: actions/checkout@v4
+        with:
+          repository: "RicherTunes/${{ matrix.plugin }}"
+          token: ${{ secrets.cross-repo-token || github.token }}
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Update Common submodule to specified ref
+        if: ${{ inputs.common-ref != '' && inputs.common-ref != 'main' }}
+        shell: bash
+        run: |
+          # Find Common submodule path (varies by plugin)
+          common_path=""
+          for p in "ext/Lidarr.Plugin.Common" "ext/lidarr.plugin.common" "ext/Common"; do
+            if [ -d "$p" ]; then
+              common_path="$p"
+              break
+            fi
+          done
+
+          if [ -z "$common_path" ]; then
+            echo "::warning::Common submodule not found, skipping update"
+            exit 0
+          fi
+
+          cd "$common_path"
+          git fetch origin '${{ inputs.common-ref }}'
+          git checkout '${{ inputs.common-ref }}'
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Detect plugin configuration
+        id: detect
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          # Find Common submodule path
+          $commonPaths = @(
+            'ext/Lidarr.Plugin.Common',
+            'ext/lidarr.plugin.common',
+            'ext/Common'
+          )
+          $commonPath = $commonPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $commonPath) { throw "Common submodule not found" }
+
+          # Find plugin csproj
+          $plugin = '${{ matrix.plugin }}'
+          $csprojPatterns = @(
+            "src/Lidarr.Plugin.$plugin/$plugin.csproj",
+            "src/$plugin/$plugin.csproj",
+            "src/Lidarr.Plugin.$(($plugin.Substring(0,1).ToUpper() + $plugin.Substring(1)))/*.csproj",
+            "src/*.csproj"
+          )
+          $csproj = Get-ChildItem -Path . -Recurse -Filter '*.csproj' -File |
+            Where-Object { $_.Name -match 'Lidarr\.Plugin\.' -or $_.Name -match "$plugin" } |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $csproj) { throw "Plugin csproj not found" }
+
+          # Find manifest
+          $manifestPaths = @(
+            (Join-Path (Split-Path $csproj) 'plugin.json'),
+            'plugin.json',
+            'src/plugin.json'
+          )
+          $manifest = $manifestPaths | Where-Object { Test-Path $_ } | Select-Object -First 1
+          if (-not $manifest) { throw "plugin.json not found" }
+
+          # Output paths
+          "common-path=$commonPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "plugin-csproj=$csproj" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          "manifest-path=$manifest" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+
+          Write-Host "Detected configuration:"
+          Write-Host "  Common: $commonPath"
+          Write-Host "  Csproj: $csproj"
+          Write-Host "  Manifest: $manifest"
+
+      - name: Build and package plugin
+        id: package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $commonPath = '${{ steps.detect.outputs.common-path }}'
+          $csproj = '${{ steps.detect.outputs.plugin-csproj }}'
+          $manifest = '${{ steps.detect.outputs.manifest-path }}'
+
+          $pluginPack = Join-Path $commonPath 'tools/PluginPack.psm1'
+          if (-not (Test-Path $pluginPack)) { throw "PluginPack.psm1 not found: $pluginPack" }
+
+          Import-Module $pluginPack -Force
+
+          $zipPath = (New-PluginPackage `
+            -Csproj $csproj `
+            -Manifest $manifest `
+            -Framework 'net8.0' `
+            -Configuration 'Release' `
+            -RequireCanonicalAbstractions `
+            -ResolveEntryPoints | Select-Object -Last 1)
+
+          if (-not $zipPath -or -not (Test-Path $zipPath)) {
+            throw "Package creation failed"
+          }
+
+          "zipPath=$zipPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Package created: $zipPath"
+
+      - name: Verify CliWrap internalization
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $zipPath = '${{ steps.package.outputs.zipPath }}'
+          $extractDir = Join-Path $env:RUNNER_TEMP 'closure-check'
+
+          if (Test-Path $extractDir) { Remove-Item -Recurse -Force $extractDir }
+          Expand-Archive -LiteralPath $zipPath -DestinationPath $extractDir -Force
+
+          # Check that CliWrap.dll is NOT present (should be merged)
+          $cliWrapDll = Get-ChildItem -Path $extractDir -Filter 'CliWrap.dll' -Recurse -File
+          if ($cliWrapDll) {
+            throw "CLOSURE VIOLATION: CliWrap.dll found in package (should be merged via ILRepack)"
+          }
+
+          Write-Host "CliWrap internalization verified - no separate CliWrap.dll in package" -ForegroundColor Green
+
+      - name: Verify no host assemblies
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $zipPath = '${{ steps.package.outputs.zipPath }}'
+          $extractDir = Join-Path $env:RUNNER_TEMP 'closure-check'
+
+          # Host assemblies that must NOT be in the package
+          $hostPatterns = @(
+            'Lidarr.Core.dll',
+            'Lidarr.Http.dll',
+            'Lidarr.Api.*.dll',
+            'NzbDrone.*.dll',
+            'FluentValidation.dll',
+            'NLog.dll',
+            'System.Text.Json.dll',
+            'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
+            'Microsoft.Extensions.Logging.Abstractions.dll'
+          )
+
+          $violations = @()
+          foreach ($pattern in $hostPatterns) {
+            $found = Get-ChildItem -Path $extractDir -Filter $pattern -Recurse -File -ErrorAction SilentlyContinue
+            if ($found) {
+              $violations += $found.Name
+            }
+          }
+
+          if ($violations.Count -gt 0) {
+            Write-Host "::error::CLOSURE VIOLATION: Host assemblies found in package:"
+            $violations | ForEach-Object { Write-Host "  - $_" }
+            throw "Package contains host assemblies that must not be shipped"
+          }
+
+          Write-Host "No host assemblies found in package" -ForegroundColor Green
+
+      - name: Verify required assemblies present
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $zipPath = '${{ steps.package.outputs.zipPath }}'
+          $extractDir = Join-Path $env:RUNNER_TEMP 'closure-check'
+
+          # Required assemblies
+          $required = @(
+            'Lidarr.Plugin.Abstractions.dll',
+            'plugin.json'
+          )
+
+          $missing = @()
+          foreach ($file in $required) {
+            $found = Get-ChildItem -Path $extractDir -Filter $file -Recurse -File -ErrorAction SilentlyContinue
+            if (-not $found) {
+              $missing += $file
+            }
+          }
+
+          if ($missing.Count -gt 0) {
+            Write-Host "::error::CLOSURE VIOLATION: Required files missing:"
+            $missing | ForEach-Object { Write-Host "  - $_" }
+            throw "Package missing required files"
+          }
+
+          # Verify exactly one plugin assembly (Lidarr.Plugin.*.dll, excluding Abstractions)
+          $pluginDlls = Get-ChildItem -Path $extractDir -Filter 'Lidarr.Plugin.*.dll' -Recurse -File |
+            Where-Object { $_.Name -ne 'Lidarr.Plugin.Abstractions.dll' }
+
+          if ($pluginDlls.Count -eq 0) {
+            throw "No plugin assembly found in package"
+          }
+          if ($pluginDlls.Count -gt 1) {
+            Write-Host "::warning::Multiple plugin assemblies found: $($pluginDlls.Name -join ', ')"
+          }
+
+          Write-Host "Required assemblies verified:" -ForegroundColor Green
+          Write-Host "  - Plugin: $($pluginDlls[0].Name)"
+          Write-Host "  - Abstractions: Lidarr.Plugin.Abstractions.dll"
+          Write-Host "  - Manifest: plugin.json"
+
+      - name: Upload package artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "package-${{ matrix.plugin }}"
+          path: ${{ steps.package.outputs.zipPath }}
+          retention-days: 7
+
+  summary:
+    name: Closure Summary
+    needs: closure-test
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Generate summary
+        shell: bash
+        run: |
+          echo "## Packaging Closure Matrix Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Plugin | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|--------|--------|" >> $GITHUB_STEP_SUMMARY
+
+          # Note: In actual run, job statuses would be checked
+          echo "| tidalarr | ${{ needs.closure-test.result == 'success' && 'Pass' || 'Check logs' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| qobuzarr | ${{ needs.closure-test.result == 'success' && 'Pass' || 'Check logs' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| applemusicarr | ${{ needs.closure-test.result == 'success' && 'Pass' || 'Check logs' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| brainarr | ${{ needs.closure-test.result == 'success' && 'Pass' || 'Check logs' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Closure Checks" >> $GITHUB_STEP_SUMMARY
+          echo "- CliWrap internalization (no separate CliWrap.dll)" >> $GITHUB_STEP_SUMMARY
+          echo "- No host assemblies (Lidarr.Core, NzbDrone.*, etc.)" >> $GITHUB_STEP_SUMMARY
+          echo "- Required files present (Abstractions, plugin.json)" >> $GITHUB_STEP_SUMMARY

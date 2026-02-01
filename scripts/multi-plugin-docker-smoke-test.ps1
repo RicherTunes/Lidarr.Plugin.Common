@@ -54,8 +54,36 @@
     This is credential-gated and depends on successful Medium + Download Client +
     Search gates.
 
+.PARAMETER RunTelemetryDIGate
+    Optional "telemetry DI gate" that verifies the IDownloadTelemetryService from
+    Common was successfully resolved and invoked during a download operation.
+    This gate depends on RunGrabGate (with RequireDownloadedFiles) since we need
+    an actual completed download to trigger telemetry logging.
+    The gate checks Lidarr container logs for telemetry entries (e.g., "Download completed:"
+    with track/album IDs, byte counts, timing data) proving that DI resolution worked
+    in the merged/internalized plugin context.
+
+.PARAMETER RunGoldenPersistGate
+    Optional "golden-persist gate" that runs the full workflow (search -> grab -> download),
+    then restarts the Lidarr container and verifies:
+      - Plugin still loads (schemas available)
+      - Queue/history state persists (no duplicate grabs)
+      - Telemetry signal still emitted
+    This gate depends on RunGrabGate and RequireDownloadedFiles.
+
+.PARAMETER RunAuthFailRedactionGate
+    Optional "authfail-redaction gate" that configures plugins with intentionally bad
+    credentials and verifies:
+      - Operation fails in an expected way (HTTP 401/403/429, no crash)
+      - Error responses do not leak secrets
+      - Container logs do not leak secrets (query strings, bearer tokens redacted)
+    This gate can run independently of other credential-gated tests.
+
 .PARAMETER GrabTimeoutSeconds
     Max time to wait for a grabbed release to appear in Lidarr's queue. Default: 300
+
+.PARAMETER TelemetryGateTimeoutSeconds
+    Max time to wait for telemetry log entries to appear after download completes. Default: 60
 
 .PARAMETER RequireDownloadedFiles
     When set, the grab gate also requires that at least one file appears under the
@@ -160,6 +188,14 @@ param(
     [switch]$RunGrabGate,
     [int]$GrabTimeoutSeconds = 300,
     [switch]$RequireDownloadedFiles,
+    [switch]$RunTelemetryDIGate,
+    [int]$TelemetryGateTimeoutSeconds = 60,
+    [switch]$RunGoldenPersistGate,
+    [int]$GoldenPersistStartupTimeoutSeconds = 120,
+    [switch]$RunAuthFailRedactionGate,
+    [switch]$RunDriftSentinelGate,
+    [switch]$DriftSentinelFailOnDrift,
+    [switch]$DriftSentinelIncludeSuccessMode,
     [int]$SearchTimeoutSeconds = 180,
     [string]$SearchArtistTerm = "Miles Davis",
     [string]$SearchAlbumTitle = "Kind of Blue",
@@ -190,6 +226,16 @@ Import-Module (Join-Path $scriptDir "lib/e2e-gates.psm1") -Force
 Import-Module (Join-Path $scriptDir "lib/e2e-abstractions.psm1") -Force
 # Import release selection module for deterministic release selection
 Import-Module (Join-Path $scriptDir "lib/e2e-release-selection.psm1") -Force
+# Import shared E2E helpers (polling, assertions, log checking)
+Import-Module (Join-Path $scriptDir "lib/e2e-helpers.psm1") -Force
+# Import persistence module for golden-persist gate
+Import-Module (Join-Path $scriptDir "lib/e2e-persistence.psm1") -Force
+# Import auth-fail module for authfail-redaction gate
+Import-Module (Join-Path $scriptDir "lib/e2e-authfail.psm1") -Force
+# Import stub-http module for hermetic E2E testing
+Import-Module (Join-Path $scriptDir "lib/e2e-stub-http.psm1") -Force
+# Import drift sentinel module for stub-vs-live drift detection
+Import-Module (Join-Path $scriptDir "lib/e2e-drift-sentinel.psm1") -Force
 
 $image = if ([string]::IsNullOrWhiteSpace($LidarrImage)) { "ghcr.io/hotio/lidarr:$LidarrTag" } else { $LidarrImage.Trim() }
 
@@ -200,6 +246,22 @@ if ($RunDownloadClientGate) {
     $RunMediumGate = $true
 }
 if ($RunGrabGate) {
+    $RunSearchGate = $true
+    $RunDownloadClientGate = $true
+    $RunMediumGate = $true
+}
+if ($RunTelemetryDIGate) {
+    # Telemetry gate requires an actual completed download to verify DI resolution
+    $RunGrabGate = $true
+    $RequireDownloadedFiles = $true
+    $RunSearchGate = $true
+    $RunDownloadClientGate = $true
+    $RunMediumGate = $true
+}
+if ($RunGoldenPersistGate) {
+    # Golden-persist gate requires a completed download to verify persistence after restart
+    $RunGrabGate = $true
+    $RequireDownloadedFiles = $true
     $RunSearchGate = $true
     $RunDownloadClientGate = $true
     $RunMediumGate = $true
@@ -534,6 +596,102 @@ function Wait-DirectoryHasAnyFiles {
     return $null
 }
 
+function Invoke-InContainerApiGet {
+    param(
+        [Parameter(Mandatory = $true)][string]$ContainerName,
+        [Parameter(Mandatory = $true)][string]$ApiPath,
+        [Parameter(Mandatory = $true)][hashtable]$Headers,
+        [Parameter()][int]$RetryCount = 3,
+        [Parameter()][int]$BaseDelayMs = 500
+    )
+
+    $url = "http://localhost:8686${ApiPath}"
+    $headerArgs = @()
+    foreach ($key in $Headers.Keys) {
+        $headerArgs += @("-H", "${key}: $($Headers[$key])")
+    }
+
+    $attempt = 0
+    while ($attempt -le $RetryCount) {
+        $attempt++
+
+        try {
+            $output = & docker exec $ContainerName curl -sS -w "`n%{http_code}" -X GET @headerArgs $url 2>&1
+            $lines = $output -split "`n"
+            $statusCode = [int]$lines[-1].Trim()
+            $body = $lines[0..($lines.Count - 2)] -join "`n"
+
+            if ($statusCode -eq 200) {
+                return $body
+            }
+
+            if ($statusCode -eq 404 -or $statusCode -eq 500 -or $statusCode -ge 501) {
+                throw "HTTP $statusCode (non-retryable): $body"
+            }
+        }
+        catch {
+            if ($attempt -gt $RetryCount) { throw }
+        }
+
+        $delay = [Math]::Pow(2, $attempt - 1) * $BaseDelayMs
+        $delayMs = [Math]::Min($delay, 5000)
+        Start-Sleep -Milliseconds $delayMs
+    }
+
+    throw "Failed after ${RetryCount} retries for $ApiPath"
+}
+
+function Test-LidarrApiWithBackoff {
+    param(
+        [Parameter(Mandatory = $true)][string]$ContainerName,
+        [Parameter(Mandatory = $true)][string]$LidarrUrl,
+        [Parameter(Mandatory = $true)][hashtable]$Headers,
+        [Parameter(Mandatory = $true)][int]$TimeoutSeconds,
+        [Parameter()][switch]$UseInContainerProbe = $true
+    )
+
+    $start = Get-Date
+    $attempt = 0
+
+    while (((Get-Date) - $start).TotalSeconds -lt $TimeoutSeconds) {
+        $attempt++
+        $elapsed = ((Get-Date) - $start).TotalSeconds
+        Write-Host "[$attempt] Checking Lidarr API... (${elapsed:F1}s elapsed)" -ForegroundColor DarkGray
+
+        try {
+            if ($UseInContainerProbe) {
+                try {
+                    $body = Invoke-InContainerApiGet -ContainerName $ContainerName -ApiPath "/api/v1/system/status" -Headers $Headers -RetryCount 2 -BaseDelayMs 200
+                    if (-not [string]::IsNullOrWhiteSpace($body)) {
+                        $status = $body | ConvertFrom-Json
+                        if ($status -and $status.version) {
+                            Write-Host "In-container probe succeeded: v$($status.version)" -ForegroundColor Green
+                            return $status
+                        }
+                    }
+                }
+                catch {
+                    Write-Host "In-container probe failed (fallback to host): $($_.Exception.Message)" -ForegroundColor Yellow
+                }
+            }
+
+            $resp = Invoke-WebRequest -Uri "$LidarrUrl/api/v1/system/status" -Headers $headers -TimeoutSec 5 -ErrorAction Stop
+            if ($resp.StatusCode -eq 200) {
+                $status = $resp.Content | ConvertFrom-Json
+                Write-Host "Host-side probe succeeded: v$($status.version)" -ForegroundColor Green
+                return $status
+            }
+        }
+        catch {
+            $backoff = [Math]::Min([Math]::Pow(2, $attempt - 1) * 1, 10)
+            Write-Host "  Retry in ${backoff}s..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds $backoff
+        }
+    }
+
+    return $null
+}
+
 function Cleanup {
     if (-not $KeepRunning) {
         & docker rm -f $ContainerName 2>$null | Out-Null
@@ -713,20 +871,7 @@ try {
     $headers = @{ "X-Api-Key" = $apiKey.Trim() }
 
     Write-Host "Waiting for Lidarr API..." -ForegroundColor Yellow
-    $start = Get-Date
-    $status = $null
-    while (((Get-Date) - $start).TotalSeconds -lt $StartupTimeoutSeconds) {
-        try {
-            $resp = Invoke-WebRequest -Uri "$lidarrUrl/api/v1/system/status" -Headers $headers -TimeoutSec 5 -ErrorAction Stop
-            if ($resp.StatusCode -eq 200) {
-                $status = $resp.Content | ConvertFrom-Json
-                break
-            }
-        }
-        catch {
-            Start-Sleep -Seconds 3
-        }
-    }
+    $status = Test-LidarrApiWithBackoff -ContainerName $ContainerName -LidarrUrl $lidarrUrl -Headers $headers -TimeoutSeconds $StartupTimeoutSeconds -UseInContainerProbe
 
     if ($status -eq $null) {
         Write-Host "=== Container logs ===" -ForegroundColor Yellow
@@ -751,8 +896,33 @@ try {
         }
     }
 
+    $schemaAttempt = 0
     while (((Get-Date) - $schemaStart).TotalSeconds -lt $SchemaTimeoutSeconds) {
+        $schemaAttempt++
+        $elapsed = ((Get-Date) - $schemaStart).TotalSeconds
+        Write-Host "[$schemaAttempt] Fetching schemas... (${elapsed:F1}s elapsed)" -ForegroundColor DarkGray
+
         try {
+            try {
+                $indexerBody = Invoke-InContainerApiGet -ContainerName $ContainerName -ApiPath "/api/v1/indexer/schema" -Headers $headers -RetryCount 2 -BaseDelayMs 300
+                $downloadBody = Invoke-InContainerApiGet -ContainerName $ContainerName -ApiPath "/api/v1/downloadclient/schema" -Headers $headers -RetryCount 2 -BaseDelayMs 300
+                if ($anyImportListsExpected) {
+                    $importListBody = Invoke-InContainerApiGet -ContainerName $ContainerName -ApiPath "/api/v1/importlist/schema" -Headers $headers -RetryCount 2 -BaseDelayMs 300
+                }
+
+                $indexerSchemas = $indexerBody | ConvertFrom-Json
+                $downloadClientSchemas = $downloadBody | ConvertFrom-Json
+                if ($anyImportListsExpected) {
+                    $importListSchemas = $importListBody | ConvertFrom-Json
+                }
+
+                Write-Host "In-container schema fetch succeeded" -ForegroundColor Green
+                break
+            }
+            catch {
+                Write-Host "In-container schema fetch failed (fallback to host): $($_.Exception.Message)" -ForegroundColor Yellow
+            }
+
             $indexerResponse = Invoke-WebRequest -Uri "$lidarrUrl/api/v1/indexer/schema" -Headers $headers -TimeoutSec 10 -ErrorAction Stop
             $downloadResponse = Invoke-WebRequest -Uri "$lidarrUrl/api/v1/downloadclient/schema" -Headers $headers -TimeoutSec 10 -ErrorAction Stop
             if ($anyImportListsExpected) {
@@ -765,12 +935,13 @@ try {
                 $importListSchemas = $importListResponse.Content | ConvertFrom-Json
             }
 
-            if ($indexerSchemas -and $downloadClientSchemas -and (-not $anyImportListsExpected -or $importListSchemas)) {
-                break
-            }
+            Write-Host "Host-side schema fetch succeeded" -ForegroundColor Green
+            break
         }
         catch {
-            Start-Sleep -Seconds 5
+            $backoff = [Math]::Min([Math]::Pow(2, $schemaAttempt - 1) * 2, 10)
+            Write-Host "  Retry in ${backoff}s..." -ForegroundColor DarkGray
+            Start-Sleep -Seconds $backoff
         }
     }
 
@@ -1421,7 +1592,342 @@ try {
         }
     }
 
-    Write-Host "`n🎉 Multi-plugin schema smoke test passed." -ForegroundColor Green
+    if ($RunTelemetryDIGate) {
+        Write-Host "`n=== Telemetry DI gate: verify IDownloadTelemetryService resolution ===" -ForegroundColor Cyan
+
+        # The telemetry gate checks that IDownloadTelemetryService from Common was actually
+        # resolved and invoked during the download operation - not just that reflection can
+        # see the type.
+        #
+        # DUAL-SIGNAL APPROACH (see docs/TELEMETRY_DI_CONTRACT.md):
+        #   1. Primary: Look for structured JSON marker [LPC_TELEMETRY] {...}
+        #      - Deterministic, machine-parseable, unlikely to change
+        #   2. Fallback: Look for human-readable log patterns (regex-based)
+        #      - Less stable but covers older plugin versions
+        #
+        # The structured marker is emitted at Debug level by DownloadTelemetryService.
+
+        # Primary signal: Structured JSON marker
+        # Format: [LPC_TELEMETRY] {"event":"telemetry_emitted","service":"...","track":"...","success":true/false}
+        $structuredMarkerPrefix = "[LPC_TELEMETRY]"
+        $structuredMarkerPattern = '\[LPC_TELEMETRY\]\s*\{[^}]*"event"\s*:\s*"telemetry_emitted"[^}]*\}'
+
+        # Fallback signal: Human-readable log patterns (existing behavior)
+        $fallbackPatterns = @(
+            # Successful download telemetry (from DownloadTelemetryService.LogDownloadTelemetry)
+            "Download completed:.*track=.*bytes=.*elapsed=.*rate=",
+            # Failed download telemetry (also proves DI worked)
+            "Download failed:.*track=.*elapsed=.*retries="
+        )
+
+        $telemetryFound = $false
+        $telemetryLogLines = @()
+        $telemetryStart = Get-Date
+        $signalMethod = $null
+
+        Write-Host "Checking Lidarr container logs for telemetry entries..." -ForegroundColor DarkGray
+        Write-Host "  Primary signal: Structured JSON marker ($structuredMarkerPrefix)" -ForegroundColor DarkGray
+        Write-Host "  Fallback signal: Human-readable log patterns (regex)" -ForegroundColor DarkGray
+
+        while (((Get-Date) - $telemetryStart).TotalSeconds -lt $TelemetryGateTimeoutSeconds) {
+            # Fetch recent container logs
+            $logs = & docker logs $ContainerName --tail 1000 2>&1
+
+            if ($LASTEXITCODE -eq 0 -and $logs) {
+                $logText = $logs -join "`n"
+
+                # PRIMARY: Check for structured JSON marker first
+                if (-not $telemetryFound) {
+                    $structuredMatches = [regex]::Matches($logText, $structuredMarkerPattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                    if ($structuredMatches.Count -gt 0) {
+                        $telemetryFound = $true
+                        $signalMethod = "structured"
+                        foreach ($m in $structuredMatches) {
+                            # Extract the full line containing the match
+                            $lineStart = $logText.LastIndexOf("`n", [Math]::Max(0, $m.Index - 1)) + 1
+                            $lineEnd = $logText.IndexOf("`n", $m.Index)
+                            if ($lineEnd -lt 0) { $lineEnd = $logText.Length }
+                            $fullLine = $logText.Substring($lineStart, $lineEnd - $lineStart).Trim()
+                            if ($fullLine -and $telemetryLogLines -notcontains $fullLine) {
+                                $telemetryLogLines += $fullLine
+                            }
+                        }
+                    }
+                }
+
+                # FALLBACK: Check for human-readable log patterns if structured not found
+                if (-not $telemetryFound) {
+                    foreach ($pattern in $fallbackPatterns) {
+                        $fallbackMatches = [regex]::Matches($logText, $pattern, [System.Text.RegularExpressions.RegexOptions]::IgnoreCase)
+                        if ($fallbackMatches.Count -gt 0) {
+                            $telemetryFound = $true
+                            $signalMethod = "fallback-regex"
+                            foreach ($m in $fallbackMatches) {
+                                # Extract the full line containing the match
+                                $lineStart = $logText.LastIndexOf("`n", [Math]::Max(0, $m.Index - 1)) + 1
+                                $lineEnd = $logText.IndexOf("`n", $m.Index)
+                                if ($lineEnd -lt 0) { $lineEnd = $logText.Length }
+                                $fullLine = $logText.Substring($lineStart, $lineEnd - $lineStart).Trim()
+                                if ($fullLine -and $telemetryLogLines -notcontains $fullLine) {
+                                    $telemetryLogLines += $fullLine
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if ($telemetryFound) { break }
+            }
+
+            Start-Sleep -Seconds 3
+        }
+
+        if (-not $telemetryFound) {
+            Write-Host "✗ telemetry DI gate: no telemetry signals found within ${TelemetryGateTimeoutSeconds}s." -ForegroundColor Red
+            Write-Host "  Primary signal (structured JSON) not found:" -ForegroundColor Yellow
+            Write-Host "    Pattern: $structuredMarkerPattern" -ForegroundColor Yellow
+            Write-Host "  Fallback signal (regex patterns) not found:" -ForegroundColor Yellow
+            foreach ($pattern in $fallbackPatterns) {
+                Write-Host "    - $pattern" -ForegroundColor Yellow
+            }
+            Write-Host "`n  This indicates IDownloadTelemetryService may not have been resolved or invoked." -ForegroundColor Yellow
+            Write-Host "  Possible causes:" -ForegroundColor Yellow
+            Write-Host "    1. DI registration missing in merged/internalized plugin assembly" -ForegroundColor Yellow
+            Write-Host "    2. Type identity mismatch preventing interface resolution" -ForegroundColor Yellow
+            Write-Host "    3. Download path did not invoke the telemetry service" -ForegroundColor Yellow
+            Write-Host "    4. Log level set too high (structured marker requires Debug level)" -ForegroundColor Yellow
+
+            # Show recent log tail for debugging
+            Write-Host "`n  Recent container logs (last 50 lines):" -ForegroundColor Yellow
+            $recentLogs = & docker logs $ContainerName --tail 50 2>&1
+            if ($recentLogs) {
+                $recentLogs | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+            }
+
+            throw "Telemetry DI gate failure: IDownloadTelemetryService was not invoked during download."
+        }
+
+        # Report which signal method succeeded
+        $signalMethodDisplay = switch ($signalMethod) {
+            "structured" { "structured JSON marker (primary)" }
+            "fallback-regex" { "human-readable log regex (fallback)" }
+            default { "unknown" }
+        }
+        Write-Host "✓ telemetry DI gate: found $($telemetryLogLines.Count) telemetry entry(ies) via $signalMethodDisplay" -ForegroundColor Green
+
+        foreach ($line in $telemetryLogLines | Select-Object -First 5) {
+            # Truncate long lines for display
+            $display = if ($line.Length -gt 200) { $line.Substring(0, 200) + "..." } else { $line }
+            Write-Host "  $display" -ForegroundColor DarkGray
+        }
+
+        if ($telemetryLogLines.Count -gt 5) {
+            Write-Host "  ... and $($telemetryLogLines.Count - 5) more" -ForegroundColor DarkGray
+        }
+
+        Write-Host "✓ telemetry DI gate: IDownloadTelemetryService successfully resolved and invoked" -ForegroundColor Green
+    }
+
+    if ($RunGoldenPersistGate) {
+        Write-Host "`n=== Golden-Persist gate: restart + revalidate ===" -ForegroundColor Cyan
+
+        # Build expected implementations map for schema verification
+        $expectedImplementations = @{
+            indexer = @()
+            downloadclient = @()
+            importlist = @()
+        }
+        foreach ($plugin in $pluginNames) {
+            if (-not $expectations.ContainsKey($plugin)) { continue }
+            $exp = $expectations[$plugin]
+            $expectedImplementations.indexer += $exp.Indexers
+            $expectedImplementations.downloadclient += $exp.DownloadClients
+            $expectedImplementations.importlist += $exp.ImportLists
+        }
+
+        # Get current queue count for duplicate detection
+        $currentQueueCount = 0
+        try {
+            $queue = Invoke-LidarrApiJson -Method "GET" -Uri "$lidarrUrl/api/v1/queue?page=1&pageSize=100" -Headers $headers -TimeoutSeconds 30
+            $records = Get-LidarrQueueRecords -QueueResponse $queue
+            $currentQueueCount = $records.Count
+            Write-Host "Pre-restart queue count: $currentQueueCount" -ForegroundColor DarkGray
+        }
+        catch {
+            Write-Host "Warning: Could not get pre-restart queue count: $($_.Exception.Message)" -ForegroundColor Yellow
+        }
+
+        # Get album ID from search gate if available
+        $albumId = 0
+        if ($searchGateAlbum -and $searchGateAlbum.id) {
+            $albumId = $searchGateAlbum.id
+        }
+
+        # Run the golden-persist gate
+        $persistResult = Invoke-GoldenPersistGate `
+            -ContainerName $ContainerName `
+            -LidarrUrl $lidarrUrl `
+            -Headers $headers `
+            -ExpectedImplementations $expectedImplementations `
+            -AlbumId $albumId `
+            -OriginalQueueCount $currentQueueCount `
+            -StartupTimeoutSeconds $GoldenPersistStartupTimeoutSeconds `
+            -VerifyTelemetry:$RunTelemetryDIGate
+
+        if (-not $persistResult.Success) {
+            Write-Host "✗ golden-persist gate failed: $($persistResult.Error)" -ForegroundColor Red
+            foreach ($step in $persistResult.Steps) {
+                $stepStatus = if ($step.Success) { "✓" } else { "✗" }
+                Write-Host "  $stepStatus $($step.Step)" -ForegroundColor $(if ($step.Success) { "Green" } else { "Red" })
+            }
+            exit 1
+        }
+
+        Write-Host "✓ golden-persist gate: all persistence checks passed" -ForegroundColor Green
+    }
+
+    if ($RunAuthFailRedactionGate) {
+        Write-Host "`n=== AuthFail-Redaction gate: auth failure + log redaction ===" -ForegroundColor Cyan
+
+        $authFailPassed = $true
+        $authFailTests = 0
+
+        foreach ($plugin in $pluginNames) {
+            if (-not $expectations.ContainsKey($plugin)) { continue }
+            $exp = $expectations[$plugin]
+
+            foreach ($impl in $exp.Indexers) {
+                $badCreds = Get-BadCredentialPreset -Implementation $impl
+                if (-not $badCreds) {
+                    Write-Host "↷ authfail gate: no bad credential preset for $impl (skipping)" -ForegroundColor Yellow
+                    continue
+                }
+
+                Write-Host "`nTesting auth failure + redaction for $impl..." -ForegroundColor Cyan
+                $authFailTests++
+
+                $authResult = Invoke-AuthFailRedactionGate `
+                    -ContainerName $ContainerName `
+                    -LidarrUrl $lidarrUrl `
+                    -Headers $headers `
+                    -Implementation $impl `
+                    -BadCredentials $badCreds
+
+                if (-not $authResult.Success) {
+                    Write-Host "✗ authfail gate ($impl): $($authResult.Error)" -ForegroundColor Red
+                    foreach ($step in $authResult.Steps) {
+                        $stepStatus = if ($step.Success) { "✓" } else { "✗" }
+                        Write-Host "  $stepStatus $($step.Step)" -ForegroundColor $(if ($step.Success) { "Green" } else { "Red" })
+                    }
+                    $authFailPassed = $false
+                }
+                else {
+                    Write-Host "✓ authfail gate ($impl): auth failure handled correctly, logs redacted" -ForegroundColor Green
+                }
+            }
+        }
+
+        if ($authFailTests -eq 0) {
+            Write-Host "↷ authfail gate: no supported implementations to test" -ForegroundColor Yellow
+        }
+        elseif (-not $authFailPassed) {
+            exit 1
+        }
+
+        Write-Host "✓ authfail-redaction gate: all tests passed" -ForegroundColor Green
+    }
+
+    # Drift Sentinel gate: validate stub-vs-live field expectations
+    # This runs OUTSIDE the Docker container - it probes live APIs directly
+    if ($RunDriftSentinelGate) {
+        Write-Host "`n=== Drift Sentinel gate: stub-vs-live field validation ===" -ForegroundColor Cyan
+
+        # Determine which providers to check based on plugins
+        $driftProviders = @()
+        foreach ($plugin in $pluginNames) {
+            switch ($plugin.ToLower()) {
+                "qobuzarr" { if ("qobuz" -notin $driftProviders) { $driftProviders += "qobuz" } }
+                "tidalarr" { if ("tidal" -notin $driftProviders) { $driftProviders += "tidal" } }
+            }
+        }
+
+        if ($driftProviders.Count -eq 0) {
+            Write-Host "↷ drift sentinel: no supported providers to check" -ForegroundColor Yellow
+        }
+        else {
+            # Build credentials from environment variables for success mode
+            $driftCredentials = @{}
+            if ($DriftSentinelIncludeSuccessMode) {
+                # Qobuz credentials
+                $qobuzAppId = $env:QOBUZARR_APP_ID ?? $env:QOBUZ_APP_ID
+                $qobuzAuthToken = $env:QOBUZARR_AUTH_TOKEN ?? $env:QOBUZ_AUTH_TOKEN
+                if ($qobuzAppId) {
+                    $driftCredentials["qobuz"] = @{
+                        AppId = $qobuzAppId
+                        AuthToken = $qobuzAuthToken
+                    }
+                }
+
+                # Tidal - try OAuth client credentials flow, fall back to manual token
+                $tidalClientId = $env:TIDALARR_CLIENT_ID ?? $env:TIDAL_CLIENT_ID
+                $tidalClientSecret = $env:TIDALARR_CLIENT_SECRET ?? $env:TIDAL_CLIENT_SECRET
+                $tidalAccessToken = $env:TIDALARR_ACCESS_TOKEN ?? $env:TIDAL_ACCESS_TOKEN
+                $tidalMarket = $env:TIDALARR_MARKET ?? $env:TIDAL_MARKET ?? "US"
+
+                if ($tidalClientId -and $tidalClientSecret) {
+                    # Acquire token via OAuth client credentials flow
+                    Write-Host "  Acquiring Tidal access token via OAuth..." -ForegroundColor DarkGray
+                    $tokenResult = Get-TidalAccessToken -ClientId $tidalClientId -ClientSecret $tidalClientSecret
+                    if ($tokenResult.Success) {
+                        Write-Host "  Tidal token acquired (expires in $($tokenResult.ExpiresIn)s)" -ForegroundColor DarkGray
+                        $driftCredentials["tidal"] = @{
+                            AccessToken = $tokenResult.AccessToken
+                            Market = $tidalMarket
+                        }
+                    }
+                    else {
+                        Write-Host "  Tidal OAuth failed: $($tokenResult.Error)" -ForegroundColor Yellow
+                    }
+                }
+                elseif ($tidalAccessToken) {
+                    # Fall back to manually provided token
+                    $driftCredentials["tidal"] = @{
+                        AccessToken = $tidalAccessToken
+                        Market = $tidalMarket
+                    }
+                }
+
+                if ($driftCredentials.Count -eq 0) {
+                    Write-Host "  Note: Success mode enabled but no credentials found in environment" -ForegroundColor DarkGray
+                }
+            }
+
+            # Write JSON artifact for triage/trending
+            $driftArtifactPath = Join-Path $WorkRoot "artifacts/e2e/drift-sentinel.json"
+
+            $driftResult = Invoke-DriftSentinel `
+                -Providers $driftProviders `
+                -FailOnDrift:$DriftSentinelFailOnDrift `
+                -Credentials $driftCredentials `
+                -IncludeSuccessMode:$DriftSentinelIncludeSuccessMode `
+                -TimeoutSeconds 30 `
+                -ArtifactPath $driftArtifactPath
+
+            if (-not $driftResult.Success) {
+                Write-Host "✗ drift sentinel gate failed" -ForegroundColor Red
+                exit 1
+            }
+
+            if ($driftResult.DriftCount -gt 0) {
+                Write-Host "⚠ drift sentinel: $($driftResult.DriftCount) drift(s) detected (warning mode)" -ForegroundColor Yellow
+            }
+            else {
+                Write-Host "✓ drift sentinel gate: no drift detected" -ForegroundColor Green
+            }
+        }
+    }
+
+    Write-Host "`n Multi-plugin schema smoke test passed." -ForegroundColor Green
 }
 finally {
     Cleanup
