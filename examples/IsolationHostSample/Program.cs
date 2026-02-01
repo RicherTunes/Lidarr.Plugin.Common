@@ -9,6 +9,7 @@ using Lidarr.Plugin.Abstractions.Hosting;
 using Lidarr.Plugin.Abstractions.Manifest;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Console;
+using System.Runtime.Loader;
 
 namespace IsolationHostSample
 {
@@ -16,11 +17,94 @@ namespace IsolationHostSample
     {
         public static async Task Main(string[] args)
         {
-            var pluginsRoot = args.Length > 0 ? args[0] : Path.Combine(AppContext.BaseDirectory, "plugins");
+            var pluginsRoot = Path.Combine(AppContext.BaseDirectory, "plugins");
+            var hostVersion = new Version(2, 12, 0, 0);
+            var ciMode = false;
+            var createComponents = false;
+            string? hostAssembliesDir = null;
+
+            for (var i = 0; i < args.Length; i++)
+            {
+                var arg = args[i];
+
+                if (string.Equals(arg, "--ci", StringComparison.OrdinalIgnoreCase))
+                {
+                    ciMode = true;
+                    continue;
+                }
+
+                if (string.Equals(arg, "--create-components", StringComparison.OrdinalIgnoreCase))
+                {
+                    createComponents = true;
+                    continue;
+                }
+
+                if (string.Equals(arg, "--host-version", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Missing value for --host-version.");
+                        Environment.ExitCode = 2;
+                        return;
+                    }
+
+                    if (!Version.TryParse(args[i + 1], out hostVersion))
+                    {
+                        Console.Error.WriteLine($"Invalid host version '{args[i + 1]}'.");
+                        Environment.ExitCode = 2;
+                        return;
+                    }
+
+                    i++;
+                    continue;
+                }
+
+                if (string.Equals(arg, "--host-assemblies-dir", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (i + 1 >= args.Length)
+                    {
+                        Console.Error.WriteLine("Missing value for --host-assemblies-dir.");
+                        Environment.ExitCode = 2;
+                        return;
+                    }
+
+                    hostAssembliesDir = args[i + 1];
+                    i++;
+                    continue;
+                }
+
+                if (!arg.StartsWith("--", StringComparison.Ordinal) && pluginsRoot == Path.Combine(AppContext.BaseDirectory, "plugins"))
+                {
+                    pluginsRoot = arg;
+                }
+            }
+
+            if (ciMode && hostVersion == new Version(2, 12, 0, 0))
+            {
+                hostVersion = new Version(99, 0, 0, 0);
+            }
+
             if (!Directory.Exists(pluginsRoot))
             {
-                Console.WriteLine($"No plugins folder found at '{pluginsRoot}'.");
+                Console.Error.WriteLine($"No plugins folder found at '{pluginsRoot}'.");
+                Environment.ExitCode = 1;
                 return;
+            }
+
+            if (!string.IsNullOrWhiteSpace(hostAssembliesDir))
+            {
+                if (!Directory.Exists(hostAssembliesDir))
+                {
+                    Console.Error.WriteLine($"Host assemblies directory not found at '{hostAssembliesDir}'.");
+                    Environment.ExitCode = 1;
+                    return;
+                }
+
+                AssemblyLoadContext.Default.Resolving += (_, name) =>
+                {
+                    var candidate = Path.Combine(hostAssembliesDir, $"{name.Name}.dll");
+                    return File.Exists(candidate) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(candidate) : null;
+                };
             }
 
             using var loggerFactory = LoggerFactory.Create(builder =>
@@ -34,18 +118,19 @@ namespace IsolationHostSample
                 });
             });
 
-            var hostVersion = new Version(2, 12, 0, 0);
             var contractVersion = typeof(IPlugin).Assembly.GetName().Version ?? new Version(1, 0, 0, 0);
 
             var pluginDirectories = Directory.EnumerateDirectories(pluginsRoot).ToList();
             if (pluginDirectories.Count == 0)
             {
-                Console.WriteLine($"No plugin directories found inside '{pluginsRoot}'.");
+                Console.Error.WriteLine($"No plugin directories found inside '{pluginsRoot}'.");
+                Environment.ExitCode = 1;
                 return;
             }
 
             Console.WriteLine($"Loading {pluginDirectories.Count} plugin(s) from '{pluginsRoot}'.");
             var handles = new List<PluginHandle>();
+            var failed = false;
 
             try
             {
@@ -66,16 +151,47 @@ namespace IsolationHostSample
                     };
 
                     Console.WriteLine($"-> Loading '{Path.GetFileName(pluginDirectory)}'...");
-                    var handle = await PluginLoader.LoadAsync(request).ConfigureAwait(false);
-                    handles.Add(handle);
 
-                    Console.WriteLine($"   Manifest: {handle.Plugin.Manifest.Name} v{handle.Plugin.Manifest.Version} (Common {handle.Plugin.Manifest.CommonVersion ?? "n/a"})");
+                    try
+                    {
+                        var handle = await PluginLoader.LoadAsync(request).ConfigureAwait(false);
+                        handles.Add(handle);
+
+                        Console.WriteLine($"   Manifest: {handle.Plugin.Manifest.Name} v{handle.Plugin.Manifest.Version} (Common {handle.Plugin.Manifest.CommonVersion ?? "n/a"})");
+
+                        if (createComponents)
+                        {
+                            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+
+                            var indexer = await handle.Plugin.CreateIndexerAsync(cts.Token).ConfigureAwait(false);
+                            if (indexer is not null)
+                            {
+                                await indexer.DisposeAsync().ConfigureAwait(false);
+                                Console.WriteLine("   Created indexer instance.");
+                            }
+
+                            var downloadClient = await handle.Plugin.CreateDownloadClientAsync(cts.Token).ConfigureAwait(false);
+                            if (downloadClient is not null)
+                            {
+                                await downloadClient.DisposeAsync().ConfigureAwait(false);
+                                Console.WriteLine("   Created download client instance.");
+                            }
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        failed = true;
+                        Console.Error.WriteLine($"   Failed to load '{Path.GetFileName(pluginDirectory)}': {ex.Message}");
+                    }
                     // end-snippet
                 }
 
-                Console.WriteLine();
-                Console.WriteLine("All plugins loaded. Press ENTER to unload and exit.");
-                Console.ReadLine();
+                if (!ciMode)
+                {
+                    Console.WriteLine();
+                    Console.WriteLine("All plugins loaded. Press ENTER to unload and exit.");
+                    Console.ReadLine();
+                }
             }
             finally
             {
@@ -88,6 +204,11 @@ namespace IsolationHostSample
                 GC.Collect();
                 GC.WaitForPendingFinalizers();
                 GC.Collect();
+            }
+
+            if (failed)
+            {
+                Environment.ExitCode = 1;
             }
         }
     }
@@ -118,6 +239,7 @@ namespace IsolationHostSample
                 SharedAssemblies = new[]
                 {
                     "Lidarr.Plugin.Abstractions",
+                    "Microsoft.Extensions.DependencyInjection.Abstractions",
                     "Microsoft.Extensions.Logging.Abstractions"
                 }
             };

@@ -55,6 +55,7 @@ namespace Lidarr.Plugin.Abstractions.Hosting
 
             var assemblyName = PluginAssemblyFile
                 ?? manifest.EntryAssembly
+                ?? manifest.Main
                 ?? $"{manifest.Id}.dll";
 
             return Path.Combine(PluginDirectory, assemblyName);

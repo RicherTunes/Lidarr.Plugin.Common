@@ -1,0 +1,31 @@
+{
+  "version": "1.0",
+  "description": "Schema defining required documentation links for plugin repositories",
+  "required_links": [
+    {
+      "target": "docs/decisions/ADR-001-streaming-architecture.md",
+      "description": "Streaming architecture decision - documents CLI-only streaming design",
+      "search_patterns": ["ADR-001", "streaming-architecture", "STREAMING_SUPPORT"],
+      "required": true
+    },
+    {
+      "target": "docs/decisions/ADR-002-subscription-auth-research.md",
+      "description": "Subscription auth research - documents auth mode decision criteria",
+      "search_patterns": ["ADR-002", "subscription-auth", "auth-research"],
+      "required": true
+    },
+    {
+      "target": "docs/STREAMING_SUPPORT.md",
+      "description": "Streaming support matrix - shows decoder/provider status",
+      "search_patterns": ["STREAMING_SUPPORT", "streaming support", "Decoder Consumer Status"],
+      "required": false
+    }
+  ],
+  "search_locations": [
+    "README.md",
+    "CLAUDE.md",
+    "docs/**/*.md",
+    ".planning/**/*.md"
+  ],
+  "notes": "Plugins should reference ADR documents in their documentation to maintain awareness of architectural decisions"
+}

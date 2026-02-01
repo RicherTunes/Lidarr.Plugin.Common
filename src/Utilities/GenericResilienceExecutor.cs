@@ -202,6 +202,9 @@ namespace Lidarr.Plugin.Common.Utilities
                         return response;
                     }
 
+                    // Record retry for telemetry
+                    DownloadTelemetryContext.RecordRetry((HttpStatusCode)status);
+
                     var retryAfter = getRetryAfterDelay(response);
                     var delay = retryAfter ?? policy.ComputeDelay(attempt) + policy.ComputeJitter();
 

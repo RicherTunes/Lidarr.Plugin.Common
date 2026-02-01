@@ -1,10 +1,12 @@
 # FAQ for Plugin Authors
 
 ## Why am I seeing duplicate `Microsoft.Extensions.*` warnings when I publish?
-Because the publish folder contains both plugin-owned copies and host-provided assemblies. Stick to folder-based packaging (no merge) or, if you merge, rely on the provided `ilrepack.rsp` which strips `Microsoft.*` binaries before merging. Never include `Lidarr.Plugin.Abstractions` in the payload.
+Because the publish folder can contain both plugin-owned copies and host-shared assemblies. Stick to the ecosystem packaging pipeline (`tools/PluginPack.psm1`) so host-shared binaries are stripped consistently and you don’t accidentally ship type-identity conflicts.
 
 ## Do I merge `Lidarr.Plugin.Abstractions` into my plugin?
-No. The host owns that assembly. `PluginPack.psm1` removes it automatically so you do not ship it, and the default `internalize.exclude` file keeps it out of ILRepack runs.
+No. `Lidarr.Plugin.Abstractions` is the shared ABI contract loaded in the default AssemblyLoadContext, and it must remain a separate assembly (not merged/internalized).
+
+In this ecosystem, plugins ship a **canonical** `Lidarr.Plugin.Abstractions.dll` (identical bytes across all plugins). `tools/PluginPack.psm1` enforces this via canonical injection and post-package SHA verification.
 
 ## How do I test `StreamingPlugin<TModule, TSettings>` locally?
 Follow the harness in [How-to: Test `StreamingPlugin<TModule, TSettings>`](how-to/USE_STREAMING_PLUGIN.md). Build your plugin with `dotnet publish`, run the xUnit fixture, and expose DI services via a simple `IServiceProviderAccessor` interface.

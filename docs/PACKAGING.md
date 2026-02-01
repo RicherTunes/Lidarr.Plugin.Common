@@ -15,7 +15,7 @@ $artifact = New-PluginPackage -Csproj plugins/Tidalarr/Tidalarr.csproj -Manifest
 Write-Host "Created $artifact"
 ```
 
-This produces `artifacts/packages/<pluginId>-<version>-<tfm>.zip` containing the publish folder (minus `Lidarr.Plugin.Abstractions`). No ILRepack step runs, logs stay quiet, and dependencies remain side-by-side with the plugin.
+This produces `artifacts/packages/<pluginId>-<version>-<tfm>.zip` containing the publish folder after cleanup. No ILRepack step runs, dependencies remain side-by-side with the plugin, the package ships a **canonical** `Lidarr.Plugin.Abstractions.dll` (identical bytes across plugins), and host-shared assemblies that cause type-identity conflicts are stripped.
 
 ## Optional: merge plugin-private assemblies
 
@@ -33,7 +33,7 @@ Defaults baked into `ilrepack.rsp`:
 - Runs in parallel with wildcard support.
 - Uses the publish directory as the `/lib` path.
 - Writes to `<AssemblyName>.merged.dll` and swaps it into place.
-- Excludes `System.*`, `Microsoft.*`, and `Lidarr.Plugin.Abstractions` from merge candidates.
+- Excludes `System.*`, `Microsoft.*`, and `Lidarr.Plugin.Abstractions` from merge candidates (Abstractions must remain a separate DLL).
 
 Tweak the `.rsp` or exclude file if you need extra filters, but keep `Lidarr.Plugin.Abstractions` out of the merged output.
 
@@ -51,7 +51,7 @@ flowchart TD
 
 1. `dotnet publish` into a plugin-local folder with `CopyLocalLockFileAssemblies=true`.
 2. Run `ManifestCheck.ps1` to ensure the manifest matches the project file.
-3. Remove host-owned assemblies (`Lidarr.Plugin.Abstractions*`) from the payload.
+3. Ensure the payload contains the canonical `Lidarr.Plugin.Abstractions.dll` and does **not** ship host-shared assemblies (notably `Microsoft.Extensions.*.Abstractions.dll`).
 4. Zip the folder as `<PluginId>-<Version>-<TFM>.zip` and upload as a release asset.
 5. Keep README/CHANGELOG alongside the package for discovery—other docs stay in the repo.
 

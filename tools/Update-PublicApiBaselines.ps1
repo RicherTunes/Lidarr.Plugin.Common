@@ -1,5 +1,5 @@
 param(
-    [string[]] $Tfms = @("net8.0","net6.0"),
+    [string[]] $Tfms = @(),
     [switch] $SkipPack
 )
 
@@ -13,12 +13,21 @@ if (-not (Test-Path $project)) {
 Write-Host "🧹 Cleaning..."
 dotnet clean $project | Out-Null
 
+if (-not $PSBoundParameters.ContainsKey('Tfms') -or -not $Tfms -or $Tfms.Count -eq 0) {
+    $projectXml = [xml](Get-Content -LiteralPath $project)
+    $tfmsRaw = $projectXml.Project.PropertyGroup.TargetFrameworks | Select-Object -Last 1
+    if (-not $tfmsRaw) { $tfmsRaw = $projectXml.Project.PropertyGroup.TargetFramework | Select-Object -Last 1 }
+    if (-not $tfmsRaw) { throw "Unable to determine TargetFramework(s) from $project" }
+
+    $Tfms = ($tfmsRaw -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }) | ForEach-Object { $_.Trim() }
+}
+
 foreach ($tfm in $Tfms) {
     Write-Host "🧩 ${tfm}: build using source baselines"
     dotnet build $project -c Release -p:PublicApiUseSourcesForCodeFix=true -f $tfm | Out-Null
 
     Write-Host "🛠️  ${tfm}: applying RS0016/RS0017 fixes"
-    dotnet format $project analyzers --diagnostics RS0016,RS0017 -p:TargetFramework=$tfm -p:PublicApiUseSourcesForCodeFix=true -p:PublicApiUseSourcesForCodeFix=true -v minimal | Out-Null
+    dotnet format $project analyzers --diagnostics RS0016,RS0017 -p:TargetFramework=$tfm -p:PublicApiUseSourcesForCodeFix=true -v minimal | Out-Null
 
     $dir = Join-Path $PSScriptRoot "..\src\Abstractions\PublicAPI\$tfm"
     $unshipped = Join-Path $dir 'PublicAPI.Unshipped.txt'

@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Abstractions.Contracts;
 using Lidarr.Plugin.Abstractions.Hosting;
@@ -80,6 +81,29 @@ namespace Lidarr.Plugin.Common.Tests
             var request = CreateRequest(pluginDir);
 
             await Assert.ThrowsAsync<FileNotFoundException>(() => PluginLoader.LoadAsync(request));
+        }
+
+        [Fact]
+        public async Task LoadAsync_uses_main_when_entry_assembly_missing()
+        {
+            using var builder = new TestPluginBuilder();
+            var pluginDir = builder.BuildPlugin("MainAlias", "1.1.4");
+
+            var manifestPath = Path.Combine(pluginDir, "plugin.json");
+            var manifestJson = JsonNode.Parse(File.ReadAllText(manifestPath))?.AsObject();
+            Assert.NotNull(manifestJson);
+
+            var assemblyFile = manifestJson!["entryAssembly"]?.GetValue<string>();
+            Assert.False(string.IsNullOrWhiteSpace(assemblyFile));
+
+            manifestJson.Remove("entryAssembly");
+            manifestJson["main"] = assemblyFile;
+            File.WriteAllText(manifestPath, manifestJson.ToJsonString());
+
+            var request = CreateRequest(pluginDir);
+
+            await using var handle = await PluginLoader.LoadAsync(request);
+            Assert.Equal("mainalias", handle.Plugin.Manifest.Id);
         }
 
         private static PluginLoadRequest CreateRequest(string pluginDirectory)

@@ -8,6 +8,7 @@
 - Resumes downloads when the server supports `Range` requests.
 - Exposes delegates so you control how albums/tracks/URLs are resolved.
 - Integrates with your existing `HttpClient` (including OAuth handlers).
+- Supports optional post-processing (e.g., remux/extract) via `IAudioPostProcessor`.
 
 ## 1. Configure delegates
 
@@ -52,7 +53,19 @@ The orchestrator reports progress via `DownloadProgress` delegates (subscribe if
 - A `200 OK` response triggers a fresh download (old partial file cleaned up automatically).
 - On success the `.partial` and checkpoint files are deleted and the final file is moved atomically.
 
-## 4. Harden the HTTP pipeline
+## 4. Optional audio post-processing (`IAudioPostProcessor`)
+
+If your plugin needs to change the downloaded file after it’s written (for example: extracting FLAC from an M4A container), implement `IAudioPostProcessor` and pass it into the orchestrator.
+
+Lifecycle contract:
+
+- Runs after the `.partial` file has been atomically moved to the final path.
+- Runs before tagging/metadata steps (so tagging sees the final format).
+- May return the original `filePath` unchanged, or a new path (for example, `track.m4a` → `track.flac`).
+- Must never produce mislabeled output on failure (e.g., a `.flac` file containing M4A bytes); on failure, keep the original file and return the original path.
+- Should be resilient: handle missing tools (ffmpeg) by returning the original path and logging a warning.
+
+## 5. Harden the HTTP pipeline
 
 - Wrap your `HttpClient` in `HttpClientExtensions.ExecuteWithResilienceAsync`.
 - Set `perRequestTimeout` on resilience calls when the service enforces strict SLAs; exceeding it throws `TimeoutException`.
@@ -60,7 +73,7 @@ The orchestrator reports progress via `DownloadProgress` delegates (subscribe if
 - Use `OAuthDelegatingHandler` or another `IStreamingTokenProvider`-backed handler if tokens expire.
 - Optionally rate-limit with `IUniversalAdaptiveRateLimiter`.
 
-## 5. Testing tips
+## 6. Testing tips
 
 - Mock delegates to simulate success + failure paths.
 - Use the filesystem abstraction from Common to redirect downloads to a temporary directory during tests.
@@ -71,4 +84,3 @@ The orchestrator reports progress via `DownloadProgress` delegates (subscribe if
 - [Developer guide → Downloads](../dev-guide/DEVELOPER_GUIDE.md#downloads)
 - [Create a plugin project](CREATE_PLUGIN.md)
 - [Add logging](ADD_LOGGING.md)
-

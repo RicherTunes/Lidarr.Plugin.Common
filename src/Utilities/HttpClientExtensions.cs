@@ -34,12 +34,54 @@ namespace Lidarr.Plugin.Common.Utilities
             int initialDelayMs = 1000,
             CancellationToken cancellationToken = default)
         {
+            return await ExecuteWithRetryAsync(
+                httpClient,
+                request,
+                HttpCompletionOption.ResponseContentRead,
+                maxRetries,
+                initialDelayMs,
+                cancellationToken);
+        }
+
+        /// <summary>
+        /// Executes an HTTP request with built-in retry logic and error handling, allowing
+        /// the caller to control response buffering behavior via <see cref="HttpCompletionOption"/>.
+        /// </summary>
+        [EditorBrowsable(EditorBrowsableState.Never)]
+        public static async Task<HttpResponseMessage> ExecuteWithRetryAsync(
+            this HttpClient httpClient,
+            HttpRequestMessage request,
+            HttpCompletionOption completionOption,
+            int maxRetries = 3,
+            int initialDelayMs = 1000,
+            CancellationToken cancellationToken = default)
+        {
             return await RetryUtilities.ExecuteWithRetryAsync(
                 async () =>
                 {
                     // Clone the request for retry attempts
-                    var clonedRequest = await CloneHttpRequestMessageAsync(request);
-                    return await httpClient.SendAsync(clonedRequest, cancellationToken);
+                    var clonedRequest = await CloneHttpRequestMessageAsync(request).ConfigureAwait(false);
+                    try
+                    {
+                        var response = await httpClient.SendAsync(clonedRequest, completionOption, cancellationToken).ConfigureAwait(false);
+
+                        if (!response.IsSuccessStatusCode && RetryUtilities.IsRetryableStatusCode(response.StatusCode))
+                        {
+                            DownloadTelemetryContext.RecordRetry(response.StatusCode);
+                            // Dispose the response before throwing so we don't leak connections on retries.
+                            response.Dispose();
+                            throw new HttpRequestException(
+                                $"Retryable HTTP status code {(int)response.StatusCode} ({response.StatusCode})",
+                                inner: null,
+                                statusCode: response.StatusCode);
+                        }
+
+                        return response;
+                    }
+                    finally
+                    {
+                        clonedRequest.Dispose();
+                    }
                 },
                 maxRetries,
                 initialDelayMs,
@@ -512,6 +554,7 @@ namespace Lidarr.Plugin.Common.Utilities
                         return response;
                     }
 
+                    DownloadTelemetryContext.RecordRetry(response.StatusCode);
                     var now = DateTime.UtcNow;
                     // Prefer Retry-After absolute date over delta; do not add jitter when an absolute date is provided
                     TimeSpan delay;
@@ -1249,9 +1292,6 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
-
-
-
 
 
 

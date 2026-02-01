@@ -27,6 +27,7 @@ namespace Lidarr.Plugin.Abstractions.Hosting
             _sharedAssemblies = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
             {
                 "Lidarr.Plugin.Abstractions",
+                "Microsoft.Extensions.DependencyInjection.Abstractions",
                 "Microsoft.Extensions.Logging.Abstractions"
             };
 

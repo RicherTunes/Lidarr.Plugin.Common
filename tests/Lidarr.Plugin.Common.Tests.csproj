@@ -35,5 +35,9 @@
   <ItemGroup Condition="'$(IncludeCLIFramework)' != 'true'">
     <Compile Remove="CLIServicesTryGetTests.cs" />
     <Compile Remove="ConfigCommandTests.cs" />
+    <Compile Remove="JsonConfigServiceTests.cs" />
+    <Compile Remove="MemoryQueueServiceTests.cs" />
+    <Compile Remove="FileStateServiceTests.cs" />
+    <Compile Remove="LiveDashboardTests.cs" />
   </ItemGroup>
 </Project>

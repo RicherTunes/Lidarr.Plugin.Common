@@ -1,24 +1,54 @@
-# Normalize line endings and mark binary files
+# ============================================================================
+# LIDARR PLUGIN ECOSYSTEM - STANDARD .gitattributes
+# Copy this to all plugin repos to prevent CRLF/LF churn
+# ============================================================================
+
+# Auto-detect text files and normalize line endings to LF on commit
 * text=auto eol=lf
 
-# Solution and project files
-*.sln text eol=lf
+# Source code - always LF
+*.cs text eol=lf
 *.csproj text eol=lf
 *.props text eol=lf
 *.targets text eol=lf
-*.ps1 text eol=lf
+*.sln text eol=lf
+*.json text eol=lf
+*.xml text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
-*.md text eol=lf
 
-# Binaries
-*.dll -text
-*.exe -text
-*.nupkg -text
-*.snupkg -text
-*.png -text
-*.jpg -text
-*.jpeg -text
-*.gif -text
-*.ico -text
+# Scripts - platform-specific
+*.sh text eol=lf
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Documentation
+*.md text eol=lf
+*.txt text eol=lf
+LICENSE text eol=lf
+
+# Config files
+.editorconfig text eol=lf
+.gitignore text eol=lf
+.gitattributes text eol=lf
+NuGet.config text eol=lf
+Directory.Build.props text eol=lf
+Directory.Packages.props text eol=lf
+
+# Prevent binary files from being modified
+*.dll binary
+*.exe binary
+*.pdb binary
+*.zip binary
+*.nupkg binary
+*.snupkg binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+
+# Keep diff-ability for test data files
+*.trx text eol=lf
 
