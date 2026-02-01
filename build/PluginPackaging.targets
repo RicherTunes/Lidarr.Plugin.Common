@@ -68,6 +68,8 @@
       <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Options.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Options.dll')" />
       <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Primitives.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Primitives.dll')" />
       <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Http.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Http.dll')" />
+      <!-- CliWrap is used by Common for process execution - must be merged to avoid runtime dependency -->
+      <_PluginDeps Include="$(_PluginOutputPath)CliWrap.dll" Condition="Exists('$(_PluginOutputPath)CliWrap.dll')" />
       <!-- NOTE: FluentValidation must NOT be merged (ILRepacked) - it breaks DownloadClient.Test(List<ValidationFailure>).
            If FluentValidation.dll should be shipped as a separate file, that is handled by the post-merge cleanup step below. -->
       <!-- NOTE: System.Text.Json must NOT be merged - its types cross the host/plugin boundary -->
