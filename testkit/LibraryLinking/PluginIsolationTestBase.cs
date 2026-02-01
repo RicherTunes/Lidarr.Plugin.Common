@@ -91,6 +91,18 @@ namespace Lidarr.Plugin.Common.TestKit.LibraryLinking
         }
 
         /// <summary>
+        /// Verifies that CliWrap types are not publicly exposed.
+        /// </summary>
+        /// <returns>True if properly internalized</returns>
+        protected bool VerifyCliWrapTypesInternalized()
+        {
+            if (PluginAssembly == null) return true;
+
+            var exposedTypes = PluginIsolationAssertions.GetExposedCliWrapTypes(PluginAssembly);
+            return exposedTypes.Count == 0;
+        }
+
+        /// <summary>
         /// Verifies that no unmerged assembly references exist.
         /// </summary>
         /// <returns>True if all target assemblies are merged</returns>

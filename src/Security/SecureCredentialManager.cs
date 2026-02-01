@@ -31,6 +31,8 @@ namespace Lidarr.Plugin.Common.Security
         /// <returns>SecureString containing the credential data</returns>
         public SecureString CreateSecureString(string source)
         {
+            ThrowIfDisposed();
+
             if (string.IsNullOrEmpty(source))
                 return null;
 

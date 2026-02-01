@@ -53,7 +53,7 @@ When a plugin updates:
 - Add integration tests that load multiple plugins with different Common versions using the Roslyn builder (`tests/Isolation/TestPluginBuilder.cs`).
 
 ## Troubleshooting
-See the [failure modes table](../concepts/PLUGIN_ISOLATION.md#failure-modes) for common issues like `MissingMethodException` or file locks.
+See the [failure modes table](../PLUGIN_ISOLATION.md#failure-modes) for common issues like `MissingMethodException` or file locks.
 
 You now have an isolation-friendly host loader that keeps plugin ecosystems healthy.
 

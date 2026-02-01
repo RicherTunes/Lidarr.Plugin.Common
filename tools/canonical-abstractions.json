@@ -1,0 +1,9 @@
+{
+  "$schema": "./canonical-abstractions.schema.json",
+  "description": "Canonical Lidarr.Plugin.Abstractions.dll configuration. All plugins MUST use this exact binary.",
+  "version": "1.5.0",
+  "commonSha": "5bd68e097110d77155e528dc570347c1dbbb8a6d",
+  "abstractionsSha256": "251bf049c28737ac1912074733adf04f099f54c801c914ac9c0e056b2a8232db",
+  "releaseUrl": "https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.5.0",
+  "lastUpdated": "2026-01-20"
+}

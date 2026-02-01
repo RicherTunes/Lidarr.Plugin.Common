@@ -17,17 +17,43 @@ namespace Lidarr.Plugin.Common.CLI.Services
         private readonly string _stateFilePath;
         private readonly JsonSerializerSettings _jsonSettings;
 
+        /// <summary>
+        /// Creates a new FileStateService with the specified app name.
+        /// State files will be stored in LocalApplicationData/[appName]/session-state.json
+        /// </summary>
         public FileStateService(string appName = "StreamingPlugin")
         {
             _state = new ConcurrentDictionary<string, object>();
-            
+
             var stateDirectory = Path.Combine(
                 Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
                 appName
             );
-            
+
             Directory.CreateDirectory(stateDirectory);
             _stateFilePath = Path.Combine(stateDirectory, "session-state.json");
+
+            _jsonSettings = new JsonSerializerSettings
+            {
+                Formatting = Formatting.Indented,
+                TypeNameHandling = TypeNameHandling.Auto
+            };
+        }
+
+        /// <summary>
+        /// Constructor for testing purposes. Allows specifying a custom state file path.
+        /// </summary>
+        /// <param name="stateFilePath">Full path to the state file (not directory).</param>
+        /// <param name="forTesting">Indicates this is a test constructor (unused, exists to differentiate from public constructor).</param>
+        internal FileStateService(string stateFilePath, bool forTesting)
+        {
+            _state = new ConcurrentDictionary<string, object>();
+
+            var stateDirectory = Path.GetDirectoryName(stateFilePath)
+                ?? throw new ArgumentException("Invalid state file path", nameof(stateFilePath));
+
+            Directory.CreateDirectory(stateDirectory);
+            _stateFilePath = stateFilePath;
 
             _jsonSettings = new JsonSerializerSettings
             {
