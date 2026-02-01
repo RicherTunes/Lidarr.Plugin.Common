@@ -44,6 +44,7 @@ namespace Lidarr.Plugin.Common.CLI.Services
         /// Constructor for testing purposes. Allows specifying a custom state file path.
         /// </summary>
         /// <param name="stateFilePath">Full path to the state file (not directory).</param>
+        /// <param name="forTesting">Indicates this is a test constructor (unused, exists to differentiate from public constructor).</param>
         internal FileStateService(string stateFilePath, bool forTesting)
         {
             _state = new ConcurrentDictionary<string, object>();
