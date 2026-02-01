@@ -75,6 +75,23 @@ namespace Lidarr.Plugin.Common.TestKit.LibraryLinking
         }
 
         /// <summary>
+        /// Asserts that no CliWrap types are publicly exported from a merged assembly.
+        /// </summary>
+        /// <param name="pluginAssembly">The merged plugin assembly to check.</param>
+        /// <exception cref="PluginIsolationException">Thrown when public CliWrap types are found.</exception>
+        public static void AssertNoPublicCliWrapTypesInMergedAssembly(Assembly pluginAssembly)
+        {
+            var exposedTypes = GetExposedCliWrapTypes(pluginAssembly);
+            if (exposedTypes.Count > 0)
+            {
+                var typeList = string.Join("\n", exposedTypes.Select(t => $"  - {t.FullName}"));
+                throw new PluginIsolationException(
+                    $"Found {exposedTypes.Count} CliWrap type(s) publicly exported from merged assembly:\n{typeList}\n\n" +
+                    "After ILRepack with Internalize=true, these types should be internal.");
+            }
+        }
+
+        /// <summary>
         /// Asserts that all expected assemblies have been merged (no separate DLL files).
         /// </summary>
         /// <param name="pluginDirectory">Directory containing the plugin.</param>
@@ -101,6 +118,7 @@ namespace Lidarr.Plugin.Common.TestKit.LibraryLinking
             AssertNoPublicCommonTypesInMergedAssembly(pluginAssembly);
             AssertNoPublicPollyTypesInMergedAssembly(pluginAssembly);
             AssertNoPublicTagLibTypesInMergedAssembly(pluginAssembly);
+            AssertNoPublicCliWrapTypesInMergedAssembly(pluginAssembly);
             AssertAllAssembliesMerged(pluginDirectory);
         }
 
@@ -269,6 +287,22 @@ namespace Lidarr.Plugin.Common.TestKit.LibraryLinking
         }
 
         /// <summary>
+        /// Verifies that CliWrap types are not publicly exposed.
+        /// After ILRepack merging, subprocess wrapper types should be internalized.
+        /// </summary>
+        /// <param name="pluginAssembly">The plugin assembly to check</param>
+        /// <returns>List of improperly exposed types (empty if correct)</returns>
+        public static IReadOnlyList<Type> GetExposedCliWrapTypes(Assembly pluginAssembly)
+        {
+            if (pluginAssembly == null)
+                throw new ArgumentNullException(nameof(pluginAssembly));
+
+            return pluginAssembly.GetExportedTypes()
+                .Where(t => t.Namespace?.StartsWith("CliWrap", StringComparison.Ordinal) == true)
+                .ToList();
+        }
+
+        /// <summary>
         /// Gets external assembly references that should have been merged.
         /// </summary>
         /// <param name="pluginAssembly">The plugin assembly to check</param>
@@ -311,7 +345,8 @@ namespace Lidarr.Plugin.Common.TestKit.LibraryLinking
                 "Polly.Core.dll",
                 "Polly.Extensions.Http.dll",
                 "TagLibSharp.dll",
-                "TagLibSharp-Lidarr.dll"
+                "TagLibSharp-Lidarr.dll",
+                "CliWrap.dll"
             };
 
             return mergedAssemblyNames
