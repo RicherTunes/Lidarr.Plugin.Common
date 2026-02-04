@@ -24,8 +24,8 @@ namespace Lidarr.Plugin.Common.CLI.Services
 
         public LiveDashboard(IQueueService queueService, IConsoleUI ui)
         {
-            _queueService = queueService;
-            _ui = ui;
+            _queueService = queueService ?? throw new ArgumentNullException(nameof(queueService));
+            _ui = ui ?? throw new ArgumentNullException(nameof(ui));
         }
 
         public async Task StartAsync(CancellationToken cancellationToken = default)

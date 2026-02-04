@@ -87,6 +87,18 @@ namespace Lidarr.Plugin.Common.Utilities
             catch { return false; }
         }
 
+        /// <summary>
+        /// Cross-platform invalid filename characters (Windows set ensures compatibility).
+        /// </summary>
+        private static readonly char[] CrossPlatformInvalidFileNameChars = new[]
+        {
+            '<', '>', ':', '"', '/', '\\', '|', '?', '*',
+            '\0', '\x01', '\x02', '\x03', '\x04', '\x05', '\x06', '\x07',
+            '\x08', '\x09', '\x0A', '\x0B', '\x0C', '\x0D', '\x0E', '\x0F',
+            '\x10', '\x11', '\x12', '\x13', '\x14', '\x15', '\x16', '\x17',
+            '\x18', '\x19', '\x1A', '\x1B', '\x1C', '\x1D', '\x1E', '\x1F'
+        };
+
         public static bool ValidateFilePath(string filePath)
         {
             if (string.IsNullOrWhiteSpace(filePath)) return false;
@@ -94,8 +106,8 @@ namespace Lidarr.Plugin.Common.Utilities
             {
                 Path.GetFullPath(filePath);
                 var fileName = Path.GetFileName(filePath);
-                var invalid = Path.GetInvalidFileNameChars();
-                return !invalid.Any(c => fileName.Contains(c));
+                // Use cross-platform invalid chars to ensure filenames work on all OS
+                return !CrossPlatformInvalidFileNameChars.Any(c => fileName.Contains(c));
             }
             catch { return false; }
         }
