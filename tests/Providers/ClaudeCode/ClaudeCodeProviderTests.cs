@@ -30,6 +30,7 @@ namespace Lidarr.Plugin.Common.Tests.Providers.ClaudeCode;
 public class ClaudeCodeProviderTests : IDisposable
 {
     private readonly Mock<ICliRunner> _mockCliRunner;
+    private readonly Mock<IFileExistenceChecker> _mockFileChecker;
     private readonly ClaudeCodeDetector _detector;
     private readonly ClaudeCodeProvider _provider;
     private readonly ClaudeCodeSettings _settings;
@@ -37,7 +38,10 @@ public class ClaudeCodeProviderTests : IDisposable
     public ClaudeCodeProviderTests()
     {
         _mockCliRunner = new Mock<ICliRunner>();
-        _detector = new ClaudeCodeDetector(_mockCliRunner.Object);
+        _mockFileChecker = new Mock<IFileExistenceChecker>();
+        // Default: mocked paths always "exist"
+        _mockFileChecker.Setup(f => f.Exists(It.IsAny<string>())).Returns(true);
+        _detector = new ClaudeCodeDetector(_mockCliRunner.Object, _mockFileChecker.Object);
         _settings = new ClaudeCodeSettings();
         _provider = new ClaudeCodeProvider(_mockCliRunner.Object, _detector, _settings);
     }
@@ -687,28 +691,12 @@ public class ClaudeCodeProviderTests : IDisposable
     }
 
     /// <summary>
-    /// Gets a CLI path to use for mocking. If Claude CLI is actually installed,
-    /// returns a path that will be found. Otherwise returns a mock path.
+    /// Gets a CLI path to use for mocking.
+    /// Since we mock IFileExistenceChecker, we can use a consistent mock path.
     /// </summary>
     private static string GetMockCliPath()
     {
-        // Check common installation locations
-        var possiblePaths = new[]
-        {
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "claude.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".local", "bin", "claude"),
-            "/usr/local/bin/claude",
-        };
-
-        foreach (var path in possiblePaths)
-        {
-            if (File.Exists(path))
-            {
-                return path;
-            }
-        }
-
-        // Return a fictional path (tests will still work with mocks)
+        // Return a consistent mock path - file existence is mocked
         return OperatingSystem.IsWindows()
             ? @"C:\mock\claude.exe"
             : "/mock/claude";

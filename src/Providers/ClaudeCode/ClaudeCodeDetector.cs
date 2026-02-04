@@ -20,6 +20,7 @@ public class ClaudeCodeDetector
     private static readonly TimeSpan PathLookupTimeout = TimeSpan.FromSeconds(5);
 
     private readonly ICliRunner _cliRunner;
+    private readonly IFileExistenceChecker _fileChecker;
 
     /// <summary>
     /// Possible installation paths for Claude CLI across platforms.
@@ -31,9 +32,11 @@ public class ClaudeCodeDetector
     /// Initializes a new instance of the <see cref="ClaudeCodeDetector"/> class.
     /// </summary>
     /// <param name="cliRunner">The CLI runner for executing path lookup commands.</param>
-    public ClaudeCodeDetector(ICliRunner cliRunner)
+    /// <param name="fileChecker">Optional file existence checker (defaults to real filesystem).</param>
+    public ClaudeCodeDetector(ICliRunner cliRunner, IFileExistenceChecker? fileChecker = null)
     {
         _cliRunner = cliRunner ?? throw new ArgumentNullException(nameof(cliRunner));
+        _fileChecker = fileChecker ?? new FileExistenceChecker();
     }
 
     /// <summary>
@@ -62,7 +65,7 @@ public class ClaudeCodeDetector
         // Strategy 2: Check known installation paths
         foreach (var path in PossiblePaths)
         {
-            if (File.Exists(path))
+            if (_fileChecker.Exists(path))
             {
                 return path;
             }
@@ -94,7 +97,7 @@ public class ClaudeCodeDetector
             {
                 // Return first line (where/which may return multiple paths)
                 var firstLine = result.StandardOutput.Split('\n')[0].Trim();
-                if (!string.IsNullOrEmpty(firstLine) && File.Exists(firstLine))
+                if (!string.IsNullOrEmpty(firstLine) && _fileChecker.Exists(firstLine))
                 {
                     return firstLine;
                 }

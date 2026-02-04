@@ -94,18 +94,27 @@ function Test-Allowlisted {
     )
 
     foreach ($entry in $Allowlist) {
-        # Safely access properties (PSCustomObject from JSON may not have all fields)
+        # Safely access properties - works for both hashtables and PSCustomObjects
         $entryFile = $null
         $entryLinePattern = $null
         $entryExpiresOn = $null
         $entryOwner = $null
         $entryReason = $null
 
-        if ($entry.PSObject.Properties['file']) { $entryFile = $entry.file }
-        if ($entry.PSObject.Properties['line_pattern']) { $entryLinePattern = $entry.line_pattern }
-        if ($entry.PSObject.Properties['expiresOn']) { $entryExpiresOn = $entry.expiresOn }
-        if ($entry.PSObject.Properties['owner']) { $entryOwner = $entry.owner }
-        if ($entry.PSObject.Properties['reason']) { $entryReason = $entry.reason }
+        # Handle both hashtables (from default) and PSCustomObjects (from JSON)
+        if ($entry -is [hashtable]) {
+            if ($entry.ContainsKey('file')) { $entryFile = $entry.file }
+            if ($entry.ContainsKey('line_pattern')) { $entryLinePattern = $entry.line_pattern }
+            if ($entry.ContainsKey('expiresOn')) { $entryExpiresOn = $entry.expiresOn }
+            if ($entry.ContainsKey('owner')) { $entryOwner = $entry.owner }
+            if ($entry.ContainsKey('reason')) { $entryReason = $entry.reason }
+        } else {
+            if ($entry.PSObject.Properties['file']) { $entryFile = $entry.file }
+            if ($entry.PSObject.Properties['line_pattern']) { $entryLinePattern = $entry.line_pattern }
+            if ($entry.PSObject.Properties['expiresOn']) { $entryExpiresOn = $entry.expiresOn }
+            if ($entry.PSObject.Properties['owner']) { $entryOwner = $entry.owner }
+            if ($entry.PSObject.Properties['reason']) { $entryReason = $entry.reason }
+        }
 
         # Check file pattern match
         $fileMatch = $false
@@ -175,8 +184,9 @@ function Find-DotnetTestViolations {
     $violations = @()
     $expiredEntries = @()
 
-    $workflowFiles = Get-ChildItem -Path $WorkflowDir -Filter "*.yml" -File -ErrorAction SilentlyContinue
-    $workflowFiles += Get-ChildItem -Path $WorkflowDir -Filter "*.yaml" -File -ErrorAction SilentlyContinue
+    # Ensure array type to prevent single-file unwrapping issues
+    $workflowFiles = @(Get-ChildItem -Path $WorkflowDir -Filter "*.yml" -File -ErrorAction SilentlyContinue)
+    $workflowFiles += @(Get-ChildItem -Path $WorkflowDir -Filter "*.yaml" -File -ErrorAction SilentlyContinue)
 
     foreach ($file in $workflowFiles) {
         $lines = Get-Content $file.FullName -ErrorAction SilentlyContinue
@@ -319,8 +329,8 @@ if (-not (Test-Path $workflowDir)) {
 Write-Host "Scanning: $workflowDir" -ForegroundColor White
 Write-Host ""
 
-# Load allowlist
-$allowlist = Get-Allowlist -RepoPath $repoPath -ExplicitPath $AllowlistPath
+# Load allowlist (wrap in @() to prevent single-element array unwrapping)
+$allowlist = @(Get-Allowlist -RepoPath $repoPath -ExplicitPath $AllowlistPath)
 Write-Host "Allowlist entries: $($allowlist.Count)" -ForegroundColor DarkGray
 
 # Find violations

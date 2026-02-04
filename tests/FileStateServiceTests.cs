@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.CLI.Services;
 using Newtonsoft.Json;
@@ -50,8 +51,12 @@ namespace Lidarr.Plugin.Common.Tests
 
         private FileStateService CreateService()
         {
+            // Use BindingFlags to find the internal constructor for testing
             var constructor = typeof(FileStateService).GetConstructor(
-                new[] { typeof(string), typeof(bool) }
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(string), typeof(bool) },
+                null
             );
 
             if (constructor != null)
@@ -59,8 +64,10 @@ namespace Lidarr.Plugin.Common.Tests
                 return (FileStateService)constructor.Invoke(new object[] { _stateFilePath, true });
             }
 
-            var appName = $"Test_{Guid.NewGuid():N}";
-            return new FileStateService(appName);
+            // Fallback should not be reached if InternalsVisibleTo is configured correctly
+            throw new InvalidOperationException(
+                "Could not find internal FileStateService(string, bool) constructor. " +
+                "Ensure InternalsVisibleTo is configured for the test assembly.");
         }
 
         #region PersistStateOperations
