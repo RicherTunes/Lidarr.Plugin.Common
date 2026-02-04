@@ -134,7 +134,7 @@ jobs:
 
     # Test 1: Detects violation
     Test-Assertion "Detects raw dotnet test" {
-        $result = & $LintScript -Path $TempDir 2>&1
+        $result = & $LintScript -Path $TempDir *>&1
         $exitCode = $LASTEXITCODE
         # Script exits 0 in report mode, check output
         ($result -join "`n") -match "violation\.yml"
@@ -142,17 +142,17 @@ jobs:
 
     # Test 2: Compliant workflow passes
     Test-Assertion "Compliant workflow not flagged" {
-        $result = & $LintScript -Path $TempDir 2>&1
+        $result = & $LintScript -Path $TempDir *>&1
         -not (($result -join "`n") -match "compliant\.yml.*violation")
     }
 
-    # Test 3: --list-tests pattern recognized
-    Test-Assertion "--list-tests recognized in output" {
-        $result = & $LintScript -Path $TempDir 2>&1
+    # Test 3: --list-tests pattern is allowlisted by default
+    Test-Assertion "--list-tests allowlisted by default" {
+        $result = & $LintScript -Path $TempDir *>&1
         $output = $result -join "`n"
-        # The list-tests.yml has dotnet test but with --list-tests
-        # Should be flagged but can be allowlisted
-        $output -match "list-tests\.yml"
+        # list-tests.yml has dotnet test --list-tests which matches default allowlist
+        # So it should NOT appear in violations
+        -not ($output -match "list-tests\.yml.*dotnet test")
     }
 
     Write-Host ""
@@ -169,7 +169,7 @@ jobs:
 
     # Test 4: Allowlist file pattern works
     Test-Assertion "File pattern allowlist works" {
-        $result = & $LintScript -Path $TempDir 2>&1
+        $result = & $LintScript -Path $TempDir *>&1
         $output = $result -join "`n"
         # violation.yml should now be allowlisted
         -not ($output -match "violation\.yml.*:.*dotnet test")
@@ -177,7 +177,7 @@ jobs:
 
     # Test 5: Line pattern allowlist works
     Test-Assertion "Line pattern allowlist works" {
-        $result = & $LintScript -Path $TempDir 2>&1
+        $result = & $LintScript -Path $TempDir *>&1
         $output = $result -join "`n"
         # list-tests.yml should be allowlisted by --list-tests pattern
         -not ($output -match "list-tests\.yml.*violation")
@@ -199,7 +199,7 @@ jobs:
 
     # Test 6: Expired allowlist entry is not honored
     Test-Assertion "Expired allowlist entry not honored" {
-        $result = & $LintScript -Path $TempDir 2>&1
+        $result = & $LintScript -Path $TempDir *>&1
         $output = $result -join "`n"
         # mixed.yml has an expired exemption, should be flagged
         $output -match "mixed\.yml"
@@ -215,7 +215,7 @@ jobs:
 
     # Test 7: Valid expiration is honored
     Test-Assertion "Valid expiration allowlist honored" {
-        $result = & $LintScript -Path $TempDir 2>&1
+        $result = & $LintScript -Path $TempDir *>&1
         $output = $result -join "`n"
         # mixed.yml should be allowlisted
         -not ($output -match "mixed\.yml.*violation")

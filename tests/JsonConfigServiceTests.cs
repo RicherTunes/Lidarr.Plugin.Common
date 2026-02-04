@@ -295,7 +295,8 @@ namespace Lidarr.Plugin.Common.Tests
             await File.WriteAllTextAsync(filePath, "{ this is not valid json }");
 
             // Act & Assert
-            await Assert.ThrowsAsync<JsonException>(async () =>
+            // JsonReaderException is a subtype of JsonException
+            await Assert.ThrowsAsync<JsonReaderException>(async () =>
             {
                 await service.LoadAsync<TestConfig>(key);
             });
