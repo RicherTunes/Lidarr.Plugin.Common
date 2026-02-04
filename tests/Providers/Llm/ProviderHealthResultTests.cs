@@ -4,7 +4,6 @@
 
 using System;
 using System.Text.Json;
-using FluentAssertions;
 using Xunit;
 
 using Lidarr.Plugin.Common.Abstractions.Llm;
@@ -35,13 +34,13 @@ public class ProviderHealthResultTests
         };
 
         // Assert
-        result.IsHealthy.Should().BeFalse();
-        result.StatusMessage.Should().Be("Connection failed");
-        result.ResponseTime.Should().Be(TimeSpan.FromSeconds(1));
-        result.Provider.Should().Be("openai");
-        result.AuthMethod.Should().Be("apiKey");
-        result.Model.Should().Be("gpt-4");
-        result.ErrorCode.Should().Be("AUTH_FAILED");
+        Assert.False(result.IsHealthy);
+        Assert.Equal("Connection failed", result.StatusMessage);
+        Assert.Equal(TimeSpan.FromSeconds(1), result.ResponseTime);
+        Assert.Equal("openai", result.Provider);
+        Assert.Equal("apiKey", result.AuthMethod);
+        Assert.Equal("gpt-4", result.Model);
+        Assert.Equal("AUTH_FAILED", result.ErrorCode);
     }
 
     [Fact]
@@ -56,13 +55,13 @@ public class ProviderHealthResultTests
         };
 
         // Assert
-        result.IsHealthy.Should().BeTrue();
-        result.StatusMessage.Should().BeNull();
-        result.ResponseTime.Should().BeNull();
-        result.Provider.Should().Be("claude-code");
-        result.AuthMethod.Should().Be("cli");
-        result.Model.Should().BeNull();
-        result.ErrorCode.Should().BeNull();
+        Assert.True(result.IsHealthy);
+        Assert.Null(result.StatusMessage);
+        Assert.Null(result.ResponseTime);
+        Assert.Equal("claude-code", result.Provider);
+        Assert.Equal("cli", result.AuthMethod);
+        Assert.Null(result.Model);
+        Assert.Null(result.ErrorCode);
     }
 
     #endregion
@@ -76,14 +75,14 @@ public class ProviderHealthResultTests
         var result = ProviderHealthResult.Healthy();
 
         // Assert
-        result.Should().NotBeNull();
-        result!.IsHealthy.Should().BeTrue();
-        result.StatusMessage.Should().BeNull();
-        result.ResponseTime.Should().BeNull();
-        result.Provider.Should().BeNull();
-        result.AuthMethod.Should().BeNull();
-        result.Model.Should().BeNull();
-        result.ErrorCode.Should().BeNull();
+        Assert.NotNull(result);
+        Assert.True(result!.IsHealthy);
+        Assert.Null(result.StatusMessage);
+        Assert.Null(result.ResponseTime);
+        Assert.Null(result.Provider);
+        Assert.Null(result.AuthMethod);
+        Assert.Null(result.Model);
+        Assert.Null(result.ErrorCode);
     }
 
     [Fact]
@@ -94,8 +93,8 @@ public class ProviderHealthResultTests
         var result = ProviderHealthResult.Healthy(responseTime);
 
         // Assert
-        result.IsHealthy.Should().BeTrue();
-        result.ResponseTime.Should().Be(responseTime);
+        Assert.True(result.IsHealthy);
+        Assert.Equal(responseTime, result.ResponseTime);
     }
 
     [Fact]
@@ -109,12 +108,12 @@ public class ProviderHealthResultTests
             model: "glm-4-flash");
 
         // Assert
-        result.IsHealthy.Should().BeTrue();
-        result.ResponseTime.Should().Be(TimeSpan.FromSeconds(2));
-        result.Provider.Should().Be("glm");
-        result.AuthMethod.Should().Be("apiKey");
-        result.Model.Should().Be("glm-4-flash");
-        result.ErrorCode.Should().BeNull();
+        Assert.True(result.IsHealthy);
+        Assert.Equal(TimeSpan.FromSeconds(2), result.ResponseTime);
+        Assert.Equal("glm", result.Provider);
+        Assert.Equal("apiKey", result.AuthMethod);
+        Assert.Equal("glm-4-flash", result.Model);
+        Assert.Null(result.ErrorCode);
     }
 
     [Fact]
@@ -127,10 +126,10 @@ public class ProviderHealthResultTests
             model: "gpt-3.5-turbo");
 
         // Assert
-        result.IsHealthy.Should().BeTrue();
-        result.Provider.Should().Be("openai");
-        result.AuthMethod.Should().Be("cli");
-        result.Model.Should().Be("gpt-3.5-turbo");
+        Assert.True(result.IsHealthy);
+        Assert.Equal("openai", result.Provider);
+        Assert.Equal("cli", result.AuthMethod);
+        Assert.Equal("gpt-3.5-turbo", result.Model);
     }
 
     #endregion
@@ -144,12 +143,12 @@ public class ProviderHealthResultTests
         var result = ProviderHealthResult.Unhealthy("API key is invalid");
 
         // Assert
-        result.IsHealthy.Should().BeFalse();
-        result.StatusMessage.Should().Be("API key is invalid");
-        result.Provider.Should().BeNull();
-        result.AuthMethod.Should().BeNull();
-        result.Model.Should().BeNull();
-        result.ErrorCode.Should().BeNull();
+        Assert.False(result.IsHealthy);
+        Assert.Equal("API key is invalid", result.StatusMessage);
+        Assert.Null(result.Provider);
+        Assert.Null(result.AuthMethod);
+        Assert.Null(result.Model);
+        Assert.Null(result.ErrorCode);
     }
 
     [Fact]
@@ -165,13 +164,13 @@ public class ProviderHealthResultTests
             errorCode: "RATE_LIMITED");
 
         // Assert
-        result.IsHealthy.Should().BeFalse();
-        result.StatusMessage.Should().Be("Rate limit exceeded");
-        result.ResponseTime.Should().Be(TimeSpan.FromSeconds(1));
-        result.Provider.Should().Be("anthropic");
-        result.AuthMethod.Should().Be("apiKey");
-        result.Model.Should().Be("claude-3-opus");
-        result.ErrorCode.Should().Be("RATE_LIMITED");
+        Assert.False(result.IsHealthy);
+        Assert.Equal("Rate limit exceeded", result.StatusMessage);
+        Assert.Equal(TimeSpan.FromSeconds(1), result.ResponseTime);
+        Assert.Equal("anthropic", result.Provider);
+        Assert.Equal("apiKey", result.AuthMethod);
+        Assert.Equal("claude-3-opus", result.Model);
+        Assert.Equal("RATE_LIMITED", result.ErrorCode);
     }
 
     [Fact]
@@ -183,8 +182,8 @@ public class ProviderHealthResultTests
             errorCode: "TIMEOUT");
 
         // Assert
-        result.IsHealthy.Should().BeFalse();
-        result.ErrorCode.Should().Be("TIMEOUT");
+        Assert.False(result.IsHealthy);
+        Assert.Equal("TIMEOUT", result.ErrorCode);
     }
 
     [Fact]
@@ -196,8 +195,8 @@ public class ProviderHealthResultTests
             authMethod: "deviceCode");
 
         // Assert
-        result.IsHealthy.Should().BeFalse();
-        result.AuthMethod.Should().Be("deviceCode");
+        Assert.False(result.IsHealthy);
+        Assert.Equal("deviceCode", result.AuthMethod);
     }
 
     [Fact]
@@ -209,8 +208,8 @@ public class ProviderHealthResultTests
             provider: "ollama");
 
         // Assert
-        result.IsHealthy.Should().BeFalse();
-        result.Provider.Should().Be("ollama");
+        Assert.False(result.IsHealthy);
+        Assert.Equal("ollama", result.Provider);
     }
 
     [Fact]
@@ -222,8 +221,8 @@ public class ProviderHealthResultTests
             model: "unknown-model");
 
         // Assert
-        result.IsHealthy.Should().BeFalse();
-        result.Model.Should().Be("unknown-model");
+        Assert.False(result.IsHealthy);
+        Assert.Equal("unknown-model", result.Model);
     }
 
     #endregion
@@ -237,11 +236,11 @@ public class ProviderHealthResultTests
         var result = ProviderHealthResult.Degraded("High latency detected");
 
         // Assert
-        result.IsHealthy.Should().BeTrue();
-        result.StatusMessage.Should().Be("[Degraded] High latency detected");
-        result.Provider.Should().BeNull();
-        result.AuthMethod.Should().BeNull();
-        result.Model.Should().BeNull();
+        Assert.True(result.IsHealthy);
+        Assert.Equal("[Degraded] High latency detected", result.StatusMessage);
+        Assert.Null(result.Provider);
+        Assert.Null(result.AuthMethod);
+        Assert.Null(result.Model);
     }
 
     [Fact]
@@ -256,12 +255,12 @@ public class ProviderHealthResultTests
             model: "gemini-pro");
 
         // Assert
-        result.IsHealthy.Should().BeTrue();
-        result.StatusMessage.Should().StartWith("[Degraded]");
-        result.ResponseTime.Should().Be(TimeSpan.FromSeconds(5));
-        result.Provider.Should().Be("gemini");
-        result.AuthMethod.Should().Be("oauth");
-        result.Model.Should().Be("gemini-pro");
+        Assert.True(result.IsHealthy);
+        Assert.StartsWith("[Degraded]", result.StatusMessage);
+        Assert.Equal(TimeSpan.FromSeconds(5), result.ResponseTime);
+        Assert.Equal("gemini", result.Provider);
+        Assert.Equal("oauth", result.AuthMethod);
+        Assert.Equal("gemini-pro", result.Model);
     }
 
     [Fact]
@@ -271,7 +270,7 @@ public class ProviderHealthResultTests
         var result = ProviderHealthResult.Degraded("Provider responding slowly", provider: "zai-glm");
 
         // Assert
-        result.Provider.Should().Be("zai-glm");
+        Assert.Equal("zai-glm", result.Provider);
     }
 
     #endregion
@@ -298,14 +297,14 @@ public class ProviderHealthResultTests
         var deserialized = JsonSerializer.Deserialize<ProviderHealthResult>(json);
 
         // Assert
-        deserialized.Should().NotBeNull();
-        deserialized!.IsHealthy.Should().BeFalse();
-        deserialized.StatusMessage.Should().Be("Connection failed");
-        deserialized.ResponseTime.Should().Be(TimeSpan.FromSeconds(1));
-        deserialized.Provider.Should().Be("openai");
-        deserialized.AuthMethod.Should().Be("apiKey");
-        deserialized.Model.Should().Be("gpt-4");
-        deserialized.ErrorCode.Should().Be("AUTH_FAILED");
+        Assert.NotNull(deserialized);
+        Assert.False(deserialized!.IsHealthy);
+        Assert.Equal("Connection failed", deserialized.StatusMessage);
+        Assert.Equal(TimeSpan.FromSeconds(1), deserialized.ResponseTime);
+        Assert.Equal("openai", deserialized.Provider);
+        Assert.Equal("apiKey", deserialized.AuthMethod);
+        Assert.Equal("gpt-4", deserialized.Model);
+        Assert.Equal("AUTH_FAILED", deserialized.ErrorCode);
     }
 
     [Fact]
@@ -319,13 +318,13 @@ public class ProviderHealthResultTests
         var deserialized = JsonSerializer.Deserialize<ProviderHealthResult>(json);
 
         // Assert
-        deserialized.Should().NotBeNull();
-        deserialized!.IsHealthy.Should().BeTrue();
-        deserialized.ResponseTime.Should().Be(TimeSpan.FromMilliseconds(100));
-        deserialized.Provider.Should().BeNull();
-        deserialized.AuthMethod.Should().BeNull();
-        deserialized.Model.Should().BeNull();
-        deserialized.ErrorCode.Should().BeNull();
+        Assert.NotNull(deserialized);
+        Assert.True(deserialized!.IsHealthy);
+        Assert.Equal(TimeSpan.FromMilliseconds(100), deserialized.ResponseTime);
+        Assert.Null(deserialized.Provider);
+        Assert.Null(deserialized.AuthMethod);
+        Assert.Null(deserialized.Model);
+        Assert.Null(deserialized.ErrorCode);
     }
 
     [Fact]
@@ -341,12 +340,12 @@ public class ProviderHealthResultTests
         }) ?? new ProviderHealthResult();
 
         // Assert - when deserializing from empty JSON, nullable fields remain null
-        result.StatusMessage.Should().BeNull();
-        result.ResponseTime.Should().BeNull();
-        result.Provider.Should().BeNull();
-        result.AuthMethod.Should().BeNull();
-        result.Model.Should().BeNull();
-        result.ErrorCode.Should().BeNull();
+        Assert.Null(result.StatusMessage);
+        Assert.Null(result.ResponseTime);
+        Assert.Null(result.Provider);
+        Assert.Null(result.AuthMethod);
+        Assert.Null(result.Model);
+        Assert.Null(result.ErrorCode);
     }
 
     #endregion
@@ -365,14 +364,14 @@ public class ProviderHealthResultTests
         };
 
         // Assert - old properties should still be set
-        result.IsHealthy.Should().BeTrue();
-        result.StatusMessage.Should().Be("Healthy");
-        result.ResponseTime.Should().Be(TimeSpan.FromSeconds(1));
+        Assert.True(result.IsHealthy);
+        Assert.Equal("Healthy", result.StatusMessage);
+        Assert.Equal(TimeSpan.FromSeconds(1), result.ResponseTime);
         // New fields should be null
-        result.Provider.Should().BeNull();
-        result.AuthMethod.Should().BeNull();
-        result.Model.Should().BeNull();
-        result.ErrorCode.Should().BeNull();
+        Assert.Null(result.Provider);
+        Assert.Null(result.AuthMethod);
+        Assert.Null(result.Model);
+        Assert.Null(result.ErrorCode);
     }
 
     [Fact]
@@ -382,10 +381,10 @@ public class ProviderHealthResultTests
         var result = ProviderHealthResult.Healthy(responseTime: TimeSpan.FromSeconds(1));
 
         // Assert
-        result.IsHealthy.Should().BeTrue();
-        result.ResponseTime.Should().Be(TimeSpan.FromSeconds(1));
-        result.Provider.Should().BeNull();
-        result.AuthMethod.Should().BeNull();
+        Assert.True(result.IsHealthy);
+        Assert.Equal(TimeSpan.FromSeconds(1), result.ResponseTime);
+        Assert.Null(result.Provider);
+        Assert.Null(result.AuthMethod);
     }
 
     [Fact]
@@ -395,11 +394,11 @@ public class ProviderHealthResultTests
         var result = ProviderHealthResult.Unhealthy("Error", responseTime: TimeSpan.FromSeconds(2));
 
         // Assert
-        result.IsHealthy.Should().BeFalse();
-        result.StatusMessage.Should().Be("Error");
-        result.ResponseTime.Should().Be(TimeSpan.FromSeconds(2));
-        result.Provider.Should().BeNull();
-        result.AuthMethod.Should().BeNull();
+        Assert.False(result.IsHealthy);
+        Assert.Equal("Error", result.StatusMessage);
+        Assert.Equal(TimeSpan.FromSeconds(2), result.ResponseTime);
+        Assert.Null(result.Provider);
+        Assert.Null(result.AuthMethod);
     }
 
     [Fact]
@@ -409,11 +408,11 @@ public class ProviderHealthResultTests
         var result = ProviderHealthResult.Degraded("Warning", responseTime: TimeSpan.FromMilliseconds(500));
 
         // Assert
-        result.IsHealthy.Should().BeTrue();
-        result.StatusMessage.Should().StartWith("[Degraded]");
-        result.ResponseTime.Should().Be(TimeSpan.FromMilliseconds(500));
-        result.Provider.Should().BeNull();
-        result.AuthMethod.Should().BeNull();
+        Assert.True(result.IsHealthy);
+        Assert.StartsWith("[Degraded]", result.StatusMessage);
+        Assert.Equal(TimeSpan.FromMilliseconds(500), result.ResponseTime);
+        Assert.Null(result.Provider);
+        Assert.Null(result.AuthMethod);
     }
 
     #endregion
