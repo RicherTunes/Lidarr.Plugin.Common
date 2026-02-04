@@ -10,11 +10,11 @@
       },
       "JsonSchema.Net": {
         "type": "Direct",
-        "requested": "[7.2.3, )",
-        "resolved": "7.2.3",
-        "contentHash": "O3KclMcPVFYTZsTeZBpwtKd/lYrNc3AFR+xi9j3Q4CfhDufOUx25TMMWJOcFRrqVklvKQ4Kl+0UhlNX1iDGoRw==",
+        "requested": "[9.0.0, )",
+        "resolved": "9.0.0",
+        "contentHash": "rGa8+OIvK9HdRduVTKrTTKTCWmPEcMgwOWXOzhDoJWirY8flz9cOVuJv21XyotDZBKAMWxnysr3E5AN1tMXubQ==",
         "dependencies": {
-          "JsonPointer.Net": "5.0.0"
+          "JsonPointer.Net": "7.0.0"
         }
       },
       "Microsoft.CodeAnalysis.CSharp": {
@@ -43,6 +43,15 @@
         "dependencies": {
           "Microsoft.CodeCoverage": "17.11.1",
           "Microsoft.TestPlatform.TestHost": "17.11.1"
+        }
+      },
+      "Spectre.Console": {
+        "type": "Direct",
+        "requested": "[0.50.0, )",
+        "resolved": "0.50.0",
+        "contentHash": "gkwYncFqMjlPF6Yz8KeVsKWpdfv15sr6uKm+vXVa/8Q4tvx52LPzMQOO5m+bXwI3AGGFeY3cok3ZJbguYizswg==",
+        "dependencies": {
+          "System.Memory": "4.6.3"
         }
       },
       "System.CommandLine": {
@@ -139,16 +148,16 @@
       },
       "Json.More.Net": {
         "type": "Transitive",
-        "resolved": "2.0.1.2",
-        "contentHash": "uF3QeiaXEfH92emz0/BWUiNtMSfxIIvgynuB0Bf1vF4s8eWTcZitBx9l+g/FDaJk5XxqBv9buQXizXKQcXFG1w=="
+        "resolved": "3.0.0",
+        "contentHash": "+kj2dE04clW9+Bw4GoEVBFdLSiOKwLEkiiGbX+CK860DbytCtpD0QA68cEQISMnIrxyxQPw5gQAra22WCnRPUA=="
       },
       "JsonPointer.Net": {
         "type": "Transitive",
-        "resolved": "5.0.0",
-        "contentHash": "fm4T5w20AY6C+p5/pJr0vrXRNGgtSfHl34I1LxC9zdPwS9S3j0GiR1Mz/CVPWKDXXGDpCt1APHpCq7kn5adCfA==",
+        "resolved": "7.0.0",
+        "contentHash": "jdnFo5huuJDB3ASWIkD0F9Ntf+9nOtRbsIp4VqRlHbTW9LxpBBMRKQhQJxPtIFAhNVS55aAsMb78TB+LK29CqQ==",
         "dependencies": {
           "Humanizer.Core": "2.14.1",
-          "Json.More.Net": "2.0.1.2"
+          "Json.More.Net": "3.0.0"
         }
       },
       "Microsoft.AspNetCore.Cryptography.Internal": {
@@ -526,8 +535,8 @@
       },
       "System.Memory": {
         "type": "Transitive",
-        "resolved": "4.5.5",
-        "contentHash": "XIWiDvKPXaTveaB7HVganDlOCRoj03l+jrwNvcge/t8vhGYKvqV+dMv6G4SAX2NoNmN0wZfVPTAlFwZcZvVOUw=="
+        "resolved": "4.6.3",
+        "contentHash": "qdcDOgnFZY40+Q9876JUHnlHu7bosOHX8XISRoH94fwk6hgaeQGSgfZd8srWRZNt5bV9ZW2TljcegDNxsf+96A=="
       },
       "System.Memory.Data": {
         "type": "Transitive",
