@@ -89,13 +89,18 @@ jobs:
         shell: bash
         env:
           SUBMODULES_TOKEN: ${{ secrets.submodules-token }}
+          COMMON_PATH: ${{ inputs.common-path }}
         run: |
           # If a PAT is provided for private submodules, configure URL rewrite
           # so git uses the PAT instead of the default github.token credential.
           if [ -n "$SUBMODULES_TOKEN" ]; then
             git config --global url."https://x-access-token:${SUBMODULES_TOKEN}@github.com/".insteadOf "https://github.com/"
           fi
-          git submodule update --init --recursive
+
+          # Init only the Common submodule (required for packaging tooling).
+          # Other submodules (e.g. private SDKs) are not needed for packaging gates
+          # and may fail auth if the PAT doesn't cover them.
+          git submodule update --init -- "$COMMON_PATH"
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
