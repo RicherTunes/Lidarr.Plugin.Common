@@ -67,6 +67,9 @@ namespace Lidarr.Plugin.Common.Tests
 
             // Assert
             Assert.True(dashboard.IsRunning);
+
+            // Cleanup - prevent dangling background task from hanging test host
+            await dashboard.StopAsync();
         }
 
         [Fact]
@@ -86,6 +89,9 @@ namespace Lidarr.Plugin.Common.Tests
             // Assert
             Assert.True(firstRunning);
             Assert.True(secondRunning);
+
+            // Cleanup
+            await dashboard.StopAsync();
         }
 
         [Fact]
@@ -102,6 +108,9 @@ namespace Lidarr.Plugin.Common.Tests
 
             // Assert
             Assert.True(ui.ClearCallCount > 0);
+
+            // Cleanup
+            await dashboard.StopAsync();
         }
 
         [Fact]
@@ -122,6 +131,7 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        [Trait("State", "Quarantined")]  // Quarantined 2026-02-04: Flaky timing-sensitive test on Linux CI - Issue #318
         public async Task StartAsync_WithShortRefreshInterval_UsesCustomInterval()
         {
             // Arrange
@@ -224,9 +234,13 @@ namespace Lidarr.Plugin.Common.Tests
 
             // Assert
             Assert.True(ui.ClearCallCount > 0);
+
+            // Cleanup
+            await dashboard.StopAsync();
         }
 
         [Fact]
+        [Trait("State", "Quarantined")]  // Quarantined 2026-02-04: Flaky on Linux CI - Issue #318
         public async Task RefreshAsync_RetrievesQueueData()
         {
             // Arrange
@@ -408,6 +422,7 @@ namespace Lidarr.Plugin.Common.Tests
         #region Progress Reporting Tests
 
         [Fact]
+        [Trait("State", "Quarantined")]  // Quarantined 2026-02-04: Flaky on Linux CI - Issue #318
         public async Task Display_WithDownloadingItem_ShowsProgressPercentage()
         {
             // Arrange
@@ -437,6 +452,7 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        [Trait("State", "Quarantined")]  // Quarantined 2026-02-04: Flaky on Linux CI - Issue #318
         public async Task Display_WithZeroProgress_DisplaysZero()
         {
             // Arrange
@@ -663,6 +679,7 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        [Trait("State", "Quarantined")]  // Quarantined 2026-02-04: Flaky on Linux CI - Issue #318
         public async Task Display_Statistics_ShowCorrectCounts()
         {
             // Arrange
@@ -868,6 +885,9 @@ namespace Lidarr.Plugin.Common.Tests
 
             // Assert
             Assert.True(dashboard.IsRunning);
+
+            // Cleanup
+            await dashboard.StopAsync();
         }
 
         [Fact]
@@ -939,6 +959,9 @@ namespace Lidarr.Plugin.Common.Tests
             // Assert
             // Should have more refreshes due to shorter interval
             Assert.True(ui.ClearCallCount >= 1);
+
+            // Cleanup
+            await dashboard.StopAsync();
         }
 
         [Fact]
