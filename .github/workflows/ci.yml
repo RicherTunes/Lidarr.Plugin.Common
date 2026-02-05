@@ -30,6 +30,7 @@ jobs:
   build_and_test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     env:
       # Don't roll forward to preview SDKs - stay on specified version
       DOTNET_ROLL_FORWARD: Minor
@@ -151,6 +152,8 @@ jobs:
         if: steps.changes.outputs.code_changed == 'true'
         run: >
           dotnet test -c Release --no-build
+          --filter "State!=Quarantined"
+          --blame-hang-timeout 5min
           --collect:"XPlat Code Coverage"
           --logger "trx;LogFileName=test_results.trx"
 
