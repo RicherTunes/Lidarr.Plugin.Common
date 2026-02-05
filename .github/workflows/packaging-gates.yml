@@ -108,7 +108,7 @@ jobs:
           $pluginPack = Join-Path $commonPath 'tools/PluginPack.psm1'
           if (-not (Test-Path -LiteralPath $pluginPack)) { throw "PluginPack.psm1 not found: $pluginPack" }
 
-          Import-Module $pluginPack -Force
+          Import-Module (Resolve-Path -LiteralPath $pluginPack) -Force
 
           $zipPath = (New-PluginPackage `
             -Csproj $csproj `
