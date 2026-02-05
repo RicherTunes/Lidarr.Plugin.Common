@@ -93,9 +93,9 @@ foreach ($zipPath in $resolvedPaths) {
 
 Write-Host ""
 
-# Verify results
-$validResults = $results | Where-Object { $_.Status -eq "OK" }
-$missingResults = $results | Where-Object { $_.Status -eq "MISSING" }
+# Verify results (wrap in @() for strict mode: Where-Object can return $null or scalar)
+$validResults = @($results | Where-Object { $_.Status -eq "OK" })
+$missingResults = @($results | Where-Object { $_.Status -eq "MISSING" })
 
 if ($missingResults.Count -gt 0) {
     Write-Host "⚠️  Packages missing Abstractions.dll:" -ForegroundColor Yellow
@@ -108,12 +108,12 @@ if ($validResults.Count -eq 0) {
     exit 1
 }
 
-$uniqueHashes = $validResults | Select-Object -ExpandProperty Hash -Unique
+$uniqueHashes = @($validResults | Select-Object -ExpandProperty Hash -Unique)
 
 if ($ExpectedSha256) {
     $expected = $ExpectedSha256.ToLower().Trim()
 
-    $mismatches = $validResults | Where-Object { $_.Hash -ne $expected }
+    $mismatches = @($validResults | Where-Object { $_.Hash -ne $expected })
     if ($mismatches.Count -gt 0) {
         Write-Host "╔═══════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Red
         Write-Host "║              CANONICAL ABSTRACTIONS VERIFICATION FAILED                   ║" -ForegroundColor Red
