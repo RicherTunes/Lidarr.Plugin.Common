@@ -89,6 +89,8 @@ jobs:
       - name: Package (Common tooling)
         id: package
         shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.submodules-token || github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
