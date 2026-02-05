@@ -67,6 +67,9 @@ namespace Lidarr.Plugin.Common.Tests
 
             // Assert
             Assert.True(dashboard.IsRunning);
+
+            // Cleanup - prevent dangling background task from hanging test host
+            await dashboard.StopAsync();
         }
 
         [Fact]
@@ -86,6 +89,9 @@ namespace Lidarr.Plugin.Common.Tests
             // Assert
             Assert.True(firstRunning);
             Assert.True(secondRunning);
+
+            // Cleanup
+            await dashboard.StopAsync();
         }
 
         [Fact]
@@ -102,6 +108,9 @@ namespace Lidarr.Plugin.Common.Tests
 
             // Assert
             Assert.True(ui.ClearCallCount > 0);
+
+            // Cleanup
+            await dashboard.StopAsync();
         }
 
         [Fact]
@@ -225,6 +234,9 @@ namespace Lidarr.Plugin.Common.Tests
 
             // Assert
             Assert.True(ui.ClearCallCount > 0);
+
+            // Cleanup
+            await dashboard.StopAsync();
         }
 
         [Fact]
@@ -873,6 +885,9 @@ namespace Lidarr.Plugin.Common.Tests
 
             // Assert
             Assert.True(dashboard.IsRunning);
+
+            // Cleanup
+            await dashboard.StopAsync();
         }
 
         [Fact]
@@ -944,6 +959,9 @@ namespace Lidarr.Plugin.Common.Tests
             // Assert
             // Should have more refreshes due to shorter interval
             Assert.True(ui.ClearCallCount >= 1);
+
+            // Cleanup
+            await dashboard.StopAsync();
         }
 
         [Fact]
