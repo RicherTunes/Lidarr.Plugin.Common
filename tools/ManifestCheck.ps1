@@ -254,7 +254,7 @@ if (-not $manifest.minHostVersion) {
     $warningList += "minHostVersion is not set; host compatibility cannot be enforced."
 }
 
-if ($manifest.targets) {
+if ($manifest.PSObject.Properties['targets'] -and $manifest.targets) {
     $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFrameworks', $nsmgr)
     if (-not $tfmNode) { $tfmNode = $project.SelectSingleNode('//msb:Project/msb:PropertyGroup/msb:TargetFramework', $nsmgr) }
     if (-not $tfmNode) { $tfmNode = $project.SelectSingleNode('//Project/PropertyGroup/TargetFrameworks') }
