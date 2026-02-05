@@ -58,6 +58,8 @@ Write-Host "Downloading canonical Abstractions from $Repository $Tag..." -Foregr
 # Check if gh CLI is available
 $ghAvailable = $null -ne (Get-Command gh -ErrorAction SilentlyContinue)
 
+$downloaded = $false
+
 if ($ghAvailable) {
     # Use gh CLI for authenticated downloads (handles rate limiting better)
     Write-Host "Using GitHub CLI for download"
@@ -74,16 +76,17 @@ if ($ghAvailable) {
         if ($LASTEXITCODE -ne 0) {
             throw "gh release download failed with exit code $LASTEXITCODE"
         }
+        $downloaded = $true
     }
     catch {
-        Write-Error "Failed to download from GitHub Release: $_"
-        Write-Host "Ensure the release $Tag exists and contains Abstractions assets."
-        exit 1
+        Write-Host "gh download failed: $_" -ForegroundColor Yellow
+        Write-Host "Falling back to direct HTTP download..." -ForegroundColor Yellow
     }
 }
-else {
-    # Fallback to direct HTTP download
-    Write-Host "GitHub CLI not found, using direct HTTP download"
+
+if (-not $downloaded) {
+    # Fallback to direct HTTP download (works for public repos without authentication)
+    Write-Host "Using direct HTTP download"
 
     $BaseUrl = "https://github.com/$Repository/releases/download/$Tag"
 
