@@ -680,16 +680,19 @@ function Install-CanonicalAbstractions {
                     throw "Failed to download canonical Abstractions.dll"
                 }
 
-                # Cache for future use
+                # Cache for future use and update $canonicalDll to the cached path
+                # (the temp directory is cleaned up in the finally block)
                 $cacheDir = Join-Path $CacheDirectory "v$CommonVersion"
                 if (-not (Test-Path $cacheDir)) {
                     New-Item -ItemType Directory -Path $cacheDir -Force | Out-Null
                 }
-                Copy-Item -LiteralPath $canonicalDll -Destination (Join-Path $cacheDir 'Lidarr.Plugin.Abstractions.dll') -Force
+                $cachedDllPath = Join-Path $cacheDir 'Lidarr.Plugin.Abstractions.dll'
+                Copy-Item -LiteralPath $canonicalDll -Destination $cachedDllPath -Force
                 $pdbPath = Join-Path $tempDir 'Lidarr.Plugin.Abstractions.pdb'
                 if (Test-Path $pdbPath) {
                     Copy-Item -LiteralPath $pdbPath -Destination (Join-Path $cacheDir 'Lidarr.Plugin.Abstractions.pdb') -Force
                 }
+                $canonicalDll = $cachedDllPath
                 Write-Host "Cached Abstractions for future builds" -ForegroundColor DarkGray
             }
             finally {
