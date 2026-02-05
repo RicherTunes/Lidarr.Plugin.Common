@@ -234,7 +234,7 @@ else {
             $errorList += "apiVersion major $apiMajor does not match $AbstractionsPackage major $packageMajor."
         }
     } elseif ($usingProjectRef) {
-        if (-not $manifest.commonVersion) {
+        if (-not $manifest.PSObject.Properties['commonVersion'] -or -not $manifest.commonVersion) {
             $msg = "MAN001: Using in-repo $AbstractionsPackage via ProjectReference; 'manifest.commonVersion' is required to validate apiVersion."
             if ($Strict) { $errorList += $msg } else { $warningList += $msg }
         } else {
