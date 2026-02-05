@@ -150,10 +150,10 @@ jobs:
 
       - name: Test (all TFMs) + coverage
         if: steps.changes.outputs.code_changed == 'true'
+        timeout-minutes: 15
         run: >
           dotnet test -c Release --no-build
           --filter "State!=Quarantined"
-          --blame-hang-timeout 5min
           --collect:"XPlat Code Coverage"
           --logger "trx;LogFileName=test_results.trx"
 
