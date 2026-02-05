@@ -56,10 +56,15 @@ on:
         type: string
         default: ""
       lidarr-docker-version:
-        description: "Lidarr docker tag to extract host assemblies for plugin-load gate (e.g. 'pr-plugins-3.1.1.4884')"
+        description: "Lidarr docker tag to extract host assemblies for plugin-load gate and pre-build setup (e.g. 'pr-plugins-3.1.1.4884')"
         required: false
         type: string
         default: "pr-plugins-3.1.1.4884"
+      host-assemblies-path:
+        description: "Path to populate with Lidarr host assemblies before build (e.g. 'ext/Lidarr/_output/net8.0'). When set, extracts DLLs from lidarr-docker-version image. Required for plugins that reference Lidarr host types at compile time."
+        required: false
+        type: string
+        default: ""
     secrets:
       submodules-token:
         description: "Optional token to checkout private submodules"
@@ -85,6 +90,49 @@ jobs:
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "8.0.x"
+
+      - name: Setup host assemblies (pre-build)
+        if: ${{ inputs.host-assemblies-path != '' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST_PATH="${{ inputs.host-assemblies-path }}"
+          LIDARR_TAG="${{ inputs.lidarr-docker-version }}"
+          IMAGE="ghcr.io/hotio/lidarr:${LIDARR_TAG}"
+
+          echo "Extracting Lidarr host assemblies from ${IMAGE} to ${HOST_PATH}..."
+          mkdir -p "${HOST_PATH}"
+
+          # Pull with retry
+          n=0
+          until [ "$n" -ge 3 ]; do
+            docker pull "${IMAGE}" && break
+            n=$((n+1))
+            echo "Pull attempt ${n} failed. Retrying in 10s..." && sleep 10
+          done
+
+          cid=$(docker create "${IMAGE}")
+          trap 'docker rm "${cid}" >/dev/null 2>&1 || true' EXIT
+
+          # Extract to temp dir, then copy DLLs to target
+          EXTRACT_DIR=$(mktemp -d)
+          docker cp "${cid}:/app/bin/." "${EXTRACT_DIR}" 2>/dev/null \
+            || docker cp "${cid}:/app/." "${EXTRACT_DIR}" 2>/dev/null \
+            || docker cp "${cid}:/opt/lidarr/." "${EXTRACT_DIR}" 2>/dev/null \
+            || { echo "::error::Failed to extract from container"; exit 1; }
+
+          find "${EXTRACT_DIR}" -type f -name "*.dll" -exec cp {} "${HOST_PATH}/" \;
+          rm -rf "${EXTRACT_DIR}"
+
+          # Verify critical assembly exists
+          if [ ! -f "${HOST_PATH}/Lidarr.dll" ]; then
+            echo "::error::Lidarr.dll not found after extraction to ${HOST_PATH}"
+            ls -la "${HOST_PATH}/" || true
+            exit 1
+          fi
+
+          DLL_COUNT=$(find "${HOST_PATH}" -name "*.dll" | wc -l)
+          echo "Extracted ${DLL_COUNT} assemblies to ${HOST_PATH}"
 
       - name: Package (Common tooling)
         id: package
