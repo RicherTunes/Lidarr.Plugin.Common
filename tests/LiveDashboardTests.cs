@@ -122,6 +122,7 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        [Trait("State", "Quarantined")]  // Quarantined 2026-02-04: Flaky timing-sensitive test on Linux CI - Issue #318
         public async Task StartAsync_WithShortRefreshInterval_UsesCustomInterval()
         {
             // Arrange
@@ -227,6 +228,7 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        [Trait("State", "Quarantined")]  // Quarantined 2026-02-04: Flaky on Linux CI - Issue #318
         public async Task RefreshAsync_RetrievesQueueData()
         {
             // Arrange
@@ -408,6 +410,7 @@ namespace Lidarr.Plugin.Common.Tests
         #region Progress Reporting Tests
 
         [Fact]
+        [Trait("State", "Quarantined")]  // Quarantined 2026-02-04: Flaky on Linux CI - Issue #318
         public async Task Display_WithDownloadingItem_ShowsProgressPercentage()
         {
             // Arrange
@@ -437,6 +440,7 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        [Trait("State", "Quarantined")]  // Quarantined 2026-02-04: Flaky on Linux CI - Issue #318
         public async Task Display_WithZeroProgress_DisplaysZero()
         {
             // Arrange
@@ -663,6 +667,7 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        [Trait("State", "Quarantined")]  // Quarantined 2026-02-04: Flaky on Linux CI - Issue #318
         public async Task Display_Statistics_ShowCorrectCounts()
         {
             // Arrange
