@@ -154,7 +154,7 @@ jobs:
         id: package
         shell: pwsh
         env:
-          GH_TOKEN: ${{ secrets.submodules-token || github.token }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           $ErrorActionPreference = 'Stop'
           Set-StrictMode -Version Latest
