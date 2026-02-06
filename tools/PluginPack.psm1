@@ -84,6 +84,10 @@ function Test-PluginManifest {
         $params['ResolveEntryPoints'] = $true
     }
 
+    # Reset $LASTEXITCODE before calling the manifest script to prevent stale
+    # exit codes from previous native commands (e.g., gh release download)
+    # from causing false failures.
+    $global:LASTEXITCODE = 0
     & $manifestScript @params
     if ($LASTEXITCODE -ne 0) {
         throw "Manifest validation failed for $Manifest."
