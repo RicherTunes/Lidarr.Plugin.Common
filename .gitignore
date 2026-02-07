@@ -69,7 +69,9 @@ _nupkg_extract/
 # Local Docker smoke test staging
 .docker-multi-smoke-test/
 .docker-e2e-runner-*/
-diagnostics/
+# Local diagnostic artifacts (keep src/Abstractions/Diagnostics/ tracked)
+/diagnostics/
+scripts/diagnostics/
 .e2e-test-output/
 .e2e-test-run.ps1
 .e2e-bootstrap/
