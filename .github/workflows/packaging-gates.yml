@@ -278,6 +278,70 @@ jobs:
 
           & $verifyScript -PackagePaths @($zipPath) -ExpectedSha256 $expected | Out-Null
 
+      - name: Contents manifest gate
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Set-StrictMode -Version Latest
+
+          $manifestFile = 'packaging/expected-contents.txt'
+          if (-not (Test-Path -LiteralPath $manifestFile)) {
+            Write-Host "::notice::No packaging/expected-contents.txt found -- skipping contents gate (opt-in)."
+            return
+          }
+
+          $zipPath = '${{ steps.package.outputs.zipPath }}'
+          if (-not (Test-Path -LiteralPath $zipPath)) { throw "Package not found: $zipPath" }
+
+          # Parse manifest (file names only, case-insensitive matching)
+          $required = @()
+          $forbidden = @()
+          $section = $null
+          Get-Content -LiteralPath $manifestFile | ForEach-Object {
+            $line = $_.Trim()
+            if ($line -eq '' -or $line.StartsWith('#')) { return }
+            if ($line -eq '[REQUIRED]') { $section = 'required'; return }
+            if ($line -eq '[FORBIDDEN]') { $section = 'forbidden'; return }
+            if ($section -eq 'required') { $required += $line.ToLowerInvariant() }
+            if ($section -eq 'forbidden') { $forbidden += $line.ToLowerInvariant() }
+          }
+
+          # List ZIP entry file names (leaf name only, lowercased for comparison)
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [System.IO.Compression.ZipFile]::OpenRead($zipPath)
+          try {
+            $entries = @($zip.Entries | ForEach-Object { $_.Name })
+          } finally {
+            $zip.Dispose()
+          }
+          $entriesLower = @($entries | ForEach-Object { $_.ToLowerInvariant() })
+
+          Write-Host "ZIP contains $($entries.Count) file(s): $($entries -join ', ')"
+
+          $missing = @()
+          $illegal = @()
+
+          foreach ($req in $required) {
+            if ($req -notin $entriesLower) { $missing += $req }
+          }
+
+          foreach ($entry in $entriesLower) {
+            if ($entry -in $forbidden) { $illegal += $entry }
+          }
+
+          # Single summary output
+          if (($missing.Count + $illegal.Count) -gt 0) {
+            if ($missing.Count -gt 0) {
+              Write-Host "::error::Missing REQUIRED: $($missing -join ', ')"
+            }
+            if ($illegal.Count -gt 0) {
+              Write-Host "::error::Found FORBIDDEN: $($illegal -join ', ')"
+            }
+            throw "Contents manifest gate failed: $($missing.Count) missing, $($illegal.Count) forbidden."
+          }
+
+          Write-Host "Contents manifest gate passed -- $($required.Count) required present, 0 forbidden found."
+
       - name: Plugin load gate
         if: ${{ inputs.plugin-load-gate }}
         shell: pwsh
