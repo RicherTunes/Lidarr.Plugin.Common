@@ -31,6 +31,8 @@ STAGE=false
 VERIFY=false
 VERIFY_ONLY=false
 SUBMODULE_PATH=""
+SHA_FROM_SUBMODULE=false
+UPDATE_PINS=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -49,6 +51,14 @@ while [[ $# -gt 0 ]]; do
         --path)
             SUBMODULE_PATH="$2"
             shift 2
+            ;;
+        --sha-from-submodule)
+            SHA_FROM_SUBMODULE=true
+            shift
+            ;;
+        --update-pins)
+            UPDATE_PINS=true
+            shift
             ;;
         *)
             if [[ -z "$SHA" ]]; then
@@ -69,6 +79,12 @@ if [[ -z "$SUBMODULE_PATH" ]]; then
         echo -e "${RED}Error: Could not find Common submodule. Specify --path explicitly.${NC}"
         exit 1
     fi
+fi
+
+# --sha-from-submodule mode: read SHA from submodule gitlink
+if [[ "$SHA_FROM_SUBMODULE" == true ]]; then
+    SHA=$(git -C "$SUBMODULE_PATH" rev-parse HEAD)
+    echo -e "${CYAN}Read SHA from submodule HEAD: $SHA${NC}"
 fi
 
 # --verify-only mode: CI check that gitlink matches ext-common-sha.txt
@@ -115,6 +131,13 @@ if [[ -z "$SHA" ]]; then
     exit 1
 fi
 
+# Validate 40-hex (case-insensitive), then normalize to lowercase
+if ! echo "$SHA" | grep -qiE '^[0-9a-f]{40}$'; then
+    echo -e "${RED}Error: SHA must be a 40-character hex string, got: $SHA${NC}"
+    exit 1
+fi
+SHA=$(echo "$SHA" | tr '[:upper:]' '[:lower:]')
+
 echo -e "${CYAN}Re-pinning Common submodule at: $SUBMODULE_PATH${NC}"
 echo -e "${CYAN}Target SHA: $SHA${NC}"
 
@@ -143,7 +166,7 @@ fi
 # Update ext-common-sha.txt
 SHA_FILE="ext-common-sha.txt"
 echo -e "\n${YELLOW}Updating $SHA_FILE...${NC}"
-echo -n "$SHA" > "$SHA_FILE"
+printf '%s\n' "$SHA" > "$SHA_FILE"
 
 # Verify the checkout
 echo -e "\n${YELLOW}Verifying checkout...${NC}"
@@ -153,6 +176,26 @@ if [[ "$CURRENT_SHA" != "$SHA" ]]; then
     exit 1
 fi
 echo -e "${GREEN}Checkout verified: $CURRENT_SHA${NC}"
+
+if [[ "$UPDATE_PINS" == true ]]; then
+    WORKFLOW_DIR=".github/workflows"
+    if [[ -d "$WORKFLOW_DIR" ]]; then
+        echo -e "\n${YELLOW}Updating workflow SHA pins...${NC}"
+        UPDATED=0
+        # Guard glob: only iterate if files exist. Include .yml and .yaml.
+        shopt -s nullglob
+        for f in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
+            if grep -q "RicherTunes/Lidarr\.Plugin\.Common/.*@[0-9a-f]\{40\}" "$f" 2>/dev/null; then
+                # Anchored to non-comment uses: lines; portable (no sed -i)
+                perl -pi -e "s|^(\s*uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+\@)[0-9a-f]{40}|\${1}${SHA}|g" "$f"
+                ((UPDATED++))
+                echo -e "  ${GREEN}Updated: $(basename "$f")${NC}"
+            fi
+        done
+        shopt -u nullglob
+        echo -e "${CYAN}Updated $UPDATED workflow file(s).${NC}"
+    fi
+fi
 
 # Verify submodule is clean after operation
 if [[ "$VERIFY" == true ]]; then
@@ -170,7 +213,9 @@ fi
 if [[ "$STAGE" == true ]]; then
     echo -e "\n${YELLOW}Staging changes...${NC}"
     git add "$SUBMODULE_PATH" "$SHA_FILE"
-
+    if [[ "$UPDATE_PINS" == true && -d ".github/workflows" ]]; then
+        git add ".github/workflows"
+    fi
     echo -e "\n${GREEN}Staged changes:${NC}"
     git status --short "$SUBMODULE_PATH" "$SHA_FILE"
 fi
