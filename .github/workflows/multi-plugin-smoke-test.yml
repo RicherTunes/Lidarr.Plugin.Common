@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       test_plugins:
-        description: "Comma-separated plugins to build/mount (qobuzarr,tidalarr,brainarr). Default: qobuzarr,tidalarr"
+        description: "Comma-separated plugins to build/mount (qobuzarr,tidalarr,brainarr,applemusicarr). Default: qobuzarr,tidalarr"
         required: true
         default: qobuzarr,tidalarr
       caller_plugin:
@@ -25,6 +25,10 @@ on:
         default: main
       brainarr_ref:
         description: Brainarr branch/tag/SHA (optional; defaults to caller SHA if called from Brainarr)
+        required: false
+        default: main
+      applemusicarr_ref:
+        description: AppleMusicarr branch/tag/SHA (optional; defaults to caller SHA if called from AppleMusicarr)
         required: false
         default: main
       run_medium_gate:
@@ -104,7 +108,7 @@ on:
   workflow_call:
     inputs:
       test_plugins:
-        description: "Comma-separated plugins to build/mount (qobuzarr,tidalarr,brainarr). Default: qobuzarr,tidalarr"
+        description: "Comma-separated plugins to build/mount (qobuzarr,tidalarr,brainarr,applemusicarr). Default: qobuzarr,tidalarr"
         type: string
         required: false
         default: qobuzarr,tidalarr
@@ -130,6 +134,11 @@ on:
         default: main
       brainarr_ref:
         description: Brainarr branch/tag/SHA (defaults to caller SHA if called from Brainarr)
+        type: string
+        required: false
+        default: ""
+      applemusicarr_ref:
+        description: AppleMusicarr branch/tag/SHA (defaults to caller SHA if called from AppleMusicarr)
         type: string
         required: false
         default: ""
@@ -353,6 +362,7 @@ jobs:
           INPUT_TEST_PLUGINS: ${{ inputs.test_plugins }}
           INPUT_CALLER_PLUGIN: ${{ inputs.caller_plugin }}
           INPUT_BRAINARR_REF: ${{ inputs.brainarr_ref }}
+          INPUT_APPLEMUSICARR_REF: ${{ inputs.applemusicarr_ref }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SHA: ${{ github.sha }}
         run: |
@@ -364,14 +374,17 @@ jobs:
           include_qobuzarr=false
           include_tidalarr=false
           include_brainarr=false
+          include_applemusicarr=false
 
           if echo ",$plugins_lc," | grep -q ",qobuzarr,"; then include_qobuzarr=true; fi
           if echo ",$plugins_lc," | grep -q ",tidalarr,"; then include_tidalarr=true; fi
           if echo ",$plugins_lc," | grep -q ",brainarr,"; then include_brainarr=true; fi
+          if echo ",$plugins_lc," | grep -q ",applemusicarr,"; then include_applemusicarr=true; fi
 
           echo "include_qobuzarr=$include_qobuzarr" >> "$GITHUB_OUTPUT"
           echo "include_tidalarr=$include_tidalarr" >> "$GITHUB_OUTPUT"
           echo "include_brainarr=$include_brainarr" >> "$GITHUB_OUTPUT"
+          echo "include_applemusicarr=$include_applemusicarr" >> "$GITHUB_OUTPUT"
 
           brainarr_ref="${INPUT_BRAINARR_REF:-}"
           if [[ -z "$brainarr_ref" ]]; then
@@ -383,7 +396,18 @@ jobs:
             fi
           fi
 
+          applemusicarr_ref="${INPUT_APPLEMUSICARR_REF:-}"
+          if [[ -z "$applemusicarr_ref" ]]; then
+            caller_lc="$(echo "${INPUT_CALLER_PLUGIN:-}" | tr '[:upper:]' '[:lower:]' | tr -d ' ')"
+            if [[ "$caller_lc" == "applemusicarr" || "$GITHUB_REPOSITORY" == "RicherTunes/AppleMusicarr" ]]; then
+              applemusicarr_ref="$GITHUB_SHA"
+            else
+              applemusicarr_ref="main"
+            fi
+          fi
+
           echo "brainarr_ref=$brainarr_ref" >> "$GITHUB_OUTPUT"
+          echo "applemusicarr_ref=$applemusicarr_ref" >> "$GITHUB_OUTPUT"
           echo "plugins=$plugins_lc" >> "$GITHUB_OUTPUT"
 
       - name: Checkout Qobuzarr
@@ -407,7 +431,7 @@ jobs:
           submodules: recursive
 
       - name: Checkout Brainarr
-        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_brainarr == 'true' }}   
+        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_brainarr == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: RicherTunes/Brainarr
@@ -415,6 +439,21 @@ jobs:
           path: brainarr
           token: ${{ secrets.CROSS_REPO_PAT }}
           submodules: recursive
+
+      - name: Checkout AppleMusicarr
+        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_applemusicarr == 'true' }}
+        uses: actions/checkout@v4
+        with:
+          repository: RicherTunes/AppleMusicarr
+          ref: ${{ steps.plugin_meta.outputs.applemusicarr_ref }}
+          path: applemusicarr
+          token: ${{ secrets.CROSS_REPO_PAT }}
+          submodules: false
+
+      - name: Init AppleMusicarr public submodules
+        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_applemusicarr == 'true' }}
+        working-directory: applemusicarr
+        run: git submodule update --init --depth=1 -- ext/Lidarr.Plugin.Common ext/Lidarr
 
       - name: Extract Lidarr assemblies from Docker image
         if: ${{ steps.pat.outputs.skip != 'true' }}
@@ -456,6 +495,7 @@ jobs:
           if [[ "${{ steps.plugin_meta.outputs.include_qobuzarr }}" == "true" ]]; then targets+=(qobuzarr); fi
           if [[ "${{ steps.plugin_meta.outputs.include_tidalarr }}" == "true" ]]; then targets+=(tidalarr); fi
           if [[ "${{ steps.plugin_meta.outputs.include_brainarr }}" == "true" ]]; then targets+=(brainarr); fi
+          if [[ "${{ steps.plugin_meta.outputs.include_applemusicarr }}" == "true" ]]; then targets+=(applemusicarr); fi
 
           if [[ ${#targets[@]} -eq 0 ]]; then
             echo "::error::No test plugins selected (test_plugins='${{ steps.plugin_meta.outputs.plugins }}')."
@@ -491,7 +531,7 @@ jobs:
 
           # Plugins have a Common submodule (path differs by repo casing)
           # The submodules may point to older commits, so we sync from this checkout
-          for plugin_dir in qobuzarr tidalarr brainarr; do
+          for plugin_dir in qobuzarr tidalarr brainarr applemusicarr; do
             if [ ! -d "$plugin_dir" ]; then
               continue
             fi
@@ -592,6 +632,27 @@ jobs:
             exit 1
           }
 
+      - name: Build AppleMusicarr package
+        if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_applemusicarr == 'true' }}
+        shell: pwsh
+        working-directory: applemusicarr
+        run: |
+          $buildSuccess = $false
+          try {
+            ./build.ps1 -Configuration Release -Restore -Package -VerboseOutput
+            if ($LASTEXITCODE -eq 0) { $buildSuccess = $true }
+          } catch {
+            Write-Host "build.ps1 threw exception: $_" -ForegroundColor Red
+          }
+          if (-not $buildSuccess) {
+            Write-Host ""
+            Write-Host "::group::Detailed build error output"
+            dotnet restore --verbosity quiet 2>&1 | Out-Null
+            dotnet build src/AppleMusicarr.Plugin/AppleMusicarr.Plugin.csproj --configuration Release --no-restore --verbosity normal -p:RunAnalyzersDuringBuild=false -p:EnableNETAnalyzers=false -p:TreatWarningsAsErrors=false 2>&1
+            Write-Host "::endgroup::"
+            exit 1
+          }
+
       - name: Locate plugin zips
         if: ${{ steps.pat.outputs.skip != 'true' }}
         shell: pwsh
@@ -652,13 +713,20 @@ jobs:
             $brainZip = Find-PluginZip -RepoDir 'brainarr' -NamePattern 'Brainarr'
           }
 
+          $appleZip = ""
+          if ("${{ steps.plugin_meta.outputs.include_applemusicarr }}" -eq "true") {
+            $appleZip = Find-PluginZip -RepoDir 'applemusicarr' -NamePattern 'AppleMusicarr'
+          }
+
           "QOBUZ_ZIP=$qobuzZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "TIDAL_ZIP=$tidalZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "BRAIN_ZIP=$brainZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "APPLE_ZIP=$appleZip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
           if (-not [string]::IsNullOrWhiteSpace($qobuzZip)) { Write-Host "Qobuzarr zip: $qobuzZip" }
           if (-not [string]::IsNullOrWhiteSpace($tidalZip)) { Write-Host "Tidalarr zip: $tidalZip" }
           if (-not [string]::IsNullOrWhiteSpace($brainZip)) { Write-Host "Brainarr zip: $brainZip" }
+          if (-not [string]::IsNullOrWhiteSpace($appleZip)) { Write-Host "AppleMusicarr zip: $appleZip" }
 
       - name: Validate credentials (if live gates enabled)
         if: ${{ steps.pat.outputs.skip != 'true' && (inputs.run_medium_gate || inputs.run_downloadclient_gate || inputs.run_search_gate || inputs.run_grab_gate || inputs.run_golden_persist_gate) }}
@@ -785,6 +853,7 @@ jobs:
           if (-not [string]::IsNullOrWhiteSpace($env:QOBUZ_ZIP)) { $pluginZips += "qobuzarr=$env:QOBUZ_ZIP" }
           if (-not [string]::IsNullOrWhiteSpace($env:TIDAL_ZIP)) { $pluginZips += "tidalarr=$env:TIDAL_ZIP" }
           if (-not [string]::IsNullOrWhiteSpace($env:BRAIN_ZIP)) { $pluginZips += "brainarr=$env:BRAIN_ZIP" }
+          if (-not [string]::IsNullOrWhiteSpace($env:APPLE_ZIP)) { $pluginZips += "applemusicarr=$env:APPLE_ZIP" }
           if ($pluginZips.Count -eq 0) {
             throw "No plugin zips were located. Check the build steps and the 'Locate plugin zips' output."
           }
@@ -846,5 +915,6 @@ jobs:
             ${{ env.QOBUZ_ZIP }}
             ${{ env.TIDAL_ZIP }}
             ${{ env.BRAIN_ZIP }}
+            ${{ env.APPLE_ZIP }}
             .docker-multi-smoke-test/
           if-no-files-found: warn
