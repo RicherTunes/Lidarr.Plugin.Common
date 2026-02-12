@@ -59,7 +59,7 @@ on:
         description: "Lidarr docker tag to extract host assemblies for plugin-load gate and pre-build setup (e.g. 'pr-plugins-3.1.1.4884')"
         required: false
         type: string
-        default: "pr-plugins-3.1.1.4884"
+        default: "pr-plugins-3.1.2.4913"
       host-assemblies-path:
         description: "Path to populate with Lidarr host assemblies before build (e.g. 'ext/Lidarr/_output/net8.0'). When set, extracts DLLs from lidarr-docker-version image. Required for plugins that reference Lidarr host types at compile time."
         required: false
@@ -149,6 +149,17 @@ jobs:
 
           DLL_COUNT=$(find "${HOST_PATH}" -name "*.dll" | wc -l)
           echo "Extracted ${DLL_COUNT} assemblies to ${HOST_PATH}"
+
+      - name: Runtime guardrail (.NET 8)
+        if: ${{ inputs.host-assemblies-path != '' }}
+        shell: bash
+        run: |
+          GUARDRAIL="${{ inputs.common-path }}/scripts/ci/assert-net8-runtime.sh"
+          if [ -f "$GUARDRAIL" ]; then
+            bash "$GUARDRAIL" "${{ inputs.host-assemblies-path }}"
+          else
+            echo "::warning::assert-net8-runtime.sh not found in Common — skipping guardrail"
+          fi
 
       - name: Package (Common tooling)
         id: package
