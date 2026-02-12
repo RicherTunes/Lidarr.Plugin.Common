@@ -14,7 +14,7 @@ on:
       lidarr_tag:
         description: Lidarr Docker tag (plugins branch; must support net8 plugins)
         required: true
-        default: pr-plugins-3.1.1.4884
+        default: pr-plugins-3.1.2.4913
       qobuzarr_ref:
         description: Qobuzarr branch/tag/SHA
         required: true
@@ -121,7 +121,7 @@ on:
         description: Lidarr Docker tag (plugins branch; must support net8 plugin hosts)
         type: string
         required: false
-        default: pr-plugins-3.1.1.4884
+        default: pr-plugins-3.1.2.4913
       qobuzarr_ref:
         description: Qobuzarr branch/tag/SHA
         type: string
@@ -452,6 +452,7 @@ jobs:
 
       - name: Init AppleMusicarr public submodules
         if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_applemusicarr == 'true' }}
+        shell: bash
         working-directory: applemusicarr
         run: git submodule update --init --depth=1 -- ext/Lidarr.Plugin.Common ext/Lidarr
 
@@ -517,7 +518,9 @@ jobs:
           done
 
           echo "Assembly extraction complete:"
-          ls -la qobuzarr/ext/Lidarr/_output/net8.0/Lidarr*.dll || true
+          for t in "${targets[@]}"; do
+            echo "  $t:" && ls -la "$t/ext/Lidarr/_output/net8.0/Lidarr*.dll" 2>/dev/null || true
+          done
 
           # Cleanup
           rm -rf _lidarr_extracted
