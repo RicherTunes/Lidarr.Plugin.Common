@@ -250,5 +250,9 @@ jobs:
         shell: pwsh
         run: ./scripts/tests/Test-LintCiUsesRunner.ps1
 
+      - name: Test repin script (SHA format + pin rewrite)
+        shell: pwsh
+        run: ./scripts/tests/Test-RepinScript.ps1
+
   # Remove separate test publishing to avoid third-party actions
   # pack_dry_run job intentionally omitted for PR CI; release builds handle packing
