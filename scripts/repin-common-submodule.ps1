@@ -43,7 +43,11 @@ param(
 
     [switch]$Verify,
 
-    [switch]$VerifyOnly
+    [switch]$VerifyOnly,
+
+    [switch]$ShaFromSubmoduleHead,
+
+    [switch]$UpdatePins
 )
 
 $ErrorActionPreference = "Stop"
@@ -60,6 +64,12 @@ if (-not $SubmodulePath) {
 }
 
 $shaFile = "ext-common-sha.txt"
+
+# --sha-from-submodule mode: read SHA from submodule gitlink (eliminates "passed wrong SHA" bugs)
+if ($ShaFromSubmoduleHead) {
+    $SHA = (git -C $SubmodulePath rev-parse HEAD).Trim()
+    Write-Host "Read SHA from submodule HEAD: $SHA" -ForegroundColor Cyan
+}
 
 # VerifyOnly mode: CI check that gitlink matches ext-common-sha.txt
 if ($VerifyOnly) {
@@ -103,6 +113,13 @@ if (-not $SHA) {
     exit 1
 }
 
+# Validate 40-hex (case-insensitive), then normalize to lowercase
+if ($SHA -notmatch '^[0-9a-fA-F]{40}$') {
+    Write-Host "Error: SHA must be a 40-character hex string, got: $SHA" -ForegroundColor Red
+    exit 1
+}
+$SHA = $SHA.ToLowerInvariant()
+
 Write-Host "Re-pinning Common submodule at: $SubmodulePath" -ForegroundColor Cyan
 Write-Host "Target SHA: $SHA" -ForegroundColor Cyan
 
@@ -131,7 +148,10 @@ if ($LASTEXITCODE -ne 0) {
 
 # Update ext-common-sha.txt
 Write-Host "`nUpdating $shaFile..." -ForegroundColor Yellow
-$SHA | Out-File -FilePath $shaFile -Encoding utf8 -NoNewline
+# Write SHA + LF (Unix line ending, no BOM, satisfies end-of-file-fixer)
+$absPath = Join-Path $PWD.Path $shaFile
+$bytes = [System.Text.Encoding]::ASCII.GetBytes($SHA + "`n")
+[System.IO.File]::WriteAllBytes($absPath, $bytes)
 
 # Verify the checkout
 Write-Host "`nVerifying checkout..." -ForegroundColor Yellow
@@ -140,6 +160,26 @@ if ($currentSha -ne $SHA) {
     throw "SHA mismatch after checkout. Expected: $SHA, Got: $currentSha"
 }
 Write-Host "Checkout verified: $currentSha" -ForegroundColor Green
+
+if ($UpdatePins) {
+    $workflowDir = ".github/workflows"
+    if (Test-Path $workflowDir) {
+        Write-Host "`nUpdating workflow SHA pins..." -ForegroundColor Yellow
+        # Anchored to non-comment uses: lines only
+        $pattern = '(?m)^(\s*uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+@)[0-9a-f]{40}'
+        $updated = 0
+        Get-ChildItem "$workflowDir" -Include "*.yml","*.yaml" | ForEach-Object {
+            $content = [IO.File]::ReadAllText($_.FullName)
+            $newContent = [regex]::Replace($content, $pattern, "`${1}$SHA")
+            if ($newContent -ne $content) {
+                [IO.File]::WriteAllText($_.FullName, $newContent)
+                $updated++
+                Write-Host "  Updated: $($_.Name)" -ForegroundColor Green
+            }
+        }
+        Write-Host "Updated $updated workflow file(s)." -ForegroundColor Cyan
+    }
+}
 
 # Verify submodule is clean after operation
 if ($Verify) {
@@ -156,10 +196,13 @@ if ($Verify) {
 # Stage changes if requested
 if ($Stage) {
     Write-Host "`nStaging changes..." -ForegroundColor Yellow
-    git add $SubmodulePath $shaFile
-
+    $filesToStage = @($SubmodulePath, $shaFile)
+    if ($UpdatePins -and (Test-Path ".github/workflows")) {
+        $filesToStage += ".github/workflows"
+    }
+    git add @filesToStage
     Write-Host "`nStaged changes:" -ForegroundColor Green
-    git status --short $SubmodulePath $shaFile
+    git status --short @filesToStage
 }
 
 Write-Host "`nDone! Submodule pinned to: $SHA" -ForegroundColor Green
