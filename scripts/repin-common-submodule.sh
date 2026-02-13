@@ -2,9 +2,23 @@
 #
 # Re-pins ext/Lidarr.Plugin.Common (or ext/lidarr.plugin.common) submodule to a specific SHA.
 #
-# Usage:
-#   ./repin-common-submodule.sh <SHA> [--stage] [--verify]
-#   ./repin-common-submodule.sh --verify-only  # CI mode: check gitlink matches ext-common-sha.txt
+# Usage (CI — recommended for bump-common workflows):
+#   ./repin-common-submodule.sh --sha-from-submodule --stage --path <path>
+#   ./repin-common-submodule.sh --verify-only --path <path>
+#
+# Usage (maintainer — manual from local checkout):
+#   ./repin-common-submodule.sh <SHA> [--stage] [--verify] [--update-pins]
+#
+# Flags:
+#   --sha-from-submodule   Read SHA from submodule HEAD (no manual SHA needed)
+#   --stage                Stage submodule + ext-common-sha.txt for commit
+#   --verify               Check submodule is clean before/after
+#   --verify-only          CI mode: fail if gitlink != ext-common-sha.txt; warn on stale workflow pins
+#   --update-pins          Rewrite workflow SHA pins in .github/workflows/*.yml
+#                          MANUAL ONLY — requires a PAT with 'workflows' scope to push.
+#                          CI bump workflows should NOT use this flag (GITHUB_TOKEN cannot
+#                          push .github/workflows/ changes).
+#   --path <path>          Explicit submodule path (default: auto-detect)
 #
 # Examples:
 #   ./repin-common-submodule.sh 08f04e0c938669cb1d8890e179bc3b91f9c71725 --stage --verify
@@ -12,6 +26,9 @@
 #   # After Common PR merges, get merge commit SHA and re-pin:
 #   SHA=$(gh pr view 316 --repo RicherTunes/Lidarr.Plugin.Common --json mergeCommit --jq .mergeCommit.oid)
 #   ./repin-common-submodule.sh "$SHA" --stage --verify
+#
+#   # Maintainer: also update workflow SHA pins (requires PAT):
+#   ./repin-common-submodule.sh "$SHA" --stage --verify --update-pins
 #
 #   # CI verification (fail fast if mismatch):
 #   ./repin-common-submodule.sh --verify-only
@@ -120,6 +137,29 @@ if [[ "$VERIFY_ONLY" == true ]]; then
     fi
 
     echo -e "${GREEN}Submodule verification passed.${NC}"
+
+    # Advisory: check for stale workflow SHA pins (warning only, not a failure)
+    WORKFLOW_DIR=".github/workflows"
+    if [[ -d "$WORKFLOW_DIR" ]]; then
+        STALE=0
+        shopt -s nullglob
+        for f in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
+            while IFS= read -r line; do
+                PIN_SHA=$(echo "$line" | grep -oE '@[0-9a-f]{40}' | tr -d '@')
+                if [[ -n "$PIN_SHA" && "$PIN_SHA" != "$EXPECTED_SHA" ]]; then
+                    ((STALE++)) || true
+                    echo -e "${YELLOW}WARNING: Stale workflow pin in $(basename "$f"):${NC}"
+                    echo -e "  ${YELLOW}$line${NC}"
+                    echo -e "  ${YELLOW}pinned: $PIN_SHA  expected: $EXPECTED_SHA${NC}"
+                fi
+            done < <(grep -E '^\s*uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+@[0-9a-f]{40}' "$f" 2>/dev/null)
+        done
+        shopt -u nullglob
+        if [[ "$STALE" -gt 0 ]]; then
+            echo -e "${YELLOW}$STALE stale workflow pin(s) found. Run with --update-pins to fix (requires PAT).${NC}"
+        fi
+    fi
+
     exit 0
 fi
 

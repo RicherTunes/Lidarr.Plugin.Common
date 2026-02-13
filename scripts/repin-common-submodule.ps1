@@ -6,8 +6,11 @@
     This script updates the Common submodule in a plugin repo to a specific commit SHA,
     updates ext-common-sha.txt, and optionally stages the changes for commit.
 
+    CI bump workflows should use: -ShaFromSubmoduleHead -Stage
+    Maintainers can also use -UpdatePins to rewrite workflow SHA pins (requires PAT).
+
 .PARAMETER SHA
-    The Common commit SHA to pin to. Required unless -VerifyOnly is specified.
+    The Common commit SHA to pin to. Required unless -VerifyOnly or -ShaFromSubmoduleHead is specified.
 
 .PARAMETER SubmodulePath
     Path to the submodule (default: auto-detect ext/Lidarr.Plugin.Common or ext/lidarr.plugin.common).
@@ -19,15 +22,30 @@
     If specified, verifies the submodule is clean before and after the operation.
 
 .PARAMETER VerifyOnly
-    CI mode: Only verify that ext-common-sha.txt matches the submodule gitlink. Exits non-zero on mismatch.
+    CI mode: Verify that ext-common-sha.txt matches the submodule gitlink. Exits non-zero on
+    mismatch. Also warns (non-fatal) about stale workflow SHA pins.
+
+.PARAMETER ShaFromSubmoduleHead
+    Read SHA from submodule HEAD instead of requiring an explicit -SHA parameter.
+
+.PARAMETER UpdatePins
+    Rewrite workflow SHA pins in .github/workflows/*.yml to match the new SHA.
+    MANUAL ONLY: requires a PAT with 'workflows' scope to push the changes.
+    CI bump workflows should NOT use this flag (GITHUB_TOKEN cannot push
+    .github/workflows/ changes).
 
 .EXAMPLE
+    # CI bump workflow (recommended):
+    .\repin-common-submodule.ps1 -ShaFromSubmoduleHead -Stage -SubmodulePath ext/Lidarr.Plugin.Common
+    .\repin-common-submodule.ps1 -VerifyOnly -SubmodulePath ext/Lidarr.Plugin.Common
+
+.EXAMPLE
+    # Manual re-pin with verification:
     .\repin-common-submodule.ps1 -SHA "08f04e0c938669cb1d8890e179bc3b91f9c71725" -Stage -Verify
 
 .EXAMPLE
-    # After Common PR merges, get merge commit SHA and re-pin:
-    $sha = gh pr view 316 --repo RicherTunes/Lidarr.Plugin.Common --json mergeCommit --jq .mergeCommit.oid
-    .\repin-common-submodule.ps1 -SHA $sha -Stage -Verify
+    # Maintainer: also update workflow SHA pins (requires PAT to push):
+    .\repin-common-submodule.ps1 -SHA $sha -Stage -Verify -UpdatePins
 
 .EXAMPLE
     # CI verification (fail fast if mismatch):
@@ -102,6 +120,30 @@ if ($VerifyOnly) {
     }
 
     Write-Host "Submodule verification passed." -ForegroundColor Green
+
+    # Advisory: check for stale workflow SHA pins (warning only, not a failure)
+    $workflowDir = ".github/workflows"
+    if (Test-Path $workflowDir) {
+        $pinPattern = '(?m)^\s*uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+@([0-9a-f]{40})'
+        $stale = 0
+        Get-ChildItem "$workflowDir" -Include "*.yml","*.yaml" -ErrorAction SilentlyContinue | ForEach-Object {
+            $content = [IO.File]::ReadAllText($_.FullName)
+            $matches = [regex]::Matches($content, $pinPattern)
+            foreach ($m in $matches) {
+                $pinSha = $m.Groups[1].Value
+                if ($pinSha -ne $expectedSha) {
+                    $stale++
+                    Write-Host "WARNING: Stale workflow pin in $($_.Name):" -ForegroundColor Yellow
+                    Write-Host "  $($m.Value.Trim())" -ForegroundColor Yellow
+                    Write-Host "  pinned: $pinSha  expected: $expectedSha" -ForegroundColor Yellow
+                }
+            }
+        }
+        if ($stale -gt 0) {
+            Write-Host "$stale stale workflow pin(s) found. Run with -UpdatePins to fix (requires PAT)." -ForegroundColor Yellow
+        }
+    }
+
     exit 0
 }
 
