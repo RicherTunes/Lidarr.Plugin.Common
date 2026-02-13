@@ -121,26 +121,33 @@ if ($VerifyOnly) {
 
     Write-Host "Submodule verification passed." -ForegroundColor Green
 
-    # Advisory: check for stale workflow SHA pins (warning only, not a failure)
+    # Advisory: check for stale workflow SHA pins (warning only, not a failure).
+    # Suppressed when the repo has no Common reusable-workflow references at all.
     $workflowDir = ".github/workflows"
     if (Test-Path $workflowDir) {
-        $pinPattern = '(?m)^\s*uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+@([0-9a-f]{40})'
+        $pinPattern = '^\s*uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+@([0-9a-f]{40})'
         $stale = 0
+        $totalPins = 0
         Get-ChildItem "$workflowDir" -Include "*.yml","*.yaml" -ErrorAction SilentlyContinue | ForEach-Object {
-            $content = [IO.File]::ReadAllText($_.FullName)
-            $matches = [regex]::Matches($content, $pinPattern)
-            foreach ($m in $matches) {
-                $pinSha = $m.Groups[1].Value
-                if ($pinSha -ne $expectedSha) {
-                    $stale++
-                    Write-Host "WARNING: Stale workflow pin in $($_.Name):" -ForegroundColor Yellow
-                    Write-Host "  $($m.Value.Trim())" -ForegroundColor Yellow
-                    Write-Host "  pinned: $pinSha  expected: $expectedSha" -ForegroundColor Yellow
+            $lines = [IO.File]::ReadAllLines($_.FullName)
+            for ($i = 0; $i -lt $lines.Length; $i++) {
+                $m = [regex]::Match($lines[$i], $pinPattern)
+                if ($m.Success) {
+                    $totalPins++
+                    $pinSha = $m.Groups[1].Value
+                    if ($pinSha -ne $expectedSha) {
+                        $stale++
+                        $lineNum = $i + 1
+                        Write-Host "WARNING: Stale pin in $($_.Name):$lineNum" -ForegroundColor Yellow
+                        Write-Host "  $($lines[$i].Trim())" -ForegroundColor Yellow
+                        Write-Host "  pinned: $($pinSha.Substring(0,12))...  expected: $($expectedSha.Substring(0,12))..." -ForegroundColor Yellow
+                    }
                 }
             }
         }
         if ($stale -gt 0) {
-            Write-Host "$stale stale workflow pin(s) found. Run with -UpdatePins to fix (requires PAT)." -ForegroundColor Yellow
+            Write-Host "$stale/$totalPins workflow pin(s) are stale." -ForegroundColor Yellow
+            Write-Host "Fix: .\scripts\repin-common-submodule.ps1 -SHA $expectedSha -UpdatePins -Stage" -ForegroundColor Cyan
         }
     }
 
