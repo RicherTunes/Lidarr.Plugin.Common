@@ -98,7 +98,24 @@ if ($VerifyOnly) {
         exit 1
     }
 
-    $expectedSha = (Get-Content $shaFile -Raw).Trim()
+    # Validate file format: exactly 40 lowercase hex + LF (41 bytes, no BOM, no CRLF)
+    $rawBytes = [System.IO.File]::ReadAllBytes((Join-Path $PWD.Path $shaFile))
+    $byteLen = $rawBytes.Length
+    if ($byteLen -ne 41) {
+        Write-Host "ERROR: $shaFile must be exactly 41 bytes (40 hex + LF), got $byteLen" -ForegroundColor Red
+        exit 1
+    }
+    if ($rawBytes[40] -ne 0x0A) {
+        Write-Host "ERROR: $shaFile must end with LF (0x0A), got 0x$($rawBytes[40].ToString('X2'))" -ForegroundColor Red
+        exit 1
+    }
+    $rawContent = [System.Text.Encoding]::ASCII.GetString($rawBytes, 0, 40)
+    if ($rawContent -cnotmatch '^[0-9a-f]{40}$') {
+        Write-Host "ERROR: $shaFile must contain exactly 40 lowercase hex chars, got: $rawContent" -ForegroundColor Red
+        exit 1
+    }
+
+    $expectedSha = $rawContent
     $actualSha = (git -C $SubmodulePath rev-parse HEAD).Trim()
 
     Write-Host "Expected (from $shaFile): $expectedSha" -ForegroundColor Cyan
