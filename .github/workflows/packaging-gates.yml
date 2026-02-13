@@ -137,7 +137,7 @@ jobs:
             || docker cp "${cid}:/opt/lidarr/." "${EXTRACT_DIR}" 2>/dev/null \
             || { echo "::error::Failed to extract from container"; exit 1; }
 
-          find "${EXTRACT_DIR}" -type f -name "*.dll" -exec cp {} "${HOST_PATH}/" \;
+          find "${EXTRACT_DIR}" -type f \( -name "*.dll" -o -name "*.json" \) -exec cp {} "${HOST_PATH}/" \;
           rm -rf "${EXTRACT_DIR}"
 
           # Verify critical assembly exists
