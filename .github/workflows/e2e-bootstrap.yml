@@ -1551,7 +1551,7 @@ jobs:
 
       - name: Upload run manifest
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: run-manifest
           path: run-manifest.json
@@ -1559,7 +1559,7 @@ jobs:
 
       - name: Upload diagnostics bundle
         if: failure() || inputs.upload_diagnostics_on_success
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: e2e-diagnostics-${{ github.run_id }}
           path: |
@@ -1570,7 +1570,7 @@ jobs:
 
       - name: Upload plugin zips (on failure)
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: plugin-packages
           path: |
@@ -2079,7 +2079,7 @@ jobs:
 
       - name: Upload canary diagnostics
         if: failure()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: e2e-canary-diagnostics-${{ github.run_id }}
           path: .e2e-canary/diagnostics/
