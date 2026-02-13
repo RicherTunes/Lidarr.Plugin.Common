@@ -253,7 +253,7 @@ jobs:
           echo "Secret validation complete"
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
@@ -1647,7 +1647,7 @@ jobs:
           if (-not $result) { throw "Redaction self-test failed" }
 
       - name: Setup .NET SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
 
