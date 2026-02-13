@@ -338,7 +338,7 @@ jobs:
       - name: Cache host override DLL
         if: steps['host-override'].outputs.use_override == 'true'
         id: cache-host-override
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           # Cache includes both DLL and its SHA256 checksum for verification
           path: |
@@ -497,7 +497,7 @@ jobs:
 
       - name: Cache Lidarr assemblies
         id: cache-lidarr-assemblies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: _lidarr_assemblies
           # Use image digest (immutable) instead of tag (mutable) to prevent cache poisoning
