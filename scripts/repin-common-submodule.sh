@@ -138,25 +138,33 @@ if [[ "$VERIFY_ONLY" == true ]]; then
 
     echo -e "${GREEN}Submodule verification passed.${NC}"
 
-    # Advisory: check for stale workflow SHA pins (warning only, not a failure)
+    # Advisory: check for stale workflow SHA pins (warning only, not a failure).
+    # Suppressed when the repo has no Common reusable-workflow references at all.
     WORKFLOW_DIR=".github/workflows"
     if [[ -d "$WORKFLOW_DIR" ]]; then
         STALE=0
+        TOTAL_PINS=0
         shopt -s nullglob
         for f in "$WORKFLOW_DIR"/*.yml "$WORKFLOW_DIR"/*.yaml; do
+            LINENO_CTR=0
             while IFS= read -r line; do
-                PIN_SHA=$(echo "$line" | grep -oE '@[0-9a-f]{40}' | tr -d '@')
-                if [[ -n "$PIN_SHA" && "$PIN_SHA" != "$EXPECTED_SHA" ]]; then
-                    ((STALE++)) || true
-                    echo -e "${YELLOW}WARNING: Stale workflow pin in $(basename "$f"):${NC}"
-                    echo -e "  ${YELLOW}$line${NC}"
-                    echo -e "  ${YELLOW}pinned: $PIN_SHA  expected: $EXPECTED_SHA${NC}"
+                ((LINENO_CTR++)) || true
+                if echo "$line" | grep -qE 'uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+@[0-9a-f]{40}'; then
+                    ((TOTAL_PINS++)) || true
+                    PIN_SHA=$(echo "$line" | grep -oE '@[0-9a-f]{40}' | tr -d '@')
+                    if [[ -n "$PIN_SHA" && "$PIN_SHA" != "$EXPECTED_SHA" ]]; then
+                        ((STALE++)) || true
+                        echo -e "${YELLOW}WARNING: Stale pin in $(basename "$f"):$LINENO_CTR${NC}"
+                        echo -e "  ${YELLOW}$(echo "$line" | sed 's/^[[:space:]]*//')${NC}"
+                        echo -e "  ${YELLOW}pinned: ${PIN_SHA:0:12}...  expected: ${EXPECTED_SHA:0:12}...${NC}"
+                    fi
                 fi
-            done < <(grep -E '^\s*uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+@[0-9a-f]{40}' "$f" 2>/dev/null)
+            done < "$f"
         done
         shopt -u nullglob
         if [[ "$STALE" -gt 0 ]]; then
-            echo -e "${YELLOW}$STALE stale workflow pin(s) found. Run with --update-pins to fix (requires PAT).${NC}"
+            echo -e "${YELLOW}${STALE}/${TOTAL_PINS} workflow pin(s) are stale.${NC}"
+            echo -e "${CYAN}Fix: ./scripts/repin-common-submodule.sh $EXPECTED_SHA --update-pins --stage${NC}"
         fi
     fi
 
