@@ -24,6 +24,18 @@ namespace Lidarr.Plugin.Common.Tests
             return new NetworkResilienceService(logger ?? Mock.Of<ILogger<NetworkResilienceService>>());
         }
 
+        /// <summary>
+        /// Synchronous IProgress&lt;T&gt; that invokes the callback immediately on the caller thread.
+        /// Unlike <see cref="Progress{T}"/>, this never drops callbacks because it bypasses
+        /// SynchronizationContext.Post (which can coalesce rapid updates in test environments).
+        /// </summary>
+        private class SynchronousProgress<T> : IProgress<T>
+        {
+            private readonly Action<T> _handler;
+            public SynchronousProgress(Action<T> handler) => _handler = handler;
+            public void Report(T value) => _handler(value);
+        }
+
         private static async Task<string> SuccessProcessor(string item, CancellationToken ct)
         {
             await Task.CompletedTask;
@@ -437,7 +449,7 @@ namespace Lidarr.Plugin.Common.Tests
             var items = Enumerable.Range(1, 25).Select(i => $"item{i}").ToList();
             var progressReports = new List<BatchProgress>();
 
-            var progress = new Progress<BatchProgress>(p => progressReports.Add(p));
+            var progress = new SynchronousProgress<BatchProgress>(p => progressReports.Add(p));
 
             // Act
             var result = await service.ExecuteResilientBatchAsync(
@@ -500,7 +512,7 @@ namespace Lidarr.Plugin.Common.Tests
             var service = CreateService();
             var items = new[] { "item1", "item2", "item3" };
             var progressReports = new List<BatchProgress>();
-            var progress = new Progress<BatchProgress>(p => progressReports.Add(p));
+            var progress = new SynchronousProgress<BatchProgress>(p => progressReports.Add(p));
 
             // Act
             var result = await service.ExecuteResilientBatchAsync(
@@ -512,9 +524,7 @@ namespace Lidarr.Plugin.Common.Tests
 
             // Assert
             Assert.True(result.IsSuccessful);
-            // Progress<T> may coalesce reports, so we check that we got at least some
-            // and that the final report shows completion
-            Assert.True(progressReports.Count >= 1);
+            Assert.Equal(3, progressReports.Count);
             var finalReport = progressReports[^1];
             // Stable assertions: TotalItems is deterministic, and completion means all processed
             Assert.Equal(3, finalReport.TotalItems);
@@ -531,7 +541,7 @@ namespace Lidarr.Plugin.Common.Tests
             var service = CreateService();
             var items = new[] { "item1", "item2", "item3" };
             var progressReports = new List<BatchProgress>();
-            var progress = new Progress<BatchProgress>(p => progressReports.Add(p));
+            var progress = new SynchronousProgress<BatchProgress>(p => progressReports.Add(p));
 
             async Task<string> PartialFailureProcessor(string item, CancellationToken ct)
             {
