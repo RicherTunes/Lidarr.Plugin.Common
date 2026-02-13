@@ -188,7 +188,7 @@ if [[ "$UPDATE_PINS" == true ]]; then
             if grep -q "RicherTunes/Lidarr\.Plugin\.Common/.*@[0-9a-f]\{40\}" "$f" 2>/dev/null; then
                 # Anchored to non-comment uses: lines; portable (no sed -i)
                 perl -pi -e "s|^(\s*uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+\@)[0-9a-f]{40}|\${1}${SHA}|g" "$f"
-                ((UPDATED++))
+                ((UPDATED++)) || true
                 echo -e "  ${GREEN}Updated: $(basename "$f")${NC}"
             fi
         done
