@@ -911,7 +911,7 @@ jobs:
 
       - name: Upload smoke artifacts
         if: ${{ always() && steps.pat.outputs.skip != 'true' }}
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: multi-plugin-smoke-${{ matrix.name }}-artifacts
           path: |
