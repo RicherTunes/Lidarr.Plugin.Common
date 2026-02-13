@@ -115,7 +115,19 @@ if [[ "$VERIFY_ONLY" == true ]]; then
         exit 1
     fi
 
-    EXPECTED_SHA=$(cat "$SHA_FILE" | tr -d '[:space:]')
+    # Validate file format: exactly 40 lowercase hex + LF (41 bytes, no BOM, no CRLF)
+    BYTE_LEN=$(wc -c < "$SHA_FILE")
+    if [[ "$BYTE_LEN" -ne 41 ]]; then
+        echo -e "${RED}ERROR: $SHA_FILE must be exactly 41 bytes (40 hex + LF), got $BYTE_LEN${NC}"
+        echo -e "${YELLOW}Fix: Run ./scripts/repin-common-submodule.sh --sha-from-submodule --stage${NC}"
+        exit 1
+    fi
+    EXPECTED_SHA=$(head -c 40 "$SHA_FILE")
+    if ! echo "$EXPECTED_SHA" | grep -qE '^[0-9a-f]{40}$'; then
+        echo -e "${RED}ERROR: $SHA_FILE must contain exactly 40 lowercase hex chars${NC}"
+        echo -e "${RED}Got: $EXPECTED_SHA${NC}"
+        exit 1
+    fi
     ACTUAL_SHA=$(git -C "$SUBMODULE_PATH" rev-parse HEAD)
 
     echo -e "Expected (from $SHA_FILE): ${CYAN}$EXPECTED_SHA${NC}"
