@@ -15,6 +15,30 @@ updates:
     labels:
       - "dependencies"
       - "automated"
+    # Host-boundary packages: types cross plugin<->host boundary via NzbDrone APIs.
+    # Bumping major versions causes type-identity conflicts at runtime.
+    # Only bump when the Lidarr host itself upgrades first.
+    ignore:
+      - dependency-name: "FluentValidation"
+        versions: [">=12.0.0"]
+      - dependency-name: "Microsoft.Extensions.DependencyInjection"
+        versions: [">=9.0.0"]
+      - dependency-name: "Microsoft.Extensions.DependencyInjection.Abstractions"
+        versions: [">=9.0.0"]
+      - dependency-name: "Microsoft.Extensions.Caching.Memory"
+        versions: [">=9.0.0"]
+      - dependency-name: "Microsoft.Extensions.Caching.Abstractions"
+        versions: [">=9.0.0"]
+      - dependency-name: "Microsoft.Extensions.Configuration"
+        versions: [">=9.0.0"]
+      - dependency-name: "Microsoft.Extensions.Configuration.EnvironmentVariables"
+        versions: [">=9.0.0"]
+      - dependency-name: "Microsoft.Extensions.Logging.Abstractions"
+        versions: [">=9.0.0"]
+      - dependency-name: "Microsoft.AspNetCore.DataProtection"
+        versions: [">=9.0.0"]
+      - dependency-name: "JsonSchema.Net"
+        versions: [">=8.0.0"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
