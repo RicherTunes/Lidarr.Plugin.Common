@@ -157,3 +157,21 @@ Describe 'Docker exit-code guardrails' {
         $content | Should -Match 'if\s*\(\$runExit\s*-ne\s*0\)'
     }
 }
+
+Describe 'Warning budget hooks' {
+
+    It 'Defines optional warning budget config keys' {
+        $content = Get-Content -LiteralPath $script:LocalCiScript -Raw
+
+        $content | Should -Match "WarningBudget"
+        $content | Should -Match "WarningBudgetEnforce"
+    }
+
+    It 'Emits warning budget summary output and total warning counters' {
+        $content = Get-Content -LiteralPath $script:LocalCiScript -Raw
+
+        $content | Should -Match '\$totalWarnings\s*='
+        $content | Should -Match 'WARNING BUDGET'
+        $content | Should -Match 'build=\$\(\$script:BuildWarningCount\)'
+    }
+}
