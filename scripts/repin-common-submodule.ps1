@@ -142,10 +142,14 @@ if ($VerifyOnly) {
     # Suppressed when the repo has no Common reusable-workflow references at all.
     $workflowDir = ".github/workflows"
     if (Test-Path $workflowDir) {
+        $workflowFiles = @(
+            Get-ChildItem -Path $workflowDir -File -Filter "*.yml" -ErrorAction SilentlyContinue
+            Get-ChildItem -Path $workflowDir -File -Filter "*.yaml" -ErrorAction SilentlyContinue
+        )
         $pinPattern = '^\s*uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+@([0-9a-f]{40})'
         $stale = 0
         $totalPins = 0
-        Get-ChildItem "$workflowDir" -Include "*.yml","*.yaml" -ErrorAction SilentlyContinue | ForEach-Object {
+        $workflowFiles | ForEach-Object {
             $lines = [IO.File]::ReadAllLines($_.FullName)
             for ($i = 0; $i -lt $lines.Length; $i++) {
                 $m = [regex]::Match($lines[$i], $pinPattern)
@@ -230,11 +234,15 @@ Write-Host "Checkout verified: $currentSha" -ForegroundColor Green
 if ($UpdatePins) {
     $workflowDir = ".github/workflows"
     if (Test-Path $workflowDir) {
+        $workflowFiles = @(
+            Get-ChildItem -Path $workflowDir -File -Filter "*.yml" -ErrorAction SilentlyContinue
+            Get-ChildItem -Path $workflowDir -File -Filter "*.yaml" -ErrorAction SilentlyContinue
+        )
         Write-Host "`nUpdating workflow SHA pins..." -ForegroundColor Yellow
         # Anchored to non-comment uses: lines only
         $pattern = '(?m)^(\s*uses:\s+RicherTunes/Lidarr\.Plugin\.Common/.+@)[0-9a-f]{40}'
         $updated = 0
-        Get-ChildItem "$workflowDir" -Include "*.yml","*.yaml" | ForEach-Object {
+        $workflowFiles | ForEach-Object {
             $content = [IO.File]::ReadAllText($_.FullName)
             $newContent = [regex]::Replace($content, $pattern, "`${1}$SHA")
             if ($newContent -ne $content) {
