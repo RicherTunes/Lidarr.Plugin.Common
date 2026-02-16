@@ -37,7 +37,7 @@ Full ecosystem parity is achieved when:
 - [x] All four plugins validate manifest entrypoints via -ResolveEntryPoints
 - [x] All four plugins enforce non-negotiable CI gates via the reusable workflow in `lidarr.plugin.common` (`.github/workflows/packaging-gates.yml`)
 - [x] Abstractions plugin-load gate (`IPlugin`) is enforced in CI for Tidalarr and AppleMusicarr
-- [ ] Both streaming plugins (Qobuzarr, Tidalarr) produce identical filename format on multi-disc and edge sanitization
+- [x] Both streaming plugins (Qobuzarr, Tidalarr) produce identical filename format on multi-disc and edge sanitization
 - [x] AppleMusicarr token protection migrated to Common facade (Common-encrypted; no legacy formats)
 - [x] Persistent single-plugin E2E gate is enforced in CI for Qobuzarr, Tidalarr, and Brainarr (Schema gate required; higher gates opt-in with credentials)
 - [ ] Multi-plugin schema gate passes for 2+ plugins (when host supports)
@@ -506,6 +506,7 @@ if (Uri.TryCreate(target, UriKind.Absolute, out var absolute) &&
 
 | Date | Change |
 |------|--------|
+| 2026-02-16 | Streaming filename parity completed: Qobuzarr and Tidalarr now delegate track naming to `FileSystemUtilities.CreateTrackFileName` (multi-disc + sanitization contract aligned) |
 | 2026-02-16 | DoD update: plugin-load gate now enforced for Tidalarr + AppleMusicarr in CI callers; packaging policy assertion tests confirmed in all plugins |
 | 2026-01-19 | XP1 fixed: file:// URI on Linux; AppleMusicarr#23 merged |
 | 2026-01-19 | XP5 fixed + Docker verified: Brainarr top-up test flakiness (PR #387) |
