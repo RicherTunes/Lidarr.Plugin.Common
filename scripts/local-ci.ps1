@@ -170,8 +170,9 @@ Write-Host "  .NET SDK: $dotnetVersion" -ForegroundColor DarkGray
 # Check Docker (only if we need it)
 if (-not $SkipExtract -or $IncludeSmoke) {
     Write-Host "Checking Docker..."
-    & docker version --format '{{.Server.Version}}' 2>$null | Out-Null
-    if ($LASTEXITCODE -ne 0) {
+    $dockerVersionOutput = & docker version --format '{{.Server.Version}}' 2>&1
+    $dockerVersionExit = $LASTEXITCODE
+    if ($dockerVersionExit -ne 0) {
         Write-Host "PREFLIGHT FAIL: Docker not available. Install Docker Desktop or use -SkipExtract." -ForegroundColor Red
         exit 1
     }
@@ -236,8 +237,11 @@ if ($SkipExtract) {
         if ($pullExit -ne 0) { throw "docker pull failed for $image" }
 
         Write-Host "  Extracting assemblies..."
-        $containerId = (& docker create $image 2>&1) | Select-Object -Last 1
-        if ($LASTEXITCODE -ne 0 -or -not $containerId) { throw "docker create failed" }
+        $createOutput = & docker create $image 2>&1
+        $createExit = $LASTEXITCODE
+        $createOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+        $containerId = $createOutput | Select-Object -Last 1
+        if ($createExit -ne 0 -or -not $containerId) { throw "docker create failed" }
 
         try {
             # Ensure destination exists
@@ -509,13 +513,15 @@ if ($IncludeSmoke) {
 
         try {
             & docker rm -f $containerName 2>$null | Out-Null
-            & docker run -d --name $containerName `
+            $runOutput = & docker run -d --name $containerName `
                 -v "${smokeDir}:/plugins/$repoName" `
                 -e "PUID=1000" -e "PGID=1000" `
                 -p 8686:8686 `
-                $image 2>&1 | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+                $image 2>&1
+            $runExit = $LASTEXITCODE
+            $runOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
 
-            if ($LASTEXITCODE -ne 0) { throw "Failed to start Lidarr container" }
+            if ($runExit -ne 0) { throw "Failed to start Lidarr container" }
 
             # Wait for API readiness (up to 60s)
             $maxWait = 60
