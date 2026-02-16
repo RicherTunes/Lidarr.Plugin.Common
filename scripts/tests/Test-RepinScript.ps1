@@ -206,6 +206,13 @@ try {
         $remaining.Count -eq 0
     }
 
+    # Test 16: Script uses explicit -Path/-Filter workflow discovery (works in root dir mode)
+    Test-Assertion "Workflow file discovery uses -Path and -Filter" {
+        $scriptText = [IO.File]::ReadAllText($RepinPs1)
+        ($scriptText -match 'Get-ChildItem -Path \$workflowDir -File -Filter "\*\.yml"') -and
+        ($scriptText -match 'Get-ChildItem -Path \$workflowDir -File -Filter "\*\.yaml"')
+    }
+
 } finally {
     # Cleanup
     Remove-Item -Recurse -Force $TempDir -ErrorAction SilentlyContinue
