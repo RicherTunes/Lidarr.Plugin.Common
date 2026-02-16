@@ -134,3 +134,26 @@ Describe 'Config contract: all required keys' {
         }
     }
 }
+
+Describe 'Docker exit-code guardrails' {
+
+    It 'Captures docker version exit status before branching' {
+        $content = Get-Content -LiteralPath $script:LocalCiScript -Raw
+
+        $content | Should -Match '\$dockerVersionOutput\s*=\s*&\s*docker version --format'
+        $content | Should -Match '\$dockerVersionExit\s*=\s*\$LASTEXITCODE'
+        $content | Should -Match 'if\s*\(\$dockerVersionExit\s*-ne\s*0\)'
+    }
+
+    It 'Captures docker create and run exits with dedicated variables' {
+        $content = Get-Content -LiteralPath $script:LocalCiScript -Raw
+
+        $content | Should -Match '\$createOutput\s*=\s*&\s*docker create'
+        $content | Should -Match '\$createExit\s*=\s*\$LASTEXITCODE'
+        $content | Should -Match 'if\s*\(\$createExit\s*-ne\s*0\s*-or\s*-not\s*\$containerId\)'
+
+        $content | Should -Match '\$runOutput\s*=\s*&\s*docker run -d'
+        $content | Should -Match '\$runExit\s*=\s*\$LASTEXITCODE'
+        $content | Should -Match 'if\s*\(\$runExit\s*-ne\s*0\)'
+    }
+}
