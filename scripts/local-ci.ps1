@@ -15,7 +15,8 @@
       RepoName, PluginCsproj, ManifestPath, MainDll, HostAssembliesPath,
       CommonPath, LidarrDockerVersion, ExpectedContentsFile
     Optional keys:
-      SolutionFile, BuildFlags, TestProjects, PackageParams
+      SolutionFile, BuildFlags, TestProjects, PackageParams,
+      WarningBudget, WarningBudgetEnforce
 
 .PARAMETER SkipExtract
     Reuse previously extracted host assemblies (fast rerun).
@@ -50,6 +51,9 @@ Set-StrictMode -Version Latest
 
 $script:StageResults = [ordered]@{}
 $script:TotalStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+$script:BuildWarningCount = 0
+$script:TestBuildWarningCount = 0
+$script:TestRunWarningCount = 0
 
 function Write-Stage {
     param([string]$Name, [string]$Status, [string]$Detail = '', [int]$Seconds = 0)
@@ -112,6 +116,25 @@ function Invoke-Stage {
     }
 }
 
+function Get-WarningCountFromOutput {
+    param([object[]]$OutputLines)
+
+    if (-not $OutputLines) {
+        return 0
+    }
+
+    $text = ($OutputLines | ForEach-Object { "$_" }) -join "`n"
+
+    # Prefer MSBuild summary count when available.
+    $summaryMatches = [regex]::Matches($text, '(?im)^\s*(\d+)\s+Warning\(s\)\s*$')
+    if ($summaryMatches.Count -gt 0) {
+        return [int]$summaryMatches[$summaryMatches.Count - 1].Groups[1].Value
+    }
+
+    # Fallback: count warning lines.
+    return [regex]::Matches($text, '(?im):\s*warning\s').Count
+}
+
 # ── Stage 0: PREFLIGHT ──────────────────────────────────────────────────
 
 $requiredKeys = @(
@@ -136,6 +159,8 @@ $solutionFile   = $Config['SolutionFile']
 $buildFlags     = $Config['BuildFlags']
 $testProjects   = $Config['TestProjects']
 $packageParams  = $Config['PackageParams']
+$warningBudget  = if ($Config.ContainsKey('WarningBudget') -and $Config.WarningBudget -ne $null -and "$($Config.WarningBudget)".Trim()) { [int]$Config.WarningBudget } else { $null }
+$warningBudgetEnforce = [bool]$Config['WarningBudgetEnforce']
 
 # Validate Common submodule
 if (-not (Test-Path -LiteralPath $commonPath)) {
@@ -325,7 +350,9 @@ $buildOk = Invoke-Stage -Name 'BUILD' -Number "$currentStage/5" -Required -Actio
     $buildOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
     if ($buildExit -ne 0) { throw "dotnet build failed" }
 
-    $null  # no detail string
+    $buildWarnings = Get-WarningCountFromOutput -OutputLines $buildOutput
+    $script:BuildWarningCount = $buildWarnings
+    "Warnings: $buildWarnings"
 }
 if (-not $buildOk) { $SkipTests = $true }
 
@@ -447,6 +474,7 @@ if ($SkipTests) {
             $tbExit = $LASTEXITCODE
             $tbOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
             if ($tbExit -ne 0) { throw "Test project build failed: $testProj" }
+            $script:TestBuildWarningCount += Get-WarningCountFromOutput -OutputLines $tbOutput
 
             # Run tests with hermetic E2E filter
             $resultsDir = Join-Path ([System.IO.Path]::GetTempPath()) "local-ci-trx-$([guid]::NewGuid().ToString('N').Substring(0,8))"
@@ -462,6 +490,7 @@ if ($SkipTests) {
             $testOutput = & dotnet test @testArgs 2>&1
             $testExitCode = $LASTEXITCODE
             $testOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+            $script:TestRunWarningCount += Get-WarningCountFromOutput -OutputLines $testOutput
 
             # Parse TRX for counts
             $trxFiles = Get-ChildItem -Path $resultsDir -Filter '*.trx' -ErrorAction SilentlyContinue
@@ -488,7 +517,8 @@ if ($SkipTests) {
             throw "$totalFailed test(s) failed"
         }
 
-        "$totalPassed passed, $totalFailed failed" + $(if ($totalSkipped) { ", $totalSkipped skipped" } else { '' })
+        $stageWarningTotal = $script:TestBuildWarningCount + $script:TestRunWarningCount
+        "$totalPassed passed, $totalFailed failed" + $(if ($totalSkipped) { ", $totalSkipped skipped" } else { '' }) + ", warnings: $stageWarningTotal"
     }
 }
 
@@ -574,6 +604,26 @@ foreach ($stage in $script:StageResults.Keys) {
     Write-Stage -Name $stage -Status $r.Status -Detail $r.Detail -Seconds $r.Seconds
     if ($r.Status -eq 'FAIL') { $allPassed = $false }
 }
+
+$totalWarnings = [int]($script:BuildWarningCount + $script:TestBuildWarningCount + $script:TestRunWarningCount)
+if ($warningBudget -ne $null) {
+    if ($totalWarnings -le $warningBudget) {
+        Write-Host "  WARNING BUDGET ...................... PASS  ($totalWarnings/$warningBudget)" -ForegroundColor Green
+    }
+    else {
+        if ($warningBudgetEnforce) {
+            Write-Host "  WARNING BUDGET ...................... FAIL  ($totalWarnings/$warningBudget, enforced)" -ForegroundColor Red
+            $allPassed = $false
+        }
+        else {
+            Write-Host "  WARNING BUDGET ...................... WARN  ($totalWarnings/$warningBudget, non-blocking)" -ForegroundColor Yellow
+        }
+    }
+}
+else {
+    Write-Host "  WARNINGS OBSERVED ................... INFO  ($totalWarnings)" -ForegroundColor DarkGray
+}
+Write-Host "      build=$($script:BuildWarningCount), test-build=$($script:TestBuildWarningCount), test-run=$($script:TestRunWarningCount)" -ForegroundColor DarkGray
 
 Write-Host ""
 Write-Host "=======================================" -ForegroundColor Cyan
