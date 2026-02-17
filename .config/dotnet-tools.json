@@ -3,7 +3,7 @@
   "isRoot": true,
   "tools": {
     "publicapigenerator.tool": {
-      "version": "11.4.6",
+      "version": "11.5.4",
       "commands": [
         "generate-public-api"
       ],
