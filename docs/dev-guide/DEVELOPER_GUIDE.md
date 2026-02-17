@@ -3,7 +3,7 @@
 Best practices for library and plugin contributors. For quick tasks, jump to the [how-to guides](../how-to/).
 
 ## Assembly load isolation
-Summary only. The canonical reference lives in [Plugin isolation](../concepts/PLUGIN_ISOLATION.md).
+Summary only. The canonical reference lives in [Plugin isolation](../PLUGIN_ISOLATION.md).
 
 - Reference `Lidarr.Plugin.Abstractions` as compile-time only.
 - Ship `Lidarr.Plugin.Common` next to your plugin DLL.
