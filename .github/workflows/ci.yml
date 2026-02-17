@@ -55,7 +55,10 @@ jobs:
           # Use the testable classifier script for consistency
           # See scripts/ci/is-code-changed.sh for rules and scripts/ci/test-change-detection.sh for tests
           if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch origin ${{ github.base_ref }} --depth=1
+            # Fetch base branch ref for diff. Use token URL to avoid credential prompt
+            # failures on Windows where actions/checkout's credential helper doesn't persist.
+            git fetch "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+              "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" --depth=1
             CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
             CODE_CHANGED=$(printf '%s' "$CHANGED" | bash scripts/ci/is-code-changed.sh)
             echo "code_changed=$CODE_CHANGED" >> $GITHUB_OUTPUT
