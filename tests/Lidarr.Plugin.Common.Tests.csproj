@@ -17,7 +17,7 @@
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="8.5.0" />
     <PackageReference Include="JsonSchema.Net" Version="7.4.0" />
     <!-- Required for LiveDashboardTests - main project has PrivateAssets="All" -->
-    <PackageReference Include="Spectre.Console" Version="0.50.0" />
+    <PackageReference Include="Spectre.Console" Version="0.54.0" />
     <!-- Required because Common has PrivateAssets=all for FluentValidation,
          so the transitive reference does not flow to test project -->
     <PackageReference Include="FluentValidation" Version="11.12.0" />
