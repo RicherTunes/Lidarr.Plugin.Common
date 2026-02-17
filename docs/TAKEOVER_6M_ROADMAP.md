@@ -53,7 +53,7 @@ This document is the **canonical source of truth** for the autonomous AI takeove
 
 **Goal:** All 4 plugins have one-command local merge validation via `verify-local.ps1`.
 
-**Status:** In Verification -- scripts exist in all repos but phase requires dated evidence before marking complete.
+**Status:** Complete.
 
 **Exit Criteria (each requires per-repo evidence):**
 
@@ -92,7 +92,7 @@ Common local-ci.ps1 exists:                                            -> 2026-0
 | Confidence calibration error | < 15% (predicted vs actual accept rate per band) |
 | Golden fixture count | >= 1 per provider (minimum 5 providers) |
 
-**Implementation Status:** Code merged, DoD pending.
+**Implementation Status:** Complete.
 
 **Evidence:**
 
@@ -105,7 +105,9 @@ Common local-ci.ps1 exists:                                            -> 2026-0
 
 - Common PR: https://github.com/RicherTunes/Lidarr.Plugin.Common/pull/380 (merged)
 - Brainarr PR: https://github.com/RicherTunes/Brainarr/pull/499 (merged 2026-02-16)
-- Tests: 35 new (10 calibration + 21 golden fixtures + 4 accuracy measurement), 2352 total passed
+- Brainarr DoD closure PR: https://github.com/RicherTunes/Brainarr/pull/503 (merged 2026-02-17) — Common submodule bump, contract import, EnableProviderCalibration feature flag
+- Tests: 35 new (10 calibration + 21 golden fixtures + 4 accuracy measurement), 2415 total passed after DoD closure
+- Local verification: `pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests` -> exit 0 (2026-02-17)
 
 ---
 
@@ -128,7 +130,7 @@ Common local-ci.ps1 exists:                                            -> 2026-0
 | Simulate latency p95 | < 2s |
 | Auto-actions without idempotency key | 0 |
 
-**Implementation Status:** Code merged, DoD pending.
+**Implementation Status:** Complete.
 
 **Evidence:**
 
@@ -141,6 +143,7 @@ Common local-ci.ps1 exists:                                            -> 2026-0
 
 - Brainarr PR: https://github.com/RicherTunes/Brainarr/pull/500 (merged 2026-02-16)
 - Tests: 25/25 gap planner tests (budget caps, simulation, monotonicity, golden fixtures, backwards compat)
+- Local verification: `pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests` -> exit 0 (2026-02-17)
 
 ---
 
@@ -163,7 +166,7 @@ Common local-ci.ps1 exists:                                            -> 2026-0
 | Cooldown default | 15 minutes between auto-runs |
 | Rollback coverage | 100% of apply actions reversible |
 
-**Implementation Status:** Code merged, DoD pending.
+**Implementation Status:** Complete.
 
 **Evidence:**
 
@@ -175,6 +178,7 @@ Common local-ci.ps1 exists:                                            -> 2026-0
 
 - Brainarr PR: https://github.com/RicherTunes/Brainarr/pull/501 (merged 2026-02-16)
 - Tests: 16/16 queue triage UX tests (explainer, cooldown, batch cap, operator identity, safety/rollback)
+- Local verification: `pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests` -> exit 0 (2026-02-17)
 
 ---
 
@@ -318,4 +322,4 @@ Baselines to be measured at Phase 12 start:
 ---
 
 *Created: 2026-02-16*
-*Last updated: 2026-02-16 — Evidence blocks added for Phases 12-17*
+*Last updated: 2026-02-17 — Phases 13-16 marked Complete with DoD evidence; Phase 14 DoD closure PR #503 added*
