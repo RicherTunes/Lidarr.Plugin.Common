@@ -101,7 +101,15 @@
     "DPAPI",
     "dpapi",
     "libsecret",
-    "dataprotection"
+    "dataprotection",
+    "explainability",
+    "cooldown",
+    "cooldowns",
+    "simulategapplan",
+    "applygapplan",
+    "rollbackgapplan",
+    "gitlink",
+    "actuals"
   ],
   "ignorePaths": [
     "**/bin",
