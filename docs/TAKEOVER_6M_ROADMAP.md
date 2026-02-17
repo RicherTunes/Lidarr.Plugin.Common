@@ -62,14 +62,14 @@ This document is the **canonical source of truth** for the autonomous AI takeove
 3. Pipeline covers: extract -> build -> package -> closure -> E2E
 4. Documented in each repo's CLAUDE.md
 
-**Evidence Block (to be filled during verification):**
+**Evidence Block:**
 
 ```
-Tidalarr:      pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests  -> [date] [exit code] [summary]
-Qobuzarr:      pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests  -> [date] [exit code] [summary]
-AppleMusicarr: pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests  -> [date] [exit code] [summary]
-Brainarr:      pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests  -> [date] [exit code] [summary]
-Common local-ci.ps1 exists:                                            -> [date] [ls output]
+Tidalarr:      pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests  -> 2026-02-16  exit 0  BUILD PASS (2s), PACKAGE PASS (5s), CLOSURE PASS (1s)
+Qobuzarr:      pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests  -> 2026-02-16  exit 0  BUILD PASS (10s), PACKAGE PASS (12s), CLOSURE PASS
+AppleMusicarr: pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests  -> 2026-02-16  exit 0  BUILD PASS (17s), PACKAGE PASS (9s), CLOSURE PASS
+Brainarr:      pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests  -> 2026-02-16  exit 0  BUILD PASS (9s), PACKAGE PASS (12s), CLOSURE PASS
+Common local-ci.ps1 exists:                                            -> 2026-02-16  ext/Lidarr.Plugin.Common/scripts/local-ci.ps1 present
 ```
 
 ---
