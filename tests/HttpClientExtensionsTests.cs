@@ -270,22 +270,17 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public async Task SendWithResilienceAsync_HonorsBuilderPolicy_WhenPresent()
         {
-            if (OperatingSystem.IsWindows())
-            {
-                // Flaky on GitHub Windows runners; validated on Linux.
-                return;
-            }
             var handler = new StubHandler(async (req, ct) =>
             {
                 // Simulate a slow server; ensure this is comfortably above the timeout
-                await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
+                await Task.Delay(TimeSpan.FromMilliseconds(2000), ct);
                 return new HttpResponseMessage(HttpStatusCode.OK);
             });
 
             using var client = new HttpClient(handler);
             var builder = new StreamingApiRequestBuilder("https://example.policy")
                 .Endpoint("timeout/test")
-                .WithPolicy(ResiliencePolicy.Default.With(perRequestTimeout: TimeSpan.FromMilliseconds(20)));
+                .WithPolicy(ResiliencePolicy.Default.With(perRequestTimeout: TimeSpan.FromMilliseconds(150)));
 
             await Assert.ThrowsAsync<TimeoutException>(() => client.SendWithResilienceAsync(
                 builder,
