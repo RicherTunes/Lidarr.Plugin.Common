@@ -472,7 +472,7 @@ jobs:
             }
 
       - name: Upload summary artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: drift-summary
           path: artifacts/e2e/drift-summary.md
