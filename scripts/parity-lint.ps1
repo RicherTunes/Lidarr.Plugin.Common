@@ -176,7 +176,7 @@ function Get-PluginRepos {
     param([string]$CommonRoot)
     $parent = Split-Path $CommonRoot -Parent
     $repos = @()
-    foreach ($name in @('qobuzarr', 'tidalarr', 'brainarr', 'applemusicarr')) {
+    foreach ($name in @('qobuzarr', 'tidalarr', 'applemusicarr')) {
         $path = Join-Path $parent $name
         $capPath = Join-Path $parent ($name.Substring(0,1).ToUpper() + $name.Substring(1))
         if (Test-Path $path) { $repos += @{ Name = $name; Path = $path } }
