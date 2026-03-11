@@ -189,7 +189,8 @@ function Test-DirectoryBuildProps {
 
     # Check required package references
     foreach ($pkgRef in $reqProps.requiredPackageReferences) {
-        if ($content -notmatch "Microsoft\.SourceLink\.GitHub") {
+        $pattern = [regex]::Escape($pkgRef.include)
+        if ($content -notmatch $pattern) {
             $violations += [PSCustomObject]@{
                 Repo = $RepoName; Category = 'DirectoryBuildProps'; Path = 'Directory.Build.props'
                 Message = "Missing PackageReference: $($pkgRef.include) ($($pkgRef.description))"
