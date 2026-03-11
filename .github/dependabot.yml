@@ -39,6 +39,10 @@ updates:
         versions: [">=9.0.0"]
       - dependency-name: "JsonSchema.Net"
         versions: [">=8.0.0"]
+      # Azure.Identity 1.18+ pulls Microsoft.Extensions.* 10.x transitively,
+      # causing NU1605 downgrade errors against our 9.x pins.
+      - dependency-name: "Azure.Identity"
+        versions: [">=1.18.0"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
