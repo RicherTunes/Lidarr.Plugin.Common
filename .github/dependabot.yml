@@ -43,6 +43,22 @@ updates:
       # causing NU1605 downgrade errors against our 9.x pins.
       - dependency-name: "Azure.Identity"
         versions: [">=1.18.0"]
+      # Microsoft.Extensions.* 10.x pulls transitives that conflict with 9.x pins
+      - dependency-name: "Microsoft.Extensions.TimeProvider.Testing"
+        versions: [">=10.0.0"]
+      - dependency-name: "Microsoft.Extensions.Configuration.Json"
+        versions: [">=9.0.0"]
+      - dependency-name: "Microsoft.Extensions.Hosting.Abstractions"
+        versions: [">=9.0.0"]
+      # Microsoft.SourceLink 10.x targets .NET 10 SDK
+      - dependency-name: "Microsoft.SourceLink.GitHub"
+        versions: [">=10.0.0"]
+      # Microsoft.CodeAnalysis.CSharp 5.x requires compiler 4.12+ (.NET 9+ SDK)
+      - dependency-name: "Microsoft.CodeAnalysis.CSharp"
+        versions: [">=5.0.0"]
+      # System.CommandLine 2.0.4 has breaking API changes (removed InvokeAsync)
+      - dependency-name: "System.CommandLine"
+        versions: [">=2.0.4"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
