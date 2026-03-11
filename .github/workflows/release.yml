@@ -173,7 +173,7 @@ jobs:
             echo "Missing package for API compatibility; skipping."
             exit 0
           fi
-          apicompat package --package "$CURRENT_PACKAGE" --baseline-package "$PREV_PACKAGE"
+          apicompat package "$CURRENT_PACKAGE" --baseline-package "$PREV_PACKAGE"
 
       - name: Generate SBOM (SPDX JSON)
         uses: anchore/sbom-action@v0
