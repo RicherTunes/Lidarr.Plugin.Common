@@ -35,7 +35,61 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+_No changes yet._
+
+## [1.6.0] - 2026-03-11
+**Upgrade note:** Major infrastructure release — ecosystem parity testing, sync-over-async cleanup, diagnostics namespace, and comprehensive dependency updates. No breaking API changes.
+
+**Highlights**
+- Ecosystem parity test infrastructure (lint + TestKit base class)
+- Sync-over-async pattern elimination with lint enforcement
+- Diagnostics namespace for non-LLM providers
+- Packaging gates improvements (contents manifest, canonical Abstractions)
+- Local CI runner (`local-ci.ps1`) for offline verification
+- 6-Month Autonomous Development Roadmap (Phases 12-23)
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:**
+- Microsoft.CodeAnalysis.CSharp 4.10.0→4.14.0
+- Microsoft.Extensions.Configuration.Json 8.0.0→8.0.1
+- Microsoft.Extensions.TimeProvider.Testing 8.5.0→9.10.0
+- System.Security.Cryptography.ProtectedData 8.0.0→9.0.14
+- coverlet.collector 6.0.4→8.0.0
+- xunit 2.9.2→2.9.3
+- Spectre.Console 0.50.0→0.54.0
+- Microsoft.NET.Test.Sdk 17.11.1→18.3.0
+- Microsoft.Extensions.Logging.Abstractions 8.0.1→8.0.3
+- JsonSchema.Net 7.2.3→7.4.0
+- actions/download-artifact v4→v8, actions/upload-artifact v4→v7
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.5.0...v1.6.0)
+
 ### Added
+- **Ecosystem Parity Infrastructure** (#393)
+  - `scripts/parity-spec.json` — single source of truth for parity requirements
+  - `scripts/ecosystem-parity-lint.ps1` — PowerShell structural lint for repos
+  - `testkit/Compliance/EcosystemParityTestBase.cs` — C# xUnit base class
+- **Diagnostics Namespace** (#331) — abstractions for non-LLM providers
+- **Sync-Over-Async Lint** (#332) — `lint-sync-over-async.ps1` with allowlist support
+- **SHA Pin Enforcement** (#330) — workflow SHA pinning lint
+- **Contents Manifest Gate** (#333) — plugin ZIP closure validation
+- **Local CI Runner** (#363) — `local-ci.ps1` for offline verification
+- **Warning Budget Visibility** (#366) — build warning tracking
+- **Canonical Reason Codes** (#380) — triage contracts
+- **Diagnostic Error Codes** (#341) — `DiagnosticErrorCodes` for providers
+- **Cross-Platform Path Validation** — `PathValidation.IsReasonablePath`
+- **Comprehensive Documentation** — roadmap phases 12-23, KPI definitions, phase gate evidence
+
+### Fixed
+- **Sync-Over-Async Patterns** (#408) — `StreamingTokenManager.ClearSession()` now truly sync
+- **Windows CI Credential Issue** (#383) — change detection step fix
+- **Local CI Docker Exit Codes** (#364, #365) — reliable Docker exit code capture
+- **ManifestCheck StrictMode** (#326) — null-safe access for optional manifest targets
+- **PluginPack Cached Path** (#320) — temp dir cleanup race condition
+- **Reserved Device Name Normalization** (#297) — cross-platform filesystem safety
+
+### Changed
 - **LLM Provider System**: Complete LLM provider abstraction layer
   - `ILlmProvider` interface with standard chat completion contract
   - `LlmRequest`/`LlmResponse` data contracts with message structure
