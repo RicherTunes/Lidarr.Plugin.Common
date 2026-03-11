@@ -109,7 +109,11 @@
     "applygapplan",
     "rollbackgapplan",
     "gitlink",
-    "actuals"
+    "actuals",
+    "agentic",
+    "mgmt",
+    "Gitsubmodule",
+    "AppleMusiSharp"
   ],
   "ignorePaths": [
     "**/bin",

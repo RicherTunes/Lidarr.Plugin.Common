@@ -1,0 +1,82 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Ecosystem parity specification — single source of truth for structural requirements across all Lidarr plugin repos.",
+  "version": "1.0.0",
+
+  "requiredFiles": [
+    { "path": "global.json", "description": "SDK version pin" },
+    { "path": "VERSION", "description": "Version file for builds" },
+    { "path": "Directory.Build.props", "description": "Shared MSBuild properties" },
+    { "path": "Directory.Packages.props", "description": "Central Package Management" },
+    { "path": ".gitleaks.toml", "description": "Secret scanning configuration" },
+    { "path": ".markdownlint.yaml", "description": "Markdown linting rules" },
+    { "path": ".github/CODEOWNERS", "description": "Code ownership" },
+    { "path": ".github/dependabot.yml", "description": "Automated dependency updates" },
+    { "path": ".github/sha-pin-allowlist.json", "description": "SHA pin exception tracking" }
+  ],
+
+  "requiredDirectories": [
+    { "path": ".github/ISSUE_TEMPLATE", "minFiles": 2, "description": "Issue templates (bug + feature minimum)" }
+  ],
+
+  "requiredWorkflows": [
+    { "file": "codeql.yml", "description": "CodeQL security analysis" },
+    { "file": "test-and-coverage.yml", "description": "Unit tests + coverage" },
+    { "file": "notify-failure.yml", "description": "CI failure notifications" },
+    { "file": "packaging-gates.yml", "description": "Plugin packaging validation" },
+    { "file": "submodule-pin.yml", "description": "Common submodule SHA verification" }
+  ],
+
+  "globalJson": {
+    "sdk": {
+      "version": "8.0.100",
+      "rollForward": "latestFeature",
+      "allowPrerelease": false
+    }
+  },
+
+  "directoryBuildProps": {
+    "requiredProperties": [
+      { "name": "ILRepackEnabled", "value": "false", "description": "ILRepack disabled (use PluginPackaging.targets)" },
+      { "name": "Deterministic", "value": "true", "description": "Deterministic builds" },
+      { "name": "Nullable", "value": "enable", "description": "Nullable reference types" },
+      { "name": "LangVersion", "value": "latest", "description": "Latest C# language version" },
+      { "name": "PublishRepositoryUrl", "value": "true", "description": "SourceLink support" },
+      { "name": "EmbedUntrackedSources", "value": "true", "description": "SourceLink support" }
+    ],
+    "requiredPackageReferences": [
+      { "include": "Microsoft.SourceLink.GitHub", "description": "SourceLink for deterministic builds" }
+    ],
+    "requiredConditions": [
+      { "description": "CPM exclusion for ext/ submodule", "pattern": "ManagePackageVersionsCentrally.*false" }
+    ],
+    "requiredSections": [
+      { "name": "VersionManagement", "marker": "VersionFromFile", "description": "VERSION file integration" },
+      { "name": "NoWarnSuppression", "marker": "NoWarn", "description": "Warning suppressions for Lidarr compat" }
+    ]
+  },
+
+  "directoryPackagesProps": {
+    "requiredProperties": [
+      { "name": "ManagePackageVersionsCentrally", "value": "true", "description": "CPM enabled" }
+    ]
+  },
+
+  "pluginJson": {
+    "requiredFields": [
+      "id", "apiVersion", "name", "version", "author", "description",
+      "homepage", "license", "tags", "commonVersion", "minHostVersion",
+      "targetFramework", "main", "rootNamespace"
+    ],
+    "targetFramework": "net8.0",
+    "forbiddenFields": [
+      { "field": "minimumVersion", "reason": "Use minHostVersion instead (non-standard duplication)" },
+      { "field": "targets", "reason": "Use targetFramework string instead of targets array" }
+    ]
+  },
+
+  "manifestJson": {
+    "targetFrameworks": ["net8.0"],
+    "forbiddenTargetFrameworks": ["net6.0"]
+  }
+}
