@@ -162,11 +162,26 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         }
 
         /// <summary>
-        /// Clears the current session and any persisted state synchronously.
+        /// Clears the current session from memory and starts a best-effort async clear of
+        /// persisted state. For guaranteed persistence clearing, use <see cref="ClearSessionAsync"/>.
         /// </summary>
         public void ClearSession()
         {
-            ClearSessionAsync().GetAwaiter().GetResult();
+            lock (_tokenLock)
+            {
+                _currentSession = null;
+                _sessionExpiryTime = DateTime.MinValue;
+                _refreshAttempts = 0;
+            }
+
+            // Fire-and-forget: best-effort clear of persisted state.
+            // Callers needing to await persistence should use ClearSessionAsync().
+            if (_tokenStore != null)
+            {
+                _ = PersistSafely(() => _tokenStore!.ClearAsync(CancellationToken.None));
+            }
+
+            _logger.LogDebug("Session cleared");
         }
 
         /// <summary>
@@ -193,15 +208,25 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         }
 
         /// <summary>
-        /// Gets current session status information.
+        /// Gets current session status from in-memory state. Does not block on persistence loading.
+        /// For status guaranteed to include persisted sessions, use <see cref="GetSessionStatusAsync"/>.
         /// </summary>
         public SessionStatus GetSessionStatus()
         {
-            if (_tokenStore != null)
-            {
-                EnsurePersistedSessionAsync().GetAwaiter().GetResult();
-            }
+            return BuildSessionStatus();
+        }
 
+        /// <summary>
+        /// Gets current session status, ensuring any persisted session is loaded first.
+        /// </summary>
+        public async Task<SessionStatus> GetSessionStatusAsync()
+        {
+            await EnsurePersistedSessionAsync().ConfigureAwait(false);
+            return BuildSessionStatus();
+        }
+
+        private SessionStatus BuildSessionStatus()
+        {
             lock (_tokenLock)
             {
                 return new SessionStatus

@@ -48,7 +48,18 @@ function Test-Allowlisted {
     param([string]$RelativePath, [array]$Allowlist)
     $normalized = $RelativePath -replace '\\', '/'
     foreach ($entry in $Allowlist) {
-        $pattern = $entry.path -replace '\\', '/'
+        # Support both 'file' (deployed allowlists) and 'path' (legacy) keys.
+        # Hashtables (self-tests) use .ContainsKey; PSCustomObject (JSON) uses .PSObject.Properties.
+        $rawPath = $null
+        if ($entry -is [hashtable]) {
+            if ($entry.ContainsKey('file')) { $rawPath = $entry['file'] }
+            elseif ($entry.ContainsKey('path')) { $rawPath = $entry['path'] }
+        } else {
+            if ($entry.PSObject.Properties.Match('file').Count -gt 0) { $rawPath = $entry.file }
+            elseif ($entry.PSObject.Properties.Match('path').Count -gt 0) { $rawPath = $entry.path }
+        }
+        if (-not $rawPath) { continue }
+        $pattern = $rawPath -replace '\\', '/'
         # Support glob-style wildcards
         if ($pattern.Contains('*')) {
             $regex = '^' + [regex]::Escape($pattern).Replace('\*\*', '.*').Replace('\*', '[^/]*') + '$'
@@ -167,7 +178,7 @@ function Invoke-SelfTest {
         }
 
         # Test 2: Allowlisted file is suppressed
-        $allowlist = @(@{ path = 'src/Bad.cs'; reason = 'test'; category = 'A' })
+        $allowlist = @(@{ file = 'src/Bad.cs'; reason = 'test'; category = 'A' })
         $result = Invoke-Scan -RepoRoot $tempDir -Allowlist $allowlist -DiffLines @{}
         if ($result.Violations.Count -eq 0 -and $result.Suppressed.Count -eq 1) {
             Write-Host '  [PASS] Test 2: Allowlisted file is suppressed' -ForegroundColor Green
@@ -195,7 +206,7 @@ function Invoke-SelfTest {
         New-Item -ItemType Directory -Path $testFile2 -Force | Out-Null
         $testFile2 = Join-Path $testFile2 'Adapter.cs'
         Set-Content $testFile2 'var x = task.GetAwaiter().GetResult();'
-        $allowlist = @(@{ path = 'src/Integration/*'; reason = 'host contract'; category = 'A' })
+        $allowlist = @(@{ file = 'src/Integration/*'; reason = 'host contract'; category = 'A' })
         $result = Invoke-Scan -RepoRoot $tempDir -Allowlist $allowlist -DiffLines @{}
         if ($result.Violations.Count -eq 0 -and $result.Suppressed.Count -eq 1) {
             Write-Host '  [PASS] Test 4: Wildcard allowlist suppresses match' -ForegroundColor Green
