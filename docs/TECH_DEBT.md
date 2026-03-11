@@ -17,22 +17,22 @@ Line counts updated 2026-03-10 from `main` branch.
 
 | File | Lines | Priority | Notes |
 |------|-------|----------|-------|
-| `Brainarr.Plugin/Services/Caching/EnhancedRecommendationCache.cs` | 805 | P2 | Cache logic could use strategy pattern |
-| `Brainarr.Plugin/Services/Core/BrainarrOrchestrator.cs` | 639 | P2 | Main orchestration — smaller than originally listed, still the largest orchestrator |
+| `Brainarr.Plugin/Services/Caching/EnhancedRecommendationCache.cs` | ~330 | ✅ Done | Extracted 8 types into separate files (PR pending) |
+| `Brainarr.Plugin/Services/Core/BrainarrOrchestrator.cs` | ~520 | ✅ Done | Deduplicated FetchRecommendationsAsync overloads (PR pending) |
 | `Brainarr.Plugin/Services/Core/LibraryAnalyzer.cs` | 569 | P3 | Analysis logic — significantly reduced from earlier versions |
 | `Brainarr.Plugin/Services/LibraryAwarePromptBuilder.cs` | 359 | P3 | Now reasonably sized |
 | `Brainarr.Plugin/BrainarrSettings.cs` | 183 | — | No longer a debt item (settings container, cohesive) |
 
-### Overlapping Provider Bases
+### Provider Architecture — Dead Base Classes
 
-| Base Class | Path | Lines | Purpose |
+| Base Class | Path | Lines | Used By |
 |------------|------|-------|---------|
-| `SecureProviderBase` | `Brainarr.Plugin/Services/Providers/SecureProviderBase.cs` | 387 | Providers with credential handling |
-| `BaseCloudProvider` | `Brainarr.Plugin/Services/Providers/BaseCloudProvider.cs` | 311 | Generic cloud API abstraction |
+| `SecureProviderBase` | `Brainarr.Plugin/Services/Providers/SecureProviderBase.cs` | 387 | Test doubles only |
+| `BaseCloudProvider` | `Brainarr.Plugin/Services/Providers/BaseCloudProvider.cs` | 311 | Nothing (OpenAICompatibleProvider extends it but is also unused) |
 
-`HttpChatProviderBase` (previously listed) no longer exists — likely consolidated into one of the above.
+**Finding (2026-03-10):** All 11 concrete providers implement `IAIProvider` directly, bypassing both bases entirely. The real duplication is across the 11 provider implementations (~250+ lines each with similar HTTP/parsing/error-handling patterns). Consolidation opportunity is a provider factory or strategy pattern, not merging the two bases.
 
-**Recommendation:** Two bases is manageable. Revisit if a third appears or if confusion persists. P3.
+**Recommendation:** P3. Consider removing unused bases or refactoring providers to use them. Low urgency — the providers work correctly as-is.
 
 ## Common Library
 
