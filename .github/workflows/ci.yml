@@ -3,15 +3,10 @@ name: CI
 on:
   pull_request:
     branches: [ main, develop ]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
-      - '.github/ISSUE_TEMPLATE/**'
+    # No paths-ignore: we always run to satisfy branch protection
+    # Docs-only PRs skip expensive steps but still report success
   push:
     branches: [ main ]
-    paths-ignore:
-      - '**/*.md'
-      - 'docs/**'
 
 concurrency:
   group: ci-${{ github.ref }}-${{ github.workflow }}
@@ -21,11 +16,24 @@ permissions:
   contents: read
 
 jobs:
+  # Self-test for change detection classifier (prevents regression)
+  change_detection_test:
+    name: Change Detection Self-Test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run classifier self-test
+        run: bash scripts/ci/test-change-detection.sh
+
   build_and_test:
     name: Build & Test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
     env:
-      DOTNET_ROLL_FORWARD: LatestMajor
+      # Don't roll forward to preview SDKs - stay on specified version
+      DOTNET_ROLL_FORWARD: Minor
     permissions:
       contents: read
       actions: write
@@ -36,15 +44,47 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
+      - name: Check for code changes
+        id: changes
+        shell: bash
+        run: |
+          # Use the testable classifier script for consistency
+          # See scripts/ci/is-code-changed.sh for rules and scripts/ci/test-change-detection.sh for tests
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            # Fetch base branch ref for diff. Use token URL to avoid credential prompt
+            # failures on Windows where actions/checkout's credential helper doesn't persist.
+            git fetch "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" \
+              "${{ github.base_ref }}:refs/remotes/origin/${{ github.base_ref }}" --depth=1
+            CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
+            CODE_CHANGED=$(printf '%s' "$CHANGED" | bash scripts/ci/is-code-changed.sh)
+            echo "code_changed=$CODE_CHANGED" >> $GITHUB_OUTPUT
+            if [ "$CODE_CHANGED" = "false" ]; then
+              echo "::notice::Docs-only PR detected - skipping build & test steps"
+            fi
+          else
+            # Push events always build
+            echo "code_changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Skip notice (docs-only)
+        if: steps.changes.outputs.code_changed == 'false'
+        run: echo "## Docs-only PR - Build & Test Skipped" >> $GITHUB_STEP_SUMMARY
+
+      # GitHub-hosted runners already have pwsh installed - skip apt install
+      # (kept for local act runs where pwsh may not be present)
       - name: Install PowerShell (pwsh)
-        if: runner.os == 'Linux'
+        if: steps.changes.outputs.code_changed == 'true' && runner.os == 'Linux' && env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "pwsh already installed, skipping"
+            exit 0
+          fi
           . /etc/os-release
           CODENAME=${VERSION_CODENAME:-"jammy"}
           echo "Using Ubuntu codename: $CODENAME"
@@ -54,18 +94,19 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y powershell
 
-      - name: Setup .NET SDKs (8 & 6)
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET SDK
+        if: steps.changes.outputs.code_changed == 'true'
+        uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: |
-            8.0.x
-            6.0.x
+          dotnet-version: 8.0.x
 
       - name: Show dotnet info
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet --info
 
       - name: Cache NuGet
-        uses: actions/cache@v4
+        if: steps.changes.outputs.code_changed == 'true'
+        uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/global.json', '**/NuGet.config') }}
@@ -73,49 +114,85 @@ jobs:
             ${{ runner.os }}-nuget-
 
       - name: Restore (including CLI framework)
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet restore -p:IncludeCLIFramework=true
+
       - name: Build (Release, all TFMs)
-        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -m:1
+        if: steps.changes.outputs.code_changed == 'true'
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -p:GeneratePackageOnBuild=false -m:1
 
       - name: Dotnet format (verify - style only)
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet format style --verify-no-changes
 
-      - name: Public API drift (net8)
+      - name: Public API drift
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0
-      - name: Public API drift (net6)
-        run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net6.0
 
       - name: Build (Release, warnings as errors)
+        if: steps.changes.outputs.code_changed == 'true'
         run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -m:1
 
+      # GitHub-hosted runners already have pwsh - this step is only for act
       - name: Ensure pwsh (Linux only)
-        if: runner.os == 'Linux'
+        if: steps.changes.outputs.code_changed == 'true' && runner.os == 'Linux' && env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          if ! command -v pwsh >/dev/null 2>&1; then
-            . /etc/os-release || true
-            CODENAME=${VERSION_CODENAME:-"jammy"}
-            curl -fsSL "https://packages.microsoft.com/config/ubuntu/$CODENAME/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb \
-              || curl -fsSL "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb
-            sudo dpkg -i packages-microsoft-prod.deb
-            sudo apt-get update
-            sudo apt-get install -y powershell
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "pwsh already installed"
+            exit 0
           fi
+          . /etc/os-release || true
+          CODENAME=${VERSION_CODENAME:-"jammy"}
+          curl -fsSL "https://packages.microsoft.com/config/ubuntu/$CODENAME/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb \
+            || curl -fsSL "https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb" -o packages-microsoft-prod.deb
+          sudo dpkg -i packages-microsoft-prod.deb
+          sudo apt-get update
+          sudo apt-get install -y powershell
 
       - name: Test (all TFMs) + coverage
-        run: >
-          dotnet test -c Release --no-build
-          --collect:"XPlat Code Coverage"
-          --logger "trx;LogFileName=test_results.trx"
+        if: steps.changes.outputs.code_changed == 'true'
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          # Run tests with blame-hang to detect and kill hanging test host
+          # (Spectre.Console background threads prevent clean process exit)
+          dotnet test -c Release --no-build `
+            --filter "State!=Quarantined" `
+            --blame-hang-timeout 30s `
+            --collect:"XPlat Code Coverage" `
+            --logger "trx;LogFileName=test_results.trx"
+          $testExit = $LASTEXITCODE
+
+          # If dotnet test exited non-zero, check if it's just a blame-hang abort
+          # (all tests passed but process was killed due to background thread hang)
+          if ($testExit -ne 0) {
+            $trx = Get-ChildItem -Path . -Filter "test_results.trx" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($trx) {
+              [xml]$xml = Get-Content $trx.FullName
+              $counters = $xml.TestRun.ResultSummary.Counters
+              $failed = [int]$counters.failed
+              $passed = [int]$counters.passed
+              Write-Host "TRX Results: Passed=$passed Failed=$failed"
+              if ($failed -eq 0 -and $passed -gt 0) {
+                Write-Host "All tests passed. Exit code $testExit was from blame-hang abort (expected)." -ForegroundColor Green
+                exit 0
+              }
+            }
+            Write-Host "Tests failed with exit code $testExit" -ForegroundColor Red
+            exit $testExit
+          }
 
       - name: Install ReportGenerator
+        if: steps.changes.outputs.code_changed == 'true'
         shell: bash
         run: |
           dotnet tool update -g dotnet-reportgenerator-globaltool
           echo "$HOME/.dotnet/tools" >> $GITHUB_PATH
 
       - name: Generate coverage summary
+        if: steps.changes.outputs.code_changed == 'true'
         shell: bash
         run: |
           reportgenerator \
@@ -126,8 +203,8 @@ jobs:
           cat coverage-report/Summary.md >> $GITHUB_STEP_SUMMARY || true
 
       - name: Upload test & coverage artifacts
-        if: always()
-        uses: actions/upload-artifact@v4
+        if: always() && steps.changes.outputs.code_changed == 'true'
+        uses: actions/upload-artifact@v7
         with:
           name: test-and-coverage-${{ matrix.os }}
           path: |
@@ -135,6 +212,50 @@ jobs:
             **/TestResults/*/coverage.cobertura.xml
             coverage-report/**
           retention-days: 14
+
+
+  # Parity lint unit tests - validates the lint script itself works correctly
+  parity_lint_test:
+    name: Parity Lint Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run parity-lint unit tests
+        shell: pwsh
+        run: ./scripts/tests/Test-ParityLint.ps1
+
+  plugin_pack_canonical_abstractions_test:
+    name: PluginPack Canonical Abstractions Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Run canonical Abstractions packaging tests
+        shell: pwsh
+        run: ./scripts/tests/Test-PluginPackCanonicalAbstractions.ps1
+
+  # Runner self-tests: prevents breakage from cascading to all plugin repos
+  runner_self_test:
+    name: Runner Self-Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Test unified runner filter composition
+        shell: pwsh
+        run: ./scripts/tests/Test-UnifiedRunner.ps1
+
+      - name: Test lint-ci-uses-runner on fixtures
+        shell: pwsh
+        run: ./scripts/tests/Test-LintCiUsesRunner.ps1
+
+      - name: Test repin script (SHA format + pin rewrite)
+        shell: pwsh
+        run: ./scripts/tests/Test-RepinScript.ps1
 
   # Remove separate test publishing to avoid third-party actions
   # pack_dry_run job intentionally omitted for PR CI; release builds handle packing

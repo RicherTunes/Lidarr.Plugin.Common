@@ -1,0 +1,25 @@
+# Test fixture for Test-RepinScript.ps1
+# Contains both real uses: lines and comment/example lines.
+# Only the real uses: lines should be rewritten by --update-pins.
+name: Repin Fixture
+
+on: workflow_dispatch
+
+jobs:
+  gates:
+    uses: RicherTunes/Lidarr.Plugin.Common/.github/workflows/packaging-gates.yml@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    with:
+      common-path: ext/Lidarr.Plugin.Common
+
+  smoke:
+    uses: RicherTunes/Lidarr.Plugin.Common/.github/workflows/multi-plugin-smoke-test.yml@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    with:
+      test_plugins: qobuzarr
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      # This comment references a SHA and must NOT be rewritten:
+      # uses: RicherTunes/Lidarr.Plugin.Common/.github/workflows/old.yml@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v3

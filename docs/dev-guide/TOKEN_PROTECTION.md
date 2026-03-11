@@ -41,3 +41,41 @@ Minimal AKV setup (example):
 1. Create a key: `az keyvault key create --vault-name <vault> --name lpc-tokens --protection software`
 2. Grant wrap/unwrap to the app: `az keyvault set-policy --name <vault> --spn <clientId> --key-permissions wrapKey unwrapKey get`
 3. Export env: `LP_COMMON_AKV_KEY_ID=https://<vault>.vault.azure.net/keys/lpc-tokens/<version>`
+
+## Protected Strings (`IStringProtector`)
+
+For plugins that need to persist individual sensitive values (API tokens, refresh tokens, session IDs),
+use the public `Lidarr.Plugin.Common.Interfaces.IStringProtector` facade instead of rolling custom crypto.
+
+### Format
+
+Protected strings use a versioned, URL-safe, self-contained format:
+
+`lpc:ps:v1:<algB64Url>:<payloadB64Url>`
+
+- `algB64Url`: base64url-encoded algorithm id (diagnostics only; not enforced on read)
+- `payloadB64Url`: base64url-encoded encrypted bytes
+
+The encoding is base64url (`-`/`_`) with no `=` padding so values are safe for JSON, URLs, and config files.
+
+### Semantics
+
+- `Protect(null)` returns `null`; `Protect("")` returns `""`.
+- `Protect(value)` is idempotent: if `value` is already in `lpc:ps:v1:` format, it is returned unchanged.
+- `Unprotect(value)` is a passthrough for non-protected values (returns `value` unchanged).
+  - If the string has the `lpc:ps:v1:` prefix but cannot be decoded/decrypted, `Unprotect` throws.
+- Prefer `TryUnprotect` for non-throwing reads when you may encounter mixed formats during migrations.
+
+### Migration Guidance
+
+When migrating an existing plugin to use `IStringProtector`:
+
+1. Dual-read on load:
+   - If `TryUnprotect` succeeds, use the decrypted plaintext.
+   - Else, treat the stored value as legacy plaintext and proceed.
+2. Write-back on save:
+   - Always write using `Protect` (new format).
+3. Add characterization tests proving:
+   - legacy plaintext still loads
+   - new format round-trips
+   - mixed-format state is handled safely without leaking secrets to logs

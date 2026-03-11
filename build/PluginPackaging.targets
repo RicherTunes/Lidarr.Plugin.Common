@@ -1,182 +1,217 @@
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <!--
+    Plugin Packaging with ILRepack Assembly Merging
+
+    Merges plugin dependencies into a single DLL for self-contained deployment.
+
+    NOTE: Internalize="true" is REQUIRED to prevent DryIoc conflicts. When types
+    from merged assemblies (Polly, TagLibSharp, etc.) remain public, they can
+    conflict with Lidarr's own types during DI container resolution.
+
+    USAGE:
+    1. Add ILRepack.Lib.MSBuild.Task package with ExcludeAssets="build" and GeneratePathProperty="true"
+    2. Import this targets file
+    3. Optionally set LidarrAssembliesPath
+  -->
+
+  <!-- Import ILRepack task from NuGet package - supports both netfx and netcore -->
+  <UsingTask TaskName="ILRepack"
+             AssemblyFile="$(PkgILRepack_Lib_MSBuild_Task)/build/ILRepack.Lib.MSBuild.Task.dll"
+             Condition="'$(PkgILRepack_Lib_MSBuild_Task)' != '' and Exists('$(PkgILRepack_Lib_MSBuild_Task)/build/ILRepack.Lib.MSBuild.Task.dll')" />
+
   <PropertyGroup>
     <PluginAssemblyFileName Condition="'$(PluginAssemblyFileName)' == ''">$(AssemblyName).dll</PluginAssemblyFileName>
     <PluginSymbolFileName Condition="'$(PluginSymbolFileName)' == ''">$(AssemblyName).pdb</PluginSymbolFileName>
     <PluginManifestFileName Condition="'$(PluginManifestFileName)' == ''">plugin.json</PluginManifestFileName>
     <EnablePluginDeployment Condition="'$(EnablePluginDeployment)' == ''">false</EnablePluginDeployment>
     <PluginPackagingDisable Condition="'$(PluginPackagingDisable)' == ''">false</PluginPackagingDisable>
+    <!-- Disable ILRepack.Lib.MSBuild.Task built-in target - we use our own RepackPlugin target -->
+    <ILRepackEnabled>false</ILRepackEnabled>
   </PropertyGroup>
 
-  <!-- Default dependency merge list; projects can extend via PluginPackagingAdditionalMerge -->
-  <ItemGroup>
-    <PluginMergeDependency Include="$(OutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(OutputPath)Lidarr.Plugin.Common.dll')" />
-    <PluginMergeDependency Include="$(OutputPath)FluentValidation.dll" Condition="Exists('$(OutputPath)FluentValidation.dll')" />
-    <PluginMergeDependency Include="$(OutputPath)Polly.dll" Condition="Exists('$(OutputPath)Polly.dll')" />
-    <PluginMergeDependency Include="$(OutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(OutputPath)Polly.Extensions.Http.dll')" />
-    <PluginMergeDependency Include="$(OutputPath)Microsoft.Extensions.*.dll" />
-    <PluginMergeDependency Include="$(OutputPath)System.Text.Json.dll" Condition="Exists('$(OutputPath)System.Text.Json.dll')" />
-    <PluginMergeDependency Include="$(OutputPath)TagLibSharp*.dll" />
-    <PluginMergeDependency Include="@(PluginPackagingAdditionalMerge)" />
-  </ItemGroup>
+  <!-- NOTE: PluginMergeDependency is defined INSIDE RepackPlugin target so Exists() checks
+       happen AFTER the build copies dependencies to OutputPath, not at project load time -->
 
   <Target Name="RepackPlugin" AfterTargets="Build" Condition="'$(PluginPackagingDisable)' != 'true'">
+    <!-- Compute library paths at runtime (after build) when OutputPath is fully resolved -->
+    <PropertyGroup>
+      <!-- Absolute path to plugin output directory (where all runtime deps are copied) -->
+      <_PluginOutputDir>$(TargetDir)</_PluginOutputDir>
+      <_PluginOutputPath>$(TargetDir)</_PluginOutputPath>
+      <!-- Paths relative to this targets file (inside Common submodule) -->
+      <_CommonLibraryPath>$(MSBuildThisFileDirectory)../src/bin/$(Configuration)/$(TargetFramework)</_CommonLibraryPath>
+      <_AbstractionsPath>$(MSBuildThisFileDirectory)../src/Abstractions/bin/$(Configuration)/$(TargetFramework)</_AbstractionsPath>
+      <!-- Paths to Lidarr assemblies (for reference resolution, typically at repo root/ext/Lidarr) -->
+      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net6.0;$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net8.0</_LidarrAssembliesPath>
+      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' != ''">$(LidarrAssembliesPath)</_LidarrAssembliesPath>
+      <!-- Combined library paths for ILRepack - plugin output first (has all NuGet deps) -->
+      <_ILRepackLibraryPaths>$(_PluginOutputDir);$(_LidarrAssembliesPath);$(_CommonLibraryPath);$(_AbstractionsPath)</_ILRepackLibraryPaths>
+    </PropertyGroup>
+
+    <!-- Detect dependencies at runtime (after build), not at project load time -->
     <ItemGroup>
-      <_AssembliesToMerge Include="$(OutputPath)$(AssemblyName).dll" />
-      <_AssembliesToMerge Include="@(PluginMergeDependency)" />
+      <_PluginDeps Include="$(_PluginOutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(_PluginOutputPath)Lidarr.Plugin.Common.dll')" />
+      <!-- NOTE: Lidarr.Plugin.Abstractions must NOT be merged - it contains IPlugin and other interfaces
+           that must have identical type identity with the host. Merging breaks plugin loading. -->
+      <!-- <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Abstractions.dll" /> DO NOT ENABLE - breaks IPlugin type identity -->
+      <_PluginDeps Include="$(_PluginOutputPath)Polly.dll" Condition="Exists('$(_PluginOutputPath)Polly.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Polly.Core.dll" Condition="Exists('$(_PluginOutputPath)Polly.Core.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(_PluginOutputPath)Polly.Extensions.Http.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)TagLibSharp*.dll" />
+      <!-- Microsoft.Extensions packages - merge implementation assemblies but NOT abstractions.
+           Abstractions must maintain type identity with host for DI to work correctly. -->
+      <!-- DO NOT MERGE: Microsoft.Extensions.DependencyInjection.Abstractions - breaks IServiceProvider contracts -->
+      <!-- DO NOT MERGE: Microsoft.Extensions.Logging.Abstractions - breaks ILogger contracts -->
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.DependencyInjection.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.DependencyInjection.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Caching.Abstractions.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Caching.Abstractions.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Caching.Memory.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Caching.Memory.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Options.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Options.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Primitives.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Primitives.dll')" />
+      <_PluginDeps Include="$(_PluginOutputPath)Microsoft.Extensions.Http.dll" Condition="Exists('$(_PluginOutputPath)Microsoft.Extensions.Http.dll')" />
+      <!-- CliWrap is used by Common for process execution - must be merged to avoid runtime dependency -->
+      <_PluginDeps Include="$(_PluginOutputPath)CliWrap.dll" Condition="Exists('$(_PluginOutputPath)CliWrap.dll')" />
+      <!-- NOTE: FluentValidation must NOT be merged (ILRepacked) - it breaks DownloadClient.Test(List<ValidationFailure>).
+           If FluentValidation.dll should be shipped as a separate file, that is handled by the post-merge cleanup step below. -->
+      <!-- NOTE: System.Text.Json must NOT be merged - its types cross the host/plugin boundary -->
+      <!-- and can cause TypeLoadException or serialization issues -->
+      <!-- <_PluginDeps Include="$(OutputPath)System.Text.Json.dll" /> DO NOT ENABLE - cross-boundary type issues -->
+      <_PluginDeps Include="@(PluginPackagingAdditionalMerge)" />
     </ItemGroup>
 
+    <ItemGroup>
+      <_AssembliesToMerge Include="$(TargetPath)" />
+      <_AssembliesToMerge Include="@(_PluginDeps)" />
+    </ItemGroup>
+
+    <Message Text="[ILRepack] Found dependencies to merge: @(_PluginDeps->'%(Filename)')" Importance="high" />
+    <Message Text="[ILRepack] Library paths: $(_ILRepackLibraryPaths)" Importance="high" />
+    <Message Text="[ILRepack] Merging plugin assemblies..." Importance="high" />
+
+    <!-- Create temp directory for ILRepack output to preserve correct assembly identity.
+         IMPORTANT: OutputFile filename determines the internal assembly name, not just the file name.
+         Using $(AssemblyName).dll (not *.merged.dll) ensures the merged assembly has the correct identity. -->
+    <PropertyGroup>
+      <_ILRepackTempDir>$(IntermediateOutputPath)ilrepack-temp\</_ILRepackTempDir>
+    </PropertyGroup>
+    <MakeDir Directories="$(_ILRepackTempDir)" />
+
+    <!-- NOTE: Internalize="true" prevents merged assembly types from conflicting with Lidarr types -->
     <ILRepack
       Parallel="true"
       Internalize="true"
       DebugInfo="true"
       TargetKind="Dll"
       InputAssemblies="@(_AssembliesToMerge)"
-      OutputFile="$(IntermediateOutputPath)$(AssemblyName).merged.dll"
-      LibraryPath="$(OutputPath)" />
+      OutputFile="$(_ILRepackTempDir)$(AssemblyName).dll"
+      LibraryPath="$(_ILRepackLibraryPaths)" />
 
-    <Copy SourceFiles="$(IntermediateOutputPath)$(AssemblyName).merged.dll"
-          DestinationFiles="$(OutputPath)$(PluginAssemblyFileName)"
+    <Copy SourceFiles="$(_ILRepackTempDir)$(AssemblyName).dll"
+          DestinationFiles="$(_PluginOutputPath)$(PluginAssemblyFileName)"
           OverwriteReadOnlyFiles="true" />
 
-    <Copy SourceFiles="$(IntermediateOutputPath)$(AssemblyName).merged.pdb"
-          DestinationFiles="$(OutputPath)$(PluginSymbolFileName)"
+    <Copy SourceFiles="$(_ILRepackTempDir)$(AssemblyName).pdb"
+          DestinationFiles="$(_PluginOutputPath)$(PluginSymbolFileName)"
           OverwriteReadOnlyFiles="true"
-          Condition="Exists('$(IntermediateOutputPath)$(AssemblyName).merged.pdb')" />
+          Condition="Exists('$(_ILRepackTempDir)$(AssemblyName).pdb')" />
 
-    <Delete Files="$(IntermediateOutputPath)$(AssemblyName).merged.dll" />
-    <Delete Files="$(IntermediateOutputPath)$(AssemblyName).merged.pdb"
-            Condition="Exists('$(IntermediateOutputPath)$(AssemblyName).merged.pdb')" />
+    <RemoveDir Directories="$(_ILRepackTempDir)" />
 
+
+    <!-- PLUGIN PACKAGE CONTENTS POLICY
+
+         MUST SHIP:
+           - Lidarr.Plugin.<Name>.dll (merged assembly)
+           - plugin.json
+           - Lidarr.Plugin.Abstractions.dll (plugin discovery; host does NOT provide this)
+
+         MUST NOT SHIP (host-provided / cross-boundary type-identity):
+           - FluentValidation.dll
+           - Microsoft.Extensions.DependencyInjection.Abstractions.dll
+           - Microsoft.Extensions.Logging.Abstractions.dll
+           - NLog.dll
+           - System.Text.Json.dll
+           - Host assemblies (Lidarr.*.dll, NzbDrone.*.dll, etc.)
+
+         MERGED/INTERNALIZED:
+           - Lidarr.Plugin.Common.dll, Polly*, TagLibSharp*, etc. (via ILRepack above)
+    -->
     <ItemGroup>
-      <_ExtraAssemblies Include="$(OutputPath)*.dll" Exclude="$(OutputPath)$(PluginAssemblyFileName)" />
-      <_ExtraSymbols Include="$(OutputPath)*.pdb" Exclude="$(OutputPath)$(PluginSymbolFileName)" />
-      <_ExtraDocs Include="$(OutputPath)*.xml" />
+      <!-- Runtime dependency assemblies to keep as separate files -->
+      <_PluginRuntimeDeps Include="$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll"
+                         Condition="Exists('$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll')" />
+      <_PluginRuntimeDeps Include="@(PluginPackagingAdditionalKeep)" />
+
+      <!-- Everything else gets deleted - either merged above or host-provided -->
+      <_ExtraAssemblies Include="$(_PluginOutputPath)*.dll" Exclude="$(_PluginOutputPath)$(PluginAssemblyFileName);@(_PluginRuntimeDeps)" />
+      <_ExtraSymbols Include="$(_PluginOutputPath)*.pdb" Exclude="$(_PluginOutputPath)$(PluginSymbolFileName)" />
     </ItemGroup>
 
+    <Message Text="[ILRepack] Keeping runtime dependencies: @(_PluginRuntimeDeps->'%(Filename)')" Importance="high" Condition="'@(_PluginRuntimeDeps)' != ''" />
+    <Message Text="[ILRepack] Deleting extra assemblies: @(_ExtraAssemblies->'%(Filename)')" Importance="high" Condition="'@(_ExtraAssemblies)' != ''" />
     <Delete Files="@(_ExtraAssemblies)" />
     <Delete Files="@(_ExtraSymbols)" />
-    <Delete Files="@(_ExtraDocs)" />
-    <Delete Files="$(OutputPath)$(AssemblyName).deps.json" Condition="Exists('$(OutputPath)$(AssemblyName).deps.json')" />
-    <RemoveDir Directories="$(OutputPath)runtimes" Condition="Exists('$(OutputPath)runtimes')" />
+    <Delete Files="$(_PluginOutputPath)$(AssemblyName).deps.json" Condition="Exists('$(_PluginOutputPath)$(AssemblyName).deps.json')" />
+    <RemoveDir Directories="$(_PluginOutputPath)runtimes" Condition="Exists('$(_PluginOutputPath)runtimes')" />
+
+    <Message Text="[ILRepack] Assembly merging completed." Importance="high" />
   </Target>
 
-  <!-- Compute SHA-256 using an inline C# task -->
-  <UsingTask TaskName="ComputeSha256" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\\Microsoft.Build.Tasks.Core.dll">
-    <ParameterGroup>
-      <InputFile ParameterType="System.String" Required="true" />
-      <Hash Output="true" ParameterType="System.String" />
-    </ParameterGroup>
-    <Task>
-      <Reference Include="System" />
-      <Reference Include="System.Core" />
-      <Reference Include="System.Security.Cryptography" />
-      <Using Namespace="System" />
-      <Using Namespace="System.IO" />
-      <Using Namespace="System.Security.Cryptography" />
-      <Code Type="Fragment" Language="cs">
-        <![CDATA[
-          if (!File.Exists(InputFile)) {
-            throw new FileNotFoundException("Input file not found", InputFile);
-          }
-          using var stream = File.OpenRead(InputFile);
-          using var sha = SHA256.Create();
-          var hashBytes = sha.ComputeHash(stream);
-          Hash = BitConverter.ToString(hashBytes).Replace("-", string.Empty).ToLowerInvariant();
-        ]]>
-      </Code>
-    </Task>
-  </UsingTask>
+  <!--
+    MANDATORY: Inject gitSha and buildTimestamp into plugin.json
 
-  <!-- Emit manifest.json and sha256 next to the packaged outputs; basic closure check -->
-  <Target Name="WritePluginPackageMetadata" AfterTargets="RepackPlugin" Condition="'$(PluginPackagingDisable)' != 'true'">
-    <ItemGroup>
-      <_MergedDependencies Include="@(PluginMergeDependency)" />
-      <_ResidualDll Include="$(OutputPath)*.dll" Exclude="$(OutputPath)$(PluginAssemblyFileName)" />
-      <!-- Residual assemblies we should not ship -->
-      <_BlockedResidual Include="@(_ResidualDll)"
-                        Condition="$([System.String]::Copy('%(Filename)').StartsWith('System.')) Or $([System.String]::Copy('%(Filename)').StartsWith('Microsoft.')) Or $([System.String]::Copy('%(Filename)').StartsWith('Lidarr.'))" />
-    </ItemGroup>
+    These fields are required for artifact freshness validation:
+    - gitSha: Short git commit hash (8 chars) or "unknown" if git unavailable
+    - buildTimestamp: ISO 8601 UTC timestamp of when the package was built
 
-    <ComputeSha256 InputFile="$(OutputPath)$(PluginAssemblyFileName)">
-      <Output TaskParameter="Hash" PropertyName="_PluginSha256" />
-    </ComputeSha256>
+    This target runs after RepackPlugin to ensure plugin.json in the output
+    directory gets the build metadata injected before deployment or packaging.
+  -->
+  <Target Name="InjectPluginBuildMetadata" AfterTargets="RepackPlugin" Condition="'$(PluginPackagingDisable)' != 'true'">
+    <PropertyGroup>
+      <_PluginManifestPath>$(TargetDir)$(PluginManifestFileName)</_PluginManifestPath>
+    </PropertyGroup>
 
-    <WriteLinesToFile File="$(OutputPath)$(AssemblyName).zip.sha256"
-                      Lines="$(_PluginSha256)"
-                      Overwrite="true" />
+    <!-- Get git SHA with fallback to "unknown" if git is not available -->
+    <Exec Command="git rev-parse --short=8 HEAD"
+          ConsoleToMsBuild="true"
+          StandardOutputImportance="low"
+          StandardErrorImportance="low"
+          IgnoreExitCode="true"
+          Condition="Exists('$(_PluginManifestPath)')">
+      <Output TaskParameter="ConsoleOutput" PropertyName="_GitShaRaw" />
+      <Output TaskParameter="ExitCode" PropertyName="_GitExitCode" />
+    </Exec>
 
-    <UsingTask TaskName="WriteJsonManifest" TaskFactory="CodeTaskFactory" AssemblyFile="$(MSBuildToolsPath)\\Microsoft.Build.Tasks.Core.dll">
-      <ParameterGroup>
-        <OutputPath ParameterType="System.String" Required="true" />
-        <AssemblyName ParameterType="System.String" Required="true" />
-        <PdbName ParameterType="System.String" Required="true" />
-        <Version ParameterType="System.String" Required="true" />
-        <TargetFramework ParameterType="System.String" Required="true" />
-        <Commit ParameterType="System.String" Required="false" />
-        <DockerTag ParameterType="System.String" Required="false" />
-        <DockerDigest ParameterType="System.String" Required="false" />
-        <Dependencies ParameterType="Microsoft.Build.Framework.ITaskItem[]" Required="false" />
-      </ParameterGroup>
-      <Task>
-        <Reference Include="System" />
-        <Reference Include="System.Core" />
-        <Using Namespace="System" />
-        <Using Namespace="System.IO" />
-        <Using Namespace="System.Linq" />
-        <Code Type="Fragment" Language="cs">
-          <![CDATA[
-            var deps = (Dependencies ?? Array.Empty<Microsoft.Build.Framework.ITaskItem>())
-              .Select(d => d.ItemSpec)
-              .Select(Path.GetFileName)
-              .Where(s => !string.IsNullOrEmpty(s))
-              .ToArray();
-            var path = Path.Combine(OutputPath, "manifest.json");
-            using var sw = new StreamWriter(path, false);
-            sw.WriteLine("{");
-            sw.WriteLine($"  \"assembly\": \"{AssemblyName}\",");
-            sw.WriteLine($"  \"pdb\": \"{PdbName}\",");
-            sw.WriteLine($"  \"version\": \"{Version}\",");
-            sw.WriteLine($"  \"targetFramework\": \"{TargetFramework}\",");
-            sw.WriteLine($"  \"commit\": \"{Commit}\",");
-            sw.WriteLine("  \"mergedDependencies\": [");
-            for (int i = 0; i < deps.Length; i++) {
-              var comma = (i < deps.Length - 1) ? "," : string.Empty;
-              sw.WriteLine($"    \"{deps[i]}\"{comma}");
-            }
-            sw.WriteLine("  ]");
-            // Optional docker metadata when builds run under CI
-            if (!string.IsNullOrWhiteSpace(DockerTag)) {
-              sw.WriteLine($",\n  \"dockerTag\": \"{DockerTag}\"");
-            }
-            if (!string.IsNullOrWhiteSpace(DockerDigest)) {
-              sw.WriteLine($",\n  \"dockerDigest\": \"{DockerDigest}\"");
-            }
-            sw.WriteLine("}");
-          ]]>
-        </Code>
-      </Task>
-    </UsingTask>
+    <PropertyGroup>
+      <!-- Use git SHA if available, otherwise "unknown" (CI without git, exported archives) -->
+      <_PluginGitSha Condition="'$(_GitExitCode)' == '0' and '$(_GitShaRaw)' != ''">$(_GitShaRaw.Trim())</_PluginGitSha>
+      <_PluginGitSha Condition="'$(_PluginGitSha)' == ''">unknown</_PluginGitSha>
+      <!-- ISO 8601 UTC timestamp -->
+      <_PluginBuildTimestamp>$([System.DateTime]::UtcNow.ToString("o"))</_PluginBuildTimestamp>
+    </PropertyGroup>
 
-    <WriteJsonManifest OutputPath="$(OutputPath)"
-                       AssemblyName="$(PluginAssemblyFileName)"
-                       PdbName="$(PluginSymbolFileName)"
-                       Version="$(Version)"
-                       TargetFramework="$(TargetFramework)"
-                       Commit="$(SourceRevisionId)"
-                       DockerTag="$(DockerTag)"
-                       DockerDigest="$(DockerDigest)"
-                       Dependencies="@(_MergedDependencies)" />
+    <!-- Inject gitSha and buildTimestamp into plugin.json using PowerShell (cross-platform) -->
+    <Exec Command="pwsh -NoProfile -NonInteractive -Command &quot;$manifest = Get-Content -LiteralPath '$(_PluginManifestPath)' -Raw | ConvertFrom-Json; $manifest | Add-Member -NotePropertyName 'gitSha' -NotePropertyValue '$(_PluginGitSha)' -Force; $manifest | Add-Member -NotePropertyName 'buildTimestamp' -NotePropertyValue '$(_PluginBuildTimestamp)' -Force; $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath '$(_PluginManifestPath)' -Encoding UTF8&quot;"
+          Condition="Exists('$(_PluginManifestPath)')"
+          StandardOutputImportance="low"
+          IgnoreExitCode="true">
+      <Output TaskParameter="ExitCode" PropertyName="_PwshExitCode" />
+    </Exec>
 
-    <Error Text="Blocked residual assemblies present in output: @(_BlockedResidual)"
-           Condition="'@(_BlockedResidual)' != ''" />
+    <!-- Fallback to powershell.exe on Windows if pwsh is not available -->
+    <Exec Command="powershell -NoProfile -NonInteractive -Command &quot;$manifest = Get-Content -LiteralPath '$(_PluginManifestPath)' -Raw | ConvertFrom-Json; $manifest | Add-Member -NotePropertyName 'gitSha' -NotePropertyValue '$(_PluginGitSha)' -Force; $manifest | Add-Member -NotePropertyName 'buildTimestamp' -NotePropertyValue '$(_PluginBuildTimestamp)' -Force; $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath '$(_PluginManifestPath)' -Encoding UTF8&quot;"
+          Condition="Exists('$(_PluginManifestPath)') and '$(_PwshExitCode)' != '0'"
+          StandardOutputImportance="low"
+          IgnoreExitCode="true" />
+
+    <Message Text="[PluginPackaging] Injected build metadata: gitSha=$(_PluginGitSha), buildTimestamp=$(_PluginBuildTimestamp)" Importance="high" Condition="Exists('$(_PluginManifestPath)')" />
   </Target>
 
-  <Target Name="DeployPluginArtifacts" AfterTargets="RepackPlugin" Condition="'$(EnablePluginDeployment)' == 'true' and '$(LidarrPluginDeployPath)' != ''">
+  <Target Name="DeployPluginArtifacts" AfterTargets="InjectPluginBuildMetadata" Condition="'$(EnablePluginDeployment)' == 'true' and '$(LidarrPluginDeployPath)' != ''">
     <ItemGroup>
       <PluginDeploymentFiles Include="$(OutputPath)$(PluginAssemblyFileName)" />
       <PluginDeploymentFiles Include="$(OutputPath)$(PluginSymbolFileName)" Condition="Exists('$(OutputPath)$(PluginSymbolFileName)')" />
       <PluginDeploymentFiles Include="$(OutputPath)$(PluginManifestFileName)" Condition="Exists('$(OutputPath)$(PluginManifestFileName)')" />
-      <PluginDeploymentFiles Include="@(PluginExtraContent)" />
     </ItemGroup>
 
     <MakeDir Directories="$(LidarrPluginDeployPath)" />

@@ -1,0 +1,88 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/main/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-10T16:00:00.000Z",
+  "runId": "golden-provider-unavailable-defensive",
+  "runner": {
+    "name": "lidarr.plugin.common:e2e-runner.ps1",
+    "version": "deadbeef",
+    "args": ["-Gate", "brainarr", "-Plugins", "Brainarr", "-StrictMode"]
+  },
+  "lidarr": {
+    "url": "http://[LOCALHOST]:8686",
+    "containerName": "lidarr-e2e-test",
+    "imageTag": "pr-plugins-3.1.1.4884",
+    "imageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "version": "3.1.1.4884",
+    "branch": "plugins",
+    "containerId": "000000000000",
+    "startedAt": "2026-01-10T15:59:00.000Z",
+    "imageId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "request": {
+    "gate": "brainarr",
+    "plugins": ["Brainarr"]
+  },
+  "effective": {
+    "gates": ["Schema", "Brainarr"],
+    "plugins": ["Brainarr"],
+    "stopReason": "failed at Brainarr for Brainarr"
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 42
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Brainarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-10T16:00:01.000Z",
+      "endedAt": "2026-01-10T16:00:02.000Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Brainarr",
+      "plugin": "Brainarr",
+      "outcome": "failed",
+      "errorCode": "E2E_PROVIDER_UNAVAILABLE",
+      "outcomeReason": "No model available on LLM endpoint",
+      "startedAt": "2026-01-10T16:00:03.000Z",
+      "endedAt": "2026-01-10T16:00:04.000Z",
+      "durationMs": 1000,
+      "errors": [
+        "No model available on LLM endpoint (modelsCount=0)."
+      ],
+      "details": {
+        "ErrorCode": "E2E_PROVIDER_UNAVAILABLE",
+        "llmKind": "unknown",
+        "modelsCount": 0,
+        "expectedModelFound": false
+      }
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 2,
+    "passed": 1,
+    "failed": 1,
+    "skipped": 0,
+    "totalDurationMs": 2000
+  },
+  "diagnostics": {
+    "bundlePath": null,
+    "bundleCreated": false,
+    "includedFiles": ["run-manifest.json"],
+    "redactionApplied": true,
+    "redactionSelfTestPassed": true
+  },
+  "hostBugSuspected": {
+    "detected": false
+  }
+}

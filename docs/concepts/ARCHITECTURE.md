@@ -45,7 +45,7 @@ flowchart TB
 
 - `Lidarr.Plugin.Abstractions` → SemVer, fixed `AssemblyVersion` per major (e.g., `1.0.0.0` for all 1.x). When the public surface changes, update `src/Abstractions/PublicAPI.*` and add migration notes in [`migration/BREAKING_CHANGES.md`](../migration/BREAKING_CHANGES.md).
 - `Lidarr.Plugin.Common` → SemVer, plugin-private. Plugin authors choose when to adopt new features.
-- The repository tracks supported TFMs and host versions in [`concepts/COMPATIBILITY.md`](COMPATIBILITY.md).
+- The repository tracks supported TFMs and host versions in [`concepts/COMPATIBILITY.md`](../COMPATIBILITY.md).
 
 ## Contracts and responsibilities
 
@@ -64,8 +64,8 @@ flowchart TB
 
 ## Related docs
 
-- [Plugin isolation](PLUGIN_ISOLATION.md)
-- [Compatibility matrix](COMPATIBILITY.md)
+- [Plugin isolation](../PLUGIN_ISOLATION.md)
+- [Compatibility matrix](../COMPATIBILITY.md)
 - [Release policy](../dev-guide/RELEASE_POLICY.md)
 - [Migration guides](../migration/FROM_LEGACY.md)
 

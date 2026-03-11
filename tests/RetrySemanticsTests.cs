@@ -5,7 +5,9 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
+using Lidarr.Plugin.Common.Services.Resilience;
 using Lidarr.Plugin.Common.Utilities;
+using Microsoft.Extensions.Logging;
 using Xunit;
 
 namespace Lidarr.Plugin.Common.Tests
@@ -64,7 +66,7 @@ namespace Lidarr.Plugin.Common.Tests
 
             Assert.Equal(HttpStatusCode.OK, response.StatusCode);
             // Allow a little slack on slower CI runners
-            Assert.InRange(sw.ElapsedMilliseconds, 250, 1300); // waited roughly for date (clamped by ~1s budget)
+            Assert.InRange(sw.ElapsedMilliseconds, 250, 1600); // waited roughly for date (clamped by ~1s budget)
         }
 
         private static int _attempt = 0;

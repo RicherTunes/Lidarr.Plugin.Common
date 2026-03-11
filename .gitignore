@@ -13,6 +13,13 @@ bld/
 [Ll]og/
 [Ll]ogs/
 
+# Alternate build output dirs (tooling/scripts)
+[Bb]in.*/
+[Bb]in-*/
+[Oo]bj.*/
+[Oo]bj-*/
+**/.tmp/
+
 # Visual Studio cache/options
 .vs/
 .vscode/
@@ -58,6 +65,32 @@ Desktop.ini
 _nupkg_extract/
 # Local package output
 /dist/
+
+# Local Docker smoke test staging
+.docker-multi-smoke-test/
+.docker-e2e-runner-*/
+# Local diagnostic artifacts (keep src/Abstractions/Diagnostics/ tracked)
+/diagnostics/
+scripts/diagnostics/
+.e2e-test-output/
+.e2e-test-run.ps1
+.e2e-bootstrap/
+.e2e-local/
+scripts/e2e-local/*.json
+!scripts/e2e-local/*.example.json
+
+# Local ad-hoc troubleshooting scripts (not part of repo tooling)
+scripts/check-clients-detail.ps1
+scripts/check-clients.ps1
+scripts/check-protocol.ps1
+scripts/compare-tidal-settings.ps1
+scripts/resave-client.ps1
+scripts/show-client-config.ps1
+scripts/sync-tidal-oauth.ps1
+scripts/test-client.ps1
+
+# Persistent local test state
+.persistent-*/
 
 # Test artifacts
 [Tt]est[Rr]esults*/

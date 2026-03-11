@@ -1,5 +1,2 @@
 #nullable enable
 
-T:Lidarr.Plugin.Common.Utilities.PathValidation
-M:Lidarr.Plugin.Common.Utilities.PathValidation.IsReasonablePath(System.String)~System.Boolean
-

@@ -19,7 +19,8 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private readonly IStreamingTokenAuthenticationService<TSession, TCredentials> _authService;
         private readonly ITokenStore<TSession>? _tokenStore;
         private readonly StreamingTokenManagerOptions<TSession> _options;
-        private readonly Timer _refreshTimer;
+        private readonly TimeProvider _timeProvider;
+        private readonly ITimer _refreshTimer;
         private readonly SemaphoreSlim _refreshSemaphore;
         private readonly object _tokenLock = new();
         private readonly object _loadLock = new();
@@ -29,6 +30,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private volatile bool _isRefreshing;
         private volatile int _refreshAttempts;
         private Task? _initialLoadTask;
+        private int _proactiveRefreshCredentialTypeMismatchWarningLogged;
 
         public event EventHandler<SessionRefreshEventArgs<TSession>>? SessionRefreshed;
         public event EventHandler<SessionRefreshFailedEventArgs>? SessionRefreshFailed;
@@ -37,15 +39,21 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             IStreamingTokenAuthenticationService<TSession, TCredentials> authService,
             ILogger<StreamingTokenManager<TSession, TCredentials>> logger,
             ITokenStore<TSession>? tokenStore = null,
-            StreamingTokenManagerOptions<TSession>? options = null)
+            StreamingTokenManagerOptions<TSession>? options = null,
+            TimeProvider? timeProvider = null)
         {
             _authService = authService ?? throw new ArgumentNullException(nameof(authService));
             _logger = logger ?? throw new ArgumentNullException(nameof(logger));
             _tokenStore = tokenStore;
             _options = options ?? new StreamingTokenManagerOptions<TSession>();
+            _timeProvider = timeProvider ?? TimeProvider.System;
 
             _refreshSemaphore = new SemaphoreSlim(1, 1);
-            _refreshTimer = new Timer(CheckTokenExpiry, null, _options.RefreshCheckInterval, _options.RefreshCheckInterval);
+            _refreshTimer = _timeProvider.CreateTimer(
+                CheckTokenExpiry,
+                null,
+                _options.RefreshCheckInterval,
+                _options.RefreshCheckInterval);
 
             _logger.LogDebug("StreamingTokenManager initialized (buffer={Buffer} checkInterval={Interval})",
                 _options.RefreshBuffer, _options.RefreshCheckInterval);
@@ -121,7 +129,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 SessionRefreshed?.Invoke(this, new SessionRefreshEventArgs<TSession>
                 {
                     NewSession = newSession,
-                    RefreshedAt = DateTime.UtcNow,
+                    RefreshedAt = _timeProvider.GetUtcNow().UtcDateTime,
                     ExpiresAt = expiry
                 });
 
@@ -135,7 +143,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 {
                     AttemptNumber = _refreshAttempts,
                     Exception = ex,
-                    FailedAt = DateTime.UtcNow
+                    FailedAt = _timeProvider.GetUtcNow().UtcDateTime
                 });
 
                 if (_refreshAttempts >= _options.MaxRefreshAttempts)
@@ -154,11 +162,26 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         }
 
         /// <summary>
-        /// Clears the current session and any persisted state synchronously.
+        /// Clears the current session from memory and starts a best-effort async clear of
+        /// persisted state. For guaranteed persistence clearing, use <see cref="ClearSessionAsync"/>.
         /// </summary>
         public void ClearSession()
         {
-            ClearSessionAsync().GetAwaiter().GetResult();
+            lock (_tokenLock)
+            {
+                _currentSession = null;
+                _sessionExpiryTime = DateTime.MinValue;
+                _refreshAttempts = 0;
+            }
+
+            // Fire-and-forget: best-effort clear of persisted state.
+            // Callers needing to await persistence should use ClearSessionAsync().
+            if (_tokenStore != null)
+            {
+                _ = PersistSafely(() => _tokenStore!.ClearAsync(CancellationToken.None));
+            }
+
+            _logger.LogDebug("Session cleared");
         }
 
         /// <summary>
@@ -185,15 +208,25 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         }
 
         /// <summary>
-        /// Gets current session status information.
+        /// Gets current session status from in-memory state. Does not block on persistence loading.
+        /// For status guaranteed to include persisted sessions, use <see cref="GetSessionStatusAsync"/>.
         /// </summary>
         public SessionStatus GetSessionStatus()
         {
-            if (_tokenStore != null)
-            {
-                EnsurePersistedSessionAsync().GetAwaiter().GetResult();
-            }
+            return BuildSessionStatus();
+        }
 
+        /// <summary>
+        /// Gets current session status, ensuring any persisted session is loaded first.
+        /// </summary>
+        public async Task<SessionStatus> GetSessionStatusAsync()
+        {
+            await EnsurePersistedSessionAsync().ConfigureAwait(false);
+            return BuildSessionStatus();
+        }
+
+        private SessionStatus BuildSessionStatus()
+        {
             lock (_tokenLock)
             {
                 return new SessionStatus
@@ -204,9 +237,23 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     RefreshAttempts = _refreshAttempts,
                     TimeUntilExpiry = _sessionExpiryTime == DateTime.MinValue
                         ? TimeSpan.Zero
-                        : _sessionExpiryTime - DateTime.UtcNow
+                        : _sessionExpiryTime - _timeProvider.GetUtcNow().UtcDateTime
                 };
             }
+        }
+
+        /// <summary>
+        /// Manually triggers the refresh check logic. Intended for deterministic testing
+        /// with FakeTimeProvider to avoid timer/threadpool scheduling variance.
+        /// </summary>
+        /// <remarks>
+        /// In production, the internal timer calls this automatically. For tests using
+        /// FakeTimeProvider, call this method after advancing time to deterministically
+        /// trigger proactive refresh behavior.
+        /// </remarks>
+        public void TriggerRefreshCheck()
+        {
+            CheckTokenExpiry(null);
         }
 
         private bool IsSessionValid()
@@ -220,22 +267,67 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private bool IsSessionValidUnsafe()
         {
             return _currentSession != null &&
-                   DateTime.UtcNow < _sessionExpiryTime.Subtract(_options.RefreshBuffer);
+                   _timeProvider.GetUtcNow().UtcDateTime < _sessionExpiryTime.Subtract(_options.RefreshBuffer);
         }
 
         private DateTime DetermineExpiry(TSession session)
         {
             var expiry = _options.GetSessionExpiry?.Invoke(session);
-            return expiry ?? DateTime.UtcNow.Add(_options.DefaultSessionLifetime);
+            return expiry ?? _timeProvider.GetUtcNow().UtcDateTime.Add(_options.DefaultSessionLifetime);
         }
 
-        private void CheckTokenExpiry(object? state)
+        private async void CheckTokenExpiry(object? state)
         {
             try
             {
-                if (!IsSessionValid() && !_isRefreshing)
+                // Check if session is within refresh buffer (needs refresh soon)
+                bool needsRefresh;
+                lock (_tokenLock)
                 {
-                    _logger.LogDebug("Session approaching expiry, awaiting caller-provided refresh");
+                    needsRefresh = _currentSession != null &&
+                                   _timeProvider.GetUtcNow().UtcDateTime >= _sessionExpiryTime.Subtract(_options.RefreshBuffer) &&
+                                   _timeProvider.GetUtcNow().UtcDateTime < _sessionExpiryTime;
+                }
+
+                if (!needsRefresh || _isRefreshing)
+                {
+                    return;
+                }
+
+                // Check if proactive refresh is enabled and credentials are available
+                if (!_options.EnableProactiveRefresh || _options.ProactiveRefreshCredentialsProvider == null)
+                {
+                    _logger.LogDebug("Session approaching expiry, awaiting caller-provided refresh (proactive refresh not configured)");
+                    return;
+                }
+
+                var credentialsObject = _options.ProactiveRefreshCredentialsProvider();
+                if (credentialsObject is not TCredentials credentials)
+                {
+                    if (Interlocked.Exchange(ref _proactiveRefreshCredentialTypeMismatchWarningLogged, 1) == 0)
+                    {
+                        _logger.LogWarning(
+                            "ProactiveRefreshCredentialsProvider returned {ActualType} but expected {ExpectedType}; proactive refresh will not run until this is fixed",
+                            credentialsObject?.GetType().FullName ?? "null",
+                            typeof(TCredentials).FullName);
+                    }
+
+                    _logger.LogDebug("Session approaching expiry, but credentials provider did not return valid credentials");
+                    return;
+                }
+
+                _logger.LogDebug("Proactive token refresh: session expires in {TimeToExpiry}, refreshing preemptively",
+                    _sessionExpiryTime - _timeProvider.GetUtcNow().UtcDateTime);
+
+                try
+                {
+                    await RefreshSessionAsync(credentials).ConfigureAwait(false);
+                    _logger.LogDebug("Proactive token refresh completed successfully");
+                }
+                catch (Exception refreshEx)
+                {
+                    _logger.LogWarning(refreshEx, "Proactive token refresh failed, will retry on next check interval");
+                    // Don't rethrow - this is background maintenance, let the timer retry
                 }
             }
             catch (Exception ex)
@@ -284,7 +376,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     return;
                 }
 
-                if (envelope.ExpiresAt.HasValue && envelope.ExpiresAt.Value <= DateTime.UtcNow)
+                if (envelope.ExpiresAt.HasValue && envelope.ExpiresAt.Value <= _timeProvider.GetUtcNow().UtcDateTime)
                 {
                     _logger.LogInformation("Persisted session expired at {Expiry}, clearing store", envelope.ExpiresAt);
                     await _tokenStore.ClearAsync(CancellationToken.None).ConfigureAwait(false);
@@ -294,7 +386,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 lock (_tokenLock)
                 {
                     _currentSession = envelope.Session;
-                    _sessionExpiryTime = envelope.ExpiresAt ?? DateTime.UtcNow.Add(_options.DefaultSessionLifetime);
+                    _sessionExpiryTime = envelope.ExpiresAt ?? _timeProvider.GetUtcNow().UtcDateTime.Add(_options.DefaultSessionLifetime);
                     _refreshAttempts = 0;
                 }
 

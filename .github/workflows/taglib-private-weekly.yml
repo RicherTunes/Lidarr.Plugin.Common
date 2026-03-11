@@ -11,6 +11,8 @@ permissions:
 jobs:
   lidarr-taglib-build:
     runs-on: ubuntu-latest
+    # Only run on schedule or manual dispatch (not on push events that GitHub creates for workflow file changes)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     steps:
       - name: Precheck for secret
         if: ${{ secrets.LIDARR_TAGLIB_FEED_URL == '' }}
@@ -18,16 +20,14 @@ jobs:
           echo "LIDARR_TAGLIB_FEED_URL not set; skipping Lidarr TagLib weekly build." && exit 0
 
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Setup .NET SDKs
-        uses: actions/setup-dotnet@v4
+      - name: Setup .NET SDK
+        uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: |
-            8.0.x
-            6.0.x
+          dotnet-version: 8.0.x
 
       - name: Add Lidarr TagLib feed (CI only)
         run: |

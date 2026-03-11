@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-03T00:00:00Z",
+  "runId": "abc123def456",
+  "runner": {
+    "name": "e2e-runner",
+    "version": "abc1234",
+    "args": ["-Gate", "configure", "-Plugins", "Qobuzarr"]
+  },
+  "lidarr": {
+    "url": "http://localhost:8686",
+    "containerName": "lidarr-e2e-test",
+    "containerId": "abc123def456",
+    "version": "3.1.1.4884",
+    "branch": "plugins"
+  },
+  "request": {
+    "gate": "configure",
+    "plugins": ["Qobuzarr"]
+  },
+  "effective": {
+    "gates": ["Schema", "Configure"],
+    "plugins": ["Qobuzarr"],
+    "stopReason": null
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 15
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Qobuzarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-03T00:00:01Z",
+      "endedAt": "2026-01-03T00:00:02Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Configure",
+      "plugin": "Qobuzarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-03T00:00:02Z",
+      "endedAt": "2026-01-03T00:00:03Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {
+        "componentResolution": {
+          "indexer": {
+            "selectedId": 1,
+            "strategy": "implementation",
+            "matchedOn": "implementation",
+            "candidateIds": [1],
+            "safeToPersist": true
+          }
+        }
+      }
+    }
+  ],
+  "summary": {
+    "overallSuccess": true,
+    "totalGates": 2,
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "totalDurationMs": 2000
+  },
+  "diagnostics": {
+    "bundleCreated": false,
+    "redactionApplied": true
+  },
+  "hostBugSuspected": {
+    "detected": false
+  }
+}

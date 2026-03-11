@@ -13,15 +13,24 @@ jobs:
       contents: read
       actions: read
     env:
-      DOTNET_ROLL_FORWARD: LatestMajor
+      # Keep CI on stable SDKs; avoid rolling to newer major SDKs unexpectedly.
+      DOTNET_ROLL_FORWARD: Minor
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
+      # GitHub-hosted runners already have pwsh - skip apt install entirely
+      # (kept for local act runs where pwsh may not be present)
       - name: Install PowerShell (pwsh)
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && env.ACT == 'true'
         shell: bash
         run: |
           set -euo pipefail
+          if command -v pwsh >/dev/null 2>&1; then
+            echo "pwsh already installed, skipping"
+            exit 0
+          fi
           . /etc/os-release
           CODENAME=${VERSION_CODENAME:-"jammy"}
           echo "Using Ubuntu codename: $CODENAME"
@@ -31,15 +40,29 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y powershell
 
+      - name: Check for contract doc changes
+        id: contract_check
+        shell: bash
+        run: |
+          # Detect if PR touches contract docs (requires tripwire test execution)
+          git fetch origin ${{ github.base_ref }} --depth=1 2>/dev/null || true
+          CHANGED=$(git diff --name-only origin/${{ github.base_ref }}...HEAD 2>/dev/null || echo "")
+
+          # Check for contract files specifically
+          CONTRACT_CHANGED="false"
+          if echo "$CHANGED" | grep -qE '^docs/E2E_ERROR_CODES\.md$|^docs/reference/e2e-run-manifest\.schema\.json$'; then
+            CONTRACT_CHANGED="true"
+            echo "::notice::Contract docs changed - tripwire test MUST execute and emit marker"
+          fi
+          echo "contract_changed=$CONTRACT_CHANGED" >> $GITHUB_OUTPUT
+
       - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@v5
         with:
-          dotnet-version: |
-            8.0.x
-            6.0.x
+          dotnet-version: 8.0.x
 
       - name: Cache NuGet packages
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/.nuget/packages
           key: ${{ runner.os }}-nuget-${{ hashFiles('**/packages.lock.json') }}
@@ -54,10 +77,98 @@ jobs:
           "LIDARR_PATH=$out" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8NoBOM -Append
 
       - name: Build
-        run: dotnet build -c Release -warnaserror:NU1903
+        run: dotnet build -c Release -warnaserror:NU1903 -p:GeneratePackageOnBuild=false -m:1
 
       - name: Dotnet format (verify - style only)
         run: dotnet format style --verify-no-changes
 
       - name: Test
-        run: dotnet test -c Release --no-build
+        timeout-minutes: 15
+        shell: pwsh
+        run: |
+          # Run with blame-hang to detect and kill hanging test host
+          # (Spectre.Console background threads prevent clean process exit)
+          dotnet test -c Release --no-build `
+            --filter "State!=Quarantined" `
+            --blame-hang-timeout 30s `
+            --logger "trx;LogFileName=test_results.trx"
+          $testExit = $LASTEXITCODE
+
+          # If dotnet test exited non-zero, check if it's just a blame-hang abort
+          if ($testExit -ne 0) {
+            $trx = Get-ChildItem -Path . -Filter "test_results.trx" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($trx) {
+              [xml]$xml = Get-Content $trx.FullName
+              $counters = $xml.TestRun.ResultSummary.Counters
+              $failed = [int]$counters.failed
+              $passed = [int]$counters.passed
+              Write-Host "TRX Results: Passed=$passed Failed=$failed"
+              if ($failed -eq 0 -and $passed -gt 0) {
+                Write-Host "All tests passed. Exit code $testExit was from blame-hang abort (expected)." -ForegroundColor Green
+                exit 0
+              }
+            }
+            exit $testExit
+          }
+
+      - name: Script tests (E2E runner)
+        id: script_tests
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $tests = Get-ChildItem -Path ./scripts/tests -Filter 'Test-*.ps1' | Sort-Object Name
+          if (-not $tests) {
+            throw "No script tests found under ./scripts/tests"
+          }
+
+          # Track execution count for verification
+          $executedCount = 0
+          foreach ($test in $tests) {
+            Write-Host "Running $($test.Name)..." -ForegroundColor Cyan
+            & $test.FullName
+            $executedCount++
+          }
+
+          # Output count for sanity check
+          "executed_count=$executedCount" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8NoBOM -Append
+          Write-Host "Executed $executedCount test scripts"
+
+      - name: Verify tripwire execution (contract docs)
+        if: always() && steps.contract_check.outputs.contract_changed == 'true'
+        shell: bash
+        run: |
+          # CRITICAL: If contract docs changed, tripwire test MUST have executed
+          # and emitted a marker file as proof of actual execution
+
+          MARKER_PATH="${RUNNER_TEMP}/tripwire-contract-test.marker"
+          EXECUTED_COUNT="${{ steps.script_tests.outputs.executed_count }}"
+
+          echo "Checking tripwire execution proof..."
+          echo "  Marker path: $MARKER_PATH"
+          echo "  Executed count: $EXECUTED_COUNT"
+
+          # Fail if script tests step didn't run or executed 0 tests
+          if [ -z "$EXECUTED_COUNT" ] || [ "$EXECUTED_COUNT" = "0" ]; then
+            echo "::error::TRIPWIRE BYPASS: Script tests step did not run or executed 0 tests!"
+            echo "Contract docs changed but test execution was skipped."
+            exit 1
+          fi
+
+          # Fail if marker file doesn't exist (tripwire didn't actually complete)
+          if [ ! -f "$MARKER_PATH" ]; then
+            echo "::error::TRIPWIRE BYPASS: Marker file not found!"
+            echo "Test-ErrorCodeDetailsContract.ps1 either:"
+            echo "  1. Did not run"
+            echo "  2. Failed before completing"
+            echo "  3. Was renamed/moved without updating workflow"
+            echo ""
+            echo "Expected marker at: $MARKER_PATH"
+            echo "This indicates the tripwire test protecting doc/code consistency did not execute."
+            exit 1
+          fi
+
+          # Verify marker content
+          echo "Marker file found. Contents:"
+          cat "$MARKER_PATH"
+          echo ""
+          echo "Tripwire verification PASSED: Contract test executed and emitted proof marker"

@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -9,6 +9,11 @@ using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Utilities;
+using Lidarr.Plugin.Common.Services.Metadata;
+using Lidarr.Plugin.Common.Security;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
+using System.Diagnostics;
 
 namespace Lidarr.Plugin.Common.Services.Download
 {
@@ -25,6 +30,11 @@ namespace Lidarr.Plugin.Common.Services.Download
         private readonly Func<string, Task<IReadOnlyList<string>>> _getAlbumTrackIdsAsync;
         private readonly Func<string, StreamingQuality?, Task<(string Url, string Extension)>> _getStreamAsync;
         private readonly IAudioStreamProvider? _streamProvider;
+        private readonly IAudioPostProcessor? _postProcessor;
+        private readonly IAudioMetadataApplier? _metadataApplier;
+        private readonly ILogger _logger;
+        private readonly int _maxConcurrentTracks;
+        private readonly IDownloadTelemetrySink? _telemetrySink;
 
         public string ServiceName { get; }
 
@@ -35,7 +45,11 @@ namespace Lidarr.Plugin.Common.Services.Download
             Func<string, Task<StreamingTrack>> getTrackAsync,
             Func<string, Task<IReadOnlyList<string>>> getAlbumTrackIdsAsync,
             Func<string, StreamingQuality?, Task<(string Url, string Extension)>> getStreamAsync,
-            IAudioStreamProvider? streamProvider = null)
+            int maxConcurrentTracks = 1,
+            IAudioStreamProvider? streamProvider = null,
+            IAudioMetadataApplier? metadataApplier = null,
+            ILogger? logger = null,
+            IAudioPostProcessor? postProcessor = null)
         {
             ServiceName = serviceName;
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -43,7 +57,30 @@ namespace Lidarr.Plugin.Common.Services.Download
             _getTrackAsync = getTrackAsync ?? throw new ArgumentNullException(nameof(getTrackAsync));
             _getAlbumTrackIdsAsync = getAlbumTrackIdsAsync ?? throw new ArgumentNullException(nameof(getAlbumTrackIdsAsync));
             _getStreamAsync = getStreamAsync ?? throw new ArgumentNullException(nameof(getStreamAsync));
+            _maxConcurrentTracks = Math.Max(1, maxConcurrentTracks);
             _streamProvider = streamProvider;
+            _postProcessor = postProcessor;
+            _metadataApplier = metadataApplier ?? new TagLibAudioMetadataApplier();
+            _logger = logger ?? NullLogger.Instance;
+            _telemetrySink = null;
+        }
+
+        public SimpleDownloadOrchestrator(
+            string serviceName,
+            HttpClient httpClient,
+            Func<string, Task<StreamingAlbum>> getAlbumAsync,
+            Func<string, Task<StreamingTrack>> getTrackAsync,
+            Func<string, Task<IReadOnlyList<string>>> getAlbumTrackIdsAsync,
+            Func<string, StreamingQuality?, Task<(string Url, string Extension)>> getStreamAsync,
+            int maxConcurrentTracks,
+            IAudioStreamProvider? streamProvider,
+            IAudioMetadataApplier? metadataApplier,
+            ILogger? logger,
+            IAudioPostProcessor? postProcessor,
+            IDownloadTelemetrySink? telemetrySink)
+            : this(serviceName, httpClient, getAlbumAsync, getTrackAsync, getAlbumTrackIdsAsync, getStreamAsync, maxConcurrentTracks, streamProvider, metadataApplier, logger, postProcessor)
+        {
+            _telemetrySink = telemetrySink;
         }
 
         public Task<DownloadResult> DownloadAlbumAsync(string albumId, string outputDirectory, StreamingQuality quality = null, IProgress<DownloadProgress> progress = null)
@@ -64,29 +101,115 @@ namespace Lidarr.Plugin.Common.Services.Download
 
             Directory.CreateDirectory(outputDirectory);
             var trackIds = await _getAlbumTrackIdsAsync(albumId).ConfigureAwait(false);
-            int done = 0, total = trackIds?.Count ?? album.TrackCount;
+            int total = trackIds?.Count ?? album.TrackCount;
 
-            foreach (var trackId in trackIds ?? Array.Empty<string>())
+            if (trackIds == null || trackIds.Count == 0)
             {
-                cancellationToken.ThrowIfCancellationRequested();
+                result.Success = false;
+                result.ErrorMessage = $"No track IDs returned for album {albumId}";
+                result.FilePaths = files;
+                result.TotalSize = 0;
+                result.Duration = DateTime.UtcNow - started;
+                return result;
+            }
 
-                var track = await _getTrackAsync(trackId).ConfigureAwait(false);
-                var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
-
-                var tr = await DownloadTrackInternalAsync(trackId, track, trackPath, quality, progress, done, total, cancellationToken).ConfigureAwait(false);
-                result.TrackResults.Add(new TrackDownloadResult
+            if (_maxConcurrentTracks <= 1)
+            {
+                // Sequential download path (original behavior)
+                int done = 0;
+                foreach (var trackId in trackIds ?? Array.Empty<string>())
                 {
-                    TrackId = trackId,
-                    Success = tr.Success,
-                    FilePath = tr.FilePath,
-                    FileSize = tr.FileSize,
-                    ActualQuality = tr.ActualQuality,
-                    DownloadTime = TimeSpan.Zero,
-                    ErrorMessage = tr.ErrorMessage
-                });
-                if (tr.Success) files.Add(tr.FilePath);
-                done++;
-                ReportProgress(progress, done, Math.Max(total, trackIds?.Count ?? total), track?.Title, 0, 0, null);
+                    cancellationToken.ThrowIfCancellationRequested();
+
+                    var track = await _getTrackAsync(trackId).ConfigureAwait(false);
+                    var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
+
+                    var tr = await DownloadTrackInternalAsync(albumId, trackId, track, trackPath, quality, progress, done, total, cancellationToken).ConfigureAwait(false);
+                    result.TrackResults.Add(new TrackDownloadResult
+                    {
+                        TrackId = trackId,
+                        Success = tr.Success,
+                        FilePath = tr.FilePath,
+                        FileSize = tr.FileSize,
+                        ActualQuality = tr.ActualQuality,
+                        DownloadTime = TimeSpan.Zero,
+                        ErrorMessage = tr.ErrorMessage
+                    });
+                    if (tr.Success) files.Add(tr.FilePath);
+                    done++;
+                    ReportProgress(progress, done, Math.Max(total, trackIds?.Count ?? total), track?.Title, 0, 0, null);
+                }
+            }
+            else
+            {
+                // Bounded parallel download path
+                using var semaphore = new SemaphoreSlim(_maxConcurrentTracks, _maxConcurrentTracks);
+                var trackResultsLock = new object();
+                int completed = 0;
+
+                var tasks = (trackIds ?? Array.Empty<string>()).Select(async trackId =>
+                {
+                    await semaphore.WaitAsync(cancellationToken).ConfigureAwait(false);
+                    try
+                    {
+                        cancellationToken.ThrowIfCancellationRequested();
+
+                        var track = await _getTrackAsync(trackId).ConfigureAwait(false);
+                        var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
+
+                        var currentCompleted = Interlocked.CompareExchange(ref completed, 0, 0);
+                        var tr = await DownloadTrackInternalAsync(albumId, trackId, track, trackPath, quality, progress, currentCompleted, total, cancellationToken).ConfigureAwait(false);
+
+                        lock (trackResultsLock)
+                        {
+                            result.TrackResults.Add(new TrackDownloadResult
+                            {
+                                TrackId = trackId,
+                                Success = tr.Success,
+                                FilePath = tr.FilePath,
+                                FileSize = tr.FileSize,
+                                ActualQuality = tr.ActualQuality,
+                                DownloadTime = TimeSpan.Zero,
+                                ErrorMessage = tr.ErrorMessage
+                            });
+                            if (tr.Success && !string.IsNullOrEmpty(tr.FilePath))
+                            {
+                                files.Add(tr.FilePath);
+                            }
+                        }
+
+                        var done = Interlocked.Increment(ref completed);
+                        ReportProgress(progress, done, total, track?.Title, 0, 0, null);
+                    }
+                    finally
+                    {
+                        semaphore.Release();
+                    }
+                }).ToList();
+
+                await Task.WhenAll(tasks).ConfigureAwait(false);
+            }
+
+            var failures = result.TrackResults.Where(tr => !tr.Success).ToList();
+            if (failures.Count > 0)
+            {
+                result.Success = false;
+                var first = failures[0];
+                result.ErrorMessage = $"Failed to download {failures.Count}/{result.TrackResults.Count} tracks. First error: {first.ErrorMessage}";
+            }
+            else if (files.Count == 0)
+            {
+                result.Success = false;
+                result.ErrorMessage = "No files were downloaded.";
+            }
+            else if (files.Count != result.TrackResults.Count)
+            {
+                result.Success = false;
+                result.ErrorMessage = $"Downloaded {files.Count} files but have {result.TrackResults.Count} track results.";
+            }
+            else
+            {
+                result.Success = true;
             }
 
             result.FilePaths = files;
@@ -105,45 +228,113 @@ namespace Lidarr.Plugin.Common.Services.Download
             cancellationToken.ThrowIfCancellationRequested();
             var track = await _getTrackAsync(trackId).ConfigureAwait(false);
             if (track == null) throw new InvalidOperationException($"Track not found: {trackId}");
-            return await DownloadTrackInternalAsync(trackId, track, outputPath, quality, null, 0, 1, cancellationToken).ConfigureAwait(false);
+            return await DownloadTrackInternalAsync(albumId: null, trackId, track, outputPath, quality, null, 0, 1, cancellationToken).ConfigureAwait(false);
         }
 
-        private async Task<TrackDownloadResult> DownloadTrackInternalAsync(string trackId, StreamingTrack track, string outputPath, StreamingQuality? quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks, CancellationToken cancellationToken)
+        private async Task<TrackDownloadResult> DownloadTrackInternalAsync(string? albumId, string trackId, StreamingTrack track, string outputPath, StreamingQuality? quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks, CancellationToken cancellationToken)
         {
-            // If a chunk-based stream provider is supplied, use it
-            if (_streamProvider != null)
+            var counters = new DownloadTelemetryCounters();
+            using var telemetryScope = DownloadTelemetryContext.Begin(counters);
+            var stopwatch = Stopwatch.StartNew();
+
+            try
             {
-                try
-                {
-                    Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
-                    var tempPath = outputPath + ".partial";
-                    var streamResult = await _streamProvider.GetStreamAsync(trackId, quality, cancellationToken).ConfigureAwait(false);
-                    var totalExpected = streamResult.TotalBytes ?? 0;
-                    if (!string.IsNullOrWhiteSpace(streamResult.SuggestedExtension))
-                    {
-                        outputPath = Path.ChangeExtension(outputPath, streamResult.SuggestedExtension.TrimStart('.'));
-                    }
+                TrackDownloadResult result;
 
-                    using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, useAsync: true))
+                // If a chunk-based stream provider is supplied, use it
+                if (_streamProvider != null)
+                {
+                    try
                     {
-                        await CopyWithProgressAsync(streamResult.Stream, fs, totalExpected, cancellationToken, (fraction, bps, eta) =>
+                        Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
+                        var tempPath = outputPath + ".partial";
+                        var streamResult = await _streamProvider.GetStreamAsync(trackId, quality, cancellationToken).ConfigureAwait(false);
+                        var totalExpected = streamResult.TotalBytes ?? 0;
+                        if (!string.IsNullOrWhiteSpace(streamResult.SuggestedExtension))
                         {
-                            ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
-                        }).ConfigureAwait(false);
-                    }
-                    try { FileSystemUtilities.MoveFile(tempPath, outputPath, true); }
-                    catch { if (File.Exists(outputPath)) File.Delete(outputPath); File.Move(tempPath, outputPath); }
+                            outputPath = Path.ChangeExtension(outputPath, streamResult.SuggestedExtension.TrimStart('.'));
+                        }
 
-                    return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = new FileInfo(outputPath).Length, ActualQuality = quality };
+                        using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, useAsync: true))
+                        {
+                            await CopyWithProgressAsync(streamResult.Stream, fs, totalExpected, cancellationToken, (fraction, bps, eta) =>
+                            {
+                                ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
+                            }).ConfigureAwait(false);
+                        }
+                        try { FileSystemUtilities.MoveFile(tempPath, outputPath, true); }
+                        catch { if (File.Exists(outputPath)) File.Delete(outputPath); File.Move(tempPath, outputPath); }
+
+                        var fileSize = new FileInfo(outputPath).Length;
+                        if (fileSize <= 0)
+                        {
+                            TryDelete(outputPath);
+                            result = new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Downloaded file is empty" };
+                        }
+                        else
+                        {
+                            outputPath = await PostProcessAsync(outputPath, track, quality, cancellationToken).ConfigureAwait(false);
+                            fileSize = new FileInfo(outputPath).Length;
+
+                            // Apply metadata tags after successful download
+                            await ApplyMetadataAsync(outputPath, track, cancellationToken).ConfigureAwait(false);
+
+                            result = new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = fileSize, ActualQuality = quality };
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        result = new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
+                    }
                 }
-                catch (Exception ex)
+                else
                 {
-                    return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = ex.Message };
+                    // Fallback to URL-based path with resume tracking
+                    result = await DownloadViaUrlAsync(trackId, track, outputPath, quality, progress, completedBefore, totalTracks, cancellationToken).ConfigureAwait(false);
                 }
+
+                stopwatch.Stop();
+                EmitTrackTelemetry(albumId, trackId, result, stopwatch.Elapsed, counters);
+                return result;
+            }
+            catch (OperationCanceledException)
+            {
+                stopwatch.Stop();
+                EmitTrackTelemetry(albumId, trackId, new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Canceled" }, stopwatch.Elapsed, counters);
+                throw;
+            }
+        }
+
+        private void EmitTrackTelemetry(string? albumId, string trackId, TrackDownloadResult result, TimeSpan elapsed, DownloadTelemetryCounters counters)
+        {
+            if (_telemetrySink == null)
+            {
+                return;
             }
 
-            // Fallback to URL-based path with resume tracking
-            return await DownloadViaUrlAsync(trackId, track, outputPath, quality, progress, completedBefore, totalTracks, cancellationToken).ConfigureAwait(false);
+            var bytesWritten = Math.Max(0, result.FileSize);
+            var bytesPerSecond = elapsed.TotalSeconds > 0
+                ? bytesWritten / elapsed.TotalSeconds
+                : 0.0;
+
+            try
+            {
+                _telemetrySink.OnTrackCompleted(new DownloadTelemetry(
+                    ServiceName,
+                    albumId,
+                    trackId,
+                    result.Success,
+                    bytesWritten,
+                    elapsed,
+                    bytesPerSecond,
+                    counters.RetryCount,
+                    counters.TooManyRequestsCount,
+                    result.ErrorMessage));
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "[{ServiceName}] Download telemetry sink failed for track {TrackId}", ServiceName, trackId);
+            }
         }
 
 
@@ -229,7 +420,21 @@ namespace Lidarr.Plugin.Common.Services.Download
                 catch { if (File.Exists(outputPath)) File.Delete(outputPath); File.Move(tempPath, outputPath); }
                 try { if (File.Exists(resumePath)) File.Delete(resumePath); } catch { }
 
-                return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = new FileInfo(outputPath).Length, ActualQuality = quality };
+                var fileSize = new FileInfo(outputPath).Length;
+                if (fileSize <= 0)
+                {
+                    TryDelete(outputPath);
+                    TryDelete(resumePath);
+                    return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Downloaded file is empty" };
+                }
+
+                outputPath = await PostProcessAsync(outputPath, track, quality, cancellationToken).ConfigureAwait(false);
+                fileSize = new FileInfo(outputPath).Length;
+
+                // Apply metadata tags after successful download
+                await ApplyMetadataAsync(outputPath, track, cancellationToken).ConfigureAwait(false);
+
+                return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = fileSize, ActualQuality = quality };
             }
             catch (OperationCanceledException)
             {
@@ -237,38 +442,100 @@ namespace Lidarr.Plugin.Common.Services.Download
             }
             catch (Exception ex)
             {
-                return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = ex.Message };
+                return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
             }
+        }
+
+        private async Task<string> PostProcessAsync(string filePath, StreamingTrack track, StreamingQuality? quality, CancellationToken cancellationToken)
+        {
+            if (_postProcessor == null || string.IsNullOrWhiteSpace(filePath) || track == null)
+            {
+                return filePath;
+            }
+
+            try
+            {
+                string processedPath = await _postProcessor.PostProcessAsync(filePath, track, quality, cancellationToken).ConfigureAwait(false);
+                if (string.IsNullOrWhiteSpace(processedPath) || !File.Exists(processedPath))
+                {
+                    return filePath;
+                }
+
+                if (!string.Equals(processedPath, filePath, StringComparison.OrdinalIgnoreCase))
+                {
+                    TryDelete(filePath);
+                }
+
+                return processedPath;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Post-processing failed for track {TrackId}: {FilePath}", track.Id, filePath);
+                return filePath;
+            }
+        }
+
+        private async Task ApplyMetadataAsync(string filePath, StreamingTrack? track, CancellationToken cancellationToken)
+        {
+            if (_metadataApplier == null || track == null || string.IsNullOrWhiteSpace(filePath))
+            {
+                return;
+            }
+
+            try
+            {
+                await _metadataApplier.ApplyAsync(filePath, track, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex)
+            {
+                // Metadata application failure shouldn't fail the download
+                // The file is already successfully downloaded - log once per track
+                _logger.LogWarning(ex, "[{ServiceName}] Failed to apply metadata to '{FileName}' (track {TrackId})",
+                    ServiceName, Path.GetFileName(filePath), track.Id);
+            }
+        }
+
+        private static void TryDelete(string path)
+        {
+            try { if (File.Exists(path)) File.Delete(path); } catch { }
         }
         private static async Task CopyWithProgressAsync(Stream input, Stream output, long totalExpected, CancellationToken cancellationToken, Action<double, long, TimeSpan?> onProgress)
         {
-            var buffer = new byte[8192];
+            const int BufferSize = 64 * 1024;
+            var buffer = System.Buffers.ArrayPool<byte>.Shared.Rent(BufferSize);
             long written = 0;
             long windowBytes = 0;
             var interval = 500;
             var last = System.Diagnostics.Stopwatch.StartNew();
             int read;
-            while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
+            try
             {
-                await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
-                written += read;
-                windowBytes += read;
-
-                if (last.ElapsedMilliseconds >= interval)
+                while ((read = await input.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false)) > 0)
                 {
-                    var seconds = Math.Max(0.001, last.Elapsed.TotalSeconds);
-                    var bps = (long)(windowBytes / seconds);
-                    var fraction = totalExpected > 0 ? Math.Min(1, (double)written / totalExpected) : 0;
-                    TimeSpan? eta = null;
-                    if (totalExpected > 0 && bps > 0)
+                    await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
+                    written += read;
+                    windowBytes += read;
+
+                    if (last.ElapsedMilliseconds >= interval)
                     {
-                        var remain = totalExpected - written;
-                        eta = TimeSpan.FromSeconds(Math.Max(0, remain / (double)bps));
+                        var seconds = Math.Max(0.001, last.Elapsed.TotalSeconds);
+                        var bps = (long)(windowBytes / seconds);
+                        var fraction = totalExpected > 0 ? Math.Min(1, (double)written / totalExpected) : 0;
+                        TimeSpan? eta = null;
+                        if (totalExpected > 0 && bps > 0)
+                        {
+                            var remain = totalExpected - written;
+                            eta = TimeSpan.FromSeconds(Math.Max(0, remain / (double)bps));
+                        }
+                        onProgress(fraction, bps, eta);
+                        windowBytes = 0;
+                        last.Restart();
                     }
-                    onProgress(fraction, bps, eta);
-                    windowBytes = 0;
-                    last.Restart();
                 }
+            }
+            finally
+            {
+                System.Buffers.ArrayPool<byte>.Shared.Return(buffer);
             }
 
             onProgress(1, 0, TimeSpan.Zero);
@@ -331,4 +598,3 @@ namespace Lidarr.Plugin.Common.Services.Download
         }
     }
 }
-

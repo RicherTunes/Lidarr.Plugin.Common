@@ -126,7 +126,6 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
-                using var cp = AcquireCrossProcessLock(_lockName, cancellationToken);
                 var persisted = PersistedEnvelope.FromEnvelope(envelope);
                 var protectedEnv = CreateProtectedEnvelope(persisted);
 
@@ -144,6 +143,10 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     await JsonSerializer.SerializeAsync(stream, protectedEnv, _serializerOptions, cancellationToken).ConfigureAwait(false);
                     await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
                 }
+
+                // Acquire a cross-process lock only for the final replace/move to minimize the time
+                // the lock is held (reduces contention and rare timeouts on busy Windows CI runners).
+                using var cp = AcquireCrossProcessLock(_lockName, cancellationToken);
 
                 // Replace atomically when destination exists; otherwise a simple move is sufficient.
                 // Add a small retry to mitigate transient Windows file locks (e.g., antivirus/indexer).
@@ -168,9 +171,10 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                         }
                         break; // success
                     }
-                    catch (IOException) when (attempt < 10)
+                    catch (IOException ex) when (attempt < 10)
                     {
-                        Thread.Sleep(50);
+                        _logger?.LogDebug(ex, "Transient file lock during save attempt {Attempt}, retrying", attempt);
+                        await Task.Delay(50, cancellationToken).ConfigureAwait(false);
                         continue;
                     }
                 }
@@ -370,9 +374,10 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 }
 #endif
             }
-            catch
+            catch (Exception ex)
             {
-                // best-effort migration: ignore failures
+                // Best-effort migration - log but don't fail the load operation
+                _logger?.LogDebug(ex, "Token migration to protected format failed, will retry on next save");
             }
         }
     }

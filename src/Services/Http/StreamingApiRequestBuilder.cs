@@ -316,7 +316,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestInfo BuildForLogging()
         {
-            var url = BuildUrl();
+            var url = BuildUrlForLogging();
             var maskedHeaders = HttpClientExtensions.MaskSensitiveParams(_headers);
             var maskedQueryParams = HttpClientExtensions.MaskSensitiveParams(
                 new Dictionary<string, string>(_queryParams
@@ -345,6 +345,15 @@ namespace Lidarr.Plugin.Common.Services.Http
             }
 
             return url;
+        }
+
+        private string BuildUrlForLogging()
+        {
+            // Do not include query parameter values in log URLs. Query values are a
+            // common credential leak vector. Query values (with masking) are logged
+            // separately via StreamingApiRequestInfo.QueryParameters.
+            var url = string.IsNullOrEmpty(_endpoint) ? _baseUrl : $"{_baseUrl}/{_endpoint}";
+            return HttpClientExtensions.BuildUrlWithQueryNames(url, _queryParams);
         }
 
         private string BuildCanonicalQueryString()

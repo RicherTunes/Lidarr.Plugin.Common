@@ -1,0 +1,76 @@
+#!/bin/bash
+# =============================================================================
+# {{PLUGIN_NAME}} Build Script
+# =============================================================================
+# Uses shared build library from Lidarr.Plugin.Common
+# =============================================================================
+
+set -e
+
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+# Source the common build library
+COMMON_LIB="ext/Lidarr.Plugin.Common/scripts/lib/build-common.sh"
+if [[ -f "$COMMON_LIB" ]]; then
+    source "$COMMON_LIB"
+else
+    echo "Error: Common build library not found at $COMMON_LIB"
+    echo "Make sure the submodule is initialized: git submodule update --init"
+    exit 1
+fi
+
+# =============================================================================
+# Plugin Configuration (customize these)
+# =============================================================================
+PLUGIN_NAME="{{PLUGIN_NAME}}"
+PROJECT_FILE="{{PROJECT_PATH}}"
+DEFAULT_DEPLOY_PATH="{{DEFAULT_DEPLOY_PATH}}"
+
+# =============================================================================
+# Main Script
+# =============================================================================
+
+# Parse arguments
+parse_build_args "$@" || { show_build_help "$PLUGIN_NAME" "$DEFAULT_DEPLOY_PATH"; exit 1; }
+
+# Show help if requested
+if [[ "$BUILD_HELP" == true ]]; then
+    show_build_help "$PLUGIN_NAME" "$DEFAULT_DEPLOY_PATH"
+    exit 0
+fi
+
+log_header "Building $PLUGIN_NAME"
+
+# Ensure dotnet is available
+ensure_dotnet
+
+# Check for Lidarr assemblies
+if ! check_lidarr_assemblies; then
+    log_warning "Lidarr assemblies not found. You may need to run setup first."
+fi
+
+# Clean if requested
+if [[ "$BUILD_CLEAN" == true ]]; then
+    do_clean "$PROJECT_FILE"
+fi
+
+# Restore if requested or if clean was run
+if [[ "$BUILD_RESTORE" == true ]] || [[ "$BUILD_CLEAN" == true ]]; then
+    do_restore "$PROJECT_FILE"
+fi
+
+# Build unless --no-build
+if [[ "$BUILD_NO_BUILD" != true ]]; then
+    do_build "$PROJECT_FILE" "$BUILD_CONFIG"
+fi
+
+# Deploy if requested
+if [[ "$BUILD_DEPLOY" == true ]]; then
+    deploy_path="${BUILD_DEPLOY_PATH:-$DEFAULT_DEPLOY_PATH}"
+    do_deploy "." "$deploy_path" "$PLUGIN_NAME"
+fi
+
+log_header "Build Complete"
+log_success "$PLUGIN_NAME $BUILD_CONFIG build finished"

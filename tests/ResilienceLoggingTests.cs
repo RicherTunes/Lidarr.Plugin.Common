@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using Lidarr.Plugin.Common.Utilities;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
@@ -28,12 +29,12 @@ namespace Lidarr.Plugin.Common.Tests
             var logger = new TestLogger();
 
             // Fire multiple times for same provider
-            Utilities.ResilienceLogging.WarnOnceFallback(logger, "openai");
-            Utilities.ResilienceLogging.WarnOnceFallback(logger, "openai");
-            Utilities.ResilienceLogging.WarnOnceFallback(logger, "openai");
+            ResilienceLogging.WarnOnceFallback(logger, "openai");
+            ResilienceLogging.WarnOnceFallback(logger, "openai");
+            ResilienceLogging.WarnOnceFallback(logger, "openai");
 
             // And once for another provider
-            Utilities.ResilienceLogging.WarnOnceFallback(logger, "gemini");
+            ResilienceLogging.WarnOnceFallback(logger, "gemini");
 
             // Expect exactly two events (one per unique provider)
             Assert.Equal(2, logger.Events.Count);

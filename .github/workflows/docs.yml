@@ -18,10 +18,10 @@ jobs:
   docs:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "20"
 
@@ -33,7 +33,7 @@ jobs:
 
 
       - name: Spell check
-        uses: streetsidesoftware/cspell-action@v6
+        uses: streetsidesoftware/cspell-action@v8
         with:
           config: cspell.json
           files: |
@@ -51,6 +51,7 @@ jobs:
             --no-progress
             --retry-wait-time 2
             --max-retries 2
+            --config .lychee.toml
             docs/**/*.md README.md
 
       - name: Snippet verifier (non-blocking)

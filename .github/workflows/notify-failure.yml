@@ -1,0 +1,131 @@
+name: Notify on Failure
+
+# Reusable workflow for failure notifications
+# Can be called from other workflows or triggered on schedule failures
+
+on:
+  workflow_call:
+    inputs:
+      workflow_name:
+        description: 'Name of the failed workflow'
+        required: true
+        type: string
+      run_url:
+        description: 'URL to the failed run'
+        required: false
+        type: string
+    secrets:
+      DISCORD_WEBHOOK:
+        required: false
+      SLACK_WEBHOOK:
+        required: false
+
+  workflow_run:
+    workflows:
+      - "CI"
+      - "Nightly Tests"
+      - "PR Validation"
+    types:
+      - completed
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  notify:
+    name: Send Failure Notification
+    runs-on: ubuntu-latest
+    # Only run if the triggering workflow failed, or if called directly
+    if: >
+      github.event_name == 'workflow_call' ||
+      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure')
+
+    steps:
+      - name: Prepare notification data
+        id: data
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_call" ]; then
+            echo "workflow_name=${{ inputs.workflow_name }}" >> $GITHUB_OUTPUT
+            echo "run_url=${{ inputs.run_url || github.server_url }}/${{ github.repository }}/actions" >> $GITHUB_OUTPUT
+            echo "branch=${{ github.ref_name }}" >> $GITHUB_OUTPUT
+            echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT
+          else
+            echo "workflow_name=${{ github.event.workflow_run.name }}" >> $GITHUB_OUTPUT
+            echo "run_url=${{ github.event.workflow_run.html_url }}" >> $GITHUB_OUTPUT
+            echo "branch=${{ github.event.workflow_run.head_branch }}" >> $GITHUB_OUTPUT
+            echo "repo=${{ github.repository }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Send Discord notification
+        if: ${{ secrets.DISCORD_WEBHOOK != '' }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: |
+          curl -H "Content-Type: application/json" \
+            -d '{
+              "embeds": [{
+                "title": "❌ CI Failure: ${{ steps.data.outputs.workflow_name }}",
+                "description": "Workflow failed on **${{ steps.data.outputs.branch }}**",
+                "color": 15158332,
+                "fields": [
+                  {"name": "Repository", "value": "`${{ steps.data.outputs.repo }}`", "inline": true},
+                  {"name": "Branch", "value": "`${{ steps.data.outputs.branch }}`", "inline": true}
+                ],
+                "url": "${{ steps.data.outputs.run_url }}",
+                "timestamp": "'$(date -u +%Y-%m-%dT%H:%M:%SZ)'"
+              }]
+            }' \
+            "$DISCORD_WEBHOOK"
+
+      - name: Send Slack notification
+        if: ${{ secrets.SLACK_WEBHOOK != '' }}
+        env:
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        run: |
+          curl -X POST -H "Content-Type: application/json" \
+            -d '{
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {"type": "plain_text", "text": "❌ CI Failure", "emoji": true}
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Workflow:*\n${{ steps.data.outputs.workflow_name }}"},
+                    {"type": "mrkdwn", "text": "*Repository:*\n${{ steps.data.outputs.repo }}"},
+                    {"type": "mrkdwn", "text": "*Branch:*\n${{ steps.data.outputs.branch }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "View Run"},
+                      "url": "${{ steps.data.outputs.run_url }}"
+                    }
+                  ]
+                }
+              ]
+            }' \
+            "$SLACK_WEBHOOK"
+
+      - name: Log notification (fallback if no webhook configured)
+        if: ${{ secrets.DISCORD_WEBHOOK == '' && secrets.SLACK_WEBHOOK == '' }}
+        run: |
+          echo "::warning::No notification webhook configured (DISCORD_WEBHOOK or SLACK_WEBHOOK)"
+          echo ""
+          echo "## ❌ Workflow Failure Detected" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Field | Value |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Workflow | ${{ steps.data.outputs.workflow_name }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Repository | ${{ steps.data.outputs.repo }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Branch | ${{ steps.data.outputs.branch }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Run URL | ${{ steps.data.outputs.run_url }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "⚠️ **Configure webhooks for real-time notifications:**" >> $GITHUB_STEP_SUMMARY
+          echo "- Add \`DISCORD_WEBHOOK\` secret for Discord notifications" >> $GITHUB_STEP_SUMMARY
+          echo "- Add \`SLACK_WEBHOOK\` secret for Slack notifications" >> $GITHUB_STEP_SUMMARY

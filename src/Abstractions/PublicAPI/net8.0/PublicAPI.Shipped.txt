@@ -312,3 +312,5 @@ M:Lidarr.Plugin.Abstractions.Results.PluginOperationResult`1.Failure(Lidarr.Plug
 M:Lidarr.Plugin.Abstractions.Results.PluginOperationResult`1.GetValueOrDefault(`0)~`0
 M:Lidarr.Plugin.Abstractions.Results.PluginOperationResult`1.GetValueOrThrow~`0
 M:Lidarr.Plugin.Abstractions.Results.PluginOperationResult`1.Success(`0)~Lidarr.Plugin.Abstractions.Results.PluginOperationResult{`0}
+P:Lidarr.Plugin.Abstractions.Manifest.PluginManifest.Main
+

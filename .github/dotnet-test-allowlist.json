@@ -1,0 +1,42 @@
+{
+  "description": "Allowlist for raw dotnet test usage in Common library workflows",
+  "notes": "Common is the source of the shared test runner, so it needs direct dotnet test commands",
+  "entries": [
+    {
+      "file": "ci.yml",
+      "reason": "common-self-test",
+      "expires": "2027-01-01",
+      "context": "Common library needs to test itself directly, cannot call ext submodule"
+    },
+    {
+      "file": "nightly.yml",
+      "reason": "common-self-test",
+      "expires": "2027-01-01",
+      "context": "Nightly tests of Common library"
+    },
+    {
+      "file": "pr-validation.yml",
+      "reason": "common-self-test",
+      "expires": "2027-01-01",
+      "context": "PR validation for Common library"
+    },
+    {
+      "file": "release.yml",
+      "reason": "common-self-test",
+      "expires": "2027-01-01",
+      "context": "Release tests with coverage collection"
+    },
+    {
+      "file": "akv-dp-check.yml",
+      "reason": "tooling-required",
+      "expires": "2027-01-01",
+      "context": "Azure Key Vault data protection check requires specific test filter"
+    },
+    {
+      "file": "taglib-private-weekly.yml",
+      "reason": "tooling-required",
+      "expires": "2027-01-01",
+      "context": "TagLib dependency check with specific test configuration"
+    }
+  ]
+}

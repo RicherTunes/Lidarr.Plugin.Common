@@ -7,25 +7,28 @@ on:
     - cron: '0 5 * * 1'
   workflow_dispatch:
 
-permissions:
-  contents: read
-  security-events: write
-  id-token: write
+# Workflow-level permissions must be read-only for Scorecard publish_results
+permissions: read-all
 
 jobs:
   analysis:
     runs-on: ubuntu-latest
+    # Job-level permissions for Scorecard with publish_results: true
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           persist-credentials: false
       - name: Run Scorecard analysis
-        uses: ossf/scorecard-action@v2
+        uses: ossf/scorecard-action@v2.4.3
         with:
           results_file: results.sarif
           results_format: sarif
           publish_results: true
       - name: Upload SARIF to code scanning
-        uses: github/codeql-action/upload-sarif@v3
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: results.sarif

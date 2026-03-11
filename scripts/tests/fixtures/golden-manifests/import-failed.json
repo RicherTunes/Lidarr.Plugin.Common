@@ -1,0 +1,106 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/main/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-02T13:00:00.000Z",
+  "runId": "golden-import-failed",
+  "runner": {
+    "name": "lidarr.plugin.common:e2e-runner.ps1",
+    "version": "deadbeef",
+    "args": ["-Gate", "importlist", "-Plugins", "Brainarr"]
+  },
+  "lidarr": {
+    "url": "http://[LOCALHOST]:8686",
+    "containerName": "lidarr-e2e-test",
+    "imageTag": "pr-plugins-3.1.1.4884",
+    "imageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "version": "3.1.1.4884",
+    "branch": "plugins",
+    "containerId": "000000000000",
+    "startedAt": "2026-01-02T12:59:00.000Z",
+    "imageId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "request": {
+    "gate": "importlist",
+    "plugins": ["Brainarr"]
+  },
+  "effective": {
+    "gates": ["Schema", "Configure", "ImportList"],
+    "plugins": ["Brainarr"],
+    "stopReason": "failed at ImportList for Brainarr"
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 42
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Brainarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-02T13:00:01.000Z",
+      "endedAt": "2026-01-02T13:00:02.000Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "Configure",
+      "plugin": "Brainarr",
+      "outcome": "success",
+      "errorCode": null,
+      "outcomeReason": null,
+      "startedAt": "2026-01-02T13:00:03.000Z",
+      "endedAt": "2026-01-02T13:00:04.000Z",
+      "durationMs": 1000,
+      "errors": [],
+      "details": {}
+    },
+    {
+      "gate": "ImportList",
+      "plugin": "Brainarr",
+      "outcome": "failed",
+      "errorCode": "E2E_IMPORT_FAILED",
+      "outcomeReason": "ImportListSync command failed",
+      "startedAt": "2026-01-02T13:00:05.000Z",
+      "endedAt": "2026-01-02T13:00:15.000Z",
+      "durationMs": 10000,
+      "errors": [
+        "ImportListSync command failed: LLM API returned 503 Service Unavailable"
+      ],
+      "details": {
+        "pluginName": "Brainarr",
+        "importListId": 42,
+        "importListName": "Brainarr AI Recommendations",
+        "operation": "ImportListSync",
+        "phase": "ImportList:PollCommand",
+        "endpoint": "/api/v1/command/789",
+        "commandId": 789,
+        "commandStatus": "failed",
+        "postSyncVerified": false,
+        "preSyncImportListFound": true
+      }
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 3,
+    "passed": 2,
+    "failed": 1,
+    "skipped": 0,
+    "totalDurationMs": 12000
+  },
+  "diagnostics": {
+    "bundlePath": null,
+    "bundleCreated": false,
+    "includedFiles": ["run-manifest.json"],
+    "redactionApplied": true,
+    "redactionSelfTestPassed": true
+  },
+  "hostBugSuspected": {
+    "detected": false
+  }
+}

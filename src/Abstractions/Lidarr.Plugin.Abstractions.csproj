@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net6.0;net8.0</TargetFrameworks>
+    <!-- Lidarr 3.x (minimum for plugin support) requires .NET 8 -->
+    <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AssemblyName>Lidarr.Plugin.Abstractions</AssemblyName>
@@ -9,17 +10,31 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <NoWarn>SA1200;SA1633;CS1591;RS0016;RS0017</NoWarn>
+    <!-- RS0025: False positive due to PreparePublicApiBaselines target adding obj/ copies after source files are already in AdditionalFiles -->
+    <NoWarn>SA1200;SA1633;CS1591;RS0016;RS0017;RS0025</NoWarn>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
-    <Version>1.2.2</Version>
+    <Version>1.6.0</Version>
+
+    <!-- NuGet package metadata -->
+    <PackageId>Lidarr.Plugin.Abstractions</PackageId>
+    <Title>Lidarr Plugin Abstractions</Title>
+    <Description>Core abstractions and interfaces for building Lidarr plugins. Provides the contract layer between plugins and the Lidarr host.</Description>
+    <Authors>RicherTunes</Authors>
+    <PackageTags>lidarr;plugin;abstractions;music;streaming</PackageTags>
+    <PackageProjectUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <Copyright>Copyright (c) RicherTunes</Copyright>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
   <!-- Make PublicAPI baselines visible to analyzer tools (e.g., dotnet format) without relying on build targets -->
   <ItemGroup>
-    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/net6.0/PublicAPI.Shipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/net6.0/PublicAPI.Unshipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/net8.0/PublicAPI.Shipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/net8.0/PublicAPI.Unshipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt')" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -37,13 +52,9 @@
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
   </ItemGroup>
 
-  <ItemGroup Condition="'$(TargetFramework)' == 'net6.0'">
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="6.0.0" />
-    <PackageReference Include="System.Text.Json" Version="6.0.11" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.1" />
+  <!-- .NET 8.0 package versions -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
   </ItemGroup>
 
@@ -90,10 +101,9 @@
     <AdditionalFiles Remove="PublicAPI.Shipped.txt" />
     <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
   </ItemGroup>
+
+  <!-- Package README -->
+  <ItemGroup>
+    <None Include="README.md" Pack="true" PackagePath="\" />
+  </ItemGroup>
 </Project>
-
-
-
-
-
-

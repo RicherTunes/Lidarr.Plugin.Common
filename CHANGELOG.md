@@ -3,6 +3,11 @@
 
 All notable changes to the shared library are documented here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Quick Links
+- **Documentation**: [README.md](README.md) | [Quickstart](docs/quickstart/) | [Architecture](docs/concepts/)
+- **Testing**: [TestKit Guide](docs/how-to/TEST_WITH_TESTKIT.md) | [Testing Strategy](docs/testing/)
+- **Ecosystem**: [Consuming Plugins](https://github.com/RicherTunes/.github/blob/main/docs/ECOSYSTEM.md)
+
 ## Release entry format
 
 Each release entry should include:
@@ -27,6 +32,128 @@ Template to copy when drafting a release:
 
 [Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/vX.Y.(Z-1)...vX.Y.Z)
 ```
+
+## [Unreleased]
+
+_No changes yet._
+
+## [1.6.0] - 2026-03-11
+**Upgrade note:** Major infrastructure release — ecosystem parity testing, sync-over-async cleanup, diagnostics namespace, and comprehensive dependency updates. No breaking API changes.
+
+**Highlights**
+- Ecosystem parity test infrastructure (lint + TestKit base class)
+- Sync-over-async pattern elimination with lint enforcement
+- Diagnostics namespace for non-LLM providers
+- Packaging gates improvements (contents manifest, canonical Abstractions)
+- Local CI runner (`local-ci.ps1`) for offline verification
+- 6-Month Autonomous Development Roadmap (Phases 12-23)
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:**
+- Microsoft.CodeAnalysis.CSharp 4.10.0→4.14.0
+- Microsoft.Extensions.Configuration.Json 8.0.0→8.0.1
+- Microsoft.Extensions.TimeProvider.Testing 8.5.0→9.10.0
+- System.Security.Cryptography.ProtectedData 8.0.0→9.0.14
+- coverlet.collector 6.0.4→8.0.0
+- xunit 2.9.2→2.9.3
+- Spectre.Console 0.50.0→0.54.0
+- Microsoft.NET.Test.Sdk 17.11.1→18.3.0
+- Microsoft.Extensions.Logging.Abstractions 8.0.1→8.0.3
+- JsonSchema.Net 7.2.3→7.4.0
+- actions/download-artifact v4→v8, actions/upload-artifact v4→v7
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.5.0...v1.6.0)
+
+### Added
+- **Ecosystem Parity Infrastructure** (#393)
+  - `scripts/parity-spec.json` — single source of truth for parity requirements
+  - `scripts/ecosystem-parity-lint.ps1` — PowerShell structural lint for repos
+  - `testkit/Compliance/EcosystemParityTestBase.cs` — C# xUnit base class
+- **Diagnostics Namespace** (#331) — abstractions for non-LLM providers
+- **Sync-Over-Async Lint** (#332) — `lint-sync-over-async.ps1` with allowlist support
+- **SHA Pin Enforcement** (#330) — workflow SHA pinning lint
+- **Contents Manifest Gate** (#333) — plugin ZIP closure validation
+- **Local CI Runner** (#363) — `local-ci.ps1` for offline verification
+- **Warning Budget Visibility** (#366) — build warning tracking
+- **Canonical Reason Codes** (#380) — triage contracts
+- **Diagnostic Error Codes** (#341) — `DiagnosticErrorCodes` for providers
+- **Cross-Platform Path Validation** — `PathValidation.IsReasonablePath`
+- **Comprehensive Documentation** — roadmap phases 12-23, KPI definitions, phase gate evidence
+
+### Fixed
+- **Sync-Over-Async Patterns** (#408) — `StreamingTokenManager.ClearSession()` now truly sync
+- **Windows CI Credential Issue** (#383) — change detection step fix
+- **Local CI Docker Exit Codes** (#364, #365) — reliable Docker exit code capture
+- **ManifestCheck StrictMode** (#326) — null-safe access for optional manifest targets
+- **PluginPack Cached Path** (#320) — temp dir cleanup race condition
+- **Reserved Device Name Normalization** (#297) — cross-platform filesystem safety
+
+### Changed
+- **LLM Provider System**: Complete LLM provider abstraction layer
+  - `ILlmProvider` interface with standard chat completion contract
+  - `LlmRequest`/`LlmResponse` data contracts with message structure
+  - `LlmErrorCode` enum with standardized error codes
+  - `LlmProviderException` base exception with concrete exception types
+    - `LlmAuthenticationException` for credential/authorization failures
+    - `LlmRateLimitException` for rate limiting scenarios
+    - `LlmProviderException` for general provider errors
+    - `LlmNetworkException` for network-related failures
+  - `LlmErrorMapper` utility for mapping provider-specific errors
+- **Structured Logging for LLM Providers**
+  - `LlmLoggerExtensions` for provider-specific structured logging
+  - `LlmEventIds` for standardized LLM event codes (2000-2039 range)
+  - `LogRedactor` for sensitive data masking in logs
+- **Claude Code Provider**: Full Claude Code CLI integration
+  - `ClaudeCodeProvider` implementing `ILlmProvider` interface
+  - `ClaudeCodeSettings` configuration record
+  - `ClaudeCodeDetector` for Claude CLI installation detection
+  - `ClaudeCodeResponseParser` for NDJSON streaming response parsing
+  - `Claude CLI JSON response` DTOs for deserialization
+  - Capability probe for provider feature detection
+- **CLI Infrastructure**: Reusable CLI execution framework
+  - `ICliRunner` interface for cross-platform CLI execution
+  - `CliRunner` implementation with CliWrap integration
+  - Support for Windows .cmd/.bat execution via cmd.exe /c
+  - Stdin/stdout stress tests for subprocess reliability
+- **Streaming Decoders**: SSE streaming support
+  - `SseStreamDecoder` for Server-Sent Events parsing
+  - `ClaudeCodeNdjsonDecoder` for Claude-specific NDJSON format
+  - Streaming token aggregation and response assembly
+- **CI Improvements**
+  - Lint enforcement for adoption guardrails
+  - Submodule pinning with ext-common-sha.txt
+- **Documentation**
+  - ADR-001: Streaming architecture decision
+  - ADR-002: Subscription auth research
+  - Streaming support matrix
+  - Tech debt registry
+  - Expanded LLM provider documentation
+  - Pre-merge tightening for v2 milestone
+- **E2E Improvements**
+  - Strictness promotion checker with actionable drift issues
+  - Harden drift issue management + secrets validation
+
+### Changed
+- **Documentation Cleanup**: Removed deprecated redirect stubs
+  - Removed docs/concepts/PLUGIN_ISOLATION.md (redirect stub)
+  - Removed docs/concepts/COMPATIBILITY.md (redirect stub)
+  - Removed docs/how-to/TEST_WITH_TESTKIT.md (redirect stub)
+  - Fixed broken link paths after redirect removal
+
+### Fixed
+- **Exception References**: Corrected LlmProviderException cref namespace
+- **Unresolvable Exception Cref**: Removed unresolvable exception cref in ILlmProvider
+- **CLI Execution**: Added safe CLI defaults and fixed error mapping
+- **Test Runner**: Robust TRX skip count and build hardening
+- **Documentation**: Avoid unresolved exception cref in abstractions
+
+### Tests
+- Added `ClaudeCodeProvider` unit tests
+- Added `ClaudeCodeDetector` unit tests
+- Added `ClaudeCodeResponseParser` unit tests
+- Added `CliRunner` unit tests
+- Added CliRunner stdin/stdout stress tests
 
 ## [1.2.2] - 2025-10-19
 **Upgrade note:** Maintenance release aligning PR #39 merge; no breaking changes.

@@ -1,6 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFrameworks>net8.0;net6.0</TargetFrameworks>
+    <!-- Lidarr 3.x (minimum for plugin support) requires .NET 8 -->
+    <TargetFramework>net8.0</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <AllowUnsafeBlocks>false</AllowUnsafeBlocks>
@@ -12,7 +13,7 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <Version>1.2.2</Version>
+    <Version>1.6.0</Version>
     <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
@@ -25,7 +26,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.2.1: Token-at-rest encryption (DPAPI/Keychain/Secret Service/Data Protection + AKV); TagLib default to public; CI security gates; docs updates. See CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.6.0: Ecosystem parity infrastructure, sync-over-async cleanup, diagnostics namespace, packaging gates improvements, dependency updates. See CHANGELOG.md.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <!-- Build Configuration -->
@@ -47,10 +48,8 @@
   </PropertyGroup>
   <!-- Make PublicAPI baselines visible to analyzer tools (e.g., dotnet format) without relying on build targets -->
   <ItemGroup>
-    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/net6.0/PublicAPI.Shipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/net6.0/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/net6.0/PublicAPI.Unshipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/net8.0/PublicAPI.Shipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/net8.0/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/net8.0/PublicAPI.Unshipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt')" />
+    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt')" />
   </ItemGroup>
 
   <PropertyGroup>
@@ -74,13 +73,6 @@
 
   <ItemGroup>
     <Compile Remove="Compat\**\*.cs" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)'=='net6.0'">
-    <Compile Include="Compat\net6\**\*.cs" />
-  </ItemGroup>
-
-  <ItemGroup Condition="'$(TargetFramework)'=='net8.0'">
     <Compile Include="Compat\net8\**\*.cs" />
   </ItemGroup>
 
@@ -95,28 +87,22 @@
     <ProjectReference Include="Abstractions/Lidarr.Plugin.Abstractions.csproj" />
   </ItemGroup>
 
-  <!-- Core Dependencies -->
+  <!-- Core Dependencies (framework-independent) -->
   <ItemGroup>
-    <PackageReference Include="FluentValidation" Version="9.5.4" />
+    <!-- FluentValidation: internal to Common only (PrivateAssets=all).
+         The Lidarr host provides FluentValidation at runtime. By making this fully private,
+         the dependency does NOT flow transitively to consuming plugins/tests. This prevents:
+         1. Type-identity conflicts (MissingMethodException) when host version differs
+         2. NuGet transitive PackageReference suppressing consumers' local host <Reference>
+         Consumers must independently reference FluentValidation (from host or their own NuGet). -->
+    <PackageReference Include="FluentValidation" Version="11.12.0" PrivateAssets="all" />
     <PackageReference Include="Microsoft.DotNet.PackageValidation" Version="1.0.0-preview.7.21379.12" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
   </ItemGroup>
-  <ItemGroup Condition="'$(TargetFramework)'=='net6.0'">
-    <PackageReference Include="System.Text.Json" Version="6.0.11" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="6.0.2" />
-    <PackageReference Include="Microsoft.Extensions.Http" Version="6.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Caching.Memory" Version="6.0.3" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="6.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="6.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Configuration" Version="6.0.2" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="6.0.1" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="6.0.2" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="6.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="6.0.36" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="6.0.36" />
-  </ItemGroup>
-  <ItemGroup Condition="'$(TargetFramework)'=='net8.0'">
+
+  <!-- .NET 8.0 package versions -->
+  <ItemGroup>
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Http" Version="8.0.1" />
@@ -124,9 +110,9 @@
     <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Logging.Console" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.0" />
+    <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="8.0.0" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.14" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.16" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.16" />
   </ItemGroup>
@@ -150,8 +136,8 @@
     <None Include="..\README.md" Pack="true" PackagePath="\" />
     <None Include="..\CHANGELOG.md" Pack="true" PackagePath="\" />
   </ItemGroup>
-  <!-- Azure Key Vault integration for Data Protection (optional, .NET 8+) -->
-  <ItemGroup Condition="'$(TargetFramework)'=='net8.0'">
+  <!-- Azure Key Vault integration for Data Protection -->
+  <ItemGroup>
     <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" Version="1.6.1" />
     <PackageReference Include="Azure.Identity" Version="1.12.0" />
   </ItemGroup>
@@ -173,11 +159,14 @@
           OverwriteReadOnlyFiles="true" />
 
     <ItemGroup>
-      <AdditionalFiles Remove="**/PublicAPI.Shipped.txt" />
-      <AdditionalFiles Remove="**/PublicAPI.Unshipped.txt" />
+      <!-- Ensure PublicApiAnalyzers see exactly one shipped/unshipped pair. -->
+      <AdditionalFiles Remove="$(_ApiShippedSrc)" />
+      <AdditionalFiles Remove="$(_ApiUnshippedSrc)" />
+      <AdditionalFiles Remove="$(_ApiShippedObj)" />
+      <AdditionalFiles Remove="$(_ApiUnshippedObj)" />
     </ItemGroup>
 
-    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' == 'true'">
+    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' == 'true'">        
       <AdditionalFiles Include="$(_ApiShippedSrc)" />
       <AdditionalFiles Include="$(_ApiUnshippedSrc)" />
     </ItemGroup>
@@ -206,7 +195,11 @@
   <ItemGroup Condition="'$(UseLidarrTaglib)'=='true'">
     <PackageReference Include="TagLibSharp-Lidarr" Version="2.2.0.27" />
   </ItemGroup>
-</Project>
 
+  <!-- CLI Subprocess Runner -->
+  <ItemGroup>
+    <PackageReference Include="CliWrap" Version="3.10.0" />
+  </ItemGroup>
+</Project>
 
 

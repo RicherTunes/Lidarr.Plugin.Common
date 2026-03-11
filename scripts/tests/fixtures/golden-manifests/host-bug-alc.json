@@ -1,0 +1,94 @@
+{
+  "$schema": "https://raw.githubusercontent.com/RicherTunes/Lidarr.Plugin.Common/main/docs/reference/e2e-run-manifest.schema.json",
+  "schemaVersion": "1.2",
+  "schemaId": "richer-tunes.lidarr.e2e-run-manifest",
+  "timestamp": "2026-01-02T12:30:00.000Z",
+  "runId": "golden-host-bug-alc",
+  "runner": {
+    "name": "lidarr.plugin.common:e2e-runner.ps1",
+    "version": "deadbeef",
+    "args": [
+      "-Gate",
+      "schema",
+      "-Plugins",
+      "Qobuzarr,Tidalarr"
+    ]
+  },
+  "lidarr": {
+    "url": "http://[LOCALHOST]:8686",
+    "containerName": "lidarr-e2e-test",
+    "imageTag": "pr-plugins",
+    "imageDigest": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "version": "3.1.1.4884",
+    "branch": "plugins",
+    "containerId": "000000000000",
+    "startedAt": "2026-01-02T12:29:00.000Z",
+    "imageId": "sha256:1111111111111111111111111111111111111111111111111111111111111111"
+  },
+  "request": {
+    "gate": "schema",
+    "plugins": [
+      "Qobuzarr",
+      "Tidalarr"
+    ]
+  },
+  "effective": {
+    "gates": [
+      "Schema"
+    ],
+    "plugins": [
+      "Qobuzarr",
+      "Tidalarr"
+    ],
+    "stopReason": "failed at Schema for Tidalarr"
+  },
+  "redaction": {
+    "selfTestExecuted": true,
+    "selfTestPassed": true,
+    "patternsCount": 42
+  },
+  "results": [
+    {
+      "gate": "Schema",
+      "plugin": "Tidalarr",
+      "outcome": "failed",
+      "errorCode": "E2E_LOAD_FAILURE",
+      "outcomeReason": "ReflectionTypeLoadException detected during plugin load",
+      "startedAt": "2026-01-02T12:30:01.000Z",
+      "endedAt": "2026-01-02T12:30:02.000Z",
+      "durationMs": 1000,
+      "errors": [
+        "System.InvalidOperationException: AssemblyLoadContext is unloading or was already unloaded."
+      ],
+      "details": {
+        "note": "Synthetic fixture: demonstrates hostBugSuspected classification"
+      }
+    }
+  ],
+  "summary": {
+    "overallSuccess": false,
+    "totalGates": 1,
+    "passed": 0,
+    "failed": 1,
+    "skipped": 0,
+    "totalDurationMs": 1000
+  },
+  "diagnostics": {
+    "bundlePath": "diagnostics/golden-host-bug-alc.zip",
+    "bundleCreated": true,
+    "includedFiles": [
+      "run-manifest.json",
+      "container.log",
+      "inspect.json"
+    ],
+    "redactionApplied": true,
+    "redactionSelfTestPassed": true
+  },
+  "hostBugSuspected": {
+    "detected": true,
+    "classification": "ALC",
+    "severity": "host_bug",
+    "matchedLine": "AssemblyLoadContext is unloading or was already unloaded."
+  }
+}
+

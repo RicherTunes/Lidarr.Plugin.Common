@@ -1,0 +1,25 @@
+# Test fixture: Common refs that are NOT correctly SHA-pinned
+name: Not-SHA-Pinned Fixture
+on: workflow_dispatch
+
+jobs:
+  smoke:
+    # Violation: @main (branch name)
+    uses: RicherTunes/Lidarr.Plugin.Common/.github/workflows/multi-plugin-smoke-test.yml@main
+
+  gates:
+    # Violation: @v1 (tag)
+    uses: RicherTunes/Lidarr.Plugin.Common/.github/workflows/packaging-gates.yml@v1.5.0
+
+  init:
+    runs-on: ubuntu-latest
+    steps:
+      # Violation: 7-char short SHA
+      - uses: RicherTunes/Lidarr.Plugin.Common/.github/actions/init-common/action.yml@abc1234
+
+  # Third-party action (not Common) — should be ignored even though not SHA-pinned
+  checkout:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v3

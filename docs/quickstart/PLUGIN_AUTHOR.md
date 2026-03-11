@@ -110,6 +110,6 @@ See the [Manifest reference](../reference/MANIFEST.md) for the full schema and v
 
 - Package the folder per host instructions.
 - Document required settings for users ([Settings reference](../reference/SETTINGS.md)).
-- Watch release notes for Abstractions updates ([Compatibility matrix](../concepts/COMPATIBILITY.md)).
+- Watch release notes for Abstractions updates ([Compatibility matrix](../COMPATIBILITY.md)).
 
 That’s it. You now have an isolated plugin that can live alongside other plugins without conflicts.

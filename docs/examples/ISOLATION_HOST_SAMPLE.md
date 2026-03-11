@@ -21,8 +21,8 @@ If no path is provided it looks for a `plugins` folder next to the executable.
 
 ## Snippets
 
-- [ALC loader](../concepts/PLUGIN_ISOLATION.md#host-responsibilities)
-- [Shim example](../concepts/PLUGIN_ISOLATION.md#alternative-shimproxy-plugin)
+- [ALC loader](../PLUGIN_ISOLATION.md#host-responsibilities)
+- [Shim example](../PLUGIN_ISOLATION.md#alternative-shimproxy-plugin)
 
 ## Extend it
 
