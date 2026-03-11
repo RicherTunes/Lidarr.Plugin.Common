@@ -59,6 +59,11 @@ updates:
       # System.CommandLine 2.0.4 has breaking API changes (removed InvokeAsync)
       - dependency-name: "System.CommandLine"
         versions: [">=2.0.4"]
+      # .NET 10 runtime packages — blocked until Lidarr host moves to .NET 10
+      - dependency-name: "System.Text.Json"
+        versions: [">=10.0.0"]
+      - dependency-name: "System.Security.Cryptography.ProtectedData"
+        versions: [">=10.0.0"]
 
   - package-ecosystem: "github-actions"
     directory: "/"
