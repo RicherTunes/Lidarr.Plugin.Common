@@ -324,11 +324,19 @@ if ($SkipExtract) {
 $currentStage++
 
 $buildOk = Invoke-Stage -Name 'BUILD' -Number "$currentStage/5" -Required -Action {
-    # Restore
+    # Restore the plugin csproj (not the solution) with build flags so conditional
+    # PackageReferences (e.g., FluentValidation with SkipHostBridge) resolve correctly.
     if (-not $NoRestore) {
-        $restoreTarget = if ($solutionFile) { $solutionFile } else { $pluginCsproj }
+        $restoreTarget = $pluginCsproj
+        $restoreArgs = @($restoreTarget)
+        if ($buildFlags) {
+            $resolvedFlags = $buildFlags | ForEach-Object {
+                $_ -replace '\{HOST_PATH\}', $hostPathAbsolute
+            }
+            $restoreArgs += $resolvedFlags
+        }
         Write-Host "  Restoring $restoreTarget ..."
-        $restoreOutput = & dotnet restore $restoreTarget 2>&1
+        $restoreOutput = & dotnet restore @restoreArgs 2>&1
         $restoreExit = $LASTEXITCODE
         $restoreOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
         if ($restoreExit -ne 0) { throw "dotnet restore failed" }
@@ -374,11 +382,20 @@ if (-not $buildOk) {
 
         Import-Module $pluginPackModule -Force
 
+        # Resolve build flags for packaging (same as build stage)
+        $resolvedBuildFlags = @()
+        if ($buildFlags) {
+            $resolvedBuildFlags = $buildFlags | ForEach-Object {
+                $_ -replace '\{HOST_PATH\}', $hostPathAbsolute
+            }
+        }
+
         $pkgArgs = @{
-            Csproj        = $pluginCsproj
-            Manifest      = $manifestPath
-            Framework     = 'net8.0'
-            Configuration = $Configuration
+            Csproj         = $pluginCsproj
+            Manifest       = $manifestPath
+            Framework      = 'net8.0'
+            Configuration  = $Configuration
+            ExtraBuildArgs = $resolvedBuildFlags
         }
 
         # Merge extra packaging params from config
@@ -453,6 +470,9 @@ if ($SkipTests) {
             return "No test projects configured"
         }
 
+        # Shutdown MSBuild server to release file locks from PACKAGE stage (Windows-specific)
+        & dotnet build-server shutdown 2>&1 | Out-Null
+
         $totalPassed = 0
         $totalFailed = 0
         $totalSkipped = 0
@@ -460,15 +480,24 @@ if ($SkipTests) {
         foreach ($testProj in $testProjects) {
             Write-Host "  Running tests in $testProj ..."
 
-            # Build test project first (disable plugin packaging for test builds)
-            $testBuildArgs = @($testProj, '-c', $Configuration, '--no-restore')
+            # Restore test project with build flags (separate from plugin csproj restore)
+            $testRestoreArgs = @($testProj)
             if ($buildFlags) {
                 $resolvedFlags = $buildFlags | ForEach-Object {
                     $_ -replace '\{HOST_PATH\}', $hostPathAbsolute
                 }
-                $testBuildArgs += $resolvedFlags
+                $testRestoreArgs += $resolvedFlags
             }
+            $testRestoreArgs += '-p:PluginPackagingDisable=true'
+            $testRestoreArgs += '-p:ExcludeHostBridge=true'
+            $trOutput = & dotnet restore @testRestoreArgs 2>&1
+            $trOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
+
+            # Build test project (disable plugin packaging, exclude host bridge tests)
+            $testBuildArgs = @($testProj, '-c', $Configuration, '--no-restore')
+            if ($resolvedFlags) { $testBuildArgs += $resolvedFlags }
             $testBuildArgs += '-p:PluginPackagingDisable=true'
+            $testBuildArgs += '-p:ExcludeHostBridge=true'
 
             $tbOutput = & dotnet build @testBuildArgs 2>&1
             $tbExit = $LASTEXITCODE

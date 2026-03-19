@@ -7,7 +7,8 @@ function Get-PluginOutput {
         [string]$Csproj,
 
         [string]$Framework = 'net8.0',
-        [string]$Configuration = 'Release'
+        [string]$Configuration = 'Release',
+        [string[]]$ExtraBuildArgs = @()
     )
 
     $projectPath = Resolve-Path -LiteralPath $Csproj
@@ -22,9 +23,10 @@ function Get-PluginOutput {
 
     # Use `dotnet build` instead of `dotnet publish` so projects using PluginPackaging.targets
     # (ILRepack) produce the same merged output that is used in real plugin deployment.
-    dotnet build $projectPath -c $Configuration -f $Framework -o $publishDirectory `
-        /p:CopyLocalLockFileAssemblies=true `
-        /p:ContinuousIntegrationBuild=true | Out-Null
+    $buildArgs = @($projectPath, '-c', $Configuration, '-f', $Framework, '-o', $publishDirectory,
+        '/p:CopyLocalLockFileAssemblies=true', '/p:ContinuousIntegrationBuild=true')
+    if ($ExtraBuildArgs) { $buildArgs += $ExtraBuildArgs }
+    dotnet build @buildArgs | Out-Null
 
     if ($LASTEXITCODE -ne 0) {
         throw "dotnet build failed for $Csproj ($Framework|$Configuration)."
@@ -121,12 +123,15 @@ function New-PluginPackage {
 
         # Optional: keep additional runtime assemblies as separate DLLs (advanced).
         # Most plugins should prefer merging/internalizing via PluginPackaging.targets.
-        [string[]]$AdditionalKeepAssemblies = @()
+        [string[]]$AdditionalKeepAssemblies = @(),
+
+        # Extra MSBuild arguments passed through to dotnet build (e.g., -p:SkipHostBridge=true).
+        [string[]]$ExtraBuildArgs = @()
     )
 
     $csprojPath = Resolve-Path -LiteralPath $Csproj
     $manifestPath = Resolve-Path -LiteralPath $Manifest
-    $publishPath = Get-PluginOutput -Csproj $csprojPath -Framework $Framework -Configuration $Configuration
+    $publishPath = Get-PluginOutput -Csproj $csprojPath -Framework $Framework -Configuration $Configuration -ExtraBuildArgs $ExtraBuildArgs
 
     # Basic manifest validation first (before any assembly modifications)
     Test-PluginManifest -Csproj $csprojPath -Manifest $manifestPath
