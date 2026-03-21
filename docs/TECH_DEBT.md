@@ -13,8 +13,9 @@ This document tracks technical debt items across the Lidarr Plugin Ecosystem.
 
 | Item | Priority | Owner | Expiry | Rationale |
 |------|----------|-------|--------|-----------|
-| CLI Bridge Adapters | P2 | @plugin-maintainer | 2026-06-19 | Canonical CLI adapters for streaming services are deferred. Native plugin patterns (ILRepack) work. Adapters in `src/CLI/Adapters/_incomplete/` are excluded from all builds via csproj `Compile Remove`. Revisit when CLI-first plugin workflow is prioritized. |
+| CLI Bridge Adapters | P2 | @plugin-maintainer | 2026-06-19 | Deferred. Native plugin patterns (ILRepack) work. Incomplete adapter stubs have been removed from the workspace. Revisit when CLI-first plugin workflow is prioritized. |
 | Core Compliance Test Rewrite | P1 | TBD | 2026-04-30 | Current `CoreCapabilityComplianceTests` use mock scaffolding that validates mock behavior, not real plugin contracts. Needs fixture-backed tests against concrete bridge implementations. |
+| Bridge Runtime Parity | P1 | TBD | TBD | v1.7.0 ships shared contracts (IAuthFailureHandler, IIndexerStatusReporter, IRateLimitReporter, etc.) in Abstractions as **Unshipped** API. No concrete implementations or plugin-side integrations exist yet. Contracts are prepared but not shipped — move to PublicAPI.Shipped.txt only at actual release. Plugin runtime consumption is deferred until at least one plugin (Tidalarr or Qobuzarr) wires the contracts end-to-end. |
 
 ## Brainarr
 
