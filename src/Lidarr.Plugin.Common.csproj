@@ -13,7 +13,7 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <Version>1.6.0</Version>
+    <Version>1.7.0</Version>
     <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
@@ -26,7 +26,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.6.0: Ecosystem parity infrastructure, sync-over-async cleanup, diagnostics namespace, packaging gates improvements, dependency updates. See CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.7.0: See CHANGELOG.md for release details.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <!-- Build Configuration -->
@@ -80,6 +80,12 @@
   <ItemGroup Condition="'$(IncludeCLIFramework)' != 'true'">
     <Compile Remove="CLI\**\*.cs" />
   </ItemGroup>
+
+  <!-- Exclude incomplete work-in-progress files from all builds -->
+  <ItemGroup>
+    <Compile Remove="CLI\Adapters\_incomplete\**\*.cs" />
+  </ItemGroup>
+
   <ItemGroup>
   </ItemGroup>
 
@@ -95,7 +101,7 @@
          1. Type-identity conflicts (MissingMethodException) when host version differs
          2. NuGet transitive PackageReference suppressing consumers' local host <Reference>
          Consumers must independently reference FluentValidation (from host or their own NuGet). -->
-    <PackageReference Include="FluentValidation" Version="11.12.0" PrivateAssets="all" />
+    <PackageReference Include="FluentValidation" Version="9.5.4" PrivateAssets="all" />
     <PackageReference Include="Microsoft.DotNet.PackageValidation" Version="1.0.0-preview.7.21379.12" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
     <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
