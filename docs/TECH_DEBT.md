@@ -9,6 +9,13 @@ This document tracks technical debt items across the Lidarr Plugin Ecosystem.
 - **P2**: Medium - Address when working in related area
 - **P3**: Low - Nice to have, address opportunistically
 
+## Common — Deferred Items
+
+| Item | Priority | Owner | Expiry | Rationale |
+|------|----------|-------|--------|-----------|
+| CLI Bridge Adapters | P2 | @plugin-maintainer | 2026-06-19 | Canonical CLI adapters for streaming services are deferred. Native plugin patterns (ILRepack) work. Adapters in `src/CLI/Adapters/_incomplete/` are excluded from all builds via csproj `Compile Remove`. Revisit when CLI-first plugin workflow is prioritized. |
+| Core Compliance Test Rewrite | P1 | TBD | 2026-04-30 | Current `CoreCapabilityComplianceTests` use mock scaffolding that validates mock behavior, not real plugin contracts. Needs fixture-backed tests against concrete bridge implementations. |
+
 ## Brainarr
 
 ### Large Files (Refactoring Candidates)
