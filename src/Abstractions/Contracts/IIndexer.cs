@@ -42,4 +42,37 @@ namespace Lidarr.Plugin.Abstractions.Contracts
         /// </summary>
         IAsyncEnumerable<StreamingTrack> SearchTracksStreamAsync(string query, CancellationToken cancellationToken = default);
     }
+
+    /// <summary>
+    /// Extended indexer interface with metadata support for host UI integration.
+    /// Implement this interface to provide protocol routing and configuration hints.
+    /// </summary>
+    public interface IIndexerWithMetadata : IIndexer
+    {
+        /// <summary>
+        /// Download protocol identifier (e.g., "torrent", "usenet", "http").
+        /// Used by host for protocol-based routing and filtering.
+        /// </summary>
+        string Protocol { get; }
+
+        /// <summary>
+        /// Default page size for search results.
+        /// </summary>
+        int PageSize { get; }
+
+        /// <summary>
+        /// Maximum supported page size.
+        /// </summary>
+        int MaxPageSize { get; }
+
+        /// <summary>
+        /// Whether RSS feeds are supported.
+        /// </summary>
+        bool SupportsRss { get; }
+
+        /// <summary>
+        /// Human-readable service name (e.g., "Tidal", "Qobuz").
+        /// </summary>
+        string ServiceName { get; }
+    }
 }
