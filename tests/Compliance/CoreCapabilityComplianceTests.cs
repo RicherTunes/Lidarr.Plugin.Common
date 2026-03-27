@@ -17,6 +17,12 @@ namespace Lidarr.Plugin.Common.Tests.Compliance
     /// Tests core plugin infrastructure contracts using fixture-backed implementations.
     /// Bridge services are tested via real DI activation and real default implementations
     /// rather than mock scaffolding.
+    ///
+    /// These lifecycle tests complement the granular BridgeComplianceTests.
+    /// BridgeComplianceTests verifies individual transitions; this file verifies
+    /// complete lifecycle sequences and cross-cutting DI concerns.
+    /// Implementation-specific tests (e.g. LastFailure, LastError) live in dedicated
+    /// Default*Tests files under the Bridge/ directory.
     /// </summary>
     public class CoreCapabilityComplianceTests : IDisposable
     {
@@ -115,22 +121,6 @@ namespace Lidarr.Plugin.Common.Tests.Compliance
         }
 
         [Fact]
-        public async Task AuthHandler_Failure_Records_And_Success_Clears_LastFailure()
-        {
-            var handler = (DefaultAuthFailureHandler)_fixture.AuthHandler;
-
-            // Failure records details
-            var failure = new AuthFailure { ErrorCode = "E001", Message = "test failure" };
-            await handler.HandleFailureAsync(failure);
-            Assert.NotNull(handler.LastFailure);
-            Assert.Equal("E001", handler.LastFailure!.ErrorCode);
-
-            // Success clears failure details
-            await handler.HandleSuccessAsync();
-            Assert.Null(handler.LastFailure);
-        }
-
-        [Fact]
         public async Task AuthHandler_Failure_Logs_Warning_With_Error_Code()
         {
             await _fixture.AuthHandler.HandleFailureAsync(
@@ -170,21 +160,6 @@ namespace Lidarr.Plugin.Common.Tests.Compliance
             // Recover to idle
             await _fixture.StatusReporter.ReportStatusAsync(IndexerStatus.Idle);
             Assert.Equal(IndexerStatus.Idle, _fixture.StatusReporter.CurrentStatus);
-        }
-
-        [Fact]
-        public async Task StatusReporter_Error_Records_And_NonError_Clears_LastError()
-        {
-            var reporter = (DefaultIndexerStatusReporter)_fixture.StatusReporter;
-
-            // Error sets LastError
-            var exception = new InvalidOperationException("test error");
-            await reporter.ReportErrorAsync(exception);
-            Assert.Same(exception, reporter.LastError);
-
-            // Non-error status clears LastError
-            await reporter.ReportStatusAsync(IndexerStatus.Idle);
-            Assert.Null(reporter.LastError);
         }
 
         [Fact]
