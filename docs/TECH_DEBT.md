@@ -14,7 +14,7 @@ This document tracks technical debt items across the Lidarr Plugin Ecosystem.
 | Item | Priority | Owner | Expiry | Rationale |
 |------|----------|-------|--------|-----------|
 | CLI Bridge Adapters | P2 | @plugin-maintainer | 2026-06-19 | Deferred. Native plugin patterns (ILRepack) work. Incomplete adapter stubs have been removed from the workspace. Revisit when CLI-first plugin workflow is prioritized. |
-| Core Compliance Test Rewrite | P1 | TBD | 2026-04-30 | Current `CoreCapabilityComplianceTests` use mock scaffolding that validates mock behavior, not real plugin contracts. Needs fixture-backed tests against concrete bridge implementations. |
+| ~~Core Compliance Test Rewrite~~ | ~~P1~~ | ~~TBD~~ | ~~2026-04-30~~ | **Done.** Rewritten in wave 4 to use `BridgeComplianceFixture` with real DI activation and `DefaultAuthFailureHandler`/`DefaultIndexerStatusReporter`/`DefaultRateLimitReporter`. All mock scaffolding removed. |
 | Bridge Runtime Parity | P2 | TBD | TBD | v1.7.0 shipped bridge contracts (IAuthFailureHandler, IIndexerStatusReporter, IRateLimitReporter, etc.) in Abstractions `PublicAPI.Shipped.txt`. Default implementations exist in Common (`DefaultAuthFailureHandler`, `DefaultIndexerStatusReporter`, `DefaultRateLimitReporter`) registered via `AddBridgeDefaults()`. Remaining work: plugin-side integration — no plugin (Tidalarr, Qobuzarr) wires the contracts end-to-end yet. |
 
 ## Brainarr
@@ -69,6 +69,7 @@ Line counts updated 2026-03-10 from `main` branch.
 
 | Date | Item | Resolution |
 |------|------|------------|
+| 2026-03-26 | Core Compliance Test Rewrite | Rewrote CoreCapabilityComplianceTests with fixture-backed bridge implementations; removed all mock scaffolding |
 | 2026-03-26 | Bridge contracts shipped + defaults | Contracts moved to PublicAPI.Shipped.txt; DefaultAuthFailureHandler, DefaultIndexerStatusReporter, DefaultRateLimitReporter implemented with AddBridgeDefaults() DI extension |
 | 2026-03-10 | FluentAssertions license risk | Decided: pin at 6.12.2 (MIT), dependabot ignore >= 7.0.0 |
 | 2026-03-10 | Package Version Management (CPM) | Implemented Directory.Packages.props in all 3 plugin repos |
