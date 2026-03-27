@@ -13,7 +13,7 @@ This document tracks technical debt items across the Lidarr Plugin Ecosystem.
 
 | Item | Priority | Owner | Expiry | Rationale |
 |------|----------|-------|--------|-----------|
-| CLI Bridge Adapters | P2 | @plugin-maintainer | 2026-06-19 | Deferred. Native plugin patterns (ILRepack) work. Incomplete adapter stubs have been removed from the workspace. Revisit when CLI-first plugin workflow is prioritized. |
+| CLI Bridge Adapters | P2 | @plugin-maintainer | 2026-06-19 | Deferred. Native plugin patterns (ILRepack) work. Incomplete adapter stubs have been removed from the workspace. **Decision required by 2026-06-19: implement or formally de-scope.** |
 | ~~Core Compliance Test Rewrite~~ | ~~P1~~ | ~~TBD~~ | ~~2026-04-30~~ | **Done.** Rewritten in wave 4 to use `BridgeComplianceFixture` with real DI activation and `DefaultAuthFailureHandler`/`DefaultIndexerStatusReporter`/`DefaultRateLimitReporter`. All mock scaffolding removed. |
 | Bridge Runtime Parity | P2 | TBD | TBD | v1.7.0 shipped bridge contracts (IAuthFailureHandler, IIndexerStatusReporter, IRateLimitReporter, etc.) in Abstractions `PublicAPI.Shipped.txt`. Default implementations exist in Common (`DefaultAuthFailureHandler`, `DefaultIndexerStatusReporter`, `DefaultRateLimitReporter`) registered via `AddBridgeDefaults()`. Remaining work: plugin-side integration — no plugin (Tidalarr, Qobuzarr) wires the contracts end-to-end yet. |
 
@@ -64,6 +64,21 @@ Line counts updated 2026-03-10 from `main` branch.
 - **Protection:** Dependabot ignore rule added for `FluentAssertions >= 7.0.0` in Qobuzarr's `.github/dependabot.yml`.
 - **Version pin comment:** Added to `Qobuzarr/Directory.Packages.props` explaining the MIT boundary.
 - **New plugins:** Should use xUnit `Assert.*` (no FA dependency). This is already the pattern in Tidalarr, AppleMusicarr, and Common.
+
+## Bridge Parity Exemptions
+
+Plugins that are **not streaming services** may opt out of bridge parity enforcement by placing a `.bridge-exempt` marker file in their repository root. Exempt repos are excluded from bridge wiring checks in `ecosystem-parity-lint.ps1` and any future CI dashboards.
+
+**Policy:**
+- The `.bridge-exempt` file must contain a comment block explaining why the plugin does not wire `AddBridgeDefaults()`.
+- Exemptions are reviewed when new bridge contracts are added.
+- The lint script's `Test-BridgeExempt` function reads this marker before applying bridge checks.
+
+**Current exemptions:**
+
+| Plugin | Reason | Date |
+|--------|--------|------|
+| Brainarr | LLM-based import list plugin. No indexer, no download client, auth via IProviderHealthMonitor, rate limiting via LimiterRegistry. | 2026-03-27 |
 
 ## Completed Items
 
