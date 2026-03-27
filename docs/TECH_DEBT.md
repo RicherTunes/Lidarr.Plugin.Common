@@ -17,31 +17,6 @@ This document tracks technical debt items across the Lidarr Plugin Ecosystem.
 | Core Compliance Test Rewrite | P1 | TBD | 2026-04-30 | Current `CoreCapabilityComplianceTests` use mock scaffolding that validates mock behavior, not real plugin contracts. Needs fixture-backed tests against concrete bridge implementations. |
 | Bridge Runtime Parity | P1 | TBD | TBD | v1.7.0 ships shared contracts (IAuthFailureHandler, IIndexerStatusReporter, IRateLimitReporter, etc.) in Abstractions as **Unshipped** API. No concrete implementations or plugin-side integrations exist yet. Contracts are prepared but not shipped — move to PublicAPI.Shipped.txt only at actual release. Plugin runtime consumption is deferred until at least one plugin (Tidalarr or Qobuzarr) wires the contracts end-to-end. |
 
-## Brainarr
-
-### Large Files (Refactoring Candidates)
-
-Line counts updated 2026-03-10 from `main` branch.
-
-| File | Lines | Priority | Notes |
-|------|-------|----------|-------|
-| `Brainarr.Plugin/Services/Caching/EnhancedRecommendationCache.cs` | ~330 | ✅ Done | Extracted 8 types into separate files (PR pending) |
-| `Brainarr.Plugin/Services/Core/BrainarrOrchestrator.cs` | ~520 | ✅ Done | Deduplicated FetchRecommendationsAsync overloads (PR pending) |
-| `Brainarr.Plugin/Services/Core/LibraryAnalyzer.cs` | 569 | P3 | Analysis logic — significantly reduced from earlier versions |
-| `Brainarr.Plugin/Services/LibraryAwarePromptBuilder.cs` | 359 | P3 | Now reasonably sized |
-| `Brainarr.Plugin/BrainarrSettings.cs` | 183 | — | No longer a debt item (settings container, cohesive) |
-
-### Provider Architecture — Dead Base Classes
-
-| Base Class | Path | Lines | Used By |
-|------------|------|-------|---------|
-| `SecureProviderBase` | `Brainarr.Plugin/Services/Providers/SecureProviderBase.cs` | 387 | Test doubles only |
-| `BaseCloudProvider` | `Brainarr.Plugin/Services/Providers/BaseCloudProvider.cs` | 311 | Nothing (OpenAICompatibleProvider extends it but is also unused) |
-
-**Finding (2026-03-10):** All 11 concrete providers implement `IAIProvider` directly, bypassing both bases entirely. The real duplication is across the 11 provider implementations (~250+ lines each with similar HTTP/parsing/error-handling patterns). Consolidation opportunity is a provider factory or strategy pattern, not merging the two bases.
-
-**Recommendation:** P3. Consider removing unused bases or refactoring providers to use them. Low urgency — the providers work correctly as-is.
-
 ## Common Library
 
 ### Streaming Decoders Without Consumer
@@ -65,10 +40,16 @@ Line counts updated 2026-03-10 from `main` branch.
 - **Version pin comment:** Added to `Qobuzarr/Directory.Packages.props` explaining the MIT boundary.
 - **New plugins:** Should use xUnit `Assert.*` (no FA dependency). This is already the pattern in Tidalarr, AppleMusicarr, and Common.
 
+## Cross-Repo References
+
+Brainarr-specific tech debt (large file refactoring, dead provider base classes) is tracked in the [Brainarr repo](https://github.com/RicherTunes/Brainarr) and should not be duplicated here.
+
 ## Completed Items
 
 | Date | Item | Resolution |
 |------|------|------------|
+| 2026-03-26 | Deprecated AdaptiveRateLimiter removal | Deleted AdaptiveRateLimiter.cs (IAdaptiveRateLimiter, AdaptiveRateLimiter, EndpointRateLimit, RateLimitConfig, RateLimitStats) — use UniversalAdaptiveRateLimiter instead |
+| 2026-03-26 | Deprecated InputSanitizer removal | Deleted InputSanitizer.cs — use Sanitize.UrlComponent/PathSegment/DisplayText/IsSafePath instead |
 | 2026-03-10 | FluentAssertions license risk | Decided: pin at 6.12.2 (MIT), dependabot ignore >= 7.0.0 |
 | 2026-03-10 | Package Version Management (CPM) | Implemented Directory.Packages.props in all 3 plugin repos |
 | 2026-03-10 | Ecosystem structural parity | Full parity achieved — PRs #393, #230, #218, #85 |

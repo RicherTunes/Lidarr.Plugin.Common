@@ -1,2 +1,35 @@
 #nullable enable
+*REMOVED*T:Lidarr.Plugin.Common.Security.InputSanitizer
+*REMOVED*M:Lidarr.Plugin.Common.Security.InputSanitizer.IsSafeInput(System.String)~System.Boolean
+*REMOVED*M:Lidarr.Plugin.Common.Security.InputSanitizer.SanitizeApiParameter(System.String)~System.String
+*REMOVED*M:Lidarr.Plugin.Common.Security.InputSanitizer.SanitizeFilePath(System.String)~System.String
+*REMOVED*M:Lidarr.Plugin.Common.Security.InputSanitizer.SanitizeMetadata(System.String)~System.String
+*REMOVED*M:Lidarr.Plugin.Common.Security.InputSanitizer.SanitizeSearchQuery(System.String)~System.String
+*REMOVED*T:Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter
+*REMOVED*T:Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter
+*REMOVED*T:Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit
+*REMOVED*T:Lidarr.Plugin.Common.Services.Performance.RateLimitConfig
+*REMOVED*T:Lidarr.Plugin.Common.Services.Performance.RateLimitStats
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.#ctor(Microsoft.Extensions.Logging.ILogger)
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.Dispose
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.GetCurrentLimit(System.String)~System.Int32
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.GetStats~Lidarr.Plugin.Common.Services.Performance.RateLimitStats
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.RecordResponse(System.String,System.Net.Http.HttpResponseMessage)
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter.WaitIfNeededAsync(System.String,System.Threading.CancellationToken)~System.Threading.Tasks.Task{System.Boolean}
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter.GetCurrentLimit(System.String)~System.Int32
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter.GetStats~Lidarr.Plugin.Common.Services.Performance.RateLimitStats
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter.RecordResponse(System.String,System.Net.Http.HttpResponseMessage)
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter.WaitIfNeededAsync(System.String,System.Threading.CancellationToken)~System.Threading.Tasks.Task{System.Boolean}
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.#ctor
+*REMOVED*P:Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.ConsecutiveFailures
+*REMOVED*P:Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.ConsecutiveSuccesses
+*REMOVED*P:Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.LastRequestTime
+*REMOVED*P:Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit.RequestsPerMinute
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.#ctor
+*REMOVED*P:Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.BurstSize
+*REMOVED*P:Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.CooldownAfterLimit
+*REMOVED*P:Lidarr.Plugin.Common.Services.Performance.RateLimitConfig.RequestsPerSecond
+*REMOVED*M:Lidarr.Plugin.Common.Services.Performance.RateLimitStats.#ctor
+*REMOVED*P:Lidarr.Plugin.Common.Services.Performance.RateLimitStats.EndpointLimits
+*REMOVED*P:Lidarr.Plugin.Common.Services.Performance.RateLimitStats.TotalEndpoints
 

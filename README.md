@@ -10,18 +10,18 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.6.0 — March 11, 2026
+Latest: v1.7.0 — March 26, 2026
 
+- Bridge contracts shipped (IAuthFailureHandler, IIndexerStatusReporter, IRateLimitReporter) with default implementations
+- Removed deprecated AdaptiveRateLimiter and InputSanitizer (use UniversalAdaptiveRateLimiter / Sanitize.* instead)
 - Ecosystem parity infrastructure (lint + TestKit base class)
 - Sync-over-async cleanup with lint enforcement
 - Diagnostics namespace for non-LLM providers
 - Packaging gates improvements and local CI runner
-- Comprehensive dependency updates
 - CI: Tag ↔ version verification re-enabled for release tags; CodeQL scanning added.
 - Hygiene: Ignore `.trx` and coverage artifacts; SECURITY.md added.
-- Docs: Minor polish and brand disclaimer.
 
-Release notes: [v1.2.2](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.2.2)
+Release notes: [v1.7.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.7.0)
 
 ## Choose your adventure
 
