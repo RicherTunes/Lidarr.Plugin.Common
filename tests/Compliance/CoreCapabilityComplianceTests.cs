@@ -1,228 +1,247 @@
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Abstractions.Contracts;
-using Lidarr.Plugin.Abstractions.Manifest;
 using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Abstractions.Results;
+using Lidarr.Plugin.Common.Extensions;
+using Lidarr.Plugin.Common.Services.Bridge;
+using Lidarr.Plugin.Common.TestKit.Fixtures;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using Moq;
 using Xunit;
 
 namespace Lidarr.Plugin.Common.Tests.Compliance
 {
     /// <summary>
     /// Layer 1: Core Capability Suite
-    /// Tests that all plugins must pass regardless of their specific capabilities.
+    /// Tests core plugin infrastructure contracts using fixture-backed implementations.
+    /// Bridge services are tested via real DI activation and real default implementations
+    /// rather than mock scaffolding.
     /// </summary>
-    public class CoreCapabilityComplianceTests
+    public class CoreCapabilityComplianceTests : IDisposable
     {
-        #region Plugin Lifecycle Tests
+        private readonly BridgeComplianceFixture _fixture = new();
+
+        #region Bridge DI Activation Tests
 
         [Fact]
-        public async Task Plugin_Initialize_Then_Dispose_Completes_Gracefully()
+        public void Bridge_Services_Resolve_Through_DI_Container()
         {
-            // Arrange
-            var plugin = CreateTestPlugin();
-            var context = CreateTestContext();
-
-            // Act
-            await plugin.InitializeAsync(context);
-            await plugin.DisposeAsync();
-
-            // Assert - No exception thrown
-            Assert.True(true);
+            // All three bridge services must be resolvable from the fixture's DI container
+            Assert.NotNull(_fixture.AuthHandler);
+            Assert.NotNull(_fixture.StatusReporter);
+            Assert.NotNull(_fixture.RateLimitReporter);
         }
 
         [Fact]
-        public async Task Plugin_Double_Dispose_Does_Not_Throw()
+        public void Bridge_Services_Are_Singleton_Instances()
         {
-            // Arrange
-            var plugin = CreateTestPlugin();
-            var context = CreateTestContext();
-            await plugin.InitializeAsync(context);
+            // Services resolved multiple times from the same container must return the same instance
+            var auth1 = _fixture.Services.GetRequiredService<IAuthFailureHandler>();
+            var auth2 = _fixture.Services.GetRequiredService<IAuthFailureHandler>();
+            Assert.Same(auth1, auth2);
 
-            // Act
-            await plugin.DisposeAsync();
-            await plugin.DisposeAsync(); // Second dispose
+            var status1 = _fixture.Services.GetRequiredService<IIndexerStatusReporter>();
+            var status2 = _fixture.Services.GetRequiredService<IIndexerStatusReporter>();
+            Assert.Same(status1, status2);
 
-            // Assert - No exception thrown
-            Assert.True(true);
+            var rate1 = _fixture.Services.GetRequiredService<IRateLimitReporter>();
+            var rate2 = _fixture.Services.GetRequiredService<IRateLimitReporter>();
+            Assert.Same(rate1, rate2);
         }
 
         [Fact]
-        public async Task Plugin_Operations_After_Dispose_Return_Null_Or_Throw()
+        public void Bridge_Defaults_Yield_Correct_Implementation_Types()
         {
-            // Arrange
-            var plugin = CreateTestPlugin();
-            var context = CreateTestContext();
-            await plugin.InitializeAsync(context);
-            await plugin.DisposeAsync();
-
-            // Act — after dispose, CreateIndexerAsync should either throw or return null.
-            // The mock returns null, which is acceptable post-dispose behavior.
-            var indexer = await plugin.CreateIndexerAsync();
-            Assert.Null(indexer);
-        }
-
-        #endregion
-
-        #region Settings Validation Tests
-
-        [Fact]
-        public void SettingsProvider_Describe_Returns_Required_Fields()
-        {
-            // Arrange
-            var settingsProvider = CreateTestSettingsProvider();
-
-            // Act
-            var definitions = settingsProvider.Describe();
-
-            // Assert
-            Assert.NotNull(definitions);
-            Assert.NotEmpty(definitions);
-
-            var requiredFields = definitions.Where(d => d.IsRequired).ToList();
-            Assert.NotEmpty(requiredFields); // At least one required field
+            Assert.IsType<DefaultAuthFailureHandler>(_fixture.AuthHandler);
+            Assert.IsType<DefaultIndexerStatusReporter>(_fixture.StatusReporter);
+            Assert.IsType<DefaultRateLimitReporter>(_fixture.RateLimitReporter);
         }
 
         [Fact]
-        public void SettingsProvider_GetDefaults_Returns_Valid_Dictionary()
+        public void Custom_Registration_Takes_Precedence_Over_Defaults()
         {
-            // Arrange
-            var settingsProvider = CreateTestSettingsProvider();
+            // Arrange: register a custom handler BEFORE calling AddBridgeDefaults
+            var services = new ServiceCollection();
+            services.AddSingleton<ILoggerFactory>(_fixture.Context.LoggerFactory);
+            services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
+            var customHandler = new TestAuthHandler();
+            services.AddSingleton<IAuthFailureHandler>(customHandler);
+            services.AddBridgeDefaults();
 
-            // Act
-            var defaults = settingsProvider.GetDefaults();
+            using var provider = services.BuildServiceProvider();
 
-            // Assert
-            Assert.NotNull(defaults);
-        }
-
-        [Fact]
-        public void SettingsProvider_Validate_Rejects_Invalid_Settings()
-        {
-            // Arrange
-            var settingsProvider = CreateTestSettingsProvider();
-            var invalidSettings = CreateInvalidSettings();
-
-            // Act
-            var result = settingsProvider.Validate(invalidSettings);
-
-            // Assert
-            Assert.False(result.IsValid);
-            Assert.NotEmpty(result.Errors);
-        }
-
-        [Fact]
-        public void SettingsProvider_Validate_Accepts_Valid_Settings()
-        {
-            // Arrange
-            var settingsProvider = CreateTestSettingsProvider();
-            var validSettings = CreateValidSettings();
-
-            // Act
-            var result = settingsProvider.Validate(validSettings);
-
-            // Assert
-            Assert.True(result.IsValid);
-            Assert.Empty(result.Errors);
-        }
-
-        [Fact]
-        public void SettingsProvider_Apply_Rejects_Invalid_Settings()
-        {
-            // Arrange
-            var settingsProvider = CreateTestSettingsProvider();
-            var invalidSettings = CreateInvalidSettings();
-
-            // Act
-            var result = settingsProvider.Apply(invalidSettings);
-
-            // Assert
-            Assert.False(result.IsValid);
-        }
-
-        [Fact]
-        public void SettingsProvider_Apply_Accepts_Valid_Settings()
-        {
-            // Arrange
-            var settingsProvider = CreateTestSettingsProvider();
-            var validSettings = CreateValidSettings();
-
-            // Act
-            var result = settingsProvider.Apply(validSettings);
-
-            // Assert
-            Assert.True(result.IsValid);
+            // Assert: custom registration wins (TryAdd semantics)
+            Assert.Same(customHandler, provider.GetRequiredService<IAuthFailureHandler>());
+            // Other defaults still resolve
+            Assert.IsType<DefaultIndexerStatusReporter>(provider.GetRequiredService<IIndexerStatusReporter>());
+            Assert.IsType<DefaultRateLimitReporter>(provider.GetRequiredService<IRateLimitReporter>());
         }
 
         #endregion
 
-        #region Auth Failure Tests
+        #region Auth Failure Handler Behavioral Tests
 
         [Fact]
-        public async Task Indexer_Expired_Token_Returns_Graceful_Result()
+        public async Task AuthHandler_Full_Lifecycle_Unknown_To_Failed_To_Authenticated()
         {
-            // Arrange — a mock indexer with expired token returns empty results gracefully
-            var indexerMock = new Mock<IIndexer>();
-            indexerMock.Setup(i => i.SearchAlbumsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .Returns(ValueTask.FromResult<IReadOnlyList<StreamingAlbum>>(new List<StreamingAlbum>()));
+            // Initial state
+            Assert.Equal(AuthStatus.Unknown, _fixture.AuthHandler.Status);
 
-            // Act
-            var result = await indexerMock.Object.SearchAlbumsAsync("test query");
+            // Failure transition
+            await _fixture.AuthHandler.HandleFailureAsync(
+                new AuthFailure { ErrorCode = "AUTH001", Message = "Token expired" });
+            Assert.Equal(AuthStatus.Failed, _fixture.AuthHandler.Status);
 
-            // Assert - Should not throw, returns empty
-            Assert.NotNull(result);
-            Assert.Empty(result);
+            // Recovery transition
+            await _fixture.AuthHandler.HandleSuccessAsync();
+            Assert.Equal(AuthStatus.Authenticated, _fixture.AuthHandler.Status);
         }
 
-        // TODO(wave-2): Add IAuthFailureHandler integration tests using DefaultAuthFailureHandler.
-        // Contracts and defaults are shipped — needs fixture-backed tests (see TECH_DEBT.md Core Compliance rewrite).
+        [Fact]
+        public async Task AuthHandler_Reauth_Request_Transitions_Through_Expired()
+        {
+            // Start authenticated
+            await _fixture.AuthHandler.HandleSuccessAsync();
+            Assert.Equal(AuthStatus.Authenticated, _fixture.AuthHandler.Status);
+
+            // Request reauth
+            await _fixture.AuthHandler.RequestReauthenticationAsync("Token revoked by user");
+            Assert.Equal(AuthStatus.Expired, _fixture.AuthHandler.Status);
+
+            // Recover
+            await _fixture.AuthHandler.HandleSuccessAsync();
+            Assert.Equal(AuthStatus.Authenticated, _fixture.AuthHandler.Status);
+        }
+
+        [Fact]
+        public async Task AuthHandler_Failure_Records_And_Success_Clears_LastFailure()
+        {
+            var handler = (DefaultAuthFailureHandler)_fixture.AuthHandler;
+
+            // Failure records details
+            var failure = new AuthFailure { ErrorCode = "E001", Message = "test failure" };
+            await handler.HandleFailureAsync(failure);
+            Assert.NotNull(handler.LastFailure);
+            Assert.Equal("E001", handler.LastFailure!.ErrorCode);
+
+            // Success clears failure details
+            await handler.HandleSuccessAsync();
+            Assert.Null(handler.LastFailure);
+        }
+
+        [Fact]
+        public async Task AuthHandler_Failure_Logs_Warning_With_Error_Code()
+        {
+            await _fixture.AuthHandler.HandleFailureAsync(
+                new AuthFailure { ErrorCode = "AUTH_EXPIRED", Message = "Session timed out" });
+
+            var logs = _fixture.Context.LogEntries.Snapshot();
+            Assert.Contains(logs, e =>
+                e.Level == LogLevel.Warning &&
+                e.Message.Contains("AUTH_EXPIRED"));
+        }
+
+        [Fact]
+        public async Task AuthHandler_Null_Failure_Throws_ArgumentNullException()
+        {
+            await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+                await _fixture.AuthHandler.HandleFailureAsync(null!));
+        }
 
         #endregion
 
-        #region Cancellation Tests
+        #region Indexer Status Reporter Behavioral Tests
 
         [Fact]
-        public async Task Indexer_SearchAlbums_Respects_Cancellation()
+        public async Task StatusReporter_Full_Lifecycle_Idle_To_Searching_To_Error_To_Idle()
         {
-            // Arrange
-            var indexer = await CreateTestIndexer();
-            var cts = new CancellationTokenSource();
-            cts.CancelAfter(TimeSpan.FromMilliseconds(50));
+            // Initial state
+            Assert.Equal(IndexerStatus.Idle, _fixture.StatusReporter.CurrentStatus);
 
-            // Act & Assert
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-                await indexer.SearchAlbumsAsync("long running query", cts.Token));
+            // Start searching
+            await _fixture.StatusReporter.ReportStatusAsync(IndexerStatus.Searching);
+            Assert.Equal(IndexerStatus.Searching, _fixture.StatusReporter.CurrentStatus);
+
+            // Error during search
+            await _fixture.StatusReporter.ReportErrorAsync(new InvalidOperationException("API down"));
+            Assert.Equal(IndexerStatus.Error, _fixture.StatusReporter.CurrentStatus);
+
+            // Recover to idle
+            await _fixture.StatusReporter.ReportStatusAsync(IndexerStatus.Idle);
+            Assert.Equal(IndexerStatus.Idle, _fixture.StatusReporter.CurrentStatus);
         }
 
         [Fact]
-        public async Task Indexer_SearchTracks_Respects_Cancellation()
+        public async Task StatusReporter_Error_Records_And_NonError_Clears_LastError()
         {
-            // Arrange
-            var indexer = await CreateTestIndexer();
-            var cts = new CancellationTokenSource();
-            cts.CancelAfter(TimeSpan.FromMilliseconds(50));
+            var reporter = (DefaultIndexerStatusReporter)_fixture.StatusReporter;
 
-            // Act & Assert
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-                await indexer.SearchTracksAsync("long running query", cts.Token));
+            // Error sets LastError
+            var exception = new InvalidOperationException("test error");
+            await reporter.ReportErrorAsync(exception);
+            Assert.Same(exception, reporter.LastError);
+
+            // Non-error status clears LastError
+            await reporter.ReportStatusAsync(IndexerStatus.Idle);
+            Assert.Null(reporter.LastError);
         }
 
         [Fact]
-        public async Task DownloadClient_Enqueue_Respects_Cancellation()
+        public async Task StatusReporter_Error_Produces_Error_Level_Log()
         {
-            // Arrange
-            var downloadClient = await CreateTestDownloadClient();
-            var cts = new CancellationTokenSource();
-            cts.CancelAfter(TimeSpan.FromMilliseconds(50));
+            await _fixture.StatusReporter.ReportErrorAsync(new InvalidOperationException("test error"));
 
-            // Act & Assert
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
-                await downloadClient.EnqueueAlbumDownloadAsync("test-album", "/output/path", cts.Token));
+            var logs = _fixture.Context.LogEntries.Snapshot();
+            Assert.Contains(logs, e => e.Level == LogLevel.Error);
+        }
+
+        [Fact]
+        public async Task StatusReporter_Null_Error_Throws_ArgumentNullException()
+        {
+            await Assert.ThrowsAsync<ArgumentNullException>(async () =>
+                await _fixture.StatusReporter.ReportErrorAsync(null!));
+        }
+
+        #endregion
+
+        #region Rate Limit Reporter Behavioral Tests
+
+        [Fact]
+        public async Task RateLimitReporter_Full_Lifecycle_Clear_To_Limited_To_Cleared()
+        {
+            // Initial state
+            Assert.False(_fixture.RateLimitReporter.Status.IsRateLimited);
+
+            // Hit rate limit
+            await _fixture.RateLimitReporter.ReportRateLimitAsync(TimeSpan.FromSeconds(30));
+            Assert.True(_fixture.RateLimitReporter.Status.IsRateLimited);
+            Assert.NotNull(_fixture.RateLimitReporter.Status.ResetAt);
+
+            // Rate limit cleared
+            await _fixture.RateLimitReporter.ReportRateLimitClearedAsync();
+            Assert.False(_fixture.RateLimitReporter.Status.IsRateLimited);
+        }
+
+        [Fact]
+        public async Task RateLimitReporter_ResetAt_Is_In_The_Future()
+        {
+            var before = DateTimeOffset.UtcNow;
+            await _fixture.RateLimitReporter.ReportRateLimitAsync(TimeSpan.FromSeconds(60));
+
+            Assert.True(_fixture.RateLimitReporter.Status.ResetAt >= before.AddSeconds(59));
+        }
+
+        [Fact]
+        public async Task RateLimitReporter_Backoff_Logs_Warning_With_Reason()
+        {
+            await _fixture.RateLimitReporter.ReportBackoffAsync(
+                TimeSpan.FromSeconds(5), "exponential");
+
+            var logs = _fixture.Context.LogEntries.Snapshot();
+            Assert.Contains(logs, e =>
+                e.Level == LogLevel.Warning &&
+                e.Message.Contains("exponential"));
         }
 
         #endregion
@@ -256,155 +275,74 @@ namespace Lidarr.Plugin.Common.Tests.Compliance
         }
 
         [Fact]
-        public async Task Indexer_Search_Returns_Empty_On_No_Results()
+        public void PluginOperationResult_Success_Contains_Value()
         {
-            // Arrange
-            var indexer = await CreateTestIndexer();
-
-            // Act
-            var results = await indexer.SearchAlbumsAsync("zzzzzzz_nonexistent_artist_12345");
+            // Arrange & Act
+            var result = PluginOperationResult.Success();
 
             // Assert
-            Assert.NotNull(results);
-            // May be empty or have results, but should not throw
+            Assert.True(result.IsSuccess);
+            Assert.Null(result.Error);
+        }
+
+        [Fact]
+        public void PluginOperationResult_Failure_EnsureSuccess_Throws()
+        {
+            // Arrange
+            var error = new PluginError(PluginErrorCode.RateLimited, "Rate limited");
+            var result = PluginOperationResult.Failure(error);
+
+            // Act & Assert
+            var ex = Assert.Throws<PluginOperationException>(() => result.EnsureSuccess());
+            Assert.Equal(PluginErrorCode.RateLimited, ex.Error.Code);
+        }
+
+        [Fact]
+        public void PluginError_FromException_Wraps_Exception_With_Unknown_Code()
+        {
+            // Arrange
+            var exception = new InvalidOperationException("Something went wrong");
+
+            // Act
+            var error = PluginError.FromException(exception);
+
+            // Assert
+            Assert.Equal(PluginErrorCode.Unknown, error.Code);
+            Assert.Same(exception, error.Exception);
+            Assert.Contains("Something went wrong", error.Message);
+        }
+
+        [Fact]
+        public void PluginError_WithMetadata_Merges_Metadata()
+        {
+            // Arrange
+            var error = new PluginError(PluginErrorCode.RateLimited, "Rate limited");
+
+            // Act
+            var enriched = error.WithMetadata(new System.Collections.Generic.Dictionary<string, string>
+            {
+                ["retry-after"] = "30",
+                ["provider"] = "test"
+            });
+
+            // Assert
+            Assert.Equal("30", enriched.Metadata["retry-after"]);
+            Assert.Equal("test", enriched.Metadata["provider"]);
+            Assert.Equal(PluginErrorCode.RateLimited, enriched.Code);
         }
 
         #endregion
 
-        #region Helper Methods
+        #region Helpers
 
-        private IPlugin CreateTestPlugin()
-        {
-            var mock = new Mock<IPlugin>();
-            mock.SetupGet(p => p.Manifest).Returns(CreateTestManifest());
-            mock.SetupGet(p => p.SettingsProvider).Returns(CreateTestSettingsProvider());
-            mock.Setup(p => p.InitializeAsync(It.IsAny<IPluginContext>(), It.IsAny<CancellationToken>()))
-                .Returns(ValueTask.CompletedTask);
-            mock.Setup(p => p.DisposeAsync()).Returns(ValueTask.CompletedTask);
-            mock.Setup(p => p.CreateIndexerAsync(It.IsAny<CancellationToken>()))
-                .Returns(() => ValueTask.FromResult<IIndexer?>(null));
-            mock.Setup(p => p.CreateDownloadClientAsync(It.IsAny<CancellationToken>()))
-                .Returns(() => ValueTask.FromResult<IDownloadClient?>(null));
-            return mock.Object;
-        }
+        public void Dispose() => _fixture.Dispose();
 
-        private IPluginContext CreateTestContext()
+        private sealed class TestAuthHandler : IAuthFailureHandler
         {
-            var mock = new Mock<IPluginContext>();
-            mock.SetupGet(c => c.LoggerFactory).Returns(new Mock<ILoggerFactory>().Object);
-            return mock.Object;
-        }
-
-        private ISettingsProvider CreateTestSettingsProvider()
-        {
-            var mock = new Mock<ISettingsProvider>();
-            mock.Setup(s => s.Describe()).Returns(new List<SettingDefinition>
-            {
-                new() { Key = "ConfigPath", DisplayName = "Config Path", IsRequired = true },
-                new() { Key = "DownloadPath", DisplayName = "Download Path", IsRequired = true }
-            });
-            mock.Setup(s => s.GetDefaults()).Returns(new Dictionary<string, object?>
-            {
-                ["ConfigPath"] = string.Empty,
-                ["DownloadPath"] = string.Empty
-            });
-            // Validate: reject when required fields are empty, accept otherwise
-            mock.Setup(s => s.Validate(It.IsAny<IDictionary<string, object?>>()))
-                .Returns((IDictionary<string, object?> settings) =>
-                {
-                    var errors = new List<string>();
-                    if (!settings.TryGetValue("ConfigPath", out var cp) || string.IsNullOrWhiteSpace(cp?.ToString()))
-                        errors.Add("ConfigPath is required");
-                    if (!settings.TryGetValue("DownloadPath", out var dp) || string.IsNullOrWhiteSpace(dp?.ToString()))
-                        errors.Add("DownloadPath is required");
-                    return errors.Count > 0
-                        ? PluginValidationResult.Failure(errors)
-                        : PluginValidationResult.Success();
-                });
-            mock.Setup(s => s.Apply(It.IsAny<IDictionary<string, object?>>()))
-                .Returns((IDictionary<string, object?> settings) =>
-                {
-                    var errors = new List<string>();
-                    if (!settings.TryGetValue("ConfigPath", out var cp) || string.IsNullOrWhiteSpace(cp?.ToString()))
-                        errors.Add("ConfigPath is required");
-                    if (!settings.TryGetValue("DownloadPath", out var dp) || string.IsNullOrWhiteSpace(dp?.ToString()))
-                        errors.Add("DownloadPath is required");
-                    return errors.Count > 0
-                        ? PluginValidationResult.Failure(errors)
-                        : PluginValidationResult.Success();
-                });
-            return mock.Object;
-        }
-
-        private PluginManifest CreateTestManifest()
-        {
-            return new PluginManifest
-            {
-                Id = "test-plugin",
-                Name = "Test Plugin",
-                Version = "1.0.0",
-                ApiVersion = "1.x"
-            };
-        }
-
-        private IDictionary<string, object?> CreateValidSettings()
-        {
-            return new Dictionary<string, object?>
-            {
-                ["ConfigPath"] = "/valid/path",
-                ["DownloadPath"] = "/valid/download"
-            };
-        }
-
-        private IDictionary<string, object?> CreateInvalidSettings()
-        {
-            return new Dictionary<string, object?>
-            {
-                ["ConfigPath"] = "", // Empty required field
-                ["DownloadPath"] = ""
-            };
-        }
-
-        private Task<IIndexer> CreateTestIndexer()
-        {
-            var mock = new Mock<IIndexer>();
-            mock.Setup(i => i.InitializeAsync(It.IsAny<CancellationToken>()))
-                .Returns(ValueTask.FromResult(PluginValidationResult.Success()));
-            // Simulate a real search that respects cancellation
-            mock.Setup(i => i.SearchAlbumsAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .Returns(async (string query, CancellationToken ct) =>
-                {
-                    await Task.Delay(5000, ct); // Long enough to be cancelled
-                    return (IReadOnlyList<StreamingAlbum>)new List<StreamingAlbum>();
-                });
-            mock.Setup(i => i.SearchTracksAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .Returns(async (string query, CancellationToken ct) =>
-                {
-                    await Task.Delay(5000, ct);
-                    return (IReadOnlyList<StreamingTrack>)new List<StreamingTrack>();
-                });
-            mock.Setup(i => i.DisposeAsync()).Returns(ValueTask.CompletedTask);
-            return Task.FromResult(mock.Object);
-        }
-
-        private Task<IIndexer> CreateAuthenticatedIndexer()
-        {
-            return CreateTestIndexer();
-        }
-
-        private Task<IDownloadClient> CreateTestDownloadClient()
-        {
-            var mock = new Mock<IDownloadClient>();
-            mock.Setup(d => d.InitializeAsync(It.IsAny<CancellationToken>()))
-                .Returns(ValueTask.FromResult(PluginValidationResult.Success()));
-            mock.Setup(d => d.EnqueueAlbumDownloadAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
-                .Returns(async (string albumId, string outputPath, CancellationToken ct) =>
-                {
-                    await Task.Delay(1000, ct); // Simulate long-running operation
-                    return "download-id-123";
-                });
-            mock.Setup(d => d.DisposeAsync()).Returns(ValueTask.CompletedTask);
-            return Task.FromResult(mock.Object);
+            public AuthStatus Status => AuthStatus.Unknown;
+            public ValueTask HandleFailureAsync(AuthFailure failure, System.Threading.CancellationToken ct = default) => default;
+            public ValueTask HandleSuccessAsync(System.Threading.CancellationToken ct = default) => default;
+            public ValueTask RequestReauthenticationAsync(string reason, System.Threading.CancellationToken ct = default) => default;
         }
 
         #endregion
