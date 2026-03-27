@@ -37,6 +37,28 @@ Template to copy when drafting a release:
 
 _No changes yet._
 
+## [1.7.0] - 2026-03-26
+**Upgrade note:** Bridge contracts shipped. 8 new Abstractions interfaces for host-boundary communication (auth, indexer, rate-limit, download status). Default implementations and DI extensions in Common. First consumer: Tidalarr.
+
+**Highlights**
+- Bridge contract interfaces: `IAuthFailureHandler`, `IIndexerStatusReporter`, `IRateLimitReporter`, `IDownloadStatusReporter`, `IIndexerRequestBuilder`, `IIndexerResponseParser<T>`, `IIndexerWithMetadata`, `IRssFeedProvider`
+- Default implementations: `DefaultAuthFailureHandler`, `DefaultIndexerStatusReporter`, `DefaultRateLimitReporter` with logging and state tracking
+- DI extension: `AddBridgeDefaults()` registers all defaults via `TryAddSingleton`
+- Fixture-backed compliance tests: `BridgeComplianceTests` (15 behavioral) + `BridgeDefaultsActivationTests` (4 DI activation)
+- TestKit: `PluginSandbox` for isolated ALC plugin loading, `BridgeComplianceFixture` for bridge contract testing
+- Behavioral docs: `BRIDGE_RUNTIME_CONTRACTS.md` with triggers, reliability, host assumptions
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:**
+- CliWrap 3.10.0 -> 3.10.1
+- coverlet.collector 8.0.0 -> 8.0.1
+- DataProtection 8.0.x -> 8.0.25
+- azure/login v2 -> v3
+- release-drafter v6 -> v7
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.6.0...v1.7.0)
+
 ## [1.6.0] - 2026-03-11
 **Upgrade note:** Major infrastructure release — ecosystem parity testing, sync-over-async cleanup, diagnostics namespace, and comprehensive dependency updates. No breaking API changes.
 

@@ -1,15 +1,2 @@
 #nullable enable
 
-T:Lidarr.Plugin.Abstractions.Contracts.IAuthFailureHandler
-T:Lidarr.Plugin.Abstractions.Contracts.IDownloadStatusReporter
-T:Lidarr.Plugin.Abstractions.Contracts.IIndexerRequestBuilder
-T:Lidarr.Plugin.Abstractions.Contracts.IIndexerResponseParser`1
-T:Lidarr.Plugin.Abstractions.Contracts.IIndexerStatusReporter
-T:Lidarr.Plugin.Abstractions.Contracts.IIndexerWithMetadata
-T:Lidarr.Plugin.Abstractions.Contracts.IRateLimitReporter
-T:Lidarr.Plugin.Abstractions.Contracts.IRssFeedProvider
-M:Lidarr.Plugin.Abstractions.Contracts.IIndexerWithMetadata.Protocol.get
-M:Lidarr.Plugin.Abstractions.Contracts.IIndexerWithMetadata.PageSize.get
-M:Lidarr.Plugin.Abstractions.Contracts.IIndexerWithMetadata.MaxPageSize.get
-M:Lidarr.Plugin.Abstractions.Contracts.IIndexerWithMetadata.SupportsRss.get
-M:Lidarr.Plugin.Abstractions.Contracts.IIndexerWithMetadata.ServiceName.get
