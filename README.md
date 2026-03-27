@@ -10,14 +10,12 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.6.0 — March 11, 2026
+Latest: v1.7.0 — March 26, 2026
 
-- Ecosystem parity infrastructure (lint + TestKit base class)
-- Sync-over-async cleanup with lint enforcement
-- Diagnostics namespace for non-LLM providers
-- Packaging gates improvements and local CI runner
-- Comprehensive dependency updates
-- CI: Tag ↔ version verification re-enabled for release tags; CodeQL scanning added.
+- Bridge contracts shipped: `IAuthFailureHandler`, `IIndexerStatusReporter`, `IRateLimitReporter` + 5 more
+- Default implementations with `AddBridgeDefaults()` DI extension
+- Fixture-backed compliance tests for bridge contracts
+- CliWrap, coverlet, DataProtection dependency updates
 - Hygiene: Ignore `.trx` and coverage artifacts; SECURITY.md added.
 - Docs: Minor polish and brand disclaimer.
 
