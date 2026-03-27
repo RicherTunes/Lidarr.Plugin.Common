@@ -15,7 +15,7 @@ This document tracks technical debt items across the Lidarr Plugin Ecosystem.
 |------|----------|-------|--------|-----------|
 | CLI Bridge Adapters | P2 | @plugin-maintainer | 2026-06-19 | Deferred. Native plugin patterns (ILRepack) work. Incomplete adapter stubs have been removed from the workspace. Revisit when CLI-first plugin workflow is prioritized. |
 | Core Compliance Test Rewrite | P1 | TBD | 2026-04-30 | Current `CoreCapabilityComplianceTests` use mock scaffolding that validates mock behavior, not real plugin contracts. Needs fixture-backed tests against concrete bridge implementations. |
-| Bridge Runtime Parity | P1 | TBD | TBD | v1.7.0 ships shared contracts (IAuthFailureHandler, IIndexerStatusReporter, IRateLimitReporter, etc.) in Abstractions as **Unshipped** API. No concrete implementations or plugin-side integrations exist yet. Contracts are prepared but not shipped — move to PublicAPI.Shipped.txt only at actual release. Plugin runtime consumption is deferred until at least one plugin (Tidalarr or Qobuzarr) wires the contracts end-to-end. |
+| Bridge Runtime Parity | P2 | TBD | TBD | v1.7.0 shipped bridge contracts (IAuthFailureHandler, IIndexerStatusReporter, IRateLimitReporter, etc.) in Abstractions `PublicAPI.Shipped.txt`. Default implementations exist in Common (`DefaultAuthFailureHandler`, `DefaultIndexerStatusReporter`, `DefaultRateLimitReporter`) registered via `AddBridgeDefaults()`. Remaining work: plugin-side integration — no plugin (Tidalarr, Qobuzarr) wires the contracts end-to-end yet. |
 
 ## Common Library
 
@@ -48,6 +48,7 @@ Brainarr-specific tech debt (large file refactoring, dead provider base classes)
 
 | Date | Item | Resolution |
 |------|------|------------|
+| 2026-03-26 | Bridge contracts shipped + defaults | Contracts moved to PublicAPI.Shipped.txt; DefaultAuthFailureHandler, DefaultIndexerStatusReporter, DefaultRateLimitReporter implemented with AddBridgeDefaults() DI extension |
 | 2026-03-26 | Deprecated AdaptiveRateLimiter removal | Deleted AdaptiveRateLimiter.cs (IAdaptiveRateLimiter, AdaptiveRateLimiter, EndpointRateLimit, RateLimitConfig, RateLimitStats) — use UniversalAdaptiveRateLimiter instead |
 | 2026-03-26 | Deprecated InputSanitizer removal | Deleted InputSanitizer.cs — use Sanitize.UrlComponent/PathSegment/DisplayText/IsSafePath instead |
 | 2026-03-10 | FluentAssertions license risk | Decided: pin at 6.12.2 (MIT), dependabot ignore >= 7.0.0 |
