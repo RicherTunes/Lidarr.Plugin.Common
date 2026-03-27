@@ -16,10 +16,10 @@ public sealed class BridgeComplianceFixture : IDisposable
     public PluginTestContext Context { get; }
     public IServiceProvider Services { get; }
 
-    public IAuthFailureHandler AuthHandler => Services.GetRequiredService<IAuthFailureHandler>();
-    public IIndexerStatusReporter StatusReporter => Services.GetRequiredService<IIndexerStatusReporter>();
-    public IDownloadStatusReporter DownloadStatusReporter => Services.GetRequiredService<IDownloadStatusReporter>();
-    public IRateLimitReporter RateLimitReporter => Services.GetRequiredService<IRateLimitReporter>();
+    public IAuthFailureHandler AuthHandler { get; }
+    public IIndexerStatusReporter StatusReporter { get; }
+    public IDownloadStatusReporter DownloadStatusReporter { get; }
+    public IRateLimitReporter RateLimitReporter { get; }
 
     public BridgeComplianceFixture()
     {
@@ -31,6 +31,11 @@ public sealed class BridgeComplianceFixture : IDisposable
         services.AddBridgeDefaults();
 
         Services = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+        AuthHandler = Services.GetRequiredService<IAuthFailureHandler>();
+        StatusReporter = Services.GetRequiredService<IIndexerStatusReporter>();
+        DownloadStatusReporter = Services.GetRequiredService<IDownloadStatusReporter>();
+        RateLimitReporter = Services.GetRequiredService<IRateLimitReporter>();
     }
 
     public void Dispose()

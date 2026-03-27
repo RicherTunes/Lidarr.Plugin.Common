@@ -12,8 +12,8 @@ namespace Lidarr.Plugin.Common.Services.Bridge;
 public sealed class DefaultIndexerStatusReporter : IIndexerStatusReporter
 {
     private readonly ILogger<DefaultIndexerStatusReporter> _logger;
-    private IndexerStatus _currentStatus = IndexerStatus.Idle;
-    private Exception? _lastError;
+    private volatile IndexerStatus _currentStatus = IndexerStatus.Idle;
+    private volatile Exception? _lastError;
 
     public DefaultIndexerStatusReporter(ILogger<DefaultIndexerStatusReporter> logger)
     {

@@ -19,7 +19,7 @@ Latest: v1.7.0 — March 26, 2026
 - Hygiene: Ignore `.trx` and coverage artifacts; SECURITY.md added.
 - Docs: Minor polish and brand disclaimer.
 
-Release notes: [v1.2.2](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.2.2)
+Release notes: [v1.7.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.7.0)
 
 ## Choose your adventure
 
