@@ -42,7 +42,8 @@ public sealed class DefaultIndexerStatusReporter : IIndexerStatusReporter
 
     public ValueTask ReportErrorAsync(Exception error, CancellationToken cancellationToken = default)
     {
-        _lastError = error ?? throw new ArgumentNullException(nameof(error));
+        ArgumentNullException.ThrowIfNull(error);
+        _lastError = error;
         _currentStatus = IndexerStatus.Error;
         _logger.LogError(error, "Indexer error reported");
         return ValueTask.CompletedTask;
