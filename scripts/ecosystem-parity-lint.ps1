@@ -8,7 +8,8 @@
 .PARAMETER RepoPath
     Path to a single plugin repo to scan.
 .PARAMETER AllRepos
-    Scan all known plugin repos (qobuzarr, tidalarr, brainarr, applemusicarr).
+    Scan all known plugin repos (qobuzarr, tidalarr, applemusicarr).
+    Note: brainarr is excluded from bridge parity checks via .bridge-exempt marker.
 .PARAMETER Mode
     Run mode: 'interactive' (warnings only, exit 0) or 'ci' (strict, exit 1 on violations).
 #>
@@ -244,6 +245,15 @@ function Test-DirectoryPackagesProps {
     return $violations
 }
 
+function Test-BridgeExempt {
+    param([string]$RepoPath)
+    # Repos that place a .bridge-exempt marker in their root are excluded from
+    # bridge parity checks (e.g., AddBridgeDefaults() wiring validation).
+    # Current exemptions: brainarr (LLM import list, not a streaming service).
+    # Policy: docs/TECH_DEBT.md "Bridge Parity Exemptions"
+    return (Test-Path (Join-Path $RepoPath '.bridge-exempt'))
+}
+
 function Find-AllViolations {
     param([string]$RepoPath, [string]$RepoName)
     $all = @()
@@ -253,6 +263,7 @@ function Find-AllViolations {
     $all += @(Test-GlobalJson -RepoPath $RepoPath -RepoName $RepoName)
     $all += @(Test-DirectoryBuildProps -RepoPath $RepoPath -RepoName $RepoName)
     $all += @(Test-DirectoryPackagesProps -RepoPath $RepoPath -RepoName $RepoName)
+    # Future: bridge wiring checks go here, gated by Test-BridgeExempt
     return $all | Sort-Object Repo, Category, Path
 }
 
