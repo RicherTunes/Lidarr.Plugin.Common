@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -57,10 +58,39 @@ public sealed class PluginSandbox : IAsyncDisposable
         using (loadContext.EnterContextualReflection())
         {
             var assembly = loadContext.LoadFromAssemblyPath(pluginAssemblyPath);
-            var pluginType = assembly.GetTypes().FirstOrDefault(t => typeof(IPlugin).IsAssignableFrom(t) && !t.IsAbstract);
-            if (pluginType is null)
+
+            Type pluginType;
+            if (options.PluginType is not null)
             {
-                throw new InvalidOperationException($"Assembly '{pluginAssemblyPath}' does not contain a concrete IPlugin implementation.");
+                pluginType = options.PluginType;
+            }
+            else
+            {
+                Type[] types;
+                try
+                {
+                    types = assembly.GetExportedTypes();
+                }
+                catch (ReflectionTypeLoadException ex)
+                {
+                    types = ex.Types.Where(t => t is not null).ToArray()!;
+                }
+
+                List<Type> pluginTypes = types.Where(t => typeof(IPlugin).IsAssignableFrom(t) && !t.IsAbstract).ToList();
+                if (pluginTypes.Count == 0)
+                {
+                    throw new InvalidOperationException($"Assembly '{pluginAssemblyPath}' does not contain a concrete IPlugin implementation.");
+                }
+
+                if (pluginTypes.Count > 1)
+                {
+                    throw new InvalidOperationException(
+                        $"Assembly contains {pluginTypes.Count} concrete IPlugin implementations: " +
+                        $"{string.Join(", ", pluginTypes.Select(t => t.FullName))}. Exactly one is required. " +
+                        $"Set {nameof(PluginSandboxOptions)}.{nameof(PluginSandboxOptions.PluginType)} to select one explicitly.");
+                }
+
+                pluginType = pluginTypes[0];
             }
 
             var plugin = (IPlugin)Activator.CreateInstance(pluginType)!;
@@ -123,7 +153,13 @@ public sealed class PluginSandbox : IAsyncDisposable
 /// <summary>Configuration options for <see cref="PluginSandbox"/>.</summary>
 public sealed class PluginSandboxOptions
 {
-    public static readonly Version DefaultHostVersion = new(2, 14, 0, 0);
+    public static readonly Version DefaultHostVersion = new(3, 1, 2, 4913);
+
+    /// <summary>
+    /// When set, the sandbox uses this type directly instead of scanning the assembly.
+    /// Useful when an assembly contains multiple concrete <see cref="IPlugin"/> implementations.
+    /// </summary>
+    public Type? PluginType { get; init; }
 
     /// <summary>Overrides the host context used during initialization.</summary>
     public PluginTestContext? Context { get; init; }
