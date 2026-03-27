@@ -18,6 +18,7 @@ public sealed class BridgeComplianceFixture : IDisposable
 
     public IAuthFailureHandler AuthHandler => Services.GetRequiredService<IAuthFailureHandler>();
     public IIndexerStatusReporter StatusReporter => Services.GetRequiredService<IIndexerStatusReporter>();
+    public IDownloadStatusReporter DownloadStatusReporter => Services.GetRequiredService<IDownloadStatusReporter>();
     public IRateLimitReporter RateLimitReporter => Services.GetRequiredService<IRateLimitReporter>();
 
     public BridgeComplianceFixture()

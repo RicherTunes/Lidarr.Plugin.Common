@@ -4,12 +4,13 @@ Behavioral specifications for the bridge runtime contracts in `Lidarr.Plugin.Abs
 
 ## Default Implementations
 
-Common ships default implementations for all three contracts via `AddBridgeDefaults()`:
+Common ships default implementations for all four contracts via `AddBridgeDefaults()`:
 
 | Contract | Default | Behavior |
 |----------|---------|----------|
 | `IAuthFailureHandler` | `DefaultAuthFailureHandler` | Tracks status transitions, logs events |
 | `IIndexerStatusReporter` | `DefaultIndexerStatusReporter` | Tracks status transitions, clears errors on non-error transitions |
+| `IDownloadStatusReporter` | `DefaultDownloadStatusReporter` | Tracks download progress/completion/failure, clears errors on non-error transitions |
 | `IRateLimitReporter` | `DefaultRateLimitReporter` | Tracks rate limit state, logs backoff events |
 
 `AddBridgeDefaults()` uses `TryAddSingleton` so plugins that register custom implementations first take precedence.
@@ -59,6 +60,28 @@ The host may query `Status` to display authentication state in the UI. The host 
 ### Status: host assumptions
 
 The host reads `CurrentStatus` for UI display. Transitions should be fast — don't hold `Searching` for minutes without progress updates.
+
+## IDownloadStatusReporter
+
+### Download: triggers
+
+| Method | Trigger |
+|--------|---------|
+| `ReportProgressAsync(progress)` | During active download — reports track-level progress |
+| `ReportCompletedAsync(albumId)` | Album download finished successfully |
+| `ReportFailedAsync(albumId, error)` | Album download failed with an exception |
+
+### Download: reliability
+
+**Best-effort.** Missing reports only affect observability, not correctness.
+
+### Download: recoverable errors
+
+`DownloadStatus.Failed` is recoverable — subsequent downloads attempt normally. `LastError` is cleared on any non-error transition (`ReportProgressAsync` or `ReportCompletedAsync`).
+
+### Download: host assumptions
+
+The host reads `Status` to display download state in the UI. Progress reports should be reasonably frequent during active downloads to provide meaningful UI updates.
 
 ## IRateLimitReporter
 
