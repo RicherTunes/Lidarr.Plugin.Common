@@ -56,7 +56,8 @@ public sealed class DefaultDownloadStatusReporter : IDownloadStatusReporter
 
     public ValueTask ReportFailedAsync(string albumId, Exception error, CancellationToken cancellationToken = default)
     {
-        _lastError = error ?? throw new ArgumentNullException(nameof(error));
+        ArgumentNullException.ThrowIfNull(error);
+        _lastError = error;
         DownloadStatus previous = _status;
         _status = DownloadStatus.Failed;
 

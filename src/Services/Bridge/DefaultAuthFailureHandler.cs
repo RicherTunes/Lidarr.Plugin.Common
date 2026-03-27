@@ -28,7 +28,8 @@ public sealed class DefaultAuthFailureHandler : IAuthFailureHandler
 
     public ValueTask HandleFailureAsync(AuthFailure failure, CancellationToken cancellationToken = default)
     {
-        _lastFailure = failure ?? throw new ArgumentNullException(nameof(failure));
+        ArgumentNullException.ThrowIfNull(failure);
+        _lastFailure = failure;
         _status = AuthStatus.Failed;
         _logger.LogWarning("Authentication failure: {ErrorCode} - {Message}", failure.ErrorCode, failure.Message);
         return ValueTask.CompletedTask;
