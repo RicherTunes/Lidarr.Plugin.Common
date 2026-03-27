@@ -12,7 +12,7 @@ namespace Lidarr.Plugin.Common.Services.Bridge;
 public sealed class DefaultRateLimitReporter : IRateLimitReporter
 {
     private readonly ILogger<DefaultRateLimitReporter> _logger;
-    private RateLimitStatus _status = new() { IsRateLimited = false };
+    private volatile RateLimitStatus _status = new() { IsRateLimited = false };
 
     public DefaultRateLimitReporter(ILogger<DefaultRateLimitReporter> logger)
     {

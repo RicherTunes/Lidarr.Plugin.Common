@@ -62,6 +62,10 @@ public sealed class PluginSandbox : IAsyncDisposable
             Type pluginType;
             if (options.PluginType is not null)
             {
+                if (!typeof(IPlugin).IsAssignableFrom(options.PluginType))
+                    throw new ArgumentException($"PluginType '{options.PluginType.FullName}' does not implement IPlugin.");
+                if (options.PluginType.IsAbstract)
+                    throw new ArgumentException($"PluginType '{options.PluginType.FullName}' is abstract.");
                 pluginType = options.PluginType;
             }
             else
@@ -69,11 +73,11 @@ public sealed class PluginSandbox : IAsyncDisposable
                 Type[] types;
                 try
                 {
-                    types = assembly.GetExportedTypes();
+                    types = assembly.GetTypes();
                 }
                 catch (ReflectionTypeLoadException ex)
                 {
-                    types = ex.Types.Where(t => t is not null).ToArray()!;
+                    types = ex.Types.Where(t => t is not null).Select(t => t!).ToArray();
                 }
 
                 List<Type> pluginTypes = types.Where(t => typeof(IPlugin).IsAssignableFrom(t) && !t.IsAbstract).ToList();
