@@ -13,7 +13,7 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <Version>1.7.0</Version>
+    <Version>1.7.1</Version>
     <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
@@ -26,7 +26,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.7.0: See CHANGELOG.md for release details.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.7.1: See CHANGELOG.md for release details.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <!-- Build Configuration -->

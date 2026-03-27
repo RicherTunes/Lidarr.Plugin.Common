@@ -37,6 +37,24 @@ Template to copy when drafting a release:
 
 _No changes yet._
 
+## [1.7.1] - 2026-03-27
+**Upgrade note:** Patch release hardening bridge defaults, sandbox resilience, and test coverage. No new public API surface.
+
+**Highlights**
+- `DefaultDownloadStatusReporter` added; `AddBridgeDefaults()` now registers 4 reporters (auth, indexer, rate-limit, download status)
+- `PluginSandbox` hardening: `ReflectionTypeLoadException` handling, single `IPlugin` enforcement, `PluginType` option, `DefaultHostVersion` updated to 3.1.2.4913
+- Thread-safe bridge singletons (`volatile` + `lock` pattern)
+- Compliance test rewrite: fixture-backed `BridgeComplianceTests` with `BridgeComplianceFixture` caching
+- 74 new tests: `MemoryHealthMonitor`, `StreamingApiRequestBuilder`, rate limit edge cases
+- Guard patterns (`ArgumentNullException.ThrowIfNull`) throughout bridge layer
+- `GetTypes` restored (from `GetExportedTypes`) for broader type discovery
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.7.0...v1.7.1)
+
 ## [1.7.0] - 2026-03-26
 **Upgrade note:** Bridge contracts shipped. 8 new Abstractions interfaces for host-boundary communication (auth, indexer, rate-limit, download status). Default implementations and DI extensions in Common. First consumer: Tidalarr.
 
