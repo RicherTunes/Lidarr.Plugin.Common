@@ -12,13 +12,14 @@ namespace Lidarr.Plugin.Common.Extensions;
 public static class BridgeServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers default bridge implementations for auth, indexer status, and rate limit reporting.
+    /// Registers default bridge implementations for auth, indexer status, download status, and rate limit reporting.
     /// Uses TryAddSingleton so plugins that register custom implementations first take precedence.
     /// </summary>
     public static IServiceCollection AddBridgeDefaults(this IServiceCollection services)
     {
         services.TryAddSingleton<IAuthFailureHandler, DefaultAuthFailureHandler>();
         services.TryAddSingleton<IIndexerStatusReporter, DefaultIndexerStatusReporter>();
+        services.TryAddSingleton<IDownloadStatusReporter, DefaultDownloadStatusReporter>();
         services.TryAddSingleton<IRateLimitReporter, DefaultRateLimitReporter>();
         return services;
     }

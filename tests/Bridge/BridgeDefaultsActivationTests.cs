@@ -12,7 +12,7 @@ namespace Lidarr.Plugin.Common.Tests.Bridge;
 public class BridgeDefaultsActivationTests
 {
     [Fact]
-    public void AddBridgeDefaults_Resolves_All_Three_Reporters()
+    public void AddBridgeDefaults_Resolves_All_Four_Reporters()
     {
         var services = new ServiceCollection();
         services.AddSingleton<ILoggerFactory>(NullLoggerFactory.Instance);
@@ -23,6 +23,7 @@ public class BridgeDefaultsActivationTests
 
         Assert.NotNull(provider.GetService<IAuthFailureHandler>());
         Assert.NotNull(provider.GetService<IIndexerStatusReporter>());
+        Assert.NotNull(provider.GetService<IDownloadStatusReporter>());
         Assert.NotNull(provider.GetService<IRateLimitReporter>());
     }
 
@@ -38,6 +39,7 @@ public class BridgeDefaultsActivationTests
 
         Assert.IsType<DefaultAuthFailureHandler>(provider.GetRequiredService<IAuthFailureHandler>());
         Assert.IsType<DefaultIndexerStatusReporter>(provider.GetRequiredService<IIndexerStatusReporter>());
+        Assert.IsType<DefaultDownloadStatusReporter>(provider.GetRequiredService<IDownloadStatusReporter>());
         Assert.IsType<DefaultRateLimitReporter>(provider.GetRequiredService<IRateLimitReporter>());
     }
 

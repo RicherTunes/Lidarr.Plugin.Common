@@ -2,6 +2,7 @@ using System;
 using System.Linq;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Abstractions.Contracts;
+using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.TestKit.Fixtures;
 using Microsoft.Extensions.Logging;
 using Xunit;
@@ -118,6 +119,61 @@ public class BridgeComplianceTests : IDisposable
 
         var logs = _fixture.Context.LogEntries.Snapshot();
         Assert.Contains(logs, e => e.Level == LogLevel.Error);
+    }
+
+    // ── Download Status Reporter ────────────────────────────────────
+
+    [Fact]
+    public void DownloadReporter_Initial_Status_Is_Idle()
+    {
+        Assert.Equal(DownloadStatus.Idle, _fixture.DownloadStatusReporter.Status);
+    }
+
+    [Fact]
+    public async Task DownloadReporter_Progress_Transitions_To_Downloading()
+    {
+        var progress = new AlbumDownloadProgress
+        {
+            CompletedTracks = 1,
+            TotalTracks = 10,
+            CurrentTrack = "Track 1"
+        };
+
+        await _fixture.DownloadStatusReporter.ReportProgressAsync(progress);
+
+        Assert.Equal(DownloadStatus.Downloading, _fixture.DownloadStatusReporter.Status);
+    }
+
+    [Fact]
+    public async Task DownloadReporter_Completed_Sets_Status()
+    {
+        await _fixture.DownloadStatusReporter.ReportCompletedAsync("album-1");
+
+        Assert.Equal(DownloadStatus.Completed, _fixture.DownloadStatusReporter.Status);
+    }
+
+    [Fact]
+    public async Task DownloadReporter_Failed_Sets_Status_And_Logs_Error()
+    {
+        await _fixture.DownloadStatusReporter.ReportFailedAsync(
+            "album-2", new InvalidOperationException("download error"));
+
+        Assert.Equal(DownloadStatus.Failed, _fixture.DownloadStatusReporter.Status);
+
+        var logs = _fixture.Context.LogEntries.Snapshot();
+        Assert.Contains(logs, e => e.Level == LogLevel.Error);
+    }
+
+    [Fact]
+    public async Task DownloadReporter_NonError_Status_Clears_LastError()
+    {
+        await _fixture.DownloadStatusReporter.ReportFailedAsync(
+            "album-3", new Exception("err"));
+        await _fixture.DownloadStatusReporter.ReportCompletedAsync("album-3");
+
+        Assert.Equal(DownloadStatus.Completed, _fixture.DownloadStatusReporter.Status);
+        var reporter = (Lidarr.Plugin.Common.Services.Bridge.DefaultDownloadStatusReporter)_fixture.DownloadStatusReporter;
+        Assert.Null(reporter.LastError);
     }
 
     // ── Rate Limit Reporter ──────────────────────────────────────────
