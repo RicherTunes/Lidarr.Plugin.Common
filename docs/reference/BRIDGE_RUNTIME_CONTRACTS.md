@@ -2,6 +2,18 @@
 
 Behavioral specifications for the bridge runtime contracts in `Lidarr.Plugin.Abstractions.Contracts`. These define when each contract fires, its reliability semantics, and what hosts may assume.
 
+## Default Implementations
+
+Common ships default implementations for all three contracts via `AddBridgeDefaults()`:
+
+| Contract | Default | Behavior |
+|----------|---------|----------|
+| `IAuthFailureHandler` | `DefaultAuthFailureHandler` | Tracks status transitions, logs events |
+| `IIndexerStatusReporter` | `DefaultIndexerStatusReporter` | Tracks status transitions, clears errors on non-error transitions |
+| `IRateLimitReporter` | `DefaultRateLimitReporter` | Tracks rate limit state, logs backoff events |
+
+`AddBridgeDefaults()` uses `TryAddSingleton` so plugins that register custom implementations first take precedence.
+
 ## IAuthFailureHandler
 
 ### Auth: triggers

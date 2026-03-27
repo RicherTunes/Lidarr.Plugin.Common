@@ -179,8 +179,8 @@ namespace Lidarr.Plugin.Common.Tests.Compliance
             Assert.Empty(result);
         }
 
-        // Auth failure handler test deferred until IAuthFailureHandler is merged to main.
-        // See: src/Abstractions/Contracts/IAuthFailureHandler.cs (pending PR)
+        // TODO(wave-2): Add IAuthFailureHandler integration tests using DefaultAuthFailureHandler.
+        // Contracts and defaults are shipped — needs fixture-backed tests (see TECH_DEBT.md Core Compliance rewrite).
 
         #endregion
 
