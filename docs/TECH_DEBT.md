@@ -29,10 +29,15 @@ Current exemptions:
 - **P2**: Medium - Address when working in related area
 - **P3**: Low - Nice to have, address opportunistically
 
+## Release & Consumption Policy
+
+See [`RELEASE_POLICY.md`](RELEASE_POLICY.md) for the full release cadence, promotion workflow, and consumption model. Key point: **submodule is the primary consumption path**. NuGet is convenience-only, pending `NUGET_API_KEY` repository secret.
+
 ## Common — Deferred Items
 
 | Item | Priority | Owner | Expiry | Rationale |
 |------|----------|-------|--------|-----------|
+| NuGet Publishing | P3 | @plugin-maintainer | — | Submodule is the primary consumption path. NuGet is convenience-only for external consumers, pending `NUGET_API_KEY` secret. `.nupkg` artifacts are attached to GitHub Releases in the meantime. See [`RELEASE_POLICY.md`](RELEASE_POLICY.md). |
 | CLI Bridge Adapters | P2 | @plugin-maintainer | 2026-06-19 | Deferred. Native plugin patterns (ILRepack) work. Incomplete adapter stubs have been removed from the workspace. **Decision required by 2026-06-19: implement or formally de-scope.** |
 | ~~Core Compliance Test Rewrite~~ | ~~P1~~ | ~~TBD~~ | ~~2026-04-30~~ | **Done.** Rewritten in wave 4 to use `BridgeComplianceFixture` with real DI activation and `DefaultAuthFailureHandler`/`DefaultIndexerStatusReporter`/`DefaultRateLimitReporter`. All mock scaffolding removed. |
 | Bridge Runtime Parity | P2 | TBD | TBD | v1.7.0 shipped bridge contracts (IAuthFailureHandler, IIndexerStatusReporter, IRateLimitReporter, etc.) in Abstractions `PublicAPI.Shipped.txt`. Default implementations exist in Common (`DefaultAuthFailureHandler`, `DefaultIndexerStatusReporter`, `DefaultRateLimitReporter`) registered via `AddBridgeDefaults()`. Remaining work: plugin-side integration — no plugin (Tidalarr, Qobuzarr) wires the contracts end-to-end yet. |
