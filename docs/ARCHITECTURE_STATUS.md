@@ -1,6 +1,7 @@
 # Architecture Status — Bridge Runtime Migration
 
-**Status:** COMPLETE (frozen 2026-03-28)
+**Status:** Migration is complete and frozen at a documented baseline. Remaining work is operational enforcement.
+**Frozen at:** commit b73ccfe on main (2026-03-28)
 **Baseline:** Common v1.7.1, all plugins on SHA `aae92da`
 **Promotion matrix:** 107/107 green
 
@@ -54,6 +55,7 @@
 2. **No bridge surface expansion** until all existing contracts have full consumer coverage
 3. **Promotion matrix must pass** (107/107) before any Common release is promoted
 4. **Quarterly parity audit** required (next: 2026-06-28)
+5. **No release of Common or plugin bumps** without promotion matrix evidence attached
 
 ## Next Phase: Enforcement, Not Migration
 
