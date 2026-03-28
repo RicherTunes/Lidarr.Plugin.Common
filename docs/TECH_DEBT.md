@@ -2,6 +2,26 @@
 
 This document tracks technical debt items across the Lidarr Plugin Ecosystem.
 
+## Debt Governance
+
+### Review Cadence
+All deferred items are reviewed quarterly. Items past their expiry date must be either:
+- Resolved and moved to Completed Items
+- Renewed with updated rationale and new expiry
+- Escalated with a plan
+
+### Exemption Policy
+Bridge parity exemptions (`.bridge-exempt`) require:
+- **Owner**: who is responsible for the exemption
+- **Rationale**: why the exemption exists
+- **Review date**: when to re-evaluate (max 6 months)
+- **Disposition**: renew, revoke, or convert to different contract
+
+Current exemptions:
+| Repo | Owner | Granted | Review Date | Rationale |
+|------|-------|---------|-------------|-----------|
+| Brainarr | @RicherTunes | 2026-03-27 | 2026-09-27 | LLM import list, not streaming service |
+
 ## Priority Levels
 
 - **P0**: Critical - Blocking development or causing production issues
@@ -9,10 +29,15 @@ This document tracks technical debt items across the Lidarr Plugin Ecosystem.
 - **P2**: Medium - Address when working in related area
 - **P3**: Low - Nice to have, address opportunistically
 
+## Release & Consumption Policy
+
+See [`RELEASE_POLICY.md`](RELEASE_POLICY.md) for the full release cadence, promotion workflow, and consumption model. Key point: **submodule is the primary consumption path**. NuGet is convenience-only, pending `NUGET_API_KEY` repository secret.
+
 ## Common — Deferred Items
 
 | Item | Priority | Owner | Expiry | Rationale |
 |------|----------|-------|--------|-----------|
+| NuGet Publishing | P3 | @plugin-maintainer | — | Submodule is the primary consumption path. NuGet is convenience-only for external consumers, pending `NUGET_API_KEY` secret. `.nupkg` artifacts are attached to GitHub Releases in the meantime. See [`RELEASE_POLICY.md`](RELEASE_POLICY.md). |
 | CLI Bridge Adapters | P2 | @plugin-maintainer | 2026-06-19 | Deferred. Native plugin patterns (ILRepack) work. Incomplete adapter stubs have been removed from the workspace. **Decision required by 2026-06-19: implement or formally de-scope.** |
 | ~~Core Compliance Test Rewrite~~ | ~~P1~~ | ~~TBD~~ | ~~2026-04-30~~ | **Done.** Rewritten in wave 4 to use `BridgeComplianceFixture` with real DI activation and `DefaultAuthFailureHandler`/`DefaultIndexerStatusReporter`/`DefaultRateLimitReporter`. All mock scaffolding removed. |
 | Bridge Runtime Parity | P2 | TBD | TBD | v1.7.0 shipped bridge contracts (IAuthFailureHandler, IIndexerStatusReporter, IRateLimitReporter, etc.) in Abstractions `PublicAPI.Shipped.txt`. Default implementations exist in Common (`DefaultAuthFailureHandler`, `DefaultIndexerStatusReporter`, `DefaultRateLimitReporter`) registered via `AddBridgeDefaults()`. Remaining work: plugin-side integration — no plugin (Tidalarr, Qobuzarr) wires the contracts end-to-end yet. |
@@ -51,7 +76,16 @@ Line counts updated 2026-03-10 from `main` branch.
 | `GeminiStreamDecoder` | Ready | No HTTP consumer (per ADR-001) |
 | `ZaiStreamDecoder` | Ready | No HTTP consumer (per ADR-001) |
 
-**Recommendation:** Keep for now (tested infrastructure). Revisit by 2026-07 if still unused.
+**Recommendation:** Keep for now (tested infrastructure). Revisit by 2026-07 if still unused. **Disposition: remove if still unused by 2026-07-31.**
+
+### Deprecated Code Pending Removal
+
+| Type | Replacement | Expiry | Disposition |
+|------|-------------|--------|-------------|
+| `AdaptiveRateLimiter` | `UniversalAdaptiveRateLimiter` | v2.0.0 or 2026-12-31 | Remove in next major version (v2.0.0) or by 2026-12-31, whichever comes first |
+| `InputSanitizer` | `Sanitize.*` context-specific methods | v2.0.0 or 2026-12-31 | Remove in next major version (v2.0.0) or by 2026-12-31, whichever comes first |
+
+Both types are marked `[Obsolete]` in source. They remain for backward compatibility with plugins that may still reference them. At expiry, remove the types and bump the major version.
 
 ## Cross-Plugin
 
@@ -70,15 +104,15 @@ Line counts updated 2026-03-10 from `main` branch.
 Plugins that are **not streaming services** may opt out of bridge parity enforcement by placing a `.bridge-exempt` marker file in their repository root. Exempt repos are excluded from bridge wiring checks in `ecosystem-parity-lint.ps1` and any future CI dashboards.
 
 **Policy:**
-- The `.bridge-exempt` file must contain a comment block explaining why the plugin does not wire `AddBridgeDefaults()`.
-- Exemptions are reviewed when new bridge contracts are added.
+- The `.bridge-exempt` file must contain governance fields: Owner, Rationale, Review date, and Granted date (see [Exemption Policy](#exemption-policy) above).
+- Exemptions are reviewed at their stated review date (max 6 months from grant).
 - The lint script's `Test-BridgeExempt` function reads this marker before applying bridge checks.
 
 **Current exemptions:**
 
-| Plugin | Reason | Date |
-|--------|--------|------|
-| Brainarr | LLM-based import list plugin. No indexer, no download client, auth via IProviderHealthMonitor, rate limiting via LimiterRegistry. | 2026-03-27 |
+| Plugin | Owner | Granted | Review Date | Reason |
+|--------|-------|---------|-------------|--------|
+| Brainarr | @RicherTunes | 2026-03-27 | 2026-09-27 | LLM-based import list plugin. No indexer, no download client, auth via IProviderHealthMonitor, rate limiting via LimiterRegistry. |
 
 ## Completed Items
 
