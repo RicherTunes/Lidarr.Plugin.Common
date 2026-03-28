@@ -59,6 +59,8 @@ public sealed class PluginSandbox : IAsyncDisposable
         {
             var assembly = loadContext.LoadFromAssemblyPath(pluginAssemblyPath);
 
+            var loggerFactory = options.LoggerFactory ?? NullLoggerFactory.Instance;
+
             Type pluginType;
             if (options.PluginType is not null)
             {
@@ -77,6 +79,16 @@ public sealed class PluginSandbox : IAsyncDisposable
                 }
                 catch (ReflectionTypeLoadException ex)
                 {
+                    if (options.LoaderMode == SandboxLoaderMode.Strict)
+                        throw; // Fail fast — runtime-proof tests should not tolerate loader failures
+
+                    // Permissive: recover but surface the failures
+                    foreach (var loaderEx in ex.LoaderExceptions.Where(e => e is not null))
+                    {
+                        loggerFactory.CreateLogger<PluginSandbox>()
+                            .LogWarning(loaderEx, "Loader exception (permissive mode): {Type}", loaderEx!.GetType().Name);
+                    }
+
                     types = ex.Types.Where(t => t is not null).Select(t => t!).ToArray();
                 }
 
@@ -98,7 +110,6 @@ public sealed class PluginSandbox : IAsyncDisposable
             }
 
             var plugin = (IPlugin)Activator.CreateInstance(pluginType)!;
-            var loggerFactory = options.LoggerFactory ?? NullLoggerFactory.Instance;
             var services = options.Services ?? (options.ConfigureServices is null
                 ? null
                 : BuildServiceProvider(options.ConfigureServices));
@@ -154,6 +165,19 @@ public sealed class PluginSandbox : IAsyncDisposable
     }
 }
 
+/// <summary>
+/// Controls how <see cref="PluginSandbox"/> handles <see cref="ReflectionTypeLoadException"/>
+/// when scanning the plugin assembly for <see cref="IPlugin"/> implementations.
+/// </summary>
+public enum SandboxLoaderMode
+{
+    /// <summary>Fail if any types fail to load. Default for runtime-proof tests.</summary>
+    Strict,
+
+    /// <summary>Allow partial type recovery but log loader exceptions. Use for known ILRepack scenarios.</summary>
+    Permissive
+}
+
 /// <summary>Configuration options for <see cref="PluginSandbox"/>.</summary>
 public sealed class PluginSandboxOptions
 {
@@ -182,4 +206,11 @@ public sealed class PluginSandboxOptions
 
     /// <summary>Fully qualified assembly names that should be resolved from the default ALC.</summary>
     public string[]? SharedAssemblies { get; init; }
+
+    /// <summary>
+    /// Controls how the sandbox handles <see cref="ReflectionTypeLoadException"/> during type scanning.
+    /// <see cref="SandboxLoaderMode.Strict"/> (default) lets the exception propagate, failing the test.
+    /// <see cref="SandboxLoaderMode.Permissive"/> recovers surviving types and logs loader exceptions.
+    /// </summary>
+    public SandboxLoaderMode LoaderMode { get; init; } = SandboxLoaderMode.Strict;
 }
