@@ -70,6 +70,38 @@ Plugin repos should NOT bump Common for:
 - Documentation changes
 - Changes that don't affect the public API or testkit
 
+## NuGet Publishing Procedure
+
+### First-time setup
+1. Create NuGet.org account (or use existing)
+2. Generate API key:
+   - Name: `Lidarr.Plugin.Common GitHub Actions`
+   - Expiration: 365 days
+   - Glob: `Lidarr.Plugin.*`
+   - Scope: Push new packages and package versions
+3. Set org-level secret:
+   ```bash
+   gh secret set NUGET_API_KEY --repo RicherTunes/Lidarr.Plugin.Common
+   ```
+4. Verify: `gh secret list --repo RicherTunes/Lidarr.Plugin.Common`
+
+### Manual publish (for existing releases)
+```bash
+mkdir -p /tmp/nuget-publish && cd /tmp/nuget-publish
+gh release download v1.7.1 -p "*.nupkg" -R RicherTunes/Lidarr.Plugin.Common
+dotnet nuget push "Lidarr.Plugin.Abstractions.1.7.1.nupkg" --source https://api.nuget.org/v3/index.json --api-key YOUR_KEY --skip-duplicate
+dotnet nuget push "Lidarr.Plugin.Common.1.7.1.nupkg" --source https://api.nuget.org/v3/index.json --api-key YOUR_KEY --skip-duplicate
+rm -rf /tmp/nuget-publish
+```
+
+### Key rotation
+- Keys expire after 365 days
+- Rotation: generate new key on NuGet.org, update GitHub secret
+- If key holder unavailable: org admin generates new key via NuGet.org API Keys page
+
+### Automated publish (future releases)
+Once `NUGET_API_KEY` secret is set, the release workflow automatically publishes on tag push.
+
 ## Current Baseline
 
 - Common: v1.7.1 (2026-03-27)
