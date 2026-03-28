@@ -80,6 +80,10 @@ Plugins that are **not streaming services** may opt out of bridge parity enforce
 |--------|--------|------|
 | Brainarr | LLM-based import list plugin. No indexer, no download client, auth via IProviderHealthMonitor, rate limiting via LimiterRegistry. | 2026-03-27 |
 
+## Related Documents
+
+- [Ecosystem Promotion Checklist](ECOSYSTEM_PROMOTION_CHECKLIST.md) — gate checklist for promoting Common releases to plugin repos
+
 ## Completed Items
 
 | Date | Item | Resolution |
