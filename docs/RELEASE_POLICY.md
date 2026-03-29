@@ -9,7 +9,7 @@ All 4 plugin repos reference Common as `ext/Lidarr.Plugin.Common` submodule. Thi
 ### NuGet Status
 
 - Packages are built and attached to GitHub Releases as artifacts
-- NuGet.org publishing requires `NUGET_API_KEY` repository secret (not yet configured)
+- NuGet.org publishing requires `NUGET_API_KEY` secret on this repository (not yet configured)
 - Until NuGet is active, external consumers can download `.nupkg` from GitHub Releases
 
 ## When to Cut a Release
@@ -79,18 +79,34 @@ Plugin repos should NOT bump Common for:
    - Expiration: 365 days
    - Glob: `Lidarr.Plugin.*`
    - Scope: Push new packages and package versions
-3. Set org-level secret:
-   ```bash
+3. Set as **repository-level** secret (Common repo only — plugins consume via submodule, not NuGet):
+   ```pwsh
    gh secret set NUGET_API_KEY --repo RicherTunes/Lidarr.Plugin.Common
    ```
-4. Verify: `gh secret list --repo RicherTunes/Lidarr.Plugin.Common`
+4. Verify:
+   ```pwsh
+   gh secret list --repo RicherTunes/Lidarr.Plugin.Common
+   ```
 
 ### Manual publish (for existing releases)
+
+**PowerShell:**
+```pwsh
+$tmp = New-Item -ItemType Directory -Path "$env:TEMP/nuget-publish" -Force
+Push-Location $tmp
+gh release download v1.7.1 -p "*.nupkg" -R RicherTunes/Lidarr.Plugin.Common
+dotnet nuget push "Lidarr.Plugin.Abstractions.1.7.1.nupkg" --source https://api.nuget.org/v3/index.json --api-key $env:NUGET_API_KEY --skip-duplicate
+dotnet nuget push "Lidarr.Plugin.Common.1.7.1.nupkg" --source https://api.nuget.org/v3/index.json --api-key $env:NUGET_API_KEY --skip-duplicate
+Pop-Location
+Remove-Item $tmp -Recurse -Force
+```
+
+**Bash:**
 ```bash
 mkdir -p /tmp/nuget-publish && cd /tmp/nuget-publish
 gh release download v1.7.1 -p "*.nupkg" -R RicherTunes/Lidarr.Plugin.Common
-dotnet nuget push "Lidarr.Plugin.Abstractions.1.7.1.nupkg" --source https://api.nuget.org/v3/index.json --api-key YOUR_KEY --skip-duplicate
-dotnet nuget push "Lidarr.Plugin.Common.1.7.1.nupkg" --source https://api.nuget.org/v3/index.json --api-key YOUR_KEY --skip-duplicate
+dotnet nuget push "Lidarr.Plugin.Abstractions.1.7.1.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
+dotnet nuget push "Lidarr.Plugin.Common.1.7.1.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY" --skip-duplicate
 rm -rf /tmp/nuget-publish
 ```
 
