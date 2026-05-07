@@ -476,7 +476,6 @@ namespace Lidarr.Plugin.Common.Services.Performance
                     if (disposing)
                     {
                         _memoryMonitorTimer?.Dispose();
-                        _disposeSemaphore?.Dispose();
                     }
 
                     _disposed = true;
@@ -484,7 +483,13 @@ namespace Lidarr.Plugin.Common.Services.Performance
             }
             finally
             {
-                _disposeSemaphore?.Release();
+                _disposeSemaphore.Release();
+            }
+
+            // Dispose the semaphore AFTER releasing it to avoid ObjectDisposedException
+            if (disposing)
+            {
+                _disposeSemaphore?.Dispose();
             }
         }
 
