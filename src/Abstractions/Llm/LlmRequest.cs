@@ -87,4 +87,45 @@ public record LlmRequest
     /// carry the intent explicitly.</para>
     /// </remarks>
     public LlmThinkingHint? Thinking { get; init; }
+
+    /// <summary>
+    /// Gets the optional set of tools the model is allowed to call on this request. When non-null and
+    /// non-empty, providers that advertise <see cref="LlmCapabilityFlags.ToolCalling"/> translate this
+    /// list into their native tool-declaration wire shape (OpenAI's <c>tools[].function</c>, Anthropic's
+    /// <c>tools[]</c> with <c>input_schema</c>, Gemini's <c>functionDeclarations</c>, Z.AI's
+    /// OpenAI-compatible shape). Defaults to <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Backward-compatible: when null, providers behave exactly as they did before this property
+    /// existed. Providers that do not advertise the <see cref="LlmCapabilityFlags.ToolCalling"/>
+    /// capability should silently ignore tools rather than fail.</para>
+    /// <para>Source: brainarr Phase 5e P1 — closes the deferred gap where the
+    /// <see cref="LlmCapabilityFlags.ToolCalling"/> flag had no shared data shape, forcing tool-using
+    /// consumers to bypass the adapter.</para>
+    /// </remarks>
+    public IReadOnlyList<LlmTool>? Tools { get; init; }
+
+    /// <summary>
+    /// Gets the tool-choice strategy that controls whether the model is allowed (or required) to call
+    /// tools. Providers translate to the vendor's native shape (OpenAI's <c>tool_choice</c>, Anthropic's
+    /// <c>tool_choice</c>, Gemini's <c>toolConfig.functionCallingConfig.mode</c>). Defaults to
+    /// <see cref="LlmToolChoice.Auto"/>, which lets the model decide.
+    /// </summary>
+    /// <remarks>
+    /// Backward-compatible: <see cref="LlmToolChoice.Auto"/> matches every vendor's pre-existing default
+    /// behavior, so callers that do not set this field see no change.
+    /// </remarks>
+    public LlmToolChoice ToolChoice { get; init; } = LlmToolChoice.Auto;
+
+    /// <summary>
+    /// Gets prior tool outputs the host wants the model to see on this turn. Used in multi-turn agentic
+    /// workflows: turn N emits <see cref="LlmResponse.ToolCalls"/>, the host runs the tools, and turn
+    /// N+1 supplies their outputs here. Each <see cref="LlmToolResult.ToolCallId"/> matches a previously
+    /// returned <see cref="LlmToolCall.Id"/>. Defaults to <see langword="null"/>.
+    /// </summary>
+    /// <remarks>
+    /// Backward-compatible: when null, providers behave exactly as they did before this property
+    /// existed.
+    /// </remarks>
+    public IReadOnlyList<LlmToolResult>? ToolResults { get; init; }
 }
