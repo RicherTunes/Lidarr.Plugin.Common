@@ -821,7 +821,7 @@ namespace Lidarr.Plugin.Common.Tests
             async Task<string> NullMessageExceptionProcessor(string item, CancellationToken ct)
             {
                 await Task.CompletedTask;
-                throw new HttpRequestException(null);
+                throw new NullMessageException();
             }
 
             var result = await service.ExecuteResilientBatchAsync(
@@ -944,6 +944,17 @@ namespace Lidarr.Plugin.Common.Tests
 
             var stats = service.GetStatistics();
             Assert.Equal(0, stats.ConsecutiveFailures);
+        }
+
+        /// <summary>
+        /// Test helper exception that returns a null Message so the null-coalescing path
+        /// in NetworkResilienceService (FailureReason = exception?.Message ?? "Item processing failed")
+        /// is exercised. Cannot be achieved via stock exception ctors (Exception.Message returns
+        /// a default string when the underlying field is null).
+        /// </summary>
+        private sealed class NullMessageException : Exception
+        {
+            public override string Message => null!;
         }
     }
 }

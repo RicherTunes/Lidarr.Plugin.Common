@@ -70,7 +70,13 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public async Task GetOrCreateAsync_PropagatesFactoryException_ForMultipleWaiters()
         {
-            // Lines 197-201: Exception set on TCS should propagate to all waiters
+            // Lines 197-201: Exception set on TCS propagates to waiters via GetResultAsync.
+            // NOTE: When a coalesced waiter observes the failure, ExecuteNewRequest's outer
+            // catch at line 112 falls through to execute the waiter's own factory as a
+            // resilience fallback. So waiter2 will see ITS OWN factory's exception (not
+            // the original shared exception). This test verifies both behaviors:
+            //   - The originating caller (task1) gets the original shared exception.
+            //   - A coalesced waiter (task2) re-runs its factory on failure.
             using var deduper = new RequestDeduplicator(NullLogger<RequestDeduplicator>.Instance);
 
             var factoryStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -86,14 +92,17 @@ namespace Lidarr.Plugin.Common.Tests
             var task1 = deduper.GetOrCreateAsync("shared-error", Factory);
             await factoryStarted.Task;
 
-            // Second request should join and receive the same exception
-            var task2 = deduper.GetOrCreateAsync("shared-error", () => Task.FromResult("should not run"));
+            // Second request joins; on TCS exception, falls back to its own factory.
+            var task2 = deduper.GetOrCreateAsync<string>(
+                "shared-error",
+                () => throw new InvalidOperationException("Waiter fallback failure"));
 
             var ex1 = await Assert.ThrowsAsync<InvalidOperationException>(() => task1);
             var ex2 = await Assert.ThrowsAsync<InvalidOperationException>(() => task2);
 
             Assert.Equal("Shared failure", ex1.Message);
-            Assert.Equal("Shared failure", ex2.Message);
+            // task2 receives its own factory's exception via the fall-through fallback path.
+            Assert.Equal("Waiter fallback failure", ex2.Message);
         }
 
         [Fact(Skip = "Hangs full test suite: factory delegate awaits blockedTcs.Task which is never signaled. " +

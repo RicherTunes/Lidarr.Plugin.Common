@@ -23,8 +23,8 @@ namespace Lidarr.Plugin.Common.Tests
             // Line 30: baseUrl?.TrimEnd('/') returns empty string, not null
             var builder = new StreamingApiRequestBuilder("");
             var request = builder.Build();
-            // Empty base URL results in empty request URI
-            Assert.Equal("", request.RequestUri!.ToString());
+            // Empty base URL results in null RequestUri (HttpRequestMessage normalizes "" to null)
+            Assert.Null(request.RequestUri);
         }
 
         #endregion
