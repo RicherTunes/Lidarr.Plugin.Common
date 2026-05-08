@@ -41,6 +41,14 @@ public static partial class LogRedactor
     private static partial Regex GenericTokenPattern();
 
     /// <summary>
+    /// Matches sensitive JSON property values: <c>"key": "value"</c> or <c>"key":"value"</c>.
+    /// Catches nested credentials like <c>{"api_key":"sk-abc..."}</c> where the value alone may not
+    /// match a structured token pattern (e.g., short opaque tokens, non-prefixed API keys).
+    /// </summary>
+    [GeneratedRegex(@"""(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|authorization|bearer|token|session[_-]?id|x-api-key)""\s*:\s*""([^""\\]|\\.)*""", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex JsonSensitiveValuePattern();
+
+    /// <summary>
     /// Redacts sensitive values from a string.
     /// Call this before logging any content that might contain credentials.
     /// </summary>
@@ -67,6 +75,18 @@ public static partial class LogRedactor
             return REDACTED;
         });
 
+        // Nested JSON credentials: redact the *value* of sensitive JSON properties even when the
+        // value alone doesn't trip a structured pattern (short tokens, opaque vendor secrets, etc.).
+        // Applied before the generic catch-all so the JSON shape is preserved in the output.
+        value = JsonSensitiveValuePattern().Replace(value, match =>
+        {
+            // Preserve the property name; replace just the quoted value.
+            var quoteIdx = match.Value.IndexOf(':');
+            if (quoteIdx <= 0) return $"\"{REDACTED}\"";
+            var keyPart = match.Value[..quoteIdx].TrimEnd();
+            return $"{keyPart}: \"{REDACTED}\"";
+        });
+
         // Generic catch-all: any remaining long opaque alphanumeric string is likely a token
         // (service-specific tokens that don't match the structured prefixes above).
         // Applied LAST so structured patterns claim their matches first.
@@ -76,6 +96,31 @@ public static partial class LogRedactor
         value = GenericTokenPattern().Replace(value, REDACTED);
 
         return value;
+    }
+
+    /// <summary>
+    /// Returns a redacted single-line representation of an exception suitable for logging in
+    /// token-handling code paths. Walks the inner-exception chain and applies <see cref="Redact"/>
+    /// to each <c>Message</c>. The full <c>StackTrace</c> is intentionally omitted because it can
+    /// contain bound parameter values (URLs with embedded auth, etc.) that vary by framework
+    /// and are not covered by structured redaction patterns.
+    /// </summary>
+    /// <param name="ex">The exception to render. Null returns empty string.</param>
+    /// <returns>A redacted, exception-type-prefixed message chain.</returns>
+    public static string RedactException(Exception? ex)
+    {
+        if (ex is null) return string.Empty;
+        var sb = new System.Text.StringBuilder();
+        var current = ex;
+        var depth = 0;
+        while (current is not null && depth < 8)
+        {
+            if (depth > 0) sb.Append(" --> ");
+            sb.Append(current.GetType().Name).Append(": ").Append(Redact(current.Message));
+            current = current.InnerException;
+            depth++;
+        }
+        return sb.ToString();
     }
 
     /// <summary>
