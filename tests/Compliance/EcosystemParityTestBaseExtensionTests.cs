@@ -8,6 +8,7 @@ using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Abstractions.Results;
 using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Common.Services.Authentication;
+using Lidarr.Plugin.Common.Services.Caching;
 using Lidarr.Plugin.Common.Services.Registration;
 using Lidarr.Plugin.Common.TestKit.Compliance;
 using Xunit;
@@ -94,6 +95,27 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     /// <summary>Subclass of StreamingPluginModule for bridge-defaults check.</summary>
     private abstract class FakeModule : StreamingPluginModule { }
 
+    /// <summary>
+    /// A legitimate plugin-local subclass of common's <see cref="StreamingResponseCache"/>
+    /// — supported extension pattern (custom keys/durations).
+    /// </summary>
+    private sealed class LegitimateResponseCacheSubclass : StreamingResponseCache
+    {
+        public LegitimateResponseCacheSubclass() : base(logger: null!, policyProvider: null) { }
+        protected override string GetServiceName() => "Test";
+    }
+
+    /// <summary>
+    /// A legitimate plugin-local fail-fast token store, marked with the opt-in attribute.
+    /// </summary>
+    [ParityAllowedTokenStore("fail-fast no-op for tests; mirrors tidalarr's FailOnIOTokenStore")]
+    private sealed class AllowedFailFastTokenStore : ITokenStore<string>
+    {
+        public System.Threading.Tasks.Task<TokenEnvelope<string>?> LoadAsync(System.Threading.CancellationToken ct = default) => throw new InvalidOperationException();
+        public System.Threading.Tasks.Task SaveAsync(TokenEnvelope<string> envelope, System.Threading.CancellationToken ct = default) => throw new InvalidOperationException();
+        public System.Threading.Tasks.Task ClearAsync(System.Threading.CancellationToken ct = default) => System.Threading.Tasks.Task.CompletedTask;
+    }
+
     // --- Check_UsesCommonFileTokenStore ---
 
     [Fact]
@@ -127,6 +149,32 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.True(h.RunFileTokenStore().Passed);
     }
 
+    [Fact]
+    public void TokenStore_AllowedAttribute_Passes()
+    {
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(AllowedFailFastTokenStore) },
+        };
+        Assert.True(h.RunFileTokenStore().Passed);
+    }
+
+    [Fact]
+    public void TokenStore_CommonNamespaceInternalized_Passes()
+    {
+        // Type lives under Lidarr.Plugin.Common.* but in the tests assembly — simulating
+        // ILRepack-internalized common types.
+        var t = Type.GetType("Lidarr.Plugin.Common.Internalized.TokenStores.FakeInternalizedTokenStore");
+        Assert.NotNull(t);
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { t! },
+        };
+        Assert.True(h.RunFileTokenStore().Passed);
+    }
+
     // --- Check_UsesCommonHttpResponseCache ---
 
     [Fact]
@@ -149,6 +197,32 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         {
             AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
             TypesValue = new[] { typeof(FileTokenStore<string>) },
+        };
+        Assert.True(h.RunHttpResponseCache().Passed);
+    }
+
+    [Fact]
+    public void ResponseCache_LegitimateCommonSubclass_Passes()
+    {
+        // Subclassing common's StreamingResponseCache is the supported extension pattern
+        // (qobuzarr / tidalarr endpoint-specific cache key/duration).
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(LegitimateResponseCacheSubclass) },
+        };
+        Assert.True(h.RunHttpResponseCache().Passed);
+    }
+
+    [Fact]
+    public void ResponseCache_CommonNamespaceInternalized_Passes()
+    {
+        var t = Type.GetType("Lidarr.Plugin.Common.Internalized.TokenStores.FakeInternalizedResponseCache");
+        Assert.NotNull(t);
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { t! },
         };
         Assert.True(h.RunHttpResponseCache().Passed);
     }
@@ -232,15 +306,66 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     }
 
     [Fact]
-    public void ValidationDrift_DetectsDirectErrorsAccess_Fails()
+    public void ValidationDrift_DetectsLinqChainOnErrors_Fails()
     {
+        // Refined logic: only LINQ chaining off `.Errors` is flagged (the unstable getter
+        // pattern). Bare `var e = r.Errors;` and list-mutation calls are tolerated.
         var srcDir = Path.Combine(_tempRepo, "src");
         Directory.CreateDirectory(srcDir);
         File.WriteAllText(Path.Combine(srcDir, "Bad.cs"),
+            "using System.Linq; using FluentValidation; class X { void M(FluentValidation.Results.ValidationResult r) { var n = r.Errors.Count(); } }");
+        var h = new Harness(_tempRepo) { SourceRootValue = srcDir };
+        var rs = h.RunValidationDrift();
+        Assert.False(rs.Passed);
+    }
+
+    [Fact]
+    public void ValidationDrift_BareErrorsAssignment_Passes()
+    {
+        // Refined logic deliberately tolerates bare `.Errors` assignment — only LINQ
+        // chains depend on the drifted getter shape. Plugins that need stricter analysis
+        // can override the check.
+        var srcDir = Path.Combine(_tempRepo, "src");
+        Directory.CreateDirectory(srcDir);
+        File.WriteAllText(Path.Combine(srcDir, "Bare.cs"),
             "using FluentValidation; class X { void M(FluentValidation.Results.ValidationResult r) { var e = r.Errors; } }");
         var h = new Harness(_tempRepo) { SourceRootValue = srcDir };
-        var r = h.RunValidationDrift();
-        Assert.False(r.Passed);
+        Assert.True(h.RunValidationDrift().Passed);
+    }
+
+    [Fact]
+    public void ValidationDrift_ListMutationAddIsAllowed_Passes()
+    {
+        // .Errors.Add(...) works on either IList<T> or List<T>, so it's stable across
+        // FV 9.x ↔ 11.x. Only LINQ chaining off the getter is unstable.
+        var srcDir = Path.Combine(_tempRepo, "src");
+        Directory.CreateDirectory(srcDir);
+        File.WriteAllText(Path.Combine(srcDir, "ListMutation.cs"),
+            "using FluentValidation; using FluentValidation.Results; class M { void Run(ValidationResult r) { r.Errors.Add(new ValidationFailure(\"p\", \"m\")); } }");
+        var h = new Harness(_tempRepo) { SourceRootValue = srcDir };
+        Assert.True(h.RunValidationDrift().Passed);
+    }
+
+    [Fact]
+    public void ValidationDrift_LinqSelectFlagged_Fails()
+    {
+        var srcDir = Path.Combine(_tempRepo, "src");
+        Directory.CreateDirectory(srcDir);
+        File.WriteAllText(Path.Combine(srcDir, "Linq.cs"),
+            "using System.Linq; using FluentValidation; using FluentValidation.Results; class M { string Run(ValidationResult r) => string.Join(\",\", r.Errors.Select(e => e.ErrorMessage)); }");
+        var h = new Harness(_tempRepo) { SourceRootValue = srcDir };
+        Assert.False(h.RunValidationDrift().Passed);
+    }
+
+    [Fact]
+    public void ValidationDrift_LinqAnyFlagged_Fails()
+    {
+        var srcDir = Path.Combine(_tempRepo, "src");
+        Directory.CreateDirectory(srcDir);
+        File.WriteAllText(Path.Combine(srcDir, "LinqAny.cs"),
+            "using System.Linq; using FluentValidation; using FluentValidation.Results; class M { bool Run(ValidationResult r) => r.Errors.Any(); }");
+        var h = new Harness(_tempRepo) { SourceRootValue = srcDir };
+        Assert.False(h.RunValidationDrift().Passed);
     }
 
     [Fact]

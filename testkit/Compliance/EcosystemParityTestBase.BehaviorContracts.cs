@@ -89,22 +89,47 @@ public abstract partial class EcosystemParityTestBase
         var offenders = new List<string>();
         foreach (var type in SafeGetTypes(assembly))
         {
-            if (type == null || type.IsInterface || type.IsAbstract) continue;
-            foreach (var iface in type.GetInterfaces())
+            if (type == null) continue;
+            bool isInterfaceOrAbstract;
+            try { isInterfaceOrAbstract = type.IsInterface || type.IsAbstract; }
+            catch { continue; }
+            if (isInterfaceOrAbstract) continue;
+
+            // Refinement: any type whose namespace lives under common's namespace tree is
+            // acceptable, regardless of host assembly. After ILRepack internalizes common's
+            // types into the merged plugin DLL, their FullName/Namespace still starts with
+            // "Lidarr.Plugin.Common." even though the assembly is the plugin's.
+            string ns;
+            try { ns = type.Namespace ?? string.Empty; }
+            catch { continue; } // type's enclosing/declaring type can't load — skip safely
+            if (IsCommonProductionNamespace(ns)) continue;
+
+            // Refinement: explicit opt-in attribute for legitimate fallback / fail-fast
+            // patterns (e.g. tidalarr's FailOnIOTokenStore).
+            if (HasParityAllowedTokenStoreAttribute(type)) continue;
+
+            Type[] ifaces;
+            try { ifaces = type.GetInterfaces(); }
+            catch { continue; }
+            foreach (var iface in ifaces)
             {
                 if (!iface.IsGenericType) continue;
                 var def = iface.GetGenericTypeDefinition();
                 if (def.FullName == "Lidarr.Plugin.Common.Interfaces.ITokenStore`1")
                 {
                     // Walk up base chain — common's FileTokenStore<T> is acceptable.
-                    var t = type;
                     var ok = false;
-                    while (t != null)
+                    try
                     {
-                        var fn = t.IsGenericType ? t.GetGenericTypeDefinition().FullName : t.FullName;
-                        if (fn == commonFullName) { ok = true; break; }
-                        t = t.BaseType;
+                        var t = type;
+                        while (t != null)
+                        {
+                            var fn = t.IsGenericType ? t.GetGenericTypeDefinition().FullName : t.FullName;
+                            if (fn == commonFullName) { ok = true; break; }
+                            t = t.BaseType;
+                        }
                     }
+                    catch { ok = false; }
                     if (!ok) offenders.Add(type.FullName ?? type.Name);
                 }
             }
@@ -112,7 +137,49 @@ public abstract partial class EcosystemParityTestBase
         return offenders.Count == 0
             ? ComplianceResult.Success
             : ComplianceResult.Failure(
-                $"Plugin-local ITokenStore<> implementations are forbidden — use Lidarr.Plugin.Common.Services.Authentication.FileTokenStore<>: {string.Join(", ", offenders)}");
+                $"Plugin-local ITokenStore<> implementations are forbidden — use Lidarr.Plugin.Common.Services.Authentication.FileTokenStore<> (or mark with [ParityAllowedTokenStore(\"rationale\")] for fallback patterns): {string.Join(", ", offenders)}");
+    }
+
+    /// <summary>
+    /// Returns true if the namespace belongs to common's production code tree (i.e. types
+    /// that ILRepack would internalize into a plugin's merged DLL). Excludes test/testkit
+    /// sub-trees so test fixtures with namespaces under <c>Lidarr.Plugin.Common.Tests.*</c>
+    /// are still subject to the check.
+    /// </summary>
+    private static bool IsCommonProductionNamespace(string ns)
+    {
+        if (string.IsNullOrEmpty(ns)) return false;
+        if (!ns.StartsWith("Lidarr.Plugin.Common.", StringComparison.Ordinal) &&
+            !ns.Equals("Lidarr.Plugin.Common", StringComparison.Ordinal)) return false;
+        // Exclude test-side namespaces.
+        if (ns.StartsWith("Lidarr.Plugin.Common.Tests", StringComparison.Ordinal)) return false;
+        if (ns.StartsWith("Lidarr.Plugin.Common.TestKit", StringComparison.Ordinal)) return false;
+        return true;
+    }
+
+    private static bool HasParityAllowedTokenStoreAttribute(Type type)
+    {
+        // Match by full name so the check works whether or not the attribute type itself
+        // has been internalized into the plugin's assembly via ILRepack.
+        const string attrFullName = "Lidarr.Plugin.Common.TestKit.Compliance.ParityAllowedTokenStoreAttribute";
+        try
+        {
+            foreach (var attr in type.GetCustomAttributesData())
+            {
+                if (attr.AttributeType.FullName == attrFullName) return true;
+            }
+        }
+        catch
+        {
+            // Some reflection-only contexts can throw; fall back to runtime attribute query.
+            try
+            {
+                return type.GetCustomAttributes(inherit: false)
+                    .Any(a => a.GetType().FullName == attrFullName);
+            }
+            catch { return false; }
+        }
+        return false;
     }
 
     #endregion
@@ -130,17 +197,60 @@ public abstract partial class EcosystemParityTestBase
         if (assembly == null) return Skipped();
 
         const string ifaceFullName = "Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache";
+
+        // Acceptable bases: subclassing one of these is the supported extension pattern
+        // (endpoint-specific cache keys/durations). Direct IStreamingResponseCache impls
+        // without inheriting from a common base are still flagged as forks.
+        var acceptableBaseFullNames = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "Lidarr.Plugin.Common.Services.Caching.StreamingResponseCache",
+            "Lidarr.Plugin.Common.Services.Caching.FileStreamingResponseCache",
+        };
+
         var offenders = new List<string>();
         foreach (var type in SafeGetTypes(assembly))
         {
-            if (type == null || type.IsInterface || type.IsAbstract) continue;
-            if (type.GetInterfaces().Any(i => i.FullName == ifaceFullName))
-                offenders.Add(type.FullName ?? type.Name);
+            if (type == null) continue;
+            try { if (type.IsInterface || type.IsAbstract) continue; }
+            catch { continue; }
+            Type[] ifaces;
+            try { ifaces = type.GetInterfaces(); }
+            catch { continue; }
+            if (!ifaces.Any(i => i.FullName == ifaceFullName)) continue;
+
+            // Refinement: types living under common's namespace are acceptable (handles
+            // ILRepack-internalized common types).
+            string ns;
+            try { ns = type.Namespace ?? string.Empty; }
+            catch { continue; }
+            if (IsCommonProductionNamespace(ns)) continue;
+
+            // Refinement: walk base chain. If we hit a common base class, the type is a
+            // legitimate subclass extension, not a fork.
+            var inheritsFromCommonBase = false;
+            try
+            {
+                var b = type.BaseType;
+                while (b != null)
+                {
+                    var bfn = b.IsGenericType ? b.GetGenericTypeDefinition().FullName : b.FullName;
+                    if (bfn != null && acceptableBaseFullNames.Contains(bfn))
+                    {
+                        inheritsFromCommonBase = true;
+                        break;
+                    }
+                    b = b.BaseType;
+                }
+            }
+            catch { /* unresolved bases — treat as not-inheriting */ }
+            if (inheritsFromCommonBase) continue;
+
+            offenders.Add(type.FullName ?? type.Name);
         }
         return offenders.Count == 0
             ? ComplianceResult.Success
             : ComplianceResult.Failure(
-                $"Plugin-local IStreamingResponseCache implementations are forbidden — register common's via DI: {string.Join(", ", offenders)}");
+                $"Plugin-local IStreamingResponseCache implementations are forbidden — subclass StreamingResponseCache/FileStreamingResponseCache or register common's via DI: {string.Join(", ", offenders)}");
     }
 
     #endregion
@@ -271,10 +381,19 @@ public abstract partial class EcosystemParityTestBase
             catch { continue; }
             if (!text.Contains("FluentValidation", StringComparison.Ordinal)) continue;
             if (!text.Contains("ValidationResult", StringComparison.Ordinal)) continue;
-            // Heuristic: a file imports FluentValidation, references ValidationResult, and
-            // accesses `.Errors`. False positives are tolerated as warnings — plugins with a
-            // legitimate use can override this check with a documented rationale.
-            if (System.Text.RegularExpressions.Regex.IsMatch(text, @"\b\w+\.Errors\b"))
+            // Refinement: flag only the unstable getter pattern — LINQ chaining off `.Errors`
+            // depends on the getter return type that drifted between FV 9.x and 11.x.
+            // Allow `.Errors.Add(...)` and similar list-mutation calls because those work on
+            // either IList<T> or List<T>. Allow `.Errors.Count` (property) but flag
+            // `.Errors.Count(...)` (LINQ extension) by requiring a parenthesis.
+            //
+            // Pattern: <ident>.Errors. followed by Select|Where|Any|Count|ToList|ToArray|
+            // FirstOrDefault|First|SingleOrDefault|Single (LINQ-ish), with an opening paren
+            // for the call form.
+            var unstableGetterPattern = new System.Text.RegularExpressions.Regex(
+                @"\b\w+\.Errors\.(Select|Where|Any|Count|ToList|ToArray|FirstOrDefault|First|SingleOrDefault|Single|Aggregate|GroupBy|OrderBy|OrderByDescending)\s*\(",
+                System.Text.RegularExpressions.RegexOptions.Compiled);
+            if (unstableGetterPattern.IsMatch(text))
             {
                 offenders.Add(Path.GetRelativePath(RepoRootPath, file));
             }
