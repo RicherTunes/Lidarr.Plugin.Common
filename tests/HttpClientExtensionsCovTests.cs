@@ -441,8 +441,11 @@ namespace Lidarr.Plugin.Common.Tests
             // Lines 912-918: existing query handling
             var result = HttpClientExtensions.BuildUrlWithQueryNames("https://example.com/path?existing=param&another=value", null!);
 
-            Assert.Contains("?existing", result);
+            // Production sorts keys alphabetically (stable, log-safe output);
+            // assert both keys are preserved without depending on order.
+            Assert.Contains("existing", result);
             Assert.Contains("another", result);
+            Assert.Contains("?", result);
         }
 
         [Fact]
@@ -922,7 +925,9 @@ namespace Lidarr.Plugin.Common.Tests
             {
                 var response = new HttpResponseMessage(HttpStatusCode.OK)
                 {
-                    Content = new StringContent("{\"name\":\"Test\"}", Encoding.UTF8, "application/json")
+                    // PascalCase property name to match TestRequest.Name with
+                    // case-sensitive options (PropertyNameCaseInsensitive = false).
+                    Content = new StringContent("{\"Name\":\"Test\"}", Encoding.UTF8, "application/json")
                 };
                 return Task.FromResult(response);
             });
@@ -970,13 +975,17 @@ namespace Lidarr.Plugin.Common.Tests
         {
             // Lines 247-268: Deduplication path for GET requests
             var callCount = 0;
-            var handler = new StubHandler(_ =>
+            var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var handler = new StubHandler(async _ =>
             {
-                callCount++;
-                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK)
+                Interlocked.Increment(ref callCount);
+                // Hold the in-flight request open so the second call can coalesce
+                // onto it (singleflight deduplicates concurrent in-flight requests).
+                await gate.Task.ConfigureAwait(false);
+                return new HttpResponseMessage(HttpStatusCode.OK)
                 {
                     Content = new StringContent("{\"result\":\"ok\"}", Encoding.UTF8, "application/json")
-                });
+                };
             });
 
             using var client = new HttpClient(handler);
@@ -984,12 +993,18 @@ namespace Lidarr.Plugin.Common.Tests
                 .Endpoint("test");
             var deduplicator = new RequestDeduplicator(new NullLogger<RequestDeduplicator>());
 
-            // First call
-            var response1 = await client.SendWithResilienceAsync(builder, deduplicator);
-            // Second call with same builder (should deduplicate)
-            var response2 = await client.SendWithResilienceAsync(builder, deduplicator);
+            // Kick off two concurrent calls with the same builder; only one should
+            // reach the handler (the other coalesces).
+            var task1 = client.SendWithResilienceAsync(builder, deduplicator);
+            // Give task1 a moment to register its pending request.
+            await Task.Delay(50);
+            var task2 = client.SendWithResilienceAsync(builder, deduplicator);
+            await Task.Delay(50);
 
-            // Should only call the handler once due to deduplication
+            gate.SetResult(true);
+            var response1 = await task1;
+            var response2 = await task2;
+
             Assert.Equal(1, callCount);
             Assert.Equal(HttpStatusCode.OK, response1.StatusCode);
             Assert.Equal(HttpStatusCode.OK, response2.StatusCode);

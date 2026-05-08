@@ -560,8 +560,11 @@ namespace Lidarr.Plugin.Common.Tests
             var request = indexer.CreateRequestPublic("/search", queryParams);
 
             // Assert
-            var uri = request.RequestUri.ToString();
-            Assert.Contains("q=test+query", uri);
+            // Use AbsoluteUri (escaped form) — ToString() decodes %20 back to space.
+            // The exact encoding form (+ vs %20) is incidental; we just verify the
+            // query parameter made it through.
+            var uri = request.RequestUri.AbsoluteUri;
+            Assert.Contains("q=test%20query", uri);
             Assert.Contains("limit=10", uri);
         }
 
