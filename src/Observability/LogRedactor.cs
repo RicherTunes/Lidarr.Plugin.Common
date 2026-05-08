@@ -67,6 +67,14 @@ public static partial class LogRedactor
             return REDACTED;
         });
 
+        // Generic catch-all: any remaining long opaque alphanumeric string is likely a token
+        // (service-specific tokens that don't match the structured prefixes above).
+        // Applied LAST so structured patterns claim their matches first.
+        // Trade-off: also matches non-hyphenated UUIDs (32 hex), Git SHAs (40 hex), and content hashes (64 hex).
+        // This is acceptable noise — those values are not security-sensitive but redacting them is benign.
+        // Threshold of 32 chars avoids matching common short identifiers and test fixtures.
+        value = GenericTokenPattern().Replace(value, REDACTED);
+
         return value;
     }
 
