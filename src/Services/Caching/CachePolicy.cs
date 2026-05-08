@@ -268,8 +268,19 @@ public sealed class CachePolicy
         }
 
         /// <summary>
-        /// Creates a new policy based on this one, optionally overriding properties. Supports <see cref="VaryByScope"/>.
+        /// Creates a new policy based on this one, optionally overriding properties.
+        /// Single discoverable entry point that exposes every knob — including the
+        /// <see cref="Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor"/> knobs
+        /// (<paramref name="softRevalidateWindow"/>, <paramref name="staleIfErrorTtl"/>,
+        /// <paramref name="evictOnTerminalStatus"/>, <paramref name="hotHitMode"/>) —
+        /// so IntelliSense surfaces every configurable parameter from one method.
         /// </summary>
+        /// <remarks>
+        /// Wave 19: merged the previously-separate <c>WithExecutor(...)</c> entry point
+        /// into this method to fix a fluent-API discoverability gap. <c>WithExecutor</c>
+        /// is preserved as an <see cref="ObsoleteAttribute"/>-marked shim that delegates
+        /// here, so existing callers continue to compile (with a deprecation warning).
+        /// </remarks>
         public CachePolicy With(
             string? name = null,
             bool? shouldCache = null,
@@ -278,7 +289,11 @@ public sealed class CachePolicy
             TimeSpan? absoluteExpiration = null,
             bool? varyByScope = null,
             TimeSpan? slidingRefreshWindow = null,
-            bool? enableConditionalRevalidation = null)
+            bool? enableConditionalRevalidation = null,
+            TimeSpan? softRevalidateWindow = null,
+            TimeSpan? staleIfErrorTtl = null,
+            bool? evictOnTerminalStatus = null,
+            HotCacheHitMode? hotHitMode = null)
         {
             return new CachePolicy(
                 name ?? Name,
@@ -289,36 +304,35 @@ public sealed class CachePolicy
                 varyByScope ?? VaryByScope,
                 slidingRefreshWindow ?? SlidingRefreshWindow,
                 enableConditionalRevalidation ?? EnableConditionalRevalidation,
-                SoftRevalidateWindow,
-                StaleIfErrorTtl,
-                EvictOnTerminalStatus,
-                HotHitMode);
+                softRevalidateWindow ?? SoftRevalidateWindow,
+                staleIfErrorTtl ?? StaleIfErrorTtl,
+                evictOnTerminalStatus ?? EvictOnTerminalStatus,
+                hotHitMode ?? HotHitMode);
         }
 
         /// <summary>
-        /// Extended <c>With</c> overload that exposes the <see cref="Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor"/>
-        /// knobs alongside the existing parameters. Existing call sites that use the original <see cref="With(string?, bool?, System.Nullable{System.TimeSpan}, System.Nullable{System.TimeSpan}, System.Nullable{System.TimeSpan}, bool?, System.Nullable{System.TimeSpan}, bool?)"/>
-        /// continue to compile and behave identically.
+        /// Deprecated. The executor knobs (<paramref name="softRevalidateWindow"/>,
+        /// <paramref name="staleIfErrorTtl"/>, <paramref name="evictOnTerminalStatus"/>,
+        /// <paramref name="hotHitMode"/>) have been merged into <see cref="With"/> for
+        /// fluent-API discoverability. Call <c>policy.With(hotHitMode: ..., ...)</c> directly.
         /// </summary>
+        /// <remarks>
+        /// Preserved bit-for-bit so existing call sites continue to compile. Marked
+        /// <see cref="ObsoleteAttribute"/> (warning, not error) so plugin migrations can
+        /// be done at the consumer's pace.
+        /// </remarks>
+        [Obsolete("Merged into With(...) — call CachePolicy.Default.With(hotHitMode: ..., softRevalidateWindow: ..., staleIfErrorTtl: ..., evictOnTerminalStatus: ...) directly. WithExecutor will be removed in a future major release.")]
         public CachePolicy WithExecutor(
             TimeSpan? softRevalidateWindow = null,
             TimeSpan? staleIfErrorTtl = null,
             bool? evictOnTerminalStatus = null,
             HotCacheHitMode? hotHitMode = null)
         {
-            return new CachePolicy(
-                Name,
-                ShouldCache,
-                Duration,
-                SlidingExpiration,
-                AbsoluteExpiration,
-                VaryByScope,
-                SlidingRefreshWindow,
-                EnableConditionalRevalidation,
-                softRevalidateWindow ?? SoftRevalidateWindow,
-                staleIfErrorTtl ?? StaleIfErrorTtl,
-                evictOnTerminalStatus ?? EvictOnTerminalStatus,
-                hotHitMode ?? HotHitMode);
+            return With(
+                softRevalidateWindow: softRevalidateWindow,
+                staleIfErrorTtl: staleIfErrorTtl,
+                evictOnTerminalStatus: evictOnTerminalStatus,
+                hotHitMode: hotHitMode);
         }
     }
 }

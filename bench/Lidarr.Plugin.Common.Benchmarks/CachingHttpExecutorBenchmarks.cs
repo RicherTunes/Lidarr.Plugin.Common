@@ -64,9 +64,10 @@ public class CachingHttpExecutorBenchmarks
         => new StreamingApiRequestBuilder(BaseUrl).Endpoint("catalog/items/42").Get();
 
     private static CachePolicy HotHitPolicy()
-        => CachePolicy.Default
-            .With(name: "bench-hothit", duration: TimeSpan.FromMinutes(15))
-            .WithExecutor(hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
+        => CachePolicy.Default.With(
+            name: "bench-hothit",
+            duration: TimeSpan.FromMinutes(15),
+            hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
 
     private static CachePolicy MissPolicy()
         => CachePolicy.Default.With(

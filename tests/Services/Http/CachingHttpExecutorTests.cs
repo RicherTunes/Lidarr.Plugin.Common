@@ -157,8 +157,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
             // "fast-path Hit" branch for in-window cache (that's handled by IStreamingResponseCache); but
             // soft-revalidate is the executor's Hit-equivalent path. We test both: here, a long soft window.
             var policy = CachePolicy.Default
-                .With(duration: TimeSpan.FromMinutes(30))
-                .WithExecutor(softRevalidateWindow: TimeSpan.FromMinutes(30));
+                .With(duration: TimeSpan.FromMinutes(30), softRevalidateWindow: TimeSpan.FromMinutes(30));
 
             var (exec, handler, _, _) = Build(policy, (_, _) => NewOk());
             var key = NewKey();
@@ -176,8 +175,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
         public async Task SoftRevalidate_ReturnsCachedWithoutOriginInsideWindow()
         {
             var policy = CachePolicy.Default
-                .With(duration: TimeSpan.FromMinutes(5))
-                .WithExecutor(softRevalidateWindow: TimeSpan.FromMinutes(2));
+                .With(duration: TimeSpan.FromMinutes(5), softRevalidateWindow: TimeSpan.FromMinutes(2));
 
             var (exec, handler, _, tp) = Build(policy, (_, _) => NewOk("{\"v\":1}"));
             var key = NewKey();
@@ -247,8 +245,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
         public async Task StaleIfError_Returns5xxFallbackFromCacheWithinWindow()
         {
             var policy = CachePolicy.Default
-                .With(duration: TimeSpan.FromMinutes(5))
-                .WithExecutor(staleIfErrorTtl: TimeSpan.FromHours(2));
+                .With(duration: TimeSpan.FromMinutes(5), staleIfErrorTtl: TimeSpan.FromHours(2));
 
             // First call OK (populates cache); second call returns 503.
             var (exec, handler, _, tp) = Build(policy, (call, _) =>
@@ -270,8 +267,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
         public async Task StaleIfError_PassesThrough5xxWhenWindowExpired()
         {
             var policy = CachePolicy.Default
-                .With(duration: TimeSpan.FromMinutes(5))
-                .WithExecutor(staleIfErrorTtl: TimeSpan.FromMinutes(10));
+                .With(duration: TimeSpan.FromMinutes(5), staleIfErrorTtl: TimeSpan.FromMinutes(10));
 
             var (exec, handler, _, tp) = Build(policy, (call, _) =>
                 call == 1 ? NewOk() : new HttpResponseMessage(HttpStatusCode.BadGateway));
@@ -320,8 +316,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
         {
             // Disable terminal eviction; 410 should pass through and leave the cache intact.
             var policy = CachePolicy.Default
-                .With(duration: TimeSpan.FromMinutes(10))
-                .WithExecutor(evictOnTerminalStatus: false);
+                .With(duration: TimeSpan.FromMinutes(10), evictOnTerminalStatus: false);
 
             var (exec, handler, cache, _) = Build(policy, (call, _) =>
                 call == 1 ? NewOk() : new HttpResponseMessage(HttpStatusCode.Gone));
@@ -363,8 +358,11 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
         {
             // Verify ParseAsync is called on Miss, SoftRevalidate, NotModifiedFold, and StaleIfError paths.
             var policy = CachePolicy.Default
-                .With(duration: TimeSpan.FromMinutes(5), enableConditionalRevalidation: true)
-                .WithExecutor(softRevalidateWindow: TimeSpan.FromMinutes(2), staleIfErrorTtl: TimeSpan.FromHours(2));
+                .With(
+                    duration: TimeSpan.FromMinutes(5),
+                    enableConditionalRevalidation: true,
+                    softRevalidateWindow: TimeSpan.FromMinutes(2),
+                    staleIfErrorTtl: TimeSpan.FromHours(2));
 
             var calls = 0;
             var (exec, _, _, tp) = Build(policy, (call, _) =>
@@ -427,8 +425,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
         public async Task OnHit_HookFiresWithCacheHitKind()
         {
             var policy = CachePolicy.Default
-                .With(duration: TimeSpan.FromMinutes(5))
-                .WithExecutor(softRevalidateWindow: TimeSpan.FromMinutes(2));
+                .With(duration: TimeSpan.FromMinutes(5), softRevalidateWindow: TimeSpan.FromMinutes(2));
             var (exec, _, _, _) = Build(policy, (_, _) => NewOk());
 
             var hits = new List<CacheHitKind>();
@@ -545,8 +542,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
         {
             // EnabledForFreshEntries: cache populated on first call, second call returns Hit without contacting origin.
             var policy = CachePolicy.Default
-                .With(duration: TimeSpan.FromMinutes(10))
-                .WithExecutor(hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
+                .With(duration: TimeSpan.FromMinutes(10), hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
 
             var (exec, handler, _, tp) = Build(policy, (_, _) => NewOk("hot-body"));
             var key = NewKey();
@@ -567,8 +563,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
         public async Task HotHit_FastPath_ContactsOriginOnceWindowExpires()
         {
             var policy = CachePolicy.Default
-                .With(duration: TimeSpan.FromMinutes(5))
-                .WithExecutor(hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
+                .With(duration: TimeSpan.FromMinutes(5), hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
 
             var (exec, handler, _, tp) = Build(policy, (_, _) => NewOk("body"));
             var key = NewKey();

@@ -58,11 +58,10 @@ var builder = new StreamingApiRequestBuilder("https://api.music.apple.com")
 var key = new CacheKey("/v1/catalog/us/albums/12345",
     new Dictionary<string, string> { ["lang"] = "en-US" });
 
-var policy = CachePolicy.LongLived
-    .WithExecutor(
-        softRevalidateWindow: TimeSpan.FromHours(2),
-        staleIfErrorTtl: TimeSpan.FromDays(7),
-        evictOnTerminalStatus: true);
+var policy = CachePolicy.LongLived.With(
+    softRevalidateWindow: TimeSpan.FromHours(2),
+    staleIfErrorTtl: TimeSpan.FromDays(7),
+    evictOnTerminalStatus: true);
 
 var hooks = new CachingHttpHooks<AlbumDto>(
     ParseAsync: async (resp, ct) =>
@@ -104,14 +103,13 @@ This deletes the ~370 LOC of `SendAsync` in `AppleMusicApiClient.cs` lines 300-6
 The applemusicarr defaults map cleanly:
 
 ```csharp
-public static readonly CachePolicy AppleMusicCatalog = CachePolicy.LongLived
-    .With(enableConditionalRevalidation: true)
-    .WithExecutor(
-        softRevalidateWindow: TimeSpan.FromDays(double.TryParse(
-            Environment.GetEnvironmentVariable("APPLEMUSICARR_SOFT_REVALIDATE_DAYS"), out var d) ? d : 0),
-        staleIfErrorTtl: TimeSpan.FromDays(double.TryParse(
-            Environment.GetEnvironmentVariable("APPLEMUSICARR_STALE_IF_ERROR_DAYS"), out var s) ? s : 7),
-        evictOnTerminalStatus: true);
+public static readonly CachePolicy AppleMusicCatalog = CachePolicy.LongLived.With(
+    enableConditionalRevalidation: true,
+    softRevalidateWindow: TimeSpan.FromDays(double.TryParse(
+        Environment.GetEnvironmentVariable("APPLEMUSICARR_SOFT_REVALIDATE_DAYS"), out var d) ? d : 0),
+    staleIfErrorTtl: TimeSpan.FromDays(double.TryParse(
+        Environment.GetEnvironmentVariable("APPLEMUSICARR_STALE_IF_ERROR_DAYS"), out var s) ? s : 7),
+    evictOnTerminalStatus: true);
 ```
 
 The two env-var overrides remain exactly compatible with the legacy applemusicarr behaviour.
@@ -150,13 +148,18 @@ Hook callbacks are best-effort; exceptions are logged and swallowed by the execu
 
 When the upstream API does not emit `ETag` or `Last-Modified`, plugins previously had to abuse the
 soft-revalidate window to express "if cached and fresh, return cached." Set
-`CachePolicy.HotHitMode = HotCacheHitMode.EnabledForFreshEntries` (via `WithExecutor`) to opt into a
-proper fast-path Hit:
+`CachePolicy.HotHitMode = HotCacheHitMode.EnabledForFreshEntries` (via the merged `With(...)`) to opt
+into a proper fast-path Hit:
 
 ```csharp
 var policy = CachePolicy.LongLived
-    .WithExecutor(hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
+    .With(hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
 ```
+
+> Wave 19: the executor knobs (`softRevalidateWindow`, `staleIfErrorTtl`, `evictOnTerminalStatus`,
+> `hotHitMode`) used to live on a separate `WithExecutor(...)` method. They are now exposed by the
+> single `With(...)` entry point so IntelliSense surfaces every configurable knob at once.
+> `WithExecutor` is preserved as an `[Obsolete]` shim that delegates to `With(...)`.
 
 Inside `Duration`, the executor returns `CacheHitKind.Hit` without contacting the origin or the resilience
 pipeline. `HotCacheHitMode.EnabledIgnoringValidators` documents the same behavior with explicit intent
