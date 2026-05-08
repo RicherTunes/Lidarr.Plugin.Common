@@ -28,6 +28,31 @@ public sealed class CachePolicy
         /// </summary>
         public bool EnableConditionalRevalidation { get; }
 
+        /// <summary>
+        /// Soft-revalidation budget consumed by <see cref="Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor"/>.
+        /// When set, a cached body that is younger than this window is returned without contacting the origin
+        /// (allowing the caller to revalidate later). Mirrors the
+        /// <c>APPLEMUSICARR_SOFT_REVALIDATE_DAYS</c> env override that previously existed in plugins.
+        /// </summary>
+        public TimeSpan? SoftRevalidateWindow { get; }
+
+        /// <summary>
+        /// Stale-if-error budget consumed by <see cref="Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor"/>.
+        /// When set, a cached body that is younger than this window is returned (with a Warning header) when
+        /// the origin returns a 5xx response. Defaults to <see langword="null"/> (disabled). When the origin
+        /// path supports stale-if-error, plugins typically set this to 7 days (the previous
+        /// <c>APPLEMUSICARR_STALE_IF_ERROR_DAYS</c> default).
+        /// </summary>
+        public TimeSpan? StaleIfErrorTtl { get; }
+
+        /// <summary>
+        /// When <see langword="true"/>, <see cref="Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor"/>
+        /// evicts the cached body and any conditional validators on terminal origin statuses (404 or 410), to
+        /// avoid repeatedly hitting the origin with conditional requests for resources known to be missing.
+        /// Default <see langword="true"/>.
+        /// </summary>
+        public bool EvictOnTerminalStatus { get; }
+
         public static CachePolicy Disabled { get; } = new CachePolicy(
             name: "disabled",
             shouldCache: false,
@@ -58,6 +83,64 @@ public sealed class CachePolicy
             TimeSpan? absoluteExpiration = null,
             TimeSpan? slidingRefreshWindow = null,
             bool enableConditionalRevalidation = false)
+            : this(
+                name,
+                shouldCache,
+                duration,
+                slidingExpiration,
+                absoluteExpiration,
+                varyByScope: false,
+                slidingRefreshWindow,
+                enableConditionalRevalidation,
+                softRevalidateWindow: null,
+                staleIfErrorTtl: null,
+                evictOnTerminalStatus: true)
+        {
+        }
+
+        /// <summary>
+        /// Extended constructor allowing explicit configuration of <see cref="VaryByScope"/>.
+        /// </summary>
+        public CachePolicy(
+            string name,
+            bool shouldCache,
+            TimeSpan duration,
+            TimeSpan? slidingExpiration,
+            TimeSpan? absoluteExpiration,
+            bool varyByScope,
+            TimeSpan? slidingRefreshWindow = null,
+            bool enableConditionalRevalidation = false)
+            : this(
+                name,
+                shouldCache,
+                duration,
+                slidingExpiration,
+                absoluteExpiration,
+                varyByScope,
+                slidingRefreshWindow,
+                enableConditionalRevalidation,
+                softRevalidateWindow: null,
+                staleIfErrorTtl: null,
+                evictOnTerminalStatus: true)
+        {
+        }
+
+        /// <summary>
+        /// Full constructor that also controls the <see cref="Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor"/>
+        /// soft-revalidate, stale-if-error and terminal-eviction knobs.
+        /// </summary>
+        public CachePolicy(
+            string name,
+            bool shouldCache,
+            TimeSpan duration,
+            TimeSpan? slidingExpiration,
+            TimeSpan? absoluteExpiration,
+            bool varyByScope,
+            TimeSpan? slidingRefreshWindow,
+            bool enableConditionalRevalidation,
+            TimeSpan? softRevalidateWindow,
+            TimeSpan? staleIfErrorTtl,
+            bool evictOnTerminalStatus)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -79,31 +162,27 @@ public sealed class CachePolicy
                 throw new ArgumentOutOfRangeException(nameof(absoluteExpiration), absoluteExpiration, "Absolute expiration must be positive.");
             }
 
+            if (softRevalidateWindow.HasValue && softRevalidateWindow.Value < TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(softRevalidateWindow), softRevalidateWindow, "Soft revalidate window cannot be negative.");
+            }
+
+            if (staleIfErrorTtl.HasValue && staleIfErrorTtl.Value < TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(staleIfErrorTtl), staleIfErrorTtl, "Stale-if-error TTL cannot be negative.");
+            }
+
             Name = name;
             ShouldCache = shouldCache;
             Duration = duration;
             SlidingExpiration = slidingExpiration;
             AbsoluteExpiration = absoluteExpiration;
-            VaryByScope = false;
+            VaryByScope = varyByScope;
             SlidingRefreshWindow = slidingRefreshWindow;
             EnableConditionalRevalidation = enableConditionalRevalidation;
-        }
-
-        /// <summary>
-        /// Extended constructor allowing explicit configuration of <see cref="VaryByScope"/>.
-        /// </summary>
-        public CachePolicy(
-            string name,
-            bool shouldCache,
-            TimeSpan duration,
-            TimeSpan? slidingExpiration,
-            TimeSpan? absoluteExpiration,
-            bool varyByScope,
-            TimeSpan? slidingRefreshWindow = null,
-            bool enableConditionalRevalidation = false)
-            : this(name, shouldCache, duration, slidingExpiration, absoluteExpiration, slidingRefreshWindow, enableConditionalRevalidation)
-        {
-            VaryByScope = varyByScope;
+            SoftRevalidateWindow = softRevalidateWindow;
+            StaleIfErrorTtl = staleIfErrorTtl;
+            EvictOnTerminalStatus = evictOnTerminalStatus;
         }
 
         /// <summary>
@@ -127,7 +206,34 @@ public sealed class CachePolicy
                 absoluteExpiration ?? AbsoluteExpiration,
                 varyByScope ?? VaryByScope,
                 slidingRefreshWindow ?? SlidingRefreshWindow,
-                enableConditionalRevalidation ?? EnableConditionalRevalidation);
+                enableConditionalRevalidation ?? EnableConditionalRevalidation,
+                SoftRevalidateWindow,
+                StaleIfErrorTtl,
+                EvictOnTerminalStatus);
+        }
+
+        /// <summary>
+        /// Extended <c>With</c> overload that exposes the <see cref="Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor"/>
+        /// knobs alongside the existing parameters. Existing call sites that use the original <see cref="With(string?, bool?, System.Nullable{System.TimeSpan}, System.Nullable{System.TimeSpan}, System.Nullable{System.TimeSpan}, bool?, System.Nullable{System.TimeSpan}, bool?)"/>
+        /// continue to compile and behave identically.
+        /// </summary>
+        public CachePolicy WithExecutor(
+            TimeSpan? softRevalidateWindow = null,
+            TimeSpan? staleIfErrorTtl = null,
+            bool? evictOnTerminalStatus = null)
+        {
+            return new CachePolicy(
+                Name,
+                ShouldCache,
+                Duration,
+                SlidingExpiration,
+                AbsoluteExpiration,
+                VaryByScope,
+                SlidingRefreshWindow,
+                EnableConditionalRevalidation,
+                softRevalidateWindow ?? SoftRevalidateWindow,
+                staleIfErrorTtl ?? StaleIfErrorTtl,
+                evictOnTerminalStatus ?? EvictOnTerminalStatus);
         }
     }
 }
