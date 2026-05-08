@@ -3,6 +3,47 @@ using System;
 namespace Lidarr.Plugin.Common.Services.Caching
 {
     /// <summary>
+    /// Controls the hot-cache-hit fast path inside
+    /// <see cref="Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Without an opt-in, the executor's only ways to serve a cached body without contacting the origin are
+    /// <see cref="CachePolicy.SoftRevalidateWindow"/>, the 304-fold path, and stale-if-error. APIs without
+    /// ETag or Last-Modified support cannot use 304-fold and must abuse the soft-revalidate window to get
+    /// "traditional" cache semantics. <see cref="CachePolicy.HotHitMode"/> lets a plugin opt into a plain
+    /// <c>if (cached &amp;&amp; fresh) return cached</c> fast path.
+    /// </para>
+    /// <para>
+    /// Source: qobuzarr Phase 3b adoption feedback.
+    /// </para>
+    /// </remarks>
+    public enum HotCacheHitMode
+    {
+        /// <summary>
+        /// Default. The hot-cache-hit fast path is disabled; the executor's existing soft-revalidate, 304-fold,
+        /// and stale-if-error code paths are the only ways a cached body is returned without contacting the origin.
+        /// </summary>
+        Disabled = 0,
+
+        /// <summary>
+        /// Before invoking the resilience pipeline, the executor checks the cache and, if a fresh cached entry
+        /// is found that is still within its nominal <see cref="CachePolicy.Duration"/>, returns it as a
+        /// <see cref="Lidarr.Plugin.Common.Services.Http.CacheHitKind.Hit"/>. If validators (ETag /
+        /// Last-Modified) are present on the cached entry, the cached entry is still returned — no conditional
+        /// round-trip is attempted.
+        /// </summary>
+        EnabledForFreshEntries = 1,
+
+        /// <summary>
+        /// Same as <see cref="EnabledForFreshEntries"/> but explicitly ignores any validators on the cached
+        /// entry. Useful for APIs that emit ETags but where the plugin has decided to treat freshness as
+        /// authoritative (e.g., the ETag is opaque or the upstream cache headers are unreliable).
+        /// </summary>
+        EnabledIgnoringValidators = 2,
+    }
+
+    /// <summary>
     /// Declarative cache policy describing whether and how long responses should be cached.
     /// Immutable and thread-safe.
     /// </summary>
@@ -52,6 +93,14 @@ public sealed class CachePolicy
         /// Default <see langword="true"/>.
         /// </summary>
         public bool EvictOnTerminalStatus { get; }
+
+        /// <summary>
+        /// Controls the hot-cache-hit fast path inside
+        /// <see cref="Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor"/>. Defaults to
+        /// <see cref="HotCacheHitMode.Disabled"/> (preserves the previous behavior of relying on
+        /// soft-revalidate, 304-fold, and stale-if-error). See <see cref="HotCacheHitMode"/> for details.
+        /// </summary>
+        public HotCacheHitMode HotHitMode { get; }
 
         public static CachePolicy Disabled { get; } = new CachePolicy(
             name: "disabled",
@@ -141,6 +190,38 @@ public sealed class CachePolicy
             TimeSpan? softRevalidateWindow,
             TimeSpan? staleIfErrorTtl,
             bool evictOnTerminalStatus)
+            : this(
+                name,
+                shouldCache,
+                duration,
+                slidingExpiration,
+                absoluteExpiration,
+                varyByScope,
+                slidingRefreshWindow,
+                enableConditionalRevalidation,
+                softRevalidateWindow,
+                staleIfErrorTtl,
+                evictOnTerminalStatus,
+                hotHitMode: HotCacheHitMode.Disabled)
+        {
+        }
+
+        /// <summary>
+        /// Full constructor that also exposes <see cref="HotHitMode"/>.
+        /// </summary>
+        public CachePolicy(
+            string name,
+            bool shouldCache,
+            TimeSpan duration,
+            TimeSpan? slidingExpiration,
+            TimeSpan? absoluteExpiration,
+            bool varyByScope,
+            TimeSpan? slidingRefreshWindow,
+            bool enableConditionalRevalidation,
+            TimeSpan? softRevalidateWindow,
+            TimeSpan? staleIfErrorTtl,
+            bool evictOnTerminalStatus,
+            HotCacheHitMode hotHitMode)
         {
             if (string.IsNullOrWhiteSpace(name))
             {
@@ -183,6 +264,7 @@ public sealed class CachePolicy
             SoftRevalidateWindow = softRevalidateWindow;
             StaleIfErrorTtl = staleIfErrorTtl;
             EvictOnTerminalStatus = evictOnTerminalStatus;
+            HotHitMode = hotHitMode;
         }
 
         /// <summary>
@@ -209,7 +291,8 @@ public sealed class CachePolicy
                 enableConditionalRevalidation ?? EnableConditionalRevalidation,
                 SoftRevalidateWindow,
                 StaleIfErrorTtl,
-                EvictOnTerminalStatus);
+                EvictOnTerminalStatus,
+                HotHitMode);
         }
 
         /// <summary>
@@ -220,7 +303,8 @@ public sealed class CachePolicy
         public CachePolicy WithExecutor(
             TimeSpan? softRevalidateWindow = null,
             TimeSpan? staleIfErrorTtl = null,
-            bool? evictOnTerminalStatus = null)
+            bool? evictOnTerminalStatus = null,
+            HotCacheHitMode? hotHitMode = null)
         {
             return new CachePolicy(
                 Name,
@@ -233,7 +317,8 @@ public sealed class CachePolicy
                 EnableConditionalRevalidation,
                 softRevalidateWindow ?? SoftRevalidateWindow,
                 staleIfErrorTtl ?? StaleIfErrorTtl,
-                evictOnTerminalStatus ?? EvictOnTerminalStatus);
+                evictOnTerminalStatus ?? EvictOnTerminalStatus,
+                hotHitMode ?? HotHitMode);
         }
     }
 }

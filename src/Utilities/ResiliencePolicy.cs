@@ -33,6 +33,30 @@ public sealed class ResiliencePolicy
             jitterMin: TimeSpan.FromMilliseconds(50),
             jitterMax: TimeSpan.FromMilliseconds(250));
 
+        /// <summary>
+        /// "Passthrough" preset for callers whose underlying transport already retries (e.g., Lidarr's
+        /// <c>NzbDrone.Common.Http.IHttpClient</c>). The executor's <see cref="GenericResilienceExecutor"/>
+        /// treats this as effectively a no-op: <c>MaxRetries=1</c> (no retries beyond the initial attempt),
+        /// no per-request timeout, very high concurrency cap, and minimal jitter/backoff. Stacking the
+        /// executor's resilience layer on top of a transport that already retries leads to multiplied retry
+        /// counts and explosive backoff — use this preset to keep the resilience pipeline out of the way.
+        /// </summary>
+        /// <remarks>
+        /// Source: qobuzarr Phase 3b adoption feedback ("the executor's GenericResilienceExecutor must be
+        /// configured with MaxRetries=1; a ResiliencePolicy.Passthrough preset would document this intent").
+        /// </remarks>
+        public static ResiliencePolicy Passthrough { get; } = new ResiliencePolicy(
+            name: "passthrough",
+            maxRetries: 1, // no retries beyond the initial attempt
+            retryBudget: TimeSpan.FromMilliseconds(1), // never expires in practice (no retries scheduled)
+            maxConcurrencyPerHost: int.MaxValue,
+            perRequestTimeout: null, // defer entirely to transport
+            initialBackoff: TimeSpan.FromMilliseconds(1), // satisfies "InitialBackoff > 0"
+            maxBackoff: TimeSpan.FromMilliseconds(1),
+            jitterMin: TimeSpan.Zero,
+            jitterMax: TimeSpan.Zero,
+            maxTotalConcurrencyPerHost: int.MaxValue);
+
         public static ResiliencePolicy Search { get; } = Default.With(
             name: "search",
             maxRetries: 4,

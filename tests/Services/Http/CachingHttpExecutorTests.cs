@@ -537,5 +537,98 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
 
             Assert.Equal(CacheHitKind.NotModifiedFold, fold.HitKind);
         }
+
+        // ---- Phase 5e refinements ----
+
+        [Fact]
+        public async Task HotHit_FastPath_ReturnsCachedHitWithoutOriginAfterMiss()
+        {
+            // EnabledForFreshEntries: cache populated on first call, second call returns Hit without contacting origin.
+            var policy = CachePolicy.Default
+                .With(duration: TimeSpan.FromMinutes(10))
+                .WithExecutor(hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
+
+            var (exec, handler, _, tp) = Build(policy, (_, _) => NewOk("hot-body"));
+            var key = NewKey();
+
+            var first = await exec.SendAsync(NewBuilder(), key, policy);
+            Assert.Equal(CacheHitKind.Miss, first.HitKind);
+            Assert.Equal(1, handler.Calls);
+
+            // Inside Duration window — fast path returns Hit without origin.
+            tp.Advance(TimeSpan.FromMinutes(2));
+            var second = await exec.SendAsync(NewBuilder(), key, policy);
+            Assert.Equal(CacheHitKind.Hit, second.HitKind);
+            Assert.Equal(1, handler.Calls);
+            Assert.Equal("hot-body", System.Text.Encoding.UTF8.GetString(second.Body));
+        }
+
+        [Fact]
+        public async Task HotHit_FastPath_ContactsOriginOnceWindowExpires()
+        {
+            var policy = CachePolicy.Default
+                .With(duration: TimeSpan.FromMinutes(5))
+                .WithExecutor(hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
+
+            var (exec, handler, _, tp) = Build(policy, (_, _) => NewOk("body"));
+            var key = NewKey();
+
+            await exec.SendAsync(NewBuilder(), key, policy);
+            Assert.Equal(1, handler.Calls);
+
+            // Past Duration — fast path no longer applies, origin is contacted.
+            tp.Advance(TimeSpan.FromMinutes(10));
+            var second = await exec.SendAsync(NewBuilder(), key, policy);
+            Assert.Equal(CacheHitKind.Miss, second.HitKind);
+            Assert.Equal(2, handler.Calls);
+        }
+
+        [Fact]
+        public async Task HotHit_Disabled_DoesNotShortCircuit()
+        {
+            // Default mode (Disabled) should never produce a Hit kind without one of the existing windows.
+            var policy = CachePolicy.Default.With(duration: TimeSpan.FromMinutes(10));
+            var (exec, handler, _, _) = Build(policy, (_, _) => NewOk());
+            var key = NewKey();
+
+            await exec.SendAsync(NewBuilder(), key, policy);
+            var second = await exec.SendAsync(NewBuilder(), key, policy);
+
+            // Disabled means no fast path, so the second call must contact the origin again.
+            Assert.NotEqual(CacheHitKind.Hit, second.HitKind);
+            Assert.Equal(CacheHitKind.Miss, second.HitKind);
+            Assert.Equal(2, handler.Calls);
+        }
+
+        [Fact]
+        public async Task PropagateParseExceptions_DefaultFalse_AbsorbsAndReturnsDefault()
+        {
+            var policy = CachePolicy.Default;
+            var (exec, _, _, _) = Build(policy, (_, _) => NewOk("{\"id\":\"a\"}"));
+
+            // Hook deliberately throws.
+            var hooks = new CachingHttpHooks<string>(
+                ParseAsync: (_, _) => throw new InvalidOperationException("parse boom"));
+
+            var result = await exec.SendAsync(NewBuilder(), NewKey(), policy, hooks);
+            Assert.Equal(CacheHitKind.Miss, result.HitKind);
+            Assert.Null(result.Payload); // exception absorbed -> default
+        }
+
+        [Fact]
+        public async Task PropagateParseExceptions_True_SurfacesParseException()
+        {
+            var policy = CachePolicy.Default;
+            var (exec, _, _, _) = Build(policy, (_, _) => NewOk("{}"));
+
+            var hooks = new CachingHttpHooks<string>(
+                ParseAsync: (_, _) => throw new InvalidOperationException("parse boom"))
+            {
+                PropagateParseExceptions = true
+            };
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => exec.SendAsync(NewBuilder(), NewKey(), policy, hooks));
+        }
     }
 }

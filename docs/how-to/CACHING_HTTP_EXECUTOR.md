@@ -143,3 +143,51 @@ Hook callbacks are best-effort; exceptions are logged and swallowed by the execu
 - The cache policy's `Duration` is automatically widened to cover `SoftRevalidateWindow` and
   `StaleIfErrorTtl`; the cached `StoredAt` field is preserved across folds so window bounds remain
   correct independent of the storage TTL.
+
+## Phase 5e additions
+
+### Hot-cache-hit fast path (`HotCacheHitMode`)
+
+When the upstream API does not emit `ETag` or `Last-Modified`, plugins previously had to abuse the
+soft-revalidate window to express "if cached and fresh, return cached." Set
+`CachePolicy.HotHitMode = HotCacheHitMode.EnabledForFreshEntries` (via `WithExecutor`) to opt into a
+proper fast-path Hit:
+
+```csharp
+var policy = CachePolicy.LongLived
+    .WithExecutor(hotHitMode: HotCacheHitMode.EnabledForFreshEntries);
+```
+
+Inside `Duration`, the executor returns `CacheHitKind.Hit` without contacting the origin or the resilience
+pipeline. `HotCacheHitMode.EnabledIgnoringValidators` documents the same behavior with explicit intent
+when the upstream does emit validators but the plugin chooses to treat freshness as authoritative.
+
+### Strict parse-exception propagation
+
+By default, exceptions raised by `CachingHttpHooks.ParseAsync` are caught, logged at Warning, and the
+caller receives a default payload. Plugins migrating from `JsonConvert.DeserializeObject` (which throws
+`JsonReaderException`) can opt into propagation:
+
+```csharp
+var hooks = new CachingHttpHooks<MyDto>(
+    ParseAsync: (resp, ct) => JsonConvert.DeserializeObjectAsync<MyDto>(...))
+{
+    PropagateParseExceptions = true
+};
+```
+
+When set to `true`, parse exceptions surface to the caller of `SendAsync`.
+
+### `ResiliencePolicy.Passthrough` preset
+
+If your transport already retries (e.g., Lidarr's `IHttpClient`), use `ResiliencePolicy.Passthrough` to
+avoid stacking retries:
+
+```csharp
+var executor = new CachingHttpExecutor(
+    invoker: lidarrHostInvoker,
+    cache: cache,
+    resiliencePolicy: ResiliencePolicy.Passthrough);
+```
+
+See [`ADAPT_IHTTPCLIENT_TO_EXECUTOR.md`](ADAPT_IHTTPCLIENT_TO_EXECUTOR.md) for the full adapter pattern.

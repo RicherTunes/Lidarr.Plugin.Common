@@ -153,6 +153,26 @@ namespace Lidarr.Plugin.Common.Services.Http
                 cacheDuration = policy.StaleIfErrorTtl.Value;
             }
 
+            // ---- Hot-cache-hit fast path (opt-in via CachePolicy.HotHitMode).
+            // Allows plugins working against APIs without ETag/Last-Modified to express traditional
+            // "if cached and fresh, return cached" semantics without abusing the soft-revalidate window.
+            // Source: qobuzarr Phase 3b adoption feedback.
+            if (shouldCache && policy.HotHitMode != HotCacheHitMode.Disabled && baseDuration > TimeSpan.Zero)
+            {
+                var cachedHot = _cache.Get<CachedHttpResponse>(endpoint, parameters);
+                if (cachedHot is not null && IsWithinWindow(cachedHot.StoredAt, baseDuration))
+                {
+                    // EnabledForFreshEntries returns the cached body even if validators are present (no
+                    // conditional round-trip is attempted on the fast path). EnabledIgnoringValidators is
+                    // semantically identical here — both modes skip the origin entirely. The two modes are
+                    // distinguished so plugins can document intent (the latter explicitly waives any
+                    // potential ETag-driven revalidation). Both record CacheHitKind.Hit for telemetry.
+                    var hot = await BuildResultFromCachedAsync(cachedHot, CacheHitKind.Hit, hooks, cancellationToken).ConfigureAwait(false);
+                    InvokeHit(hooks, CacheHitKind.Hit, key);
+                    return hot;
+                }
+            }
+
             // ---- Soft-revalidate window: serve cached body without contacting the origin if young enough.
             if (shouldCache && policy.SoftRevalidateWindow.HasValue && policy.SoftRevalidateWindow.Value > TimeSpan.Zero)
             {
@@ -496,22 +516,30 @@ namespace Lidarr.Plugin.Common.Services.Http
             {
                 return default;
             }
+            // Replace content with a fresh ByteArrayContent so the parse hook can read the body even if the
+            // origin's content stream was already consumed by the executor.
+            using var clone = new HttpResponseMessage(response.StatusCode)
+            {
+                Content = new ByteArrayContent(bytes)
+            };
+            if (!string.IsNullOrEmpty(contentType))
+            {
+                clone.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
+            }
+            foreach (var h in response.Headers)
+            {
+                clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
+            }
+
+            // Honor PropagateParseExceptions: when set, surface parse exceptions to the caller instead of
+            // returning the default payload. Source: qobuzarr Phase 3b adoption feedback.
+            if (hooks.PropagateParseExceptions)
+            {
+                return await hooks.ParseAsync(clone, cancellationToken).ConfigureAwait(false);
+            }
+
             try
             {
-                // Replace content with a fresh ByteArrayContent so the parse hook can read the body even if the
-                // origin's content stream was already consumed by the executor.
-                using var clone = new HttpResponseMessage(response.StatusCode)
-                {
-                    Content = new ByteArrayContent(bytes)
-                };
-                if (!string.IsNullOrEmpty(contentType))
-                {
-                    clone.Content.Headers.ContentType = MediaTypeHeaderValue.Parse(contentType);
-                }
-                foreach (var h in response.Headers)
-                {
-                    clone.Headers.TryAddWithoutValidation(h.Key, h.Value);
-                }
                 return await hooks.ParseAsync(clone, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)

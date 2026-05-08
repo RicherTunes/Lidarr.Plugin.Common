@@ -72,4 +72,19 @@ public record LlmRequest
     /// Use for provider-specific features not covered by standard properties.
     /// </summary>
     public IReadOnlyDictionary<string, object>? ProviderOptions { get; init; }
+
+    /// <summary>
+    /// Gets the optional thinking/reasoning hint for providers that support extended-thinking modes
+    /// (Anthropic, Gemini, etc.). Defaults to <see langword="null"/>, in which case the adapter should
+    /// not send an explicit thinking directive.
+    /// </summary>
+    /// <remarks>
+    /// <para>Backward-compatible: when null, providers behave exactly as they did before this property
+    /// existed. Providers that do not advertise <see cref="LlmCapabilityFlags.ExtendedThinking"/> should
+    /// silently ignore the hint rather than fail.</para>
+    /// <para>Source: brainarr Phase 4a feedback — adapters previously had to "sneak" thinking-mode through
+    /// <see cref="Model"/> sentinels (e.g., <c>"claude-sonnet-thinking"</c>); this property lets them
+    /// carry the intent explicitly.</para>
+    /// </remarks>
+    public LlmThinkingHint? Thinking { get; init; }
 }

@@ -32,5 +32,19 @@ namespace Lidarr.Plugin.Common.Services.Http
         Func<HttpResponseMessage, CancellationToken, Task<TPayload>>? ParseAsync = null,
         Action<HttpRequestMessage>? MutateRequest = null,
         Action<HttpStatusCode, CacheKey>? OnEvict = null,
-        Action<CacheHitKind, CacheKey>? OnHit = null);
+        Action<CacheHitKind, CacheKey>? OnHit = null)
+    {
+        /// <summary>
+        /// When <see langword="true"/>, exceptions raised by <see cref="ParseAsync"/> are surfaced to the
+        /// caller rather than being absorbed into a default payload. Default: <see langword="false"/>
+        /// (preserves the previous swallow-and-log behavior).
+        /// </summary>
+        /// <remarks>
+        /// Source: qobuzarr Phase 3b adoption feedback ("legacy callers depend on <c>JsonReaderException</c>
+        /// propagating from <c>JsonConvert.DeserializeObject</c>"). Plugins adopting strict parsing should set
+        /// this to <c>true</c>; plugins that prefer the executor's resilience-first behavior should leave it
+        /// at the default.
+        /// </remarks>
+        public bool PropagateParseExceptions { get; init; }
+    }
 }

@@ -18,6 +18,50 @@ public class LlmRequestTests
     }
 
     [Fact]
+    public void Thinking_DefaultsToNull()
+    {
+        var req = new LlmRequest { Prompt = "hello" };
+        Assert.Null(req.Thinking);
+    }
+
+    [Fact]
+    public void Thinking_CarriesModeAndBudget()
+    {
+        var req = new LlmRequest
+        {
+            Prompt = "explain",
+            Thinking = new LlmThinkingHint(LlmThinkingMode.Enabled, BudgetTokens: 4096),
+        };
+        Assert.NotNull(req.Thinking);
+        Assert.Equal(LlmThinkingMode.Enabled, req.Thinking!.Mode);
+        Assert.Equal(4096, req.Thinking.BudgetTokens);
+    }
+
+    [Fact]
+    public void Thinking_BudgetTokens_OptionalAndDefaultsToNull()
+    {
+        var hint = new LlmThinkingHint(LlmThinkingMode.Auto);
+        Assert.Equal(LlmThinkingMode.Auto, hint.Mode);
+        Assert.Null(hint.BudgetTokens);
+    }
+
+    [Fact]
+    public void Thinking_RoundTrips_ThroughJsonSerialization()
+    {
+        var original = new LlmRequest
+        {
+            Prompt = "p",
+            Thinking = new LlmThinkingHint(LlmThinkingMode.Enabled, 2048),
+        };
+        var json = JsonSerializer.Serialize(original);
+        var deserialized = JsonSerializer.Deserialize<LlmRequest>(json);
+        Assert.NotNull(deserialized);
+        Assert.NotNull(deserialized!.Thinking);
+        Assert.Equal(LlmThinkingMode.Enabled, deserialized.Thinking!.Mode);
+        Assert.Equal(2048, deserialized.Thinking.BudgetTokens);
+    }
+
+    [Fact]
     public void JsonMode_CanBeOptedIn()
     {
         var req = new LlmRequest

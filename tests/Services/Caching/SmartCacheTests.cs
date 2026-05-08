@@ -1021,5 +1021,62 @@ namespace Lidarr.Plugin.Common.Tests.Services.Caching
         }
 
         #endregion
+
+        #region ValueClone Hook (Phase 5e)
+
+        [Fact]
+        public void ValueClone_WhenSet_TryGetReturnsCloneNotSharedReference()
+        {
+            // Arrange — clone hook deep-copies the list so callers can mutate without affecting the cache entry.
+            var cache = new SmartCache<string, List<int>>(
+                keySerializer: k => k,
+                options: null,
+                logger: null,
+                valueClone: src => new List<int>(src));
+
+            var stored = new List<int> { 1, 2, 3 };
+            cache.Set("k", stored);
+
+            // Act — fetch, mutate, fetch again
+            Assert.True(cache.TryGet("k", out var first));
+            first!.Add(4);
+            first.Add(5);
+
+            Assert.True(cache.TryGet("k", out var second));
+
+            // Assert — the cached entry was NOT mutated; second copy has the original 3 elements.
+            Assert.Equal(3, second!.Count);
+            Assert.Equal(new[] { 1, 2, 3 }, second);
+        }
+
+        [Fact]
+        public void ValueClone_WhenNull_TryGetReturnsSameReference()
+        {
+            // Default behavior: no clone hook -> the stored reference is returned (callers must treat as shared).
+            var cache = new SmartCache<string, List<int>>(k => k);
+            var stored = new List<int> { 1, 2, 3 };
+            cache.Set("k", stored);
+
+            Assert.True(cache.TryGet("k", out var first));
+            Assert.Same(stored, first); // identity preserved
+        }
+
+        [Fact]
+        public void ValueClone_NotInvokedOnMiss()
+        {
+            // Hook should never run for misses — the out parameter should be default(TValue).
+            int callCount = 0;
+            var cache = new SmartCache<string, string>(
+                keySerializer: k => k,
+                options: null,
+                logger: null,
+                valueClone: src => { callCount++; return src; });
+
+            Assert.False(cache.TryGet("missing", out var v));
+            Assert.Null(v);
+            Assert.Equal(0, callCount);
+        }
+
+        #endregion
     }
 }
