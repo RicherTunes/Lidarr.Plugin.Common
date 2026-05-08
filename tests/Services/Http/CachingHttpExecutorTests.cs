@@ -630,5 +630,167 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
             await Assert.ThrowsAsync<InvalidOperationException>(
                 () => exec.SendAsync(NewBuilder(), NewKey(), policy, hooks));
         }
+
+        // ---- Wave 7 gap-fill: branch coverage for hook-exception swallowing and provider-null
+        // overload guard (pre-wave-7 line-rate 85.10% / branch-rate 57.89%). ----
+
+        [Fact]
+        public async Task PolicyProviderOverload_WithoutProvider_Throws()
+        {
+            // Build an executor without an ICachePolicyProvider, then call the convenience
+            // overload that omits per-call policy. The guard at the top of SendAsync must throw.
+            var tp = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            var provider = new StaticPolicyProvider(CachePolicy.Default);
+            var cache = new TestCache(tp, provider);
+            var handler = new ScriptedHandler((_, _) => NewOk());
+            var client = new HttpClient(handler);
+
+            var exec = new CachingHttpExecutor(
+                client, cache, resiliencePolicy: null,
+                policyProvider: null,                    // <- explicitly absent
+                conditionalState: null, timeProvider: tp);
+
+            await Assert.ThrowsAsync<InvalidOperationException>(
+                () => exec.SendAsync<string>(NewBuilder(), NewKey()));
+        }
+
+        [Fact]
+        public async Task MutateRequest_HookThrowing_IsSwallowed_AndRequestStillSends()
+        {
+            // The MutateRequest hook is wrapped in try/catch (logged at Debug). A throwing hook
+            // must not propagate and must not block the request.
+            var policy = CachePolicy.Default;
+            var (exec, handler, _, _) = Build(policy, (_, _) => NewOk("body"));
+
+            var hooks = new CachingHttpHooks<string>(
+                MutateRequest: _ => throw new InvalidOperationException("mutate boom"));
+
+            var result = await exec.SendAsync(NewBuilder(), NewKey(), policy, hooks);
+
+            Assert.Equal(CacheHitKind.Miss, result.HitKind);
+            Assert.Equal(1, handler.Calls);
+        }
+
+        [Fact]
+        public async Task OnHit_HookThrowing_IsSwallowed_AndResultIsReturned()
+        {
+            var policy = CachePolicy.Default;
+            var (exec, _, _, _) = Build(policy, (_, _) => NewOk());
+
+            var hooks = new CachingHttpHooks<string>(
+                OnHit: (_, _) => throw new InvalidOperationException("onhit boom"));
+
+            var result = await exec.SendAsync(NewBuilder(), NewKey(), policy, hooks);
+            Assert.Equal(CacheHitKind.Miss, result.HitKind);
+        }
+
+        [Fact]
+        public async Task OnEvict_HookThrowing_IsSwallowed_AndEvictionStillCompletes()
+        {
+            // 404 path: OnEvict hook throws, executor must swallow and still return EvictOnTerminal.
+            var policy = CachePolicy.Default.With(duration: TimeSpan.FromMinutes(10));
+            var (exec, _, cache, _) = Build(policy, (call, _) =>
+                call == 1 ? NewOk("warm") : new HttpResponseMessage(HttpStatusCode.NotFound));
+
+            var key = NewKey();
+            await exec.SendAsync(NewBuilder(), key, policy);
+            Assert.NotNull(cache.Get<CachedHttpResponse>(Endpoint, key.Parameters));
+
+            var hooks = new CachingHttpHooks<string>(
+                OnEvict: (_, _) => throw new InvalidOperationException("evict boom"));
+
+            var terminal = await exec.SendAsync(NewBuilder(), key, policy, hooks);
+            Assert.Equal(CacheHitKind.EvictOnTerminal, terminal.HitKind);
+            // Eviction still happened despite the hook failure.
+            Assert.Null(cache.Get<CachedHttpResponse>(Endpoint, key.Parameters));
+        }
+
+        [Fact]
+        public async Task NotModifiedFold_With304AndNoCachedBody_FallsBackToPassthrough()
+        {
+            // 304 with shouldCache=false means cache lookup is skipped → passthrough branch (line 215-217).
+            // Use Disabled policy so shouldCache is false but the request still happens.
+            var policy = CachePolicy.Disabled;
+            var (exec, _, _, _) = Build(policy, (_, _) => new HttpResponseMessage(HttpStatusCode.NotModified));
+
+            var result = await exec.SendAsync(NewBuilder(), NewKey(), policy);
+            Assert.Equal(CacheHitKind.Passthrough, result.HitKind);
+            Assert.Equal(HttpStatusCode.NotModified, result.StatusCode);
+        }
+
+        [Fact]
+        public async Task PrivateCacheControl_IsNotCached()
+        {
+            // Distinguishes Private from NoStore — both must skip the cache write (IsResponseCacheable false branch).
+            var policy = CachePolicy.Default.With(duration: TimeSpan.FromMinutes(5));
+            var (exec, handler, cache, _) = Build(policy, (_, _) =>
+            {
+                var r = NewOk();
+                r.Headers.CacheControl = new CacheControlHeaderValue { Private = true };
+                return r;
+            });
+
+            var key = NewKey();
+            var first = await exec.SendAsync(NewBuilder(), key, policy);
+            Assert.Equal(CacheHitKind.Miss, first.HitKind);
+            Assert.Null(cache.Get<CachedHttpResponse>(Endpoint, key.Parameters));
+
+            var second = await exec.SendAsync(NewBuilder(), key, policy);
+            Assert.Equal(CacheHitKind.Miss, second.HitKind);
+            Assert.Equal(2, handler.Calls);
+        }
+
+        [Fact]
+        public async Task RetryAfter_AbsoluteDate_HonoredForBackoff()
+        {
+            // Exercises the GetRetryAfterDelay branch where retryAfter.Date.HasValue is true (not Delta).
+            // Use a date in the past so the helper computes a non-positive delta and clamps to zero;
+            // the request still retries (resilience executor) and the second attempt succeeds.
+            var policy = CachePolicy.Default;
+            var (exec, handler, _, _) = Build(policy, (call, _) =>
+            {
+                if (call == 1)
+                {
+                    var r = new HttpResponseMessage((HttpStatusCode)429);
+                    r.Headers.RetryAfter = new RetryConditionHeaderValue(DateTimeOffset.UtcNow.AddSeconds(-1));
+                    return r;
+                }
+                return NewOk();
+            });
+
+            var result = await exec.SendAsync(NewBuilder(), NewKey(), policy);
+            Assert.Equal(CacheHitKind.Miss, result.HitKind);
+            Assert.Equal(2, handler.Calls);
+        }
+
+        [Fact]
+        public async Task Builder_Null_Throws()
+        {
+            var policy = CachePolicy.Default;
+            var (exec, _, _, _) = Build(policy, (_, _) => NewOk());
+
+            await Assert.ThrowsAsync<ArgumentNullException>(
+                () => exec.SendAsync(builder: null!, NewKey(), policy));
+        }
+
+        [Fact]
+        public async Task Key_Null_Throws()
+        {
+            var policy = CachePolicy.Default;
+            var (exec, _, _, _) = Build(policy, (_, _) => NewOk());
+
+            await Assert.ThrowsAsync<ArgumentNullException>(
+                () => exec.SendAsync(NewBuilder(), key: null!, policy));
+        }
+
+        [Fact]
+        public async Task Policy_Null_Throws()
+        {
+            var policy = CachePolicy.Default;
+            var (exec, _, _, _) = Build(policy, (_, _) => NewOk());
+
+            await Assert.ThrowsAsync<ArgumentNullException>(
+                () => exec.SendAsync(NewBuilder(), NewKey(), policy: null!));
+        }
     }
 }
