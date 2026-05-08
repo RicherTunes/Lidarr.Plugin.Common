@@ -52,6 +52,21 @@ public record LlmRequest
     public TimeSpan? Timeout { get; init; }
 
     /// <summary>
+    /// Gets a value indicating whether the provider should be instructed to return a
+    /// strict JSON response (where supported). Each provider encodes this differently
+    /// in its native protocol (for example OpenAI's <c>response_format=json_object</c>,
+    /// Anthropic's prompt-conditioned JSON shaping, Gemini's <c>responseMimeType</c>,
+    /// or Z.AI's OpenAI-compatible <c>response_format</c>) so the unified abstraction
+    /// surfaces the intent here and lets each provider translate it.
+    /// </summary>
+    /// <remarks>
+    /// Backward compatible: defaults to <c>false</c>. Providers that do not advertise
+    /// the <see cref="LlmCapabilityFlags.JsonMode"/> capability should ignore this flag
+    /// rather than fail.
+    /// </remarks>
+    public bool JsonMode { get; init; }
+
+    /// <summary>
     /// Gets optional provider-specific options for advanced configuration.
     /// These are passed through to the underlying provider without interpretation.
     /// Use for provider-specific features not covered by standard properties.
