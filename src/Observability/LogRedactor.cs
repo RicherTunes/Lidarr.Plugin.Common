@@ -32,9 +32,23 @@ public static partial class LogRedactor
     [GeneratedRegex(@"Bearer\s+[A-Za-z0-9._-]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex BearerTokenPattern();
 
-    /// <summary>Matches Authorization and API key header patterns.</summary>
-    [GeneratedRegex(@"(Authorization|X-Api-Key|api[_-]?key)\s*[:=]\s*\S+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    /// <summary>
+    /// Matches Authorization and API key header patterns. Consumes the full value
+    /// (not just the first whitespace-delimited token) so multi-token schemes like
+    /// <c>Basic dXNlcm5hbWU6cGFzc3dvcmQ=</c> are fully redacted, not partially.
+    /// Stops at end-of-line or common log-line delimiters (<c>, ; |</c> and <c>}</c>).
+    /// </summary>
+    [GeneratedRegex(@"(Authorization|X-Api-Key|api[_-]?key)\s*[:=]\s*[^\r\n,;|}]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex AuthHeaderPattern();
+
+    /// <summary>
+    /// Matches <c>Cookie:</c> and <c>Set-Cookie:</c> header values. Cookies routinely
+    /// carry session identifiers (e.g. <c>JSESSIONID=...</c>, <c>session_id=...</c>)
+    /// that are typically below the 32-char generic-token threshold and so escape
+    /// <see cref="GenericTokenPattern"/>. Redacts the entire cookie value to be safe.
+    /// </summary>
+    [GeneratedRegex(@"(Set-Cookie|Cookie)\s*[:=]\s*[^\r\n]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex CookieHeaderPattern();
 
     /// <summary>Matches generic long alphanumeric tokens (potential API keys).</summary>
     [GeneratedRegex(@"\b[A-Za-z0-9]{32,}\b", RegexOptions.Compiled)]
@@ -65,6 +79,16 @@ public static partial class LogRedactor
         value = GoogleKeyPattern().Replace(value, REDACTED);
         value = BearerTokenPattern().Replace(value, $"Bearer {REDACTED}");
         value = AuthHeaderPattern().Replace(value, match =>
+        {
+            var colonIndex = match.Value.IndexOfAny(new[] { ':', '=' });
+            if (colonIndex > 0)
+            {
+                var headerName = match.Value[..colonIndex].Trim();
+                return $"{headerName}: {REDACTED}";
+            }
+            return REDACTED;
+        });
+        value = CookieHeaderPattern().Replace(value, match =>
         {
             var colonIndex = match.Value.IndexOfAny(new[] { ':', '=' });
             if (colonIndex > 0)

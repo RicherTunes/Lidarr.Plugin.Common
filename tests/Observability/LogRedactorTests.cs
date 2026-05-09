@@ -169,6 +169,50 @@ public class LogRedactorTests
     }
 
     [Fact]
+    public void Redact_BasicAuthHeader_ValueFullyRedacted()
+    {
+        // Basic auth: Authorization scheme is "Basic", followed by base64-encoded user:pass.
+        // The previous \S+ pattern only consumed "Basic" and left the credential in cleartext.
+        var input = "Authorization: Basic dXNlcm5hbWU6cGFzc3dvcmQ=";
+        var result = LogRedactor.Redact(input);
+        Assert.DoesNotContain("dXNlcm5hbWU6cGFzc3dvcmQ=", result);
+        Assert.Contains("Authorization", result);
+        Assert.Contains(LogRedactor.REDACTED, result);
+    }
+
+    [Fact]
+    public void Redact_AuthHeader_StopsAtPipeDelimiter()
+    {
+        // Multi-field log line — auth pattern should not consume past the pipe separator.
+        var input = "Authorization: Basic dXNlcjpwd2Q= | next: safe-field-value";
+        var result = LogRedactor.Redact(input);
+        Assert.DoesNotContain("dXNlcjpwd2Q=", result);
+        Assert.Contains("safe-field-value", result);
+    }
+
+    [Fact]
+    public void Redact_CookieHeader_RedactsShortSessionId()
+    {
+        // 12-char session id — well below the 32-char generic threshold.
+        var input = "Cookie: session_id=xyz789abc123; path=/";
+        var result = LogRedactor.Redact(input);
+        Assert.DoesNotContain("xyz789abc123", result);
+        Assert.Contains("Cookie", result);
+        Assert.Contains(LogRedactor.REDACTED, result);
+    }
+
+    [Fact]
+    public void Redact_SetCookieHeader_RedactsJSessionId()
+    {
+        // 20-char JSESSIONID — also below 32-char threshold.
+        var input = "Set-Cookie: JSESSIONID=1A2B3C4D5E6F7G8H9I0J; HttpOnly";
+        var result = LogRedactor.Redact(input);
+        Assert.DoesNotContain("1A2B3C4D5E6F7G8H9I0J", result);
+        Assert.Contains("Set-Cookie", result);
+        Assert.Contains(LogRedactor.REDACTED, result);
+    }
+
+    [Fact]
     public void RedactException_NullException_ReturnsEmpty()
     {
         Assert.Equal(string.Empty, LogRedactor.RedactException(null));
