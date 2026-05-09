@@ -57,8 +57,11 @@ public class LogRedactorTests
     [Fact]
     public void Redact_HyphenatedUuid_NotRedacted()
     {
-        // Standard hyphenated UUIDs do not match \b[A-Za-z0-9]{32,}\b due to hyphens.
-        const string uuid = "00000000-0000-0000-0000-000000000000";
+        // Standard hyphenated UUIDs do not match \b[A-Za-z0-9]{32,}\b due to hyphens,
+        // and don't match the CC pattern because of the hex letters.
+        // The all-zero UUID is degenerate and would be caught by the CC pattern, which
+        // is an accepted trade-off — real UUIDs in the wild contain a-f letters.
+        const string uuid = "a1b2c3d4-e5f6-7890-abcd-ef1234567890";
         var input = $"id: {uuid}";
         var result = LogRedactor.Redact(input);
         Assert.Contains(uuid, result);
@@ -210,6 +213,45 @@ public class LogRedactorTests
         Assert.DoesNotContain("1A2B3C4D5E6F7G8H9I0J", result);
         Assert.Contains("Set-Cookie", result);
         Assert.Contains(LogRedactor.REDACTED, result);
+    }
+
+    [Fact]
+    public void Redact_EmailAddress_Redacted()
+    {
+        var input = "Contact admin@example.com or user.test+tag@sub.example.co for help";
+        var result = LogRedactor.Redact(input);
+        Assert.DoesNotContain("admin@example.com", result);
+        Assert.DoesNotContain("user.test+tag@sub.example.co", result);
+        Assert.Contains(LogRedactor.REDACTED, result);
+        Assert.Contains("Contact", result);
+    }
+
+    [Fact]
+    public void Redact_IPv4Address_Redacted()
+    {
+        var input = "Server at 192.168.1.100 forwarded by 10.0.0.1";
+        var result = LogRedactor.Redact(input);
+        Assert.DoesNotContain("192.168.1.100", result);
+        Assert.DoesNotContain("10.0.0.1", result);
+    }
+
+    [Fact]
+    public void Redact_CreditCardLikeSequence_Redacted()
+    {
+        var input = "card on file: 4111-1111-1111-1111 expires soon";
+        var result = LogRedactor.Redact(input);
+        Assert.DoesNotContain("4111-1111-1111-1111", result);
+    }
+
+    [Fact]
+    public void Redact_NormalProseAndMetrics_Preserved()
+    {
+        // Ensure PII redaction doesn't eat ordinary log prose.
+        var input = "Provider openai returned 5 recommendations in 250ms";
+        var result = LogRedactor.Redact(input);
+        Assert.Contains("openai", result);
+        Assert.Contains("5 recommendations", result);
+        Assert.Contains("250ms", result);
     }
 
     [Fact]

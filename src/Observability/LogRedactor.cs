@@ -54,6 +54,18 @@ public static partial class LogRedactor
     [GeneratedRegex(@"\b[A-Za-z0-9]{32,}\b", RegexOptions.Compiled)]
     private static partial Regex GenericTokenPattern();
 
+    /// <summary>Matches RFC-ish email addresses (PII).</summary>
+    [GeneratedRegex(@"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex EmailPattern();
+
+    /// <summary>Matches IPv4 addresses (PII / infrastructure detail).</summary>
+    [GeneratedRegex(@"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", RegexOptions.Compiled)]
+    private static partial Regex IpAddressPattern();
+
+    /// <summary>Matches credit-card-shaped digit sequences with optional space/dash separators.</summary>
+    [GeneratedRegex(@"\b(?:\d[ -]*?){13,16}\b", RegexOptions.Compiled)]
+    private static partial Regex CreditCardPattern();
+
     /// <summary>
     /// Matches sensitive JSON property values: <c>"key": "value"</c> or <c>"key":"value"</c>.
     /// Catches nested credentials like <c>{"api_key":"sk-abc..."}</c> where the value alone may not
@@ -110,6 +122,13 @@ public static partial class LogRedactor
             var keyPart = match.Value[..quoteIdx].TrimEnd();
             return $"{keyPart}: \"{REDACTED}\"";
         });
+
+        // PII patterns — applied before the generic catch-all so emails and IPs aren't first
+        // claimed by the 32-char alphanumeric rule (and so 13-16 digit sequences don't get
+        // partially eaten). Order: email → CC → IP, since email and CC are more specific.
+        value = EmailPattern().Replace(value, REDACTED);
+        value = CreditCardPattern().Replace(value, REDACTED);
+        value = IpAddressPattern().Replace(value, REDACTED);
 
         // Generic catch-all: any remaining long opaque alphanumeric string is likely a token
         // (service-specific tokens that don't match the structured prefixes above).
