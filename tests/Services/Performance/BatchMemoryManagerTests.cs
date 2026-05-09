@@ -481,8 +481,15 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
         [Fact]
         public void GetMemoryStatistics_CalculatesMemoryUtilization()
         {
-            // Arrange & Act
-            using var manager = CreateManager();
+            // Use a very high limit (100 GB) so the test process's actual working set
+            // can't realistically exceed it. The previous default of 512 MB caused
+            // intermittent failures under full-suite load when the test runner's
+            // working set exceeded 512 MB — MemoryUtilizationPercent is computed from
+            // real Process.WorkingSet64, not from any clamp, so values > 100 are
+            // legitimate signal (process is over its configured budget) and worth
+            // preserving in production. The test just needs a budget the runner can't
+            // bust under load.
+            using var manager = CreateManager(maxMemoryMB: 100_000);
             var stats = manager.GetMemoryStatistics();
 
             // Assert
