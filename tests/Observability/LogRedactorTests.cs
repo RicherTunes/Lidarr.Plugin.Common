@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Lidarr.Plugin.Common.Observability;
 using Xunit;
 
@@ -280,6 +281,59 @@ public class LogRedactorTests
         Assert.Contains("HttpRequestException", result);
         Assert.Contains("-->", result);
         Assert.DoesNotContain("eyJhbGc.payload.signature", result);
+    }
+
+    [Theory]
+    [InlineData("apiKey", true)]
+    [InlineData("api_key", true)]
+    [InlineData("Authorization", true)]
+    [InlineData("password", true)]
+    [InlineData("client_secret", true)]
+    [InlineData("session_id", true)]
+    [InlineData("refresh_token", true)]
+    [InlineData("X-API-Key", true)]
+    [InlineData("custom_auth_field", true)]   // contains "auth"
+    [InlineData("user_credential", true)]      // contains "credential"
+    [InlineData("user_password_hash", true)]   // contains "password"
+    [InlineData("display_name", false)]
+    [InlineData("user_id", false)]
+    [InlineData("count", false)]
+    public void IsSensitiveParameter_ClassifiesNamesCorrectly(string name, bool expected)
+    {
+        Assert.Equal(expected, LogRedactor.IsSensitiveParameter(name));
+    }
+
+    [Fact]
+    public void IsSensitiveParameter_NullOrEmpty_ReturnsFalse()
+    {
+        Assert.False(LogRedactor.IsSensitiveParameter(null));
+        Assert.False(LogRedactor.IsSensitiveParameter(""));
+    }
+
+    [Fact]
+    public void RedactDictionary_RedactsSensitiveKeysAndScansStringValues()
+    {
+        var input = new Dictionary<string, object>
+        {
+            ["api_key"] = "sk-abcdef1234567890ABCDEF1234567890",
+            ["username"] = "alice",                                // not sensitive name, not a token
+            ["body"] = "Authorization: Bearer eyJhbGc.payload.sig", // string value gets scanned
+            ["count"] = 42,                                         // non-string preserved as-is
+        };
+        var result = LogRedactor.RedactDictionary(input);
+
+        Assert.Equal(LogRedactor.REDACTED, result["api_key"]);
+        Assert.Equal("alice", result["username"]);
+        Assert.DoesNotContain("eyJhbGc.payload.sig", (string)result["body"]);
+        Assert.Equal(42, result["count"]);
+    }
+
+    [Fact]
+    public void RedactDictionary_NullSource_ReturnsEmptyDictionary()
+    {
+        var result = LogRedactor.RedactDictionary(null);
+        Assert.NotNull(result);
+        Assert.Empty(result);
     }
 
     [Fact]
