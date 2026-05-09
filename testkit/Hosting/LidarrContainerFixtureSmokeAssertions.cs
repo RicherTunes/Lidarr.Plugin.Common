@@ -48,6 +48,25 @@ public static class LidarrContainerFixtureSmokeAssertions
     public static async Task AssertDownloadClientTestReturnsSensibleFailureAsync(this LidarrContainerFixture fixture)
         => await AssertTestEndpointReturnsValidationFailureAsync(fixture, "downloadclient").ConfigureAwait(false);
 
+    /// <summary>
+    /// Asserts <c>GET /api/v1/importlist/schema</c> contains an entry whose
+    /// <c>name</c> or <c>implementation</c> matches the plugin's
+    /// <see cref="LidarrContainerOptions.PluginEntrySubstring"/>. Used by
+    /// ImportList-only plugins (e.g. brainarr) which expose neither an
+    /// indexer nor a download client.
+    /// </summary>
+    public static async Task AssertPluginAppearsInImportListSchemaAsync(this LidarrContainerFixture fixture)
+        => await AssertSchemaContainsPluginAsync(fixture, "importlist").ConfigureAwait(false);
+
+    /// <summary>
+    /// POSTs the plugin's importlist schema entry back to
+    /// <c>/api/v1/importlist/test</c> and asserts the response is &lt; 500.
+    /// With no real credentials a 4xx validation failure is expected; a 500
+    /// means the plugin failed to load.
+    /// </summary>
+    public static async Task AssertImportListTestReturnsSensibleFailureAsync(this LidarrContainerFixture fixture)
+        => await AssertTestEndpointReturnsValidationFailureAsync(fixture, "importlist").ConfigureAwait(false);
+
     // -- helpers -----------------------------------------------------------
 
     private static async Task AssertSchemaContainsPluginAsync(LidarrContainerFixture fixture, string kind)
