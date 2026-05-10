@@ -114,7 +114,11 @@
     "agentic",
     "mgmt",
     "Gitsubmodule",
-    "AppleMusiSharp"
+    "AppleMusiSharp",
+    "Diagnoser",
+    "Linq",
+    "backoffs",
+    "IHTTPCLIENT"
   ],
   "ignorePaths": [
     "**/bin",

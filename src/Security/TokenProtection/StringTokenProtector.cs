@@ -1,5 +1,6 @@
 using System;
 using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
 using System.Text;
 using Lidarr.Plugin.Common.Interfaces;
 
@@ -38,13 +39,22 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
             }
 
             var plaintextBytes = Encoding.UTF8.GetBytes(plaintext);
-            var protectedBytes = _tokenProtector.Protect(plaintextBytes);
+            try
+            {
+                var protectedBytes = _tokenProtector.Protect(plaintextBytes);
 
-            var algorithmIdBytes = Encoding.UTF8.GetBytes(_tokenProtector.AlgorithmId ?? string.Empty);
-            var algB64Url = Base64UrlEncode(algorithmIdBytes);
-            var payloadB64Url = Base64UrlEncode(protectedBytes);
+                var algorithmIdBytes = Encoding.UTF8.GetBytes(_tokenProtector.AlgorithmId ?? string.Empty);
+                var algB64Url = Base64UrlEncode(algorithmIdBytes);
+                var payloadB64Url = Base64UrlEncode(protectedBytes);
 
-            return $"{Prefix}{algB64Url}:{payloadB64Url}";
+                return $"{Prefix}{algB64Url}:{payloadB64Url}";
+            }
+            finally
+            {
+                // Zero the intermediate plaintext copy (the original `plaintext` string is immutable
+                // and outside our control; this only neutralizes the byte[] we just allocated).
+                CryptographicOperations.ZeroMemory(plaintextBytes);
+            }
         }
 
         public string? Unprotect(string? protectedValue)
@@ -78,10 +88,11 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
                 return false;
             }
 
+            byte[]? unprotectedBytes = null;
             try
             {
                 var protectedBytes = Base64UrlDecode(parts[1]);
-                var unprotectedBytes = _tokenProtector.Unprotect(protectedBytes);
+                unprotectedBytes = _tokenProtector.Unprotect(protectedBytes);
                 plaintext = Encoding.UTF8.GetString(unprotectedBytes);
                 return true;
             }
@@ -89,6 +100,16 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
             {
                 plaintext = null;
                 return false;
+            }
+            finally
+            {
+                // Zero the intermediate plaintext byte[] returned by the underlying protector.
+                // The decoded string is now in `plaintext` (immutable); we cannot zero that, but
+                // neutralizing the byte buffer reduces residue.
+                if (unprotectedBytes is not null)
+                {
+                    CryptographicOperations.ZeroMemory(unprotectedBytes);
+                }
             }
         }
 

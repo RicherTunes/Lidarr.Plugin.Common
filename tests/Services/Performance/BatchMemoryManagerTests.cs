@@ -13,7 +13,6 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
     [Trait("Category", "Unit")]
     public class BatchMemoryManagerTests
     {
-        private const string DisposeSkipReason = "Fix needed: BatchMemoryManager.Dispose() has bug at line 487 - tries to Release() on disposed SemaphoreSlim";
         private BatchMemoryManager CreateManager(long maxMemoryMB = 512)
         {
             return new BatchMemoryManager(maxMemoryMB: maxMemoryMB);
@@ -21,7 +20,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region Constructor Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public void Constructor_InitializesWithDefaultMemoryLimit()
         {
             // Arrange & Act
@@ -32,7 +31,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.Equal(512, stats.MaxMemoryLimitMB);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public void Constructor_AcceptsCustomMemoryLimit()
         {
             // Arrange & Act
@@ -43,7 +42,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.Equal(1024, stats.MaxMemoryLimitMB);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public void Constructor_InitializesOptimalBatchSize()
         {
             // Arrange & Act
@@ -58,7 +57,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region ProcessWithMemoryManagementAsync Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_ProcessesAllItems()
         {
             // Arrange
@@ -83,7 +82,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.Equal(250, manager.GetMemoryStatistics().TotalItemsProcessed);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_ReturnsStreamingResults()
         {
             // Arrange
@@ -115,7 +114,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.True(batchCount > 0);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_UsesAdaptiveBatchSizing()
         {
             // Arrange
@@ -145,7 +144,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.All(batchSizes, size => Assert.InRange(size, 10, 100));
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_ReducesBatchSizeUnderMemoryPressure()
         {
             // Arrange
@@ -179,7 +178,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             }
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_HandlesOutOfMemoryException()
         {
             // Arrange
@@ -220,7 +219,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.True(callCount >= 1);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_HandlesEmptyCollection()
         {
             // Arrange
@@ -246,7 +245,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.Equal(0, manager.GetMemoryStatistics().TotalItemsProcessed);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_HandlesZeroBatchSize()
         {
             // Arrange
@@ -271,7 +270,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             }
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_ReportsProgress()
         {
             // Arrange
@@ -302,7 +301,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             });
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_ContinuesOnError()
         {
             // Arrange
@@ -345,7 +344,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.True(errorCount > 0);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_StopsOnErrorWhenConfigured()
         {
             // Arrange
@@ -372,7 +371,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             });
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_RespectsCancellationToken()
         {
             // Arrange
@@ -406,7 +405,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.True(processedCount >= 50 || task.IsCompleted);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task ProcessWithMemoryManagementAsync_ThrowsWhenDisposed()
         {
             // Arrange
@@ -434,7 +433,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region GetMemoryStatistics Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public void GetMemoryStatistics_ReturnsValidStatistics()
         {
             // Arrange & Act
@@ -451,7 +450,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.True(stats.ProcessingDuration >= TimeSpan.Zero);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task GetMemoryStatistics_ReflectsProcessing()
         {
             // Arrange
@@ -479,11 +478,18 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.True(stats.AverageBatchSize > 0);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public void GetMemoryStatistics_CalculatesMemoryUtilization()
         {
-            // Arrange & Act
-            using var manager = CreateManager();
+            // Use a very high limit (100 GB) so the test process's actual working set
+            // can't realistically exceed it. The previous default of 512 MB caused
+            // intermittent failures under full-suite load when the test runner's
+            // working set exceeded 512 MB — MemoryUtilizationPercent is computed from
+            // real Process.WorkingSet64, not from any clamp, so values > 100 are
+            // legitimate signal (process is over its configured budget) and worth
+            // preserving in production. The test just needs a budget the runner can't
+            // bust under load.
+            using var manager = CreateManager(maxMemoryMB: 100_000);
             var stats = manager.GetMemoryStatistics();
 
             // Assert
@@ -495,7 +501,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region GetOptimalBatchSize Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public void GetOptimalBatchSize_ReturnsValidSize()
         {
             // Arrange & Act
@@ -506,7 +512,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.InRange(batchSize, 10, 1000);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task GetOptimalBatchSize_AdaptsBasedOnPerformance()
         {
             // Arrange
@@ -539,7 +545,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region ShouldPauseForMemory Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public void ShouldPauseForMemory_ReturnsBoolean()
         {
             // Arrange & Act
@@ -550,7 +556,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.IsType<bool>(shouldPause);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public void ShouldPauseForMemory_DetectsMemoryPressure()
         {
             // Arrange & Act
@@ -567,7 +573,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region Streaming Correctness Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task StreamingCorrectness_PreservesOrder()
         {
             // Arrange
@@ -592,7 +598,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.Equal(expected, results);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task StreamingCorrectness_ProcessesAllItemsExactlyOnce()
         {
             // Arrange
@@ -621,7 +627,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.Equal(100, processedItems.Count);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task StreamingCorrectness_HandlesNullResults()
         {
             // Arrange
@@ -647,7 +653,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region Edge Cases Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task EdgeCase_SingleItem()
         {
             // Arrange
@@ -672,7 +678,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.Equal(84, results[0]);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task EdgeCase_VeryLargeCollection()
         {
             // Arrange
@@ -697,7 +703,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.Equal(10000, totalCount);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task EdgeCase_BatchSizeExceedsItemCount()
         {
             // Arrange
@@ -732,7 +738,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region Disposal Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public void Dispose_CanBeCalledMultipleTimes()
         {
             // Arrange
@@ -743,7 +749,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             manager.Dispose();
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task DisposeAsync_CanBeCalledMultipleTimes()
         {
             // Arrange
@@ -754,7 +760,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             await manager.DisposeAsync();
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task DisposeAsync_StopsMonitoring()
         {
             // Arrange
@@ -782,7 +788,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region Memory Cleanup Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task PerformMemoryCleanup_TriggeredPeriodically()
         {
             // Arrange
@@ -810,7 +816,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.Equal(100, stats.TotalItemsProcessed);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task PerformMemoryCleanup_CanBeDisabled()
         {
             // Arrange
@@ -842,7 +848,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region BatchDuration Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task BatchDuration_IsTracked()
         {
             // Arrange
@@ -867,7 +873,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
 
         #region Adaptive Performance Tests
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task AdaptiveBatching_IncreasesOnHighThroughput()
         {
             // Arrange
@@ -893,7 +899,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             Assert.InRange(finalBatchSize, 10, 1000);
         }
 
-        [Fact(Skip = DisposeSkipReason)]
+        [Fact]
         public async Task AdaptiveBatching_DecreasesOnLowThroughput()
         {
             // Arrange

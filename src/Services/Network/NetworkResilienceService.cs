@@ -348,6 +348,27 @@ namespace Lidarr.Plugin.Common.Services.Network
                         Result = result
                     };
                 }
+                catch (TaskCanceledException tce) when (!cancellationToken.IsCancellationRequested)
+                {
+                    // TaskCanceledException with caller's token NOT cancelled: typically a network/HTTP
+                    // timeout. Treat as a normal exception so ShouldRetry can classify it by message
+                    // ("A task was canceled" => not retryable; otherwise retryable).
+                    lastException = tce;
+
+                    if (!ShouldRetry(tce, attempt))
+                    {
+                        break;
+                    }
+
+                    if (attempt < _maxRetryAttempts - 1)
+                    {
+                        var delay = CalculateRetryDelay(attempt);
+                        _logger.LogDebug("🔄 RETRY: Attempt {0} failed (TCE), retrying in {1}ms: {2}",
+                                     attempt + 1, delay.TotalMilliseconds, tce.Message);
+
+                        await Task.Delay(delay, cancellationToken);
+                    }
+                }
                 catch (OperationCanceledException)
                 {
                     throw; // Don't retry cancellation

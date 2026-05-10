@@ -614,6 +614,8 @@ function Get-StandardTestArgs {
 
     if ($Coverage) {
         $args += @("--collect", "XPlat Code Coverage")
+        # Disable PathMap so coverlet can resolve source paths from PDBs.
+        $args += @("-p:DisablePathMap=true")
     }
 
     if ($Verbose) {

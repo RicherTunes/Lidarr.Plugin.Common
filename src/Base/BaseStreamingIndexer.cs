@@ -230,7 +230,11 @@ namespace Lidarr.Plugin.Common.Base
                 var validationResult = ValidateSettings(Settings);
                 if (!validationResult.IsValid)
                 {
-                    Logger?.LogError($"{ServiceName} settings validation failed: {string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))}");
+                    // NOTE: Avoid validationResult.Errors here — the property's return type changed
+                    // between FluentValidation 9.5.4 (IList<>) and 11.x (List<>), causing
+                    // MissingMethodException when host/test runtime version differs from compile version.
+                    // ValidationResult.ToString() is stable across versions.
+                    Logger?.LogError($"{ServiceName} settings validation failed: {validationResult}");
                     return validationResult;
                 }
 
@@ -238,9 +242,14 @@ namespace Lidarr.Plugin.Common.Base
                 var authResult = await AuthenticateAsync();
                 if (!authResult)
                 {
-                    var authError = new ValidationResult();
-                    authError.Errors.Add(new FluentValidation.Results.ValidationFailure("Authentication", $"Failed to authenticate with {ServiceName}"));
-                    return authError;
+                    // NOTE: Construct ValidationResult via the IEnumerable<ValidationFailure> ctor instead
+                    // of Errors.Add(...) — the Errors property return type changed between FluentValidation
+                    // 9.5.4 (IList<ValidationFailure>) and 11.x (List<ValidationFailure>), causing
+                    // MissingMethodException at runtime when host/test version differs from compile version.
+                    return new ValidationResult(new[]
+                    {
+                        new FluentValidation.Results.ValidationFailure("Authentication", $"Failed to authenticate with {ServiceName}")
+                    });
                 }
 
                 lock (_initializationLock)
@@ -254,9 +263,11 @@ namespace Lidarr.Plugin.Common.Base
             catch (Exception ex)
             {
                 Logger?.LogError(ex, $"Failed to initialize {ServiceName} indexer");
-                var errorResult = new ValidationResult();
-                errorResult.Errors.Add(new FluentValidation.Results.ValidationFailure("Initialization", $"Initialization failed: {ex.Message}"));
-                return errorResult;
+                // See note above on FluentValidation API drift; use ctor instead of Errors.Add.
+                return new ValidationResult(new[]
+                {
+                    new FluentValidation.Results.ValidationFailure("Initialization", $"Initialization failed: {ex.Message}")
+                });
             }
         }
 
@@ -337,13 +348,33 @@ namespace Lidarr.Plugin.Common.Base
         /// </summary>
         protected async Task<string> ExecuteRequestAsync(System.Net.Http.HttpRequestMessage request)
         {
-            using var response = await GetHttpClient().ExecuteWithResilienceAsync(
-                request,
-                ResiliencePolicy.Lookup
-            );
+            try
+            {
+                using var response = await GetHttpClient().ExecuteWithResilienceAsync(
+                    request,
+                    ResiliencePolicy.Lookup
+                );
 
-            response.EnsureSuccessStatusCode();
-            return await response.Content.ReadAsStringAsync();
+                response.EnsureSuccessStatusCode();
+                return await response.Content.ReadAsStringAsync();
+            }
+            catch (TimeoutException ex)
+            {
+                // ExecuteWithResilienceAsync surfaces the per-request timeout as TimeoutException;
+                // translate to HttpRequestException so callers get a consistent network-error type.
+                throw new System.Net.Http.HttpRequestException(
+                    $"Request to {request.RequestUri} timed out after retries: {ex.Message}", ex);
+            }
+            catch (TaskCanceledException ex)
+            {
+                // Retry-budget exhaustion or per-request timeout can manifest as TaskCanceledException
+                // from the resilience layer's internal Task.Delay. ExecuteRequestAsync does not accept
+                // an external CancellationToken, so any cancellation here is internal — always translate
+                // to HttpRequestException so consumers don't have to handle two exception types for the
+                // same logical failure.
+                throw new System.Net.Http.HttpRequestException(
+                    $"Request to {request.RequestUri} failed after retries: {ex.Message}", ex);
+            }
         }
 
         /// <summary>
@@ -389,7 +420,14 @@ namespace Lidarr.Plugin.Common.Base
         /// Initialize with cancellation support. Default forwards to InitializeAsync().
         /// </summary>
         public virtual Task<ValidationResult> InitializeAsync(CancellationToken cancellationToken)
-            => InitializeAsync();
+        {
+            // Honor the cancellation token before delegating — the parameterless overload runs
+            // long-lived synchronous work (ValidateSettings, AuthenticateAsync) that does not
+            // observe cancellation. Throwing here is the contract callers expect when they pass
+            // an already-cancelled token.
+            cancellationToken.ThrowIfCancellationRequested();
+            return InitializeAsync();
+        }
 
         #endregion
 

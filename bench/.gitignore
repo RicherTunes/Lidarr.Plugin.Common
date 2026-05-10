@@ -1,0 +1,3 @@
+# BenchmarkDotNet emits reports + logs into a sibling directory of the bench project.
+# These are run-specific artifacts; the curated baseline numbers live under bench/baselines/.
+**/BenchmarkDotNet.Artifacts/

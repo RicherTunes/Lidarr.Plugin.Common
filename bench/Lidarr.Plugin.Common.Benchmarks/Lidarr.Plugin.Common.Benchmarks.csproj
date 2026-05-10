@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Optimize>true</Optimize>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <ConcurrentGarbageCollection>true</ConcurrentGarbageCollection>
+    <IsPackable>false</IsPackable>
+    <!-- Standalone harness; intentionally NOT in lidarr.plugin.common.sln. -->
+    <RunAnalyzersDuringBuild>false</RunAnalyzersDuringBuild>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BenchmarkDotNet" Version="0.14.0" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Lidarr.Plugin.Common.csproj">
+      <AdditionalProperties>GeneratePackageOnBuild=false;RunAnalyzersDuringBuild=false;EnableNETAnalyzers=false</AdditionalProperties>
+    </ProjectReference>
+    <ProjectReference Include="..\..\src\Abstractions\Lidarr.Plugin.Abstractions.csproj">
+      <AdditionalProperties>GeneratePackageOnBuild=false;RunAnalyzersDuringBuild=false;EnableNETAnalyzers=false</AdditionalProperties>
+    </ProjectReference>
+  </ItemGroup>
+
+</Project>

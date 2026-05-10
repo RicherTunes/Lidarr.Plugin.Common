@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 #if NET8_0_OR_GREATER
 using Azure.Identity;
@@ -89,12 +90,32 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
 
         public byte[] Protect(ReadOnlySpan<byte> plaintext)
         {
-            return _protector.Protect(plaintext.ToArray());
+            // Copy the plaintext into an owned buffer so we can zero it after IDataProtection returns.
+            // IDataProtector.Protect requires byte[]; the intermediate copy is unavoidable.
+            var buffer = plaintext.ToArray();
+            try
+            {
+                return _protector.Protect(buffer);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(buffer);
+            }
         }
 
         public byte[] Unprotect(ReadOnlySpan<byte> protectedBytes)
         {
-            return _protector.Unprotect(protectedBytes.ToArray());
+            // Input is ciphertext; intermediate byte[] is just for IDataProtector's API surface.
+            // The returned plaintext is owned by the caller (cannot be zeroed here without breaking contract).
+            var buffer = protectedBytes.ToArray();
+            try
+            {
+                return _protector.Unprotect(buffer);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(buffer);
+            }
         }
 
         private static string GetDefaultKeysDir()

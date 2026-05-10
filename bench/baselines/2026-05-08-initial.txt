@@ -1,0 +1,59 @@
+# Initial baseline — 2026-05-08
+
+Captured by `dotnet run -c Release -- --filter "*" --job short --warmupCount 2 --iterationCount 3`
+under BenchmarkDotNet v0.14.0 on Windows 11 (10.0.26200.8328), .NET SDK 8.0.420
+(.NET 8.0.26 / 8.0.2626.16921), X64 RyuJIT AVX2.
+
+NOTE: `--job short` (warmup=2, iterations=3) is intentionally rough — these are
+baseline anchors, not high-precision numbers. Re-run with default job settings
+when chasing a regression.
+
+## CachingHttpExecutor
+
+| Method                                               | Mean     | Allocated |
+| ---------------------------------------------------- | -------: | --------: |
+| Hit (hot cache, no origin call)                      | 2.172 us |   4.38 KB |
+| Miss (origin 200, cache write)                       | 2.214 us |   4.74 KB |
+| NotModifiedFold (origin 304, cached body returned)   | 6.393 us |  12.45 KB |
+
+## ChunkedHttpAssembler
+
+| Method                                  | Mean       | Allocated  |
+| --------------------------------------- | ---------: | ---------: |
+| AssembleAsync — 8 chunks (4KB each)     |   9.098 ms |  607.13 KB |
+| AssembleAsync — 64 chunks (4KB each)    |  49.969 ms | 4378.85 KB |
+
+(Wall-time dominated by temp-file IO; concurrency 4 / 8 respectively.)
+
+## JsonFileStore<TKey,TValue> (TTL=30m, MaxEntries=256)
+
+| Method                                | Mean              | Allocated |
+| ------------------------------------- | ----------------: | --------: |
+| SetAsync (small payload, TTL+LRU)     | 2,599,240.20 ns   |    1641 B |
+| GetAsync (warm key)                   |        38.15 ns   |       0 B |
+
+(Set hits disk on every call; Get is in-memory.)
+
+## AnthropicStreamDecoder
+
+| Method                                       | Mean      | Allocated |
+| -------------------------------------------- | --------: | --------: |
+| DecodeAsync — small message (~4 deltas)      |  7.880 us |  38.82 KB |
+| DecodeAsync — typical message (~32 deltas)   | 30.199 us | 111.03 KB |
+
+## FileTokenStore<TSession>
+
+| Method                              | Mean      | Allocated |
+| ----------------------------------- | --------: | --------: |
+| SaveAsync + LoadAsync round-trip    |  3.876 ms |  15.32 KB |
+
+(Round-trip = serialize + protect + write + read + deserialize. Disk-bound.)
+
+## LogRedactor.Redact
+
+| Method                                          | Mean        | Allocated |
+| ----------------------------------------------- | ----------: | --------: |
+| Plain message (no match)                        |    266.5 ns |       0 B |
+| Bearer token in header line                     |    794.9 ns |     744 B |
+| JSON credential blob                            |  1,499.0 ns |    2480 B |
+| Query string with sensitive params              |  1,002.2 ns |       0 B |

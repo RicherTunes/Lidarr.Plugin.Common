@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Diagnostics;
 
 namespace Lidarr.Plugin.Common.Abstractions.Llm;
 
@@ -115,6 +116,28 @@ public record ProviderHealthResult
     };
 
     /// <summary>
+    /// Creates a healthy result, sourcing the response time from the supplied
+    /// <see cref="Stopwatch"/>. When the stopwatch has not been started (its
+    /// <see cref="Stopwatch.Elapsed"/> is <see cref="TimeSpan.Zero"/> and it is
+    /// not running), the response time is reported as <c>null</c> rather than
+    /// <see cref="TimeSpan.Zero"/> to avoid signalling a misleading "0 ms" latency.
+    /// </summary>
+    /// <param name="stopwatch">Stopwatch capturing the health-check duration. Null treated as no measurement.</param>
+    /// <param name="provider">Optional provider identifier.</param>
+    /// <param name="authMethod">Optional authentication method.</param>
+    /// <param name="model">Optional model identifier.</param>
+    /// <returns>A healthy <see cref="ProviderHealthResult"/>.</returns>
+    public static ProviderHealthResult Healthy(
+        Stopwatch? stopwatch,
+        string? provider = null,
+        string? authMethod = null,
+        string? model = null) => Healthy(
+            ToResponseTime(stopwatch),
+            provider,
+            authMethod,
+            model);
+
+    /// <summary>
     /// Creates an unhealthy result indicating the provider cannot accept requests.
     /// </summary>
     /// <param name="reason">The reason the provider is unhealthy.</param>
@@ -150,19 +173,39 @@ public record ProviderHealthResult
     /// <param name="provider">Optional provider identifier.</param>
     /// <param name="authMethod">Optional authentication method.</param>
     /// <param name="model">Optional model identifier.</param>
+    /// <param name="errorCode">Optional standardized error/warning code for diagnostics (e.g., <c>CONNECTION_REFUSED</c>, <c>STARTUP</c>).</param>
     /// <returns>A degraded <see cref="ProviderHealthResult"/> (marked as healthy but with warning message).</returns>
     public static ProviderHealthResult Degraded(
         string reason,
         TimeSpan? responseTime = null,
         string? provider = null,
         string? authMethod = null,
-        string? model = null) => new()
+        string? model = null,
+        string? errorCode = null) => new()
     {
         IsHealthy = true,
         StatusMessage = $"[Degraded] {reason}",
         ResponseTime = responseTime,
         Provider = provider,
         AuthMethod = authMethod,
-        Model = model
+        Model = model,
+        ErrorCode = errorCode
     };
+
+    private static TimeSpan? ToResponseTime(Stopwatch? stopwatch)
+    {
+        if (stopwatch is null)
+        {
+            return null;
+        }
+
+        // Stopwatch never started: Elapsed is Zero and IsRunning is false.
+        // We choose null to avoid claiming "0 ms" when no measurement was taken.
+        if (!stopwatch.IsRunning && stopwatch.Elapsed == TimeSpan.Zero)
+        {
+            return null;
+        }
+
+        return stopwatch.Elapsed;
+    }
 }

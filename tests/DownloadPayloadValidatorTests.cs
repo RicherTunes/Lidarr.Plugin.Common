@@ -451,4 +451,100 @@ public class DownloadPayloadValidatorTests
     }
 
     #endregion
+
+    #region Phase 5 wave 5a: ClassifyPayload + per-kind detectors
+
+    [Fact]
+    public void ClassifyPayload_EmptySample_ReturnsEmpty()
+    {
+        Assert.Equal(PayloadKind.Empty, DownloadPayloadValidator.ClassifyPayload(ReadOnlySpan<byte>.Empty));
+    }
+
+    [Fact]
+    public void ClassifyPayload_HtmlErrorPage_ReturnsHtml()
+    {
+        var html = Encoding.UTF8.GetBytes("<!DOCTYPE html><html><body>Forbidden</body></html>");
+        Assert.Equal(PayloadKind.Html, DownloadPayloadValidator.ClassifyPayload(html));
+    }
+
+    [Fact]
+    public void ClassifyPayload_JsonProblemDocument_ReturnsJson()
+    {
+        var problem = Encoding.UTF8.GetBytes("{\"type\":\"https://example.com/problem\",\"title\":\"Forbidden\",\"status\":403}");
+        Assert.Equal(PayloadKind.Json, DownloadPayloadValidator.ClassifyPayload(problem));
+    }
+
+    [Fact]
+    public void ClassifyPayload_EmptyJsonObject_ReturnsJson()
+    {
+        var json = Encoding.UTF8.GetBytes("{}");
+        Assert.Equal(PayloadKind.Json, DownloadPayloadValidator.ClassifyPayload(json));
+    }
+
+    [Fact]
+    public void ClassifyPayload_XmlDeclaration_ReturnsXml()
+    {
+        var xml = Encoding.UTF8.GetBytes("<?xml version=\"1.0\"?><error>Forbidden</error>");
+        Assert.Equal(PayloadKind.Xml, DownloadPayloadValidator.ClassifyPayload(xml));
+    }
+
+    [Fact]
+    public void ClassifyPayload_FlacPayload_ReturnsAudio()
+    {
+        var buffer = new byte[64];
+        FlacMagic.CopyTo(buffer, 0);
+        Assert.Equal(PayloadKind.Audio, DownloadPayloadValidator.ClassifyPayload(buffer, "flac"));
+    }
+
+    [Fact]
+    public void ClassifyPayload_RandomBinary_ReturnsUnknown()
+    {
+        var buffer = new byte[] { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A };
+        Assert.Equal(PayloadKind.Unknown, DownloadPayloadValidator.ClassifyPayload(buffer));
+    }
+
+    [Fact]
+    public void LooksLikeHtmlPayload_TrueForDoctypeHtml()
+    {
+        var html = Encoding.UTF8.GetBytes("<!DOCTYPE html><html></html>");
+        Assert.True(DownloadPayloadValidator.LooksLikeHtmlPayload(html));
+    }
+
+    [Fact]
+    public void LooksLikeHtmlPayload_FalseForJson()
+    {
+        var json = Encoding.UTF8.GetBytes("{\"key\":\"value\"}");
+        Assert.False(DownloadPayloadValidator.LooksLikeHtmlPayload(json));
+    }
+
+    [Fact]
+    public void LooksLikeJsonPayload_TrueForObjectStartingWithStringKey()
+    {
+        var json = Encoding.UTF8.GetBytes("{\"k\":\"v\"}");
+        Assert.True(DownloadPayloadValidator.LooksLikeJsonPayload(json));
+    }
+
+    [Fact]
+    public void LooksLikeJsonPayload_FalseForBinary()
+    {
+        // Binary that happens to start with '{' but is not JSON
+        var binary = new byte[] { (byte)'{', 0x00, 0x01, 0x02 };
+        Assert.False(DownloadPayloadValidator.LooksLikeJsonPayload(binary));
+    }
+
+    [Fact]
+    public void LooksLikeXmlPayload_TrueForXmlDeclaration()
+    {
+        var xml = Encoding.UTF8.GetBytes("<?xml version=\"1.0\" encoding=\"UTF-8\"?>");
+        Assert.True(DownloadPayloadValidator.LooksLikeXmlPayload(xml));
+    }
+
+    [Fact]
+    public void LooksLikeXmlPayload_FalseForHtml()
+    {
+        var html = Encoding.UTF8.GetBytes("<!DOCTYPE html>");
+        Assert.False(DownloadPayloadValidator.LooksLikeXmlPayload(html));
+    }
+
+    #endregion
 }

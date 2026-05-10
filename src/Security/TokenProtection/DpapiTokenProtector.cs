@@ -25,12 +25,32 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
         public byte[] Protect(ReadOnlySpan<byte> plaintext)
         {
             // Entropy not required; DPAPI adds integrity and confidentiality.
-            return ProtectedData.Protect(plaintext.ToArray(), optionalEntropy: null, scope: _scope);
+            // Copy plaintext into an owned buffer so we can zero it after DPAPI returns.
+            var buffer = plaintext.ToArray();
+            try
+            {
+                return ProtectedData.Protect(buffer, optionalEntropy: null, scope: _scope);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(buffer);
+            }
         }
 
         public byte[] Unprotect(ReadOnlySpan<byte> protectedBytes)
         {
-            return ProtectedData.Unprotect(protectedBytes.ToArray(), optionalEntropy: null, scope: _scope);
+            // protectedBytes is ciphertext (already on heap as input); the returned plaintext is
+            // owned by the caller and we cannot zero it here without breaking the contract.
+            // The intermediate copy below is just to materialize a byte[] for DPAPI's API surface.
+            var buffer = protectedBytes.ToArray();
+            try
+            {
+                return ProtectedData.Unprotect(buffer, optionalEntropy: null, scope: _scope);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(buffer);
+            }
         }
     }
 }

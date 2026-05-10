@@ -416,4 +416,63 @@ public class ProviderHealthResultTests
     }
 
     #endregion
+
+    #region Phase 5 wave 5a additions
+
+    [Fact]
+    public void Degraded_WithErrorCode_SetsErrorCode()
+    {
+        // Phase 5: Degraded factory grew an errorCode parameter so providers can attach a
+        // standardized warning code (e.g., CONNECTION_REFUSED) without dropping the
+        // healthy-but-impaired classification.
+        var result = ProviderHealthResult.Degraded(
+            reason: "Connection refused; service may be starting",
+            provider: "ollama",
+            errorCode: "CONNECTION_REFUSED");
+
+        Assert.True(result.IsHealthy);
+        Assert.StartsWith("[Degraded]", result.StatusMessage);
+        Assert.Equal("ollama", result.Provider);
+        Assert.Equal("CONNECTION_REFUSED", result.ErrorCode);
+    }
+
+    [Fact]
+    public void Healthy_StopwatchOverload_StartedStopwatch_UsesElapsed()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        // Burn a tiny bit of time so Elapsed is observably > 0
+        System.Threading.Thread.Sleep(2);
+        sw.Stop();
+
+        var result = ProviderHealthResult.Healthy(sw, provider: "openai");
+
+        Assert.True(result.IsHealthy);
+        Assert.NotNull(result.ResponseTime);
+        Assert.True(result.ResponseTime!.Value > TimeSpan.Zero);
+        Assert.Equal("openai", result.Provider);
+    }
+
+    [Fact]
+    public void Healthy_StopwatchOverload_NeverStartedStopwatch_NullsOutElapsed()
+    {
+        // The whole point of the Stopwatch overload: if the stopwatch was never started,
+        // Elapsed is Zero — but we should report null to avoid claiming "0 ms latency".
+        var sw = new System.Diagnostics.Stopwatch();
+        var result = ProviderHealthResult.Healthy(sw, provider: "claude-code");
+
+        Assert.True(result.IsHealthy);
+        Assert.Null(result.ResponseTime);
+    }
+
+    [Fact]
+    public void Healthy_StopwatchOverload_NullStopwatch_NullsOutElapsed()
+    {
+        var result = ProviderHealthResult.Healthy(stopwatch: null, provider: "ollama");
+
+        Assert.True(result.IsHealthy);
+        Assert.Null(result.ResponseTime);
+        Assert.Equal("ollama", result.Provider);
+    }
+
+    #endregion
 }

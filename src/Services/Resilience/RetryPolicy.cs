@@ -141,7 +141,6 @@ namespace Lidarr.Plugin.Common.Services.Resilience
     {
         private readonly ILogger _logger;
         private readonly RetryPolicyOptions _options;
-        private readonly Random _random;
 
         /// <summary>
         /// Creates a new ExponentialBackoffRetryPolicy with default options.
@@ -161,8 +160,14 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         {
             _logger = logger;
             _options = options ?? RetryPolicyOptions.Default;
-            // Use a deterministic seed based on environment for reproducibility in tests
-            _random = new Random(unchecked(Environment.TickCount));
+            // Wave 56: previously seeded a per-instance Random from TickCount. Two
+            // policy instances created within the same tick (common when many
+            // request handlers spin up simultaneously) seeded identically and
+            // produced identical jitter sequences — defeating the jitter and
+            // re-creating the thundering-herd problem the jitter is meant to
+            // prevent. Using Random.Shared (thread-safe, well-mixed) closes the
+            // window. The "deterministic for tests" comment was aspirational —
+            // tests should inject their own jitter source if reproducibility matters.
         }
 
         /// <inheritdoc />
@@ -250,7 +255,7 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             if (_options.UseJitter)
             {
                 // Full jitter: random between 0 and calculated delay
-                var jitterMs = _random.Next(0, (int)Math.Max(1, baseDelayMs));
+                var jitterMs = Random.Shared.Next(0, (int)Math.Max(1, baseDelayMs));
                 return TimeSpan.FromMilliseconds(jitterMs);
             }
 

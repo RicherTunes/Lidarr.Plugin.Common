@@ -137,6 +137,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
         private readonly ConcurrentDictionary<string, CacheEntry> _cache;
         private readonly ConcurrentDictionary<string, AccessPattern> _patterns;
         private readonly Func<TKey, string> _keySerializer;
+        private readonly Func<TValue, TValue>? _valueClone;
         private readonly object _evictionLock = new object();
 
         // Performance metrics
@@ -154,10 +155,33 @@ namespace Lidarr.Plugin.Common.Services.Caching
             Func<TKey, string> keySerializer,
             SmartCacheOptions? options = null,
             ILogger? logger = null)
+            : this(keySerializer, options, logger, valueClone: null)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the SmartCache class with an optional defensive-copy hook.
+        /// </summary>
+        /// <param name="keySerializer">Function to convert keys to string for hashing.</param>
+        /// <param name="options">Cache configuration options.</param>
+        /// <param name="logger">Optional logger for diagnostic output.</param>
+        /// <param name="valueClone">
+        /// Optional defensive-copy hook applied to every cached value returned from <see cref="TryGet"/>.
+        /// When <see langword="null"/> (the default), <c>TryGet</c> returns the stored reference directly.
+        /// For mutable value types (lists, DTOs that callers mutate before redispatching, etc.), pass a
+        /// function that returns an independent copy so callers cannot mutate the shared cache entry.
+        /// The hook is not invoked on cache miss. Source: brainarr Phase 3b adoption feedback.
+        /// </param>
+        public SmartCache(
+            Func<TKey, string> keySerializer,
+            SmartCacheOptions? options,
+            ILogger? logger,
+            Func<TValue, TValue>? valueClone)
         {
             _keySerializer = keySerializer ?? throw new ArgumentNullException(nameof(keySerializer));
             _options = options ?? SmartCacheOptions.Default;
             _logger = logger;
+            _valueClone = valueClone;
             _cache = new ConcurrentDictionary<string, CacheEntry>();
             _patterns = new ConcurrentDictionary<string, AccessPattern>();
 
@@ -180,7 +204,16 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 {
                     Interlocked.Increment(ref _hits);
                     entry.RecordAccess();
-                    value = entry.Data;
+                    var stored = entry.Data;
+                    if (_valueClone is not null && stored is not null)
+                    {
+                        // Defensive copy hook: return a clone so callers cannot mutate the shared entry.
+                        value = _valueClone(stored);
+                    }
+                    else
+                    {
+                        value = stored;
+                    }
                     return true;
                 }
                 else

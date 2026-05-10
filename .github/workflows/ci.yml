@@ -131,7 +131,9 @@ jobs:
 
       - name: Build (Release, warnings as errors)
         if: steps.changes.outputs.code_changed == 'true'
-        run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -m:1
+        # DisablePathMap=true so the test step's coverlet collector can resolve source
+        # paths from PDBs (PathMap rewrite breaks coverlet source-resolution).
+        run: dotnet build -c Release -warnaserror -p:IncludeCLIFramework=true -p:RunAnalyzersDuringBuild=false -p:DisablePathMap=true -m:1
 
       # GitHub-hosted runners already have pwsh - this step is only for act
       - name: Ensure pwsh (Linux only)
@@ -162,6 +164,7 @@ jobs:
             --filter "State!=Quarantined" `
             --blame-hang-timeout 30s `
             --collect:"XPlat Code Coverage" `
+            -p:DisablePathMap=true `
             --logger "trx;LogFileName=test_results.trx"
           $testExit = $LASTEXITCODE
 

@@ -11,8 +11,12 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
     <Deterministic>true</Deterministic>
-    <!-- Map project directories to a stable root to avoid leaking developer paths in PDBs -->
-    <PathMap>$(MSBuildProjectDirectory)=/src</PathMap>
+    <!-- Map project directories to a stable root to avoid leaking developer paths in PDBs.
+         Disabled by default during coverage collection because coverlet's source-resolution
+         cannot follow rewritten PDB paths and produces an empty coverage XML.
+         Set DisablePathMap=true (or pass -p:DisablePathMap=true) when collecting coverage;
+         CI deterministic builds still get the rewrite by default. -->
+    <PathMap Condition="'$(DisablePathMap)' != 'true' AND !$(MSBuildProjectName.Contains('Tests')) AND !$(MSBuildProjectName.Contains('TestKit'))">$(MSBuildProjectDirectory)=/src</PathMap>
     <!-- Some scripts/tools emit per-run intermediates under .tmp/ or alternate bin/obj directories; exclude from default item globs. -->
     <DefaultItemExcludes>$(DefaultItemExcludes);**/.tmp/**;**\.tmp\**;**/obj/**;**\obj\**;**/bin/**;**\bin\**;**/obj.*/**;**\obj.*\**;**/bin.*/**;**\bin.*\**</DefaultItemExcludes>
   </PropertyGroup>

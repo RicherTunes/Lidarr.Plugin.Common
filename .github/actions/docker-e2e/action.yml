@@ -1,0 +1,117 @@
+name: 'Docker E2E (Lidarr Plugin)'
+description: >-
+  Run a Lidarr plugin's wave-21/22 Docker E2E smoke harness in CI. Pulls the
+  pinned Lidarr container image, executes xUnit tests filtered to
+  Category=DockerE2E, and on failure captures docker logs from the test
+  container plus xUnit TestResults as artifacts. The plugin DLL must already
+  be built (e.g. via verify-local.ps1) before this action runs.
+author: 'RicherTunes'
+
+inputs:
+  plugin-name:
+    description: >-
+      Plugin slug used for log artifact naming and as the default container
+      name guess (must match LidarrContainerOptions.ContainerName, e.g.
+      "tidalarr" -> "tidalarr-e2e").
+    required: true
+  test-project:
+    description: 'Path to the test project containing DockerE2E facts.'
+    required: true
+  lidarr-docker-version:
+    description: 'Lidarr container tag (plugins branch, net8 capable).'
+    required: false
+    default: 'pr-plugins-3.1.2.4913'
+  configuration:
+    description: 'Build configuration. Tests run with --no-build, so this must match the prior build step.'
+    required: false
+    default: 'Release'
+  test-filter:
+    description: 'xUnit filter expression. Defaults to the DockerE2E trait.'
+    required: false
+    default: 'Category=DockerE2E'
+  container-name:
+    description: >-
+      Docker container name used by the fixture (LidarrContainerOptions.ContainerName).
+      Defaults to "<plugin-name>-e2e" which matches the convention used by all
+      first-party plugins (tidalarr-e2e, qobuzarr-e2e, ...).
+    required: false
+    default: ''
+  test-session-timeout-ms:
+    description: 'xUnit RunConfiguration.TestSessionTimeout (ms).'
+    required: false
+    default: '600000'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve container name
+      id: resolve
+      shell: bash
+      run: |
+        name="${{ inputs.container-name }}"
+        if [ -z "$name" ]; then
+          name="${{ inputs.plugin-name }}-e2e"
+        fi
+        echo "container-name=$name" >> "$GITHUB_OUTPUT"
+        echo "Container name: $name"
+
+    - name: Pre-flight — Docker daemon
+      shell: bash
+      run: |
+        if ! docker info >/dev/null 2>&1; then
+          echo "::error::Docker daemon is not available. Use a Linux runner (ubuntu-latest)."
+          exit 1
+        fi
+        docker version --format 'Docker {{.Server.Version}} (API {{.Server.APIVersion}})'
+
+    - name: Pull Lidarr image
+      shell: bash
+      run: |
+        echo "Pulling ghcr.io/hotio/lidarr:${{ inputs.lidarr-docker-version }}"
+        docker pull "ghcr.io/hotio/lidarr:${{ inputs.lidarr-docker-version }}"
+
+    - name: Run Docker E2E tests
+      shell: bash
+      run: |
+        dotnet test "${{ inputs.test-project }}" \
+          --configuration "${{ inputs.configuration }}" \
+          --no-build \
+          --logger "console;verbosity=normal" \
+          --logger "trx;LogFileName=docker-e2e.trx" \
+          --filter "${{ inputs.test-filter }}" \
+          --results-directory "${{ github.workspace }}/TestResults/${{ inputs.plugin-name }}" \
+          -- RunConfiguration.TestSessionTimeout=${{ inputs.test-session-timeout-ms }}
+
+    - name: Capture container logs on failure
+      if: failure()
+      shell: bash
+      run: |
+        set +e
+        outdir="${{ github.workspace }}/TestResults/${{ inputs.plugin-name }}/container-logs"
+        mkdir -p "$outdir"
+        cname="${{ steps.resolve.outputs.container-name }}"
+
+        echo "=== docker ps -a (filtered by name=$cname) ==="
+        docker ps -a --filter "name=$cname" || true
+
+        if docker inspect "$cname" >/dev/null 2>&1; then
+          echo "Capturing logs for container: $cname"
+          docker logs "$cname" >"$outdir/$cname.stdout.log" 2>"$outdir/$cname.stderr.log" || true
+          docker inspect "$cname" >"$outdir/$cname.inspect.json" 2>/dev/null || true
+        else
+          echo "Container '$cname' not found. Capturing logs for any *-e2e container."
+          for id in $(docker ps -a --filter "name=-e2e" --format '{{.Names}}'); do
+            docker logs "$id" >"$outdir/$id.stdout.log" 2>"$outdir/$id.stderr.log" || true
+          done
+        fi
+        ls -la "$outdir" || true
+
+    - name: Upload Docker E2E artifacts on failure
+      if: failure()
+      uses: actions/upload-artifact@v4
+      with:
+        name: docker-e2e-${{ inputs.plugin-name }}
+        path: |
+          TestResults/${{ inputs.plugin-name }}/**
+        if-no-files-found: warn
+        retention-days: 7

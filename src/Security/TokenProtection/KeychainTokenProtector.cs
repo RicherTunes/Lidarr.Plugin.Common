@@ -99,11 +99,21 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
 
         private static bool AddGenericPassword(string service, string account, ReadOnlySpan<byte> secret)
         {
-            IntPtr itemRef;
-            int status = SecKeychainAddGenericPassword(IntPtr.Zero, (uint)service.Length, service, (uint)account.Length, account,
-                (uint)secret.Length, secret.ToArray(), out itemRef);
-            if (itemRef != IntPtr.Zero) CFRelease(itemRef);
-            return status == 0;
+            // Materialize a byte[] for P/Invoke marshalling, then zero it after the call returns
+            // so the AES key copy doesn't linger on the GC heap.
+            var secretCopy = secret.ToArray();
+            try
+            {
+                IntPtr itemRef;
+                int status = SecKeychainAddGenericPassword(IntPtr.Zero, (uint)service.Length, service, (uint)account.Length, account,
+                    (uint)secretCopy.Length, secretCopy, out itemRef);
+                if (itemRef != IntPtr.Zero) CFRelease(itemRef);
+                return status == 0;
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(secretCopy);
+            }
         }
 
         [DllImport("Security", EntryPoint = "SecKeychainFindGenericPassword")]

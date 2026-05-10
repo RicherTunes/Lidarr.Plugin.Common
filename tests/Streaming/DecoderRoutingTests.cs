@@ -50,6 +50,15 @@ public class DecoderRoutingTests
         "zhipu",
     };
 
+    /// <summary>
+    /// Source of truth for Anthropic provider IDs.
+    /// </summary>
+    private static readonly HashSet<string> KnownAnthropicProviders = new()
+    {
+        "anthropic",
+        "claude",
+    };
+
     [Fact]
     public void OpenAiDecoder_SupportedProviders_MatchesKnownList()
     {
@@ -194,6 +203,44 @@ public class DecoderRoutingTests
         Assert.False(decoder.CanDecodeForProvider(providerId, "text/event-stream"));
     }
 
+    // Anthropic decoder routing tests
+
+    [Fact]
+    public void AnthropicDecoder_SupportedProviders_MatchesKnownList()
+    {
+        var decoder = new AnthropicStreamDecoder();
+        var decoderProviders = decoder.SupportedProviderIds.ToHashSet();
+
+        foreach (var provider in KnownAnthropicProviders)
+        {
+            Assert.Contains(provider, decoderProviders);
+        }
+
+        foreach (var provider in decoderProviders)
+        {
+            Assert.Contains(provider, KnownAnthropicProviders);
+        }
+    }
+
+    [Theory]
+    [InlineData("anthropic")]
+    [InlineData("claude")]
+    public void AnthropicDecoder_CanDecodeForProvider_KnownProviders(string providerId)
+    {
+        var decoder = new AnthropicStreamDecoder();
+        Assert.True(decoder.CanDecodeForProvider(providerId, "text/event-stream"));
+    }
+
+    [Theory]
+    [InlineData("openai")]
+    [InlineData("gemini")]
+    [InlineData("zai")]
+    public void AnthropicDecoder_CanDecodeForProvider_UnknownProviders_ReturnsFalse(string providerId)
+    {
+        var decoder = new AnthropicStreamDecoder();
+        Assert.False(decoder.CanDecodeForProvider(providerId, "text/event-stream"));
+    }
+
     // Cross-decoder exclusivity tests
 
     [Fact]
@@ -202,17 +249,22 @@ public class DecoderRoutingTests
         var openAi = new OpenAiStreamDecoder().SupportedProviderIds.ToHashSet();
         var gemini = new GeminiStreamDecoder().SupportedProviderIds.ToHashSet();
         var zai = new ZaiStreamDecoder().SupportedProviderIds.ToHashSet();
+        var anthropic = new AnthropicStreamDecoder().SupportedProviderIds.ToHashSet();
 
         // No provider should be claimed by multiple decoders
         Assert.Empty(openAi.Intersect(gemini));
         Assert.Empty(openAi.Intersect(zai));
+        Assert.Empty(openAi.Intersect(anthropic));
         Assert.Empty(gemini.Intersect(zai));
+        Assert.Empty(gemini.Intersect(anthropic));
+        Assert.Empty(zai.Intersect(anthropic));
     }
 
     [Theory]
     [InlineData("openai", "openai")]
     [InlineData("gemini", "gemini")]
     [InlineData("zai", "zai")]
+    [InlineData("anthropic", "anthropic")]
     public void AllDecoders_HaveUniqueDecoderId(string providerId, string expectedDecoderId)
     {
         IStreamDecoder decoder = providerId switch
@@ -220,6 +272,7 @@ public class DecoderRoutingTests
             "openai" => new OpenAiStreamDecoder(),
             "gemini" => new GeminiStreamDecoder(),
             "zai" => new ZaiStreamDecoder(),
+            "anthropic" => new AnthropicStreamDecoder(),
             _ => throw new System.ArgumentException($"Unknown provider: {providerId}"),
         };
 
