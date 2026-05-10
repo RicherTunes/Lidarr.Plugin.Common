@@ -55,7 +55,35 @@ namespace Lidarr.Plugin.Common.Services.Registration
             var services = new ServiceCollection();
             ConfigureServices(services);
             configureServices?.Invoke(services);
+            SuppressHttpClientMetricsFilter(services);
             return services;
+        }
+
+        /// <summary>
+        /// Removes <c>Microsoft.Extensions.Http.MetricsFactoryHttpMessageHandlerFilter</c> from the
+        /// service collection. The filter is auto-registered by <c>AddHttpClient</c> via
+        /// <c>TryAddEnumerable</c> and calls <c>socketsHandler.MeterFactory ??= ...</c> on the
+        /// primary handler. After ILRepack internalizes M.E.Http into the merged plugin DLL and
+        /// the plugin loads in an isolated AssemblyLoadContext, the JIT lookup for
+        /// <c>SocketsHttpHandler.get_MeterFactory</c> throws MissingMethodException — the ALC's
+        /// System.Net.Http resolution path produces a metadata view in which that property
+        /// reference can't be bound, despite .NET 8 having the property on the BCL type.
+        /// We don't surface HttpClient metrics from plugins (Lidarr's host owns that telemetry),
+        /// so removing the filter is safe and keeps IHttpClientFactory's other functionality
+        /// (typed-client wiring, connection pooling, delegating-handler chains) intact.
+        /// Targets only the named filter type, so future Logging / PolicyHttpMessageHandler
+        /// filters added to M.E.Http are unaffected.
+        /// </summary>
+        private static void SuppressHttpClientMetricsFilter(IServiceCollection services)
+        {
+            for (int i = services.Count - 1; i >= 0; i--)
+            {
+                var implType = services[i].ImplementationType;
+                if (implType is not null && implType.FullName == "Microsoft.Extensions.Http.MetricsFactoryHttpMessageHandlerFilter")
+                {
+                    services.RemoveAt(i);
+                }
+            }
         }
 
         /// <summary>
