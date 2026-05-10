@@ -17,8 +17,6 @@ namespace Lidarr.Plugin.Common.Services
     {
         private readonly string _serviceName;
         private readonly StreamingCacheHelper _cache;
-        private readonly object _rateLimitLock = new object();
-        private DateTime _lastRequestTime = DateTime.MinValue;
 
         public StreamingIndexerMixin(string serviceName, StreamingCacheHelper cache = null)
         {
@@ -26,31 +24,13 @@ namespace Lidarr.Plugin.Common.Services
             _cache = cache;
         }
 
-        /// <summary>
-        /// Applies rate limiting using shared patterns.
-        /// Call this before making API requests.
-        /// </summary>
-        public async Task ApplyRateLimitAsync(int requestsPerMinute)
-        {
-            if (requestsPerMinute <= 0) return;
-
-            await Task.Run(() =>
-            {
-                lock (_rateLimitLock)
-                {
-                    var timeSinceLastRequest = DateTime.UtcNow - _lastRequestTime;
-                    var minInterval = TimeSpan.FromMinutes(1.0 / requestsPerMinute);
-
-                    if (timeSinceLastRequest < minInterval)
-                    {
-                        var waitTime = minInterval - timeSinceLastRequest;
-                        Task.Delay(waitTime).Wait();
-                    }
-
-                    _lastRequestTime = DateTime.UtcNow;
-                }
-            });
-        }
+        // Note: a per-instance ApplyRateLimitAsync helper was removed (2026-05-10).
+        // It had zero callers ecosystem-wide and used a Task.Run+lock+.Wait pattern
+        // that defeats async on the thread-pool. Plugins that need rate limiting
+        // should resolve IUniversalAdaptiveRateLimiter from DI (see common's
+        // Services.Performance) — it provides per-service/per-endpoint budgets,
+        // adaptive backoff, and Retry-After handling, none of which a per-mixin
+        // last-request-stamp helper could match.
 
         /// <summary>
         /// Gets cached search results if available.
