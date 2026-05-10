@@ -74,15 +74,25 @@ jobs:
         env:
           CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
         run: |
-          set -e
-          if [[ -n "${CROSS_REPO_PAT:-}" ]]; then
-            echo "::notice::CROSS_REPO_PAT present — cloning all 4 plugin repos"
-            git config --global url."https://x-access-token:${CROSS_REPO_PAT}@github.com/".insteadOf "https://github.com/"
-          else
-            echo "::warning::CROSS_REPO_PAT not configured. The proof requires cross-repo access to tidalarr / qobuzarr / brainarr / applemusicarr (3 of which are private). Skipping with success — set the secret to enable the proof in CI, or run locally against your dev checkouts."
+          # Don't `set -e` here — we want to capture clone failures and self-skip
+          # rather than abort the workflow when the PAT is missing or invalid.
+          if [[ -z "${CROSS_REPO_PAT:-}" ]]; then
+            echo "::warning::CROSS_REPO_PAT not configured. Cross-repo access needed to clone tidalarr / qobuzarr / brainarr / applemusicarr (3 are private). Skipping proof — configure the secret to enable in CI, or run locally."
             echo "skipped=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          # Probe PAT validity once before configuring git. If bad, skip — don't fail.
+          probe_status=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: token ${CROSS_REPO_PAT}" \
+            https://api.github.com/repos/RicherTunes/tidalarr)
+          if [[ "$probe_status" != "200" ]]; then
+            echo "::warning::CROSS_REPO_PAT present but rejected by RicherTunes/tidalarr (HTTP $probe_status). Likely expired or wrong scope (needs 'repo'). Skipping proof — rotate the PAT to enable in CI."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::notice::CROSS_REPO_PAT verified — cloning all 4 plugin repos"
+          git config --global url."https://x-access-token:${CROSS_REPO_PAT}@github.com/".insteadOf "https://github.com/"
+          set -e
           for repo in tidalarr qobuzarr brainarr applemusicarr; do
             echo "[clone] $repo"
             git clone --depth 1 --recurse-submodules --shallow-submodules \
