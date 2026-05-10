@@ -195,10 +195,49 @@ public class LidarrContainerFixture : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Returns true when the plugin DLL is loadable by Lidarr's host loader. Two valid shapes
+    /// post-multi-plugin-co-existence-fix (PR #485, see docs/dev-guide/ALC_MULTIPLUGIN_FIX.md):
+    /// 1. Merged build: Abstractions has been ILRepacked + internalized into the plugin DLL.
+    ///    The merged DLL has NO AssemblyRef to <c>Lidarr.Plugin.Abstractions</c>. This is the
+    ///    new normal — packages no longer ship Abstractions as a sidecar.
+    /// 2. Legacy/dev build: Abstractions sits next to the plugin DLL. Tolerated for dev
+    ///    iteration; Lidarr's host can still resolve the AssemblyRef from the plugin's
+    ///    directory (single-plugin only — multi-plugin would fail with COR_E_INVALIDOPERATION).
+    /// Pre-fix this method only checked shape (2) and silently skipped every E2E test once
+    /// shape (1) shipped. The check now accepts either shape, which restores E2E coverage
+    /// while still gating on actual loadability.
+    /// </summary>
     private static bool IsHostBridgeBuild(string dllPath)
     {
         string dir = Path.GetDirectoryName(dllPath)!;
-        return File.Exists(Path.Combine(dir, "Lidarr.Plugin.Abstractions.dll"));
+        if (File.Exists(Path.Combine(dir, "Lidarr.Plugin.Abstractions.dll")))
+        {
+            return true; // shape 2 — sidecar present
+        }
+
+        // shape 1 — merged build. Verify the plugin DLL has NO Abstractions AssemblyRef
+        // (because it's been internalized) by reading its metadata. Tolerate transient
+        // I/O failures by returning true (let the actual load attempt fail with a real error).
+        try
+        {
+            using var fs = File.OpenRead(dllPath);
+            using var pe = new System.Reflection.PortableExecutable.PEReader(fs);
+            var md = System.Reflection.Metadata.PEReaderExtensions.GetMetadataReader(pe);
+            foreach (var arh in md.AssemblyReferences)
+            {
+                var ar = md.GetAssemblyReference(arh);
+                if (string.Equals(md.GetString(ar.Name), "Lidarr.Plugin.Abstractions", StringComparison.Ordinal))
+                {
+                    return false; // unresolvable: refs Abstractions but no sidecar present
+                }
+            }
+            return true; // merged build, no external Abstractions ref → host can load it
+        }
+        catch
+        {
+            return true; // PE read failed; defer to actual load attempt
+        }
     }
 
     private static (int ExitCode, string Output) RunDocker(string arguments)
