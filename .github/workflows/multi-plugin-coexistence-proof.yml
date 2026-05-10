@@ -30,6 +30,13 @@ on:
       - 'src/**'
       - 'testkit/**'
       - '.github/workflows/multi-plugin-coexistence-proof.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/multi-plugin-coexistence-proof.ps1'
+      - 'src/**'
+      - 'testkit/**'
+      - '.github/workflows/multi-plugin-coexistence-proof.yml'
   schedule:
     - cron: '0 7 * * 1'  # Mondays 07:00 UTC
 
