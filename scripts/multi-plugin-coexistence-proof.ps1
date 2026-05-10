@@ -89,7 +89,12 @@ $plugins = @(
     },
     @{
         Repo = 'applemusicarr'
-        Dll  = 'src/AppleMusicarr.Plugin/bin/AppleMusicarr.Plugin.dll'
+        # applemusicarr keeps the standard SDK output layout (Release/net8.0/...),
+        # unlike tidalarr/qobuzarr which set AppendTargetFrameworkToOutputPath=false.
+        DllCandidates = @(
+            'src/AppleMusicarr.Plugin/bin/Release/net8.0/AppleMusicarr.Plugin.dll',
+            'src/AppleMusicarr.Plugin/bin/Debug/net8.0/AppleMusicarr.Plugin.dll'
+        )
         Mount = '/config/plugins/RicherTunes/AppleMusicarr'
         Substring = 'AppleMusic'
         Schemas = @('indexer', 'downloadclient')
@@ -133,15 +138,23 @@ if (-not $SkipBuild) {
     }
 }
 
-# Verify all DLLs exist post-build
+# Verify all DLLs exist post-build. Plugins use either a flat `bin/` layout
+# (tidalarr/qobuzarr/brainarr — AppendTargetFrameworkToOutputPath=false) or
+# the standard SDK Release/net8.0 nested layout (applemusicarr). Try the
+# explicit `Dll` path first, then any `DllCandidates`.
 $dllPaths = @{}
 foreach ($p in $plugins) {
-    $abs = Join-Path (Join-Path $PluginsDir $p.Repo) $p.Dll
-    if (-not (Test-Path -LiteralPath $abs)) {
-        Write-Error "Plugin DLL not found: $abs (build with -SkipBuild=`$false or build manually)"
+    $repoDir = Join-Path $PluginsDir $p.Repo
+    $candidates = @()
+    if ($p.ContainsKey('Dll'))           { $candidates += (Join-Path $repoDir $p.Dll) }
+    if ($p.ContainsKey('DllCandidates')) { $candidates += $p.DllCandidates | ForEach-Object { Join-Path $repoDir $_ } }
+
+    $found = $candidates | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    if (-not $found) {
+        Write-Error "Plugin DLL not found for $($p.Repo). Tried:`n - $($candidates -join "`n - ")"
         exit 3
     }
-    $dllPaths[$p.Repo] = (Resolve-Path -LiteralPath $abs).Path
+    $dllPaths[$p.Repo] = (Resolve-Path -LiteralPath $found).Path
 }
 
 # ── Tear down any prior container ──────────────────────────────────
@@ -166,50 +179,59 @@ if ($LASTEXITCODE -ne 0) {
 
 try {
     # ── Wait for Lidarr to become healthy ──────────────────────────
-    $baseUrl = "http://localhost:$HostPort"
-    Write-Host "[wait] Lidarr startup at $baseUrl (timeout ${StartupTimeoutSeconds}s)" -ForegroundColor Cyan
+    # Use `docker exec curl` to probe Lidarr from inside the container, not from
+    # the host. Reasons:
+    #   1. On Docker Desktop for Windows, the host→container port forward can
+    #      have multi-second latency or hang on the first connect after startup.
+    #      The probe inside the container is sub-millisecond local-loopback.
+    #   2. We don't need host reachability for the proof — we only need to know
+    #      whether each plugin appears in Lidarr's schema endpoints from the
+    #      Lidarr process's perspective.
+    Write-Host "[wait] Lidarr startup (timeout ${StartupTimeoutSeconds}s)" -ForegroundColor Cyan
     $deadline = (Get-Date).AddSeconds($StartupTimeoutSeconds)
     $apiKey = $null
     while ((Get-Date) -lt $deadline) {
-        try {
-            $initJson = (docker exec $ContainerName cat /config/initialize.json 2>$null)
-            if ($LASTEXITCODE -eq 0 -and $initJson) {
-                $obj = $initJson | ConvertFrom-Json
-                if ($obj.PSObject.Properties['apiKey'] -and $obj.apiKey) {
-                    $apiKey = $obj.apiKey
-                    break
+        $initJson = docker exec $ContainerName curl -fsS http://localhost:8686/initialize.json 2>$null
+        if ($LASTEXITCODE -eq 0 -and $initJson) {
+            try {
+                $initObj = $initJson | ConvertFrom-Json
+                if ($initObj.apiKey) {
+                    docker exec $ContainerName curl -fsS -H "X-Api-Key: $($initObj.apiKey)" "http://localhost:8686/api/v1/system/status" 2>$null | Out-Null
+                    if ($LASTEXITCODE -eq 0) {
+                        $apiKey = $initObj.apiKey
+                        break
+                    }
                 }
-            }
-        } catch { }
+            } catch { }
+        }
         Start-Sleep -Seconds 2
     }
     if (-not $apiKey) {
         Write-Error "Lidarr did not become healthy within ${StartupTimeoutSeconds}s"
-        Write-Host "==== Container logs ====" -ForegroundColor Yellow
-        docker logs $ContainerName | Out-Host
+        Write-Host "==== Container logs (last 200 lines) ====" -ForegroundColor Yellow
+        docker logs --tail 200 $ContainerName | Out-Host
         exit 5
     }
     Write-Host "[ok] Lidarr healthy; apiKey acquired" -ForegroundColor Green
 
     # ── Assert each plugin appears in expected schema endpoints ────
-    $headers = @{ 'X-Api-Key' = $apiKey }
+    # Probe via `docker exec curl` for the same reason as the health probe
+    # (consistent semantics, avoids host port-forward hangs).
     $failures = @()
-
     foreach ($p in $plugins) {
         foreach ($schema in $p.Schemas) {
-            $url = "$baseUrl/api/v1/$schema/schema"
-            try {
-                $body = Invoke-RestMethod -Uri $url -Headers $headers -TimeoutSec 10 -ErrorAction Stop
-            } catch {
-                $failures += "$($p.Repo) /$schema/schema fetch failed: $($_.Exception.Message)"
+            $body = docker exec $ContainerName curl -fsS -H "X-Api-Key: $apiKey" "http://localhost:8686/api/v1/$schema/schema" 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $body) {
+                $failures += "$($p.Repo) /$schema/schema fetch failed (curl exit $LASTEXITCODE)"
                 continue
             }
-            $hits = @($body | Where-Object {
-                ($_.name -and ($_.name -like "*$($p.Substring)*")) -or
-                ($_.implementation -and ($_.implementation -like "*$($p.Substring)*"))
-            })
-            if ($hits.Count -gt 0) {
-                Write-Host "[ok] $($p.Repo) ✓ /api/v1/$schema/schema (matched '$($p.Substring)' in $($hits.Count) entries)" -ForegroundColor Green
+            # Match `"name": "...<substring>..."` or `"implementation": "...<substring>..."`
+            # in the raw JSON. Substring match is intentional — it survives both legacy
+            # name conventions ("Tidalarr", "Tidal") and casing variations.
+            $pattern = "(?i)""(name|implementation)""\s*:\s*""[^""]*$([regex]::Escape($p.Substring))[^""]*"""
+            $matches = [regex]::Matches($body, $pattern)
+            if ($matches.Count -gt 0) {
+                Write-Host "[ok] $($p.Repo) ✓ /api/v1/$schema/schema ($($matches.Count) matches for '$($p.Substring)')" -ForegroundColor Green
             } else {
                 $failures += "$($p.Repo) NOT FOUND in /api/v1/$schema/schema (looked for '$($p.Substring)')"
             }
