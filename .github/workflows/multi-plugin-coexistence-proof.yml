@@ -1,0 +1,103 @@
+name: Multi-Plugin Coexistence Proof
+
+# Runnable proof that all 4 plugins (tidalarr / qobuzarr / brainarr / applemusicarr)
+# load simultaneously into one Lidarr container and each appears in its expected
+# /api/v1/{indexer,downloadclient,importlist}/schema endpoint.
+#
+# This is the CI version of scripts/multi-plugin-coexistence-proof.ps1. It uses
+# the default GITHUB_TOKEN to clone the public sibling repos — no CROSS_REPO_PAT
+# required (that secret is only needed by the credentials-driven workflow at
+# multi-plugin-smoke-test.yml for the "configure indexers and run search"
+# heavy gates).
+#
+# Triggers:
+#   - workflow_dispatch (manual run on-demand)
+#   - push to main (continuously verify nothing regresses)
+#   - schedule weekly (catches transient infra drift)
+
+on:
+  workflow_dispatch:
+    inputs:
+      lidarr_tag:
+        description: Lidarr Docker tag (plugins branch; net8 only)
+        type: string
+        required: false
+        default: pr-plugins-3.1.2.4913
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/multi-plugin-coexistence-proof.ps1'
+      - 'src/**'
+      - 'testkit/**'
+      - '.github/workflows/multi-plugin-coexistence-proof.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/multi-plugin-coexistence-proof.ps1'
+      - 'src/**'
+      - 'testkit/**'
+      - '.github/workflows/multi-plugin-coexistence-proof.yml'
+  schedule:
+    - cron: '0 7 * * 1'  # Mondays 07:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    name: Prove all 4 plugins co-exist
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout common
+        uses: actions/checkout@v4
+        with:
+          path: lidarr.plugin.common
+          submodules: false
+
+      # Public-repo clones via direct git — the workflow's default GITHUB_TOKEN is
+      # scoped to the running repo only and gets 404 on cross-repo metadata lookups
+      # (the Lidarr.Plugin.Common-issued token is correctly NOT trusted by the
+      # tidalarr/qobuzarr/brainarr/applemusicarr repos). Bypass actions/checkout's
+      # token-based default-branch probe by cloning unauthenticated — these are
+      # public repos.
+      - name: Clone sibling plugin repos (unauth, public)
+        shell: bash
+        run: |
+          set -e
+          for repo in tidalarr qobuzarr brainarr applemusicarr; do
+            echo "[clone] $repo"
+            git clone --depth 1 --recurse-submodules --shallow-submodules \
+              "https://github.com/RicherTunes/$repo.git" "$repo"
+          done
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Extract Lidarr host assemblies (per plugin)
+        shell: bash
+        run: |
+          set -e
+          # Each plugin has its own extract-lidarr-assemblies.sh / equivalent.
+          # Run them in parallel so we don't pay 4× the docker pull cost.
+          for plugin in tidalarr qobuzarr brainarr applemusicarr; do
+            if [ -f "$plugin/scripts/extract-lidarr-assemblies.sh" ]; then
+              (cd "$plugin" && bash scripts/extract-lidarr-assemblies.sh) &
+            fi
+          done
+          wait
+
+      - name: Run multi-plugin co-existence proof
+        shell: pwsh
+        run: |
+          # PluginsDir = the workspace root where the 4 sibling repos were cloned
+          pwsh lidarr.plugin.common/scripts/multi-plugin-coexistence-proof.ps1 `
+            -PluginsDir . `
+            -LidarrTag ${{ inputs.lidarr_tag || 'pr-plugins-3.1.2.4913' }}
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs --tail 500 multi-plugin-coexistence || true
