@@ -56,37 +56,21 @@ jobs:
           path: lidarr.plugin.common
           submodules: false
 
-      - name: Checkout tidalarr
-        uses: actions/checkout@v4
-        with:
-          repository: RicherTunes/tidalarr
-          path: tidalarr
-          submodules: recursive
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout qobuzarr
-        uses: actions/checkout@v4
-        with:
-          repository: RicherTunes/qobuzarr
-          path: qobuzarr
-          submodules: recursive
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout brainarr
-        uses: actions/checkout@v4
-        with:
-          repository: RicherTunes/brainarr
-          path: brainarr
-          submodules: recursive
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Checkout applemusicarr
-        uses: actions/checkout@v4
-        with:
-          repository: RicherTunes/applemusicarr
-          path: applemusicarr
-          submodules: recursive
-          token: ${{ secrets.GITHUB_TOKEN }}
+      # Public-repo clones via direct git — the workflow's default GITHUB_TOKEN is
+      # scoped to the running repo only and gets 404 on cross-repo metadata lookups
+      # (the Lidarr.Plugin.Common-issued token is correctly NOT trusted by the
+      # tidalarr/qobuzarr/brainarr/applemusicarr repos). Bypass actions/checkout's
+      # token-based default-branch probe by cloning unauthenticated — these are
+      # public repos.
+      - name: Clone sibling plugin repos (unauth, public)
+        shell: bash
+        run: |
+          set -e
+          for repo in tidalarr qobuzarr brainarr applemusicarr; do
+            echo "[clone] $repo"
+            git clone --depth 1 --recurse-submodules --shallow-submodules \
+              "https://github.com/RicherTunes/$repo.git" "$repo"
+          done
 
       - name: Setup .NET 8
         uses: actions/setup-dotnet@v4
