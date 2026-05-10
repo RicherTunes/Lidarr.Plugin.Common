@@ -1,10 +1,15 @@
 using System;
 using System.IO;
+using System.Reflection;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
-#if NET8_0_OR_GREATER
-using Azure.Identity;
-#endif
+// NOTE: Do NOT add `using Azure.Identity;` or any Azure.* reference here.
+// The compile-time AssemblyRef would force every consuming plugin's merged DLL
+// to ship Azure.Identity + Azure.Extensions.AspNetCore.DataProtection.Keys
+// (transitively Azure.Core, Microsoft.Identity.Client, etc.) — ~10 MB of dead
+// weight when AKV isn't used (the default for every Lidarr plugin shipped today).
+// AKV setup below uses reflection so the assembly load is on-demand; without an
+// AKV key id the Azure assemblies are never resolved.
 using Lidarr.Plugin.Common.Interfaces;
 using Microsoft.AspNetCore.DataProtection;
 
@@ -60,14 +65,8 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
                 {
                     try
                     {
-#if NET8_0_OR_GREATER
                         var keyId = new Uri(akvKeyIdentifier);
-                        var cred = new DefaultAzureCredential();
-                        options.ProtectKeysWithAzureKeyVault(keyId, cred);
-                        akvConfigured = true;
-#else
-                        // AKV wrapping requires .NET 8+ in this library build; ignore on older TFMs
-#endif
+                        akvConfigured = TryConfigureAzureKeyVaultViaReflection(options, keyId);
                     }
                     catch
                     {
@@ -127,6 +126,54 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
             }
             var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
             return Path.Combine(home, ".config", "lidarr.plugin.common", "keys");
+        }
+
+        /// <summary>
+        /// Configures `options.ProtectKeysWithAzureKeyVault(keyId, new DefaultAzureCredential())`
+        /// via reflection so the Azure.Identity / Azure.Extensions.AspNetCore.DataProtection.Keys
+        /// assemblies are only resolved when AKV is actually opted into. Without this indirection,
+        /// every consuming plugin's merged DLL has a hard AssemblyRef to Azure.Identity and ships
+        /// (or fails to load if stripped) ~10 MB of Azure SDK assemblies.
+        ///
+        /// Returns true when AKV configuration succeeded; false (without throwing) when the Azure
+        /// assemblies aren't on disk — the caller treats that as "AKV not available" and falls back
+        /// to the local DataProtection key store.
+        /// </summary>
+        private static bool TryConfigureAzureKeyVaultViaReflection(IDataProtectionBuilder options, Uri keyId)
+        {
+            // Resolve `Azure.Identity.DefaultAzureCredential`. Assembly load is on-demand and
+            // returns null cleanly when the DLL isn't present (rather than throwing FileNotFound).
+            var credentialType = Type.GetType("Azure.Identity.DefaultAzureCredential, Azure.Identity", throwOnError: false);
+            if (credentialType is null) return false;
+
+            // The extension method lives in Microsoft.AspNetCore.DataProtection.AzureKeyVault.AzureDataProtectionBuilderExtensions
+            // (shipped by Azure.Extensions.AspNetCore.DataProtection.Keys). Three overloads exist;
+            // we want the (IDataProtectionBuilder, Uri, TokenCredential) one. Bind by name +
+            // signature shape (parameter count + first parameter type) to be tolerant of refactors.
+            var extType = Type.GetType(
+                "Microsoft.AspNetCore.DataProtection.AzureKeyVault.AzureDataProtectionBuilderExtensions, Azure.Extensions.AspNetCore.DataProtection.Keys",
+                throwOnError: false);
+            if (extType is null) return false;
+
+            MethodInfo? extMethod = null;
+            foreach (var m in extType.GetMethods(BindingFlags.Public | BindingFlags.Static))
+            {
+                if (!string.Equals(m.Name, "ProtectKeysWithAzureKeyVault", StringComparison.Ordinal)) continue;
+                var ps = m.GetParameters();
+                if (ps.Length != 3) continue;
+                if (ps[0].ParameterType != typeof(IDataProtectionBuilder)) continue;
+                if (ps[1].ParameterType != typeof(Uri)) continue;
+                // Third parameter is Azure.Core.TokenCredential — match by name to avoid taking
+                // a hard dep on Azure.Core.dll just to grab the type.
+                if (ps[2].ParameterType.FullName != "Azure.Core.TokenCredential") continue;
+                extMethod = m;
+                break;
+            }
+            if (extMethod is null) return false;
+
+            var credential = Activator.CreateInstance(credentialType);
+            extMethod.Invoke(null, new object?[] { options, keyId, credential });
+            return true;
         }
     }
 }
