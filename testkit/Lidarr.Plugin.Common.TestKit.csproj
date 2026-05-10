@@ -35,9 +35,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging" Version="9.0.0" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="9.0.0" />
+    <!-- M.E.* MUST match the Lidarr host (8.0.x) — bumping these to 9.0 forces
+         consuming plugin tests to also pin 9.0 via CPM transitive pinning, which
+         then puts AssemblyRef=9.0.0.0 into the merged plugin DLL — runtime can't
+         resolve against the host's 8.0.0 and plugin discovery fails in
+         multi-plugin scenarios (see docs/dev-guide/ALC_MULTIPLUGIN_FIX.md table). -->
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
     <PackageReference Include="NSubstitute" Version="5.3.0" />
     <PackageReference Include="Moq" Version="4.20.72" />
     <!-- xunit + SkippableFact: needed by Hosting/LidarrContainerFixture (wave 22a).
