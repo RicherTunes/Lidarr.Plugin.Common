@@ -120,7 +120,8 @@
     "backoffs",
     "IHTTPCLIENT",
     "MULTIPLUGIN",
-    "INVALIDOPERATION"
+    "INVALIDOPERATION",
+    "LRCLIB"
   ],
   "ignorePaths": [
     "**/bin",
