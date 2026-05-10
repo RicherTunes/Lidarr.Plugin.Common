@@ -169,7 +169,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
                         var batchDuration = DateTime.UtcNow - batchStartTime;
 
                         // Adapt batch size based on performance
-                        AdaptBatchSizeBasedOnPerformance(batchSize, batchDuration, batch.Count, resultsList.Count);
+                        AdaptBatchSizeBasedOnPerformance(options, batchSize, batchDuration, batch.Count, resultsList.Count);
 
                         // Report progress
                         progress?.Report(new BatchMemoryProgress
@@ -369,20 +369,25 @@ namespace Lidarr.Plugin.Common.Services.Performance
             return Math.Min(baseSize, remainingItems);
         }
 
-        private void AdaptBatchSizeBasedOnPerformance(int batchSize, TimeSpan duration, int inputCount, int outputCount)
+        private void AdaptBatchSizeBasedOnPerformance(BatchMemoryOptions options, int batchSize, TimeSpan duration, int inputCount, int outputCount)
         {
             // Calculate items processed per second
             var itemsPerSecond = duration.TotalSeconds > 0 ? inputCount / duration.TotalSeconds : 0;
 
-            // Adjust batch size based on throughput
+            // Adjust batch size based on throughput. Clamp to the caller's configured
+            // bounds rather than the global DEFAULT_* constants — otherwise a caller
+            // that passes MaxBatchSize=100 can still see _currentOptimalBatchSize grow
+            // to 110, 121, 133… across iterations once throughput exceeds 50/s.
+            var maxBound = Math.Min(DEFAULT_MAX_BATCH_SIZE, options.MaxBatchSize);
+            var minBound = Math.Max(DEFAULT_MIN_BATCH_SIZE, options.MinBatchSize);
             if (itemsPerSecond > 50) // High throughput - can handle larger batches
             {
-                _currentOptimalBatchSize = Math.Min(DEFAULT_MAX_BATCH_SIZE,
+                _currentOptimalBatchSize = Math.Min(maxBound,
                     (int)(_currentOptimalBatchSize * 1.1));
             }
             else if (itemsPerSecond < 10) // Low throughput - reduce batch size
             {
-                _currentOptimalBatchSize = Math.Max(DEFAULT_MIN_BATCH_SIZE,
+                _currentOptimalBatchSize = Math.Max(minBound,
                     (int)(_currentOptimalBatchSize * 0.9));
             }
         }
