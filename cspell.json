@@ -118,7 +118,9 @@
     "Diagnoser",
     "Linq",
     "backoffs",
-    "IHTTPCLIENT"
+    "IHTTPCLIENT",
+    "MULTIPLUGIN",
+    "INVALIDOPERATION"
   ],
   "ignorePaths": [
     "**/bin",

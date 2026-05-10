@@ -118,7 +118,12 @@
     <PackageReference Include="Microsoft.Extensions.Configuration" Version="8.0.0" />
     <PackageReference Include="Microsoft.Extensions.Configuration.Json" Version="8.0.1" />
     <PackageReference Include="Microsoft.Extensions.Configuration.EnvironmentVariables" Version="8.0.0" />
-    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.14" />
+    <!-- v8.0.x to match Lidarr host's System.Security.Cryptography.ProtectedData
+         (ships v8.0.0.0 in /app/bin/). 9.0.x stamps v9.0.0.0 into the merged plugin
+         DLL's AssemblyRef and the runtime can't resolve that against the host's
+         8.0.0 — manifests as "Could not load ... Version=9.0.0.0" during plugin
+         discovery, blocking multi-plugin loading. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.25" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.25" />
   </ItemGroup>

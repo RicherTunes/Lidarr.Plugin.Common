@@ -51,9 +51,22 @@
     <!-- Detect dependencies at runtime (after build), not at project load time -->
     <ItemGroup>
       <_PluginDeps Include="$(_PluginOutputPath)Lidarr.Plugin.Common.dll" Condition="Exists('$(_PluginOutputPath)Lidarr.Plugin.Common.dll')" />
-      <!-- NOTE: Lidarr.Plugin.Abstractions must NOT be merged - it contains IPlugin and other interfaces
-           that must have identical type identity with the host. Merging breaks plugin loading. -->
-      <!-- <_PluginDeps Include="$(OutputPath)Lidarr.Plugin.Abstractions.dll" /> DO NOT ENABLE - breaks IPlugin type identity -->
+      <!-- EXPERIMENT: merge + internalize Lidarr.Plugin.Abstractions.dll.
+           Rationale: Lidarr's host has its OWN IPlugin (NzbDrone.Core.Plugins.IPlugin)
+           and zero AssemblyRefs to Lidarr.Plugin.Abstractions — verified by reading
+           Lidarr.Core.dll's metadata. The host discovers plugins by reflecting on
+           HttpIndexerBase / DownloadClientBase / ImportListBase derivatives, not via
+           Abstractions.IPlugin. The previous "do not merge" warning was based on a
+           wrong premise (that the host needs identity with Abstractions.IPlugin).
+           Empirically the warning is also wrong: shipping Abstractions.dll alongside
+           every plugin's merged DLL causes COR_E_INVALIDOPERATION (0x80131509) on
+           multi-plugin co-existence — Lidarr loads Abstractions from plugin A's bin/
+           into the default ALC, then chokes when scanning plugin B's bin/ for the
+           "same" assembly at a different path. Merging + internalizing removes the
+           AssemblyRef from the merged DLL so each plugin's ALC self-resolves all
+           IPlugin references internally; the AssemblyRef Lidarr's loader sees on the
+           merged DLL goes away, ergo no "load Abstractions" attempt. -->
+      <_PluginDeps Include="$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll" Condition="Exists('$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll')" />
       <_PluginDeps Include="$(_PluginOutputPath)Polly.dll" Condition="Exists('$(_PluginOutputPath)Polly.dll')" />
       <_PluginDeps Include="$(_PluginOutputPath)Polly.Core.dll" Condition="Exists('$(_PluginOutputPath)Polly.Core.dll')" />
       <_PluginDeps Include="$(_PluginOutputPath)Polly.Extensions.Http.dll" Condition="Exists('$(_PluginOutputPath)Polly.Extensions.Http.dll')" />
@@ -122,7 +135,6 @@
          MUST SHIP:
            - Lidarr.Plugin.<Name>.dll (merged assembly)
            - plugin.json
-           - Lidarr.Plugin.Abstractions.dll (plugin discovery; host does NOT provide this)
 
          MUST NOT SHIP (host-provided / cross-boundary type-identity):
            - FluentValidation.dll
@@ -132,13 +144,16 @@
            - System.Text.Json.dll
            - Host assemblies (Lidarr.*.dll, NzbDrone.*.dll, etc.)
 
-         MERGED/INTERNALIZED:
-           - Lidarr.Plugin.Common.dll, Polly*, TagLibSharp*, etc. (via ILRepack above)
+         MERGED/INTERNALIZED (via ILRepack above):
+           - Lidarr.Plugin.Common.dll
+           - Lidarr.Plugin.Abstractions.dll (NEW: see merge-list comment for why)
+           - Polly*, TagLibSharp*, Microsoft.Extensions.{DI,Caching,Options,Primitives,Http}, CliWrap
     -->
     <ItemGroup>
-      <!-- Runtime dependency assemblies to keep as separate files -->
-      <_PluginRuntimeDeps Include="$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll"
-                         Condition="Exists('$(_PluginOutputPath)Lidarr.Plugin.Abstractions.dll')" />
+      <!-- Lidarr.Plugin.Abstractions.dll is now merged + internalized into the plugin DLL,
+           so it must NOT be retained as a separate file. The merged DLL self-resolves all
+           IPlugin references internally; shipping a sidecar Abstractions.dll alongside reintroduces
+           the COR_E_INVALIDOPERATION cross-ALC conflict the merge was meant to eliminate. -->
       <_PluginRuntimeDeps Include="@(PluginPackagingAdditionalKeep)" />
 
       <!-- Everything else gets deleted - either merged above or host-provided -->

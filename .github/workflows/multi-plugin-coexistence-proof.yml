@@ -1,0 +1,133 @@
+name: Multi-Plugin Coexistence Proof
+
+# Runnable proof that all 4 plugins (tidalarr / qobuzarr / brainarr / applemusicarr)
+# load simultaneously into one Lidarr container and each appears in its expected
+# /api/v1/{indexer,downloadclient,importlist}/schema endpoint.
+#
+# This is the CI version of scripts/multi-plugin-coexistence-proof.ps1. It uses
+# the default GITHUB_TOKEN to clone the public sibling repos — no CROSS_REPO_PAT
+# required (that secret is only needed by the credentials-driven workflow at
+# multi-plugin-smoke-test.yml for the "configure indexers and run search"
+# heavy gates).
+#
+# Triggers:
+#   - workflow_dispatch (manual run on-demand)
+#   - push to main (continuously verify nothing regresses)
+#   - schedule weekly (catches transient infra drift)
+
+on:
+  workflow_dispatch:
+    inputs:
+      lidarr_tag:
+        description: Lidarr Docker tag (plugins branch; net8 only)
+        type: string
+        required: false
+        default: pr-plugins-3.1.2.4913
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/multi-plugin-coexistence-proof.ps1'
+      - 'src/**'
+      - 'testkit/**'
+      - '.github/workflows/multi-plugin-coexistence-proof.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'scripts/multi-plugin-coexistence-proof.ps1'
+      - 'src/**'
+      - 'testkit/**'
+      - '.github/workflows/multi-plugin-coexistence-proof.yml'
+  schedule:
+    - cron: '0 7 * * 1'  # Mondays 07:00 UTC
+
+permissions:
+  contents: read
+
+jobs:
+  prove:
+    name: Prove all 4 plugins co-exist
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout common
+        uses: actions/checkout@v4
+        with:
+          path: lidarr.plugin.common
+          submodules: false
+
+      # Sibling plugin repos are private (only brainarr is public). Two options
+      # for cross-repo access from this workflow:
+      #
+      # 1. Configure a CROSS_REPO_PAT secret in this repo's Settings → Actions →
+      #    Secrets (classic PAT with `repo` scope). The block below opportunistically
+      #    uses it via `git config --global url.X.insteadOf` if present.
+      # 2. Without the PAT, this workflow self-skips: the proof can still be run
+      #    locally against developer checkouts (`pwsh scripts/multi-plugin-coexistence-proof.ps1`).
+      #
+      # We intentionally don't fail the PR when CROSS_REPO_PAT is missing — that
+      # would block every PR forever, and the bug being proved is one we'd rather
+      # catch via a green/red signal where it's available than gate everything on it.
+      - name: Clone sibling plugin repos (or skip)
+        id: clone
+        shell: bash
+        env:
+          CROSS_REPO_PAT: ${{ secrets.CROSS_REPO_PAT }}
+        run: |
+          # Don't `set -e` here — we want to capture clone failures and self-skip
+          # rather than abort the workflow when the PAT is missing or invalid.
+          if [[ -z "${CROSS_REPO_PAT:-}" ]]; then
+            echo "::warning::CROSS_REPO_PAT not configured. Cross-repo access needed to clone tidalarr / qobuzarr / brainarr / applemusicarr (3 are private). Skipping proof — configure the secret to enable in CI, or run locally."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Probe PAT validity once before configuring git. If bad, skip — don't fail.
+          probe_status=$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: token ${CROSS_REPO_PAT}" \
+            https://api.github.com/repos/RicherTunes/tidalarr)
+          if [[ "$probe_status" != "200" ]]; then
+            echo "::warning::CROSS_REPO_PAT present but rejected by RicherTunes/tidalarr (HTTP $probe_status). Likely expired or wrong scope (needs 'repo'). Skipping proof — rotate the PAT to enable in CI."
+            echo "skipped=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "::notice::CROSS_REPO_PAT verified — cloning all 4 plugin repos"
+          git config --global url."https://x-access-token:${CROSS_REPO_PAT}@github.com/".insteadOf "https://github.com/"
+          set -e
+          for repo in tidalarr qobuzarr brainarr applemusicarr; do
+            echo "[clone] $repo"
+            git clone --depth 1 --recurse-submodules --shallow-submodules \
+              "https://github.com/RicherTunes/$repo.git" "$repo"
+          done
+
+      - name: Setup .NET 8
+        if: steps.clone.outputs.skipped != 'true'
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Extract Lidarr host assemblies (per plugin)
+        if: steps.clone.outputs.skipped != 'true'
+        shell: bash
+        run: |
+          set -e
+          # Each plugin has its own extract-lidarr-assemblies.sh / equivalent.
+          # Run them in parallel so we don't pay 4× the docker pull cost.
+          for plugin in tidalarr qobuzarr brainarr applemusicarr; do
+            if [ -f "$plugin/scripts/extract-lidarr-assemblies.sh" ]; then
+              (cd "$plugin" && bash scripts/extract-lidarr-assemblies.sh) &
+            fi
+          done
+          wait
+
+      - name: Run multi-plugin co-existence proof
+        if: steps.clone.outputs.skipped != 'true'
+        shell: pwsh
+        run: |
+          # PluginsDir = the workspace root where the 4 sibling repos were cloned
+          pwsh lidarr.plugin.common/scripts/multi-plugin-coexistence-proof.ps1 `
+            -PluginsDir . `
+            -LidarrTag ${{ inputs.lidarr_tag || 'pr-plugins-3.1.2.4913' }}
+
+      - name: Container logs on failure
+        if: failure()
+        run: docker logs --tail 500 multi-plugin-coexistence || true
