@@ -158,7 +158,7 @@
        plugin DLL has a hard ref but the host doesn't ship Azure assemblies). -->
   <ItemGroup>
     <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" Version="1.6.1" PrivateAssets="all" ExcludeAssets="runtime" />
-    <PackageReference Include="Azure.Identity" Version="1.12.0" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Azure.Identity" Version="1.17.2" PrivateAssets="all" ExcludeAssets="runtime" />
   </ItemGroup>
 
   <Target Name="PreparePublicApiBaselines"
