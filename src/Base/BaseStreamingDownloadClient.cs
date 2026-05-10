@@ -207,7 +207,9 @@ namespace Lidarr.Plugin.Common.Base
                 var validationResult = ValidateDownloadSettings(Settings);
                 if (!validationResult.IsValid)
                 {
-                    Logger?.LogError($"{ServiceName} download settings validation failed: {string.Join(", ", validationResult.Errors.Select(e => e.ErrorMessage))}");
+                    // NOTE: Avoid .Errors getter — return type drifted between FluentValidation 9.5.4
+                    // (IList<>) and 11.x (List<>); ToString() is stable across versions.
+                    Logger?.LogError($"{ServiceName} download settings validation failed: {validationResult}");
                     return validationResult;
                 }
 
@@ -215,9 +217,12 @@ namespace Lidarr.Plugin.Common.Base
                 var authResult = await AuthenticateAsync();
                 if (!authResult)
                 {
-                    var authError = new ValidationResult();
-                    authError.Errors.Add(new FluentValidation.Results.ValidationFailure("Authentication", $"Failed to authenticate with {ServiceName}"));
-                    return authError;
+                    // NOTE: Use IEnumerable<ValidationFailure> ctor instead of Errors.Add to avoid
+                    // the cross-version Errors property mismatch.
+                    return new ValidationResult(new[]
+                    {
+                        new FluentValidation.Results.ValidationFailure("Authentication", $"Failed to authenticate with {ServiceName}")
+                    });
                 }
 
                 lock (_initializationLock)
@@ -231,9 +236,11 @@ namespace Lidarr.Plugin.Common.Base
             catch (Exception ex)
             {
                 Logger?.LogError(ex, $"Failed to initialize {ServiceName} download client");
-                var errorResult = new ValidationResult();
-                errorResult.Errors.Add(new FluentValidation.Results.ValidationFailure("Initialization", $"Initialization failed: {ex.Message}"));
-                return errorResult;
+                // See note above on FluentValidation API drift; use ctor instead of Errors.Add.
+                return new ValidationResult(new[]
+                {
+                    new FluentValidation.Results.ValidationFailure("Initialization", $"Initialization failed: {ex.Message}")
+                });
             }
         }
 

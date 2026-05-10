@@ -63,7 +63,9 @@ jobs:
         run: dotnet restore lidarr.plugin.common.sln
 
       - name: Build
-        run: dotnet build lidarr.plugin.common.sln --configuration Release --no-restore
+        # DisablePathMap=true so the test step's coverlet collector can resolve source
+        # paths from PDBs.
+        run: dotnet build lidarr.plugin.common.sln --configuration Release --no-restore -p:DisablePathMap=true
 
       - name: Run tests
         run: |

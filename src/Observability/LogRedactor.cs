@@ -32,13 +32,47 @@ public static partial class LogRedactor
     [GeneratedRegex(@"Bearer\s+[A-Za-z0-9._-]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex BearerTokenPattern();
 
-    /// <summary>Matches Authorization and API key header patterns.</summary>
-    [GeneratedRegex(@"(Authorization|X-Api-Key|api[_-]?key)\s*[:=]\s*\S+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    /// <summary>
+    /// Matches Authorization and API key header patterns. Consumes the full value
+    /// (not just the first whitespace-delimited token) so multi-token schemes like
+    /// <c>Basic dXNlcm5hbWU6cGFzc3dvcmQ=</c> are fully redacted, not partially.
+    /// Stops at end-of-line or common log-line delimiters (<c>, ; |</c> and <c>}</c>).
+    /// </summary>
+    [GeneratedRegex(@"(Authorization|X-Api-Key|api[_-]?key)\s*[:=]\s*[^\r\n,;|}]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex AuthHeaderPattern();
+
+    /// <summary>
+    /// Matches <c>Cookie:</c> and <c>Set-Cookie:</c> header values. Cookies routinely
+    /// carry session identifiers (e.g. <c>JSESSIONID=...</c>, <c>session_id=...</c>)
+    /// that are typically below the 32-char generic-token threshold and so escape
+    /// <see cref="GenericTokenPattern"/>. Redacts the entire cookie value to be safe.
+    /// </summary>
+    [GeneratedRegex(@"(Set-Cookie|Cookie)\s*[:=]\s*[^\r\n]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex CookieHeaderPattern();
 
     /// <summary>Matches generic long alphanumeric tokens (potential API keys).</summary>
     [GeneratedRegex(@"\b[A-Za-z0-9]{32,}\b", RegexOptions.Compiled)]
     private static partial Regex GenericTokenPattern();
+
+    /// <summary>Matches RFC-ish email addresses (PII).</summary>
+    [GeneratedRegex(@"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex EmailPattern();
+
+    /// <summary>Matches IPv4 addresses (PII / infrastructure detail).</summary>
+    [GeneratedRegex(@"\b(?:[0-9]{1,3}\.){3}[0-9]{1,3}\b", RegexOptions.Compiled)]
+    private static partial Regex IpAddressPattern();
+
+    /// <summary>Matches credit-card-shaped digit sequences with optional space/dash separators.</summary>
+    [GeneratedRegex(@"\b(?:\d[ -]*?){13,16}\b", RegexOptions.Compiled)]
+    private static partial Regex CreditCardPattern();
+
+    /// <summary>
+    /// Matches sensitive JSON property values: <c>"key": "value"</c> or <c>"key":"value"</c>.
+    /// Catches nested credentials like <c>{"api_key":"sk-abc..."}</c> where the value alone may not
+    /// match a structured token pattern (e.g., short opaque tokens, non-prefixed API keys).
+    /// </summary>
+    [GeneratedRegex(@"""(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|authorization|bearer|token|session[_-]?id|x-api-key)""\s*:\s*""([^""\\]|\\.)*""", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex JsonSensitiveValuePattern();
 
     /// <summary>
     /// Redacts sensitive values from a string.
@@ -66,8 +100,70 @@ public static partial class LogRedactor
             }
             return REDACTED;
         });
+        value = CookieHeaderPattern().Replace(value, match =>
+        {
+            var colonIndex = match.Value.IndexOfAny(new[] { ':', '=' });
+            if (colonIndex > 0)
+            {
+                var headerName = match.Value[..colonIndex].Trim();
+                return $"{headerName}: {REDACTED}";
+            }
+            return REDACTED;
+        });
+
+        // Nested JSON credentials: redact the *value* of sensitive JSON properties even when the
+        // value alone doesn't trip a structured pattern (short tokens, opaque vendor secrets, etc.).
+        // Applied before the generic catch-all so the JSON shape is preserved in the output.
+        value = JsonSensitiveValuePattern().Replace(value, match =>
+        {
+            // Preserve the property name; replace just the quoted value.
+            var quoteIdx = match.Value.IndexOf(':');
+            if (quoteIdx <= 0) return $"\"{REDACTED}\"";
+            var keyPart = match.Value[..quoteIdx].TrimEnd();
+            return $"{keyPart}: \"{REDACTED}\"";
+        });
+
+        // PII patterns — applied before the generic catch-all so emails and IPs aren't first
+        // claimed by the 32-char alphanumeric rule (and so 13-16 digit sequences don't get
+        // partially eaten). Order: email → CC → IP, since email and CC are more specific.
+        value = EmailPattern().Replace(value, REDACTED);
+        value = CreditCardPattern().Replace(value, REDACTED);
+        value = IpAddressPattern().Replace(value, REDACTED);
+
+        // Generic catch-all: any remaining long opaque alphanumeric string is likely a token
+        // (service-specific tokens that don't match the structured prefixes above).
+        // Applied LAST so structured patterns claim their matches first.
+        // Trade-off: also matches non-hyphenated UUIDs (32 hex), Git SHAs (40 hex), and content hashes (64 hex).
+        // This is acceptable noise — those values are not security-sensitive but redacting them is benign.
+        // Threshold of 32 chars avoids matching common short identifiers and test fixtures.
+        value = GenericTokenPattern().Replace(value, REDACTED);
 
         return value;
+    }
+
+    /// <summary>
+    /// Returns a redacted single-line representation of an exception suitable for logging in
+    /// token-handling code paths. Walks the inner-exception chain and applies <see cref="Redact"/>
+    /// to each <c>Message</c>. The full <c>StackTrace</c> is intentionally omitted because it can
+    /// contain bound parameter values (URLs with embedded auth, etc.) that vary by framework
+    /// and are not covered by structured redaction patterns.
+    /// </summary>
+    /// <param name="ex">The exception to render. Null returns empty string.</param>
+    /// <returns>A redacted, exception-type-prefixed message chain.</returns>
+    public static string RedactException(Exception? ex)
+    {
+        if (ex is null) return string.Empty;
+        var sb = new System.Text.StringBuilder();
+        var current = ex;
+        var depth = 0;
+        while (current is not null && depth < 8)
+        {
+            if (depth > 0) sb.Append(" --> ");
+            sb.Append(current.GetType().Name).Append(": ").Append(Redact(current.Message));
+            current = current.InnerException;
+            depth++;
+        }
+        return sb.ToString();
     }
 
     /// <summary>

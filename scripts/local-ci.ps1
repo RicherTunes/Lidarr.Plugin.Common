@@ -293,10 +293,16 @@ if ($SkipExtract) {
             throw "Lidarr.runtimeconfig.json not found in extracted assemblies"
         }
         $rc = Get-Content -LiteralPath $rcPath -Raw | ConvertFrom-Json
-        $runtimeVersion = $rc.runtimeOptions.framework.version
-        if (-not $runtimeVersion) {
-            # Try tfm array format
-            $runtimeVersion = ($rc.runtimeOptions.frameworks | Where-Object { $_.name -eq 'Microsoft.NETCore.App' }).version
+        $runtimeVersion = $null
+        # Newer Lidarr images ship runtimeconfig with `frameworks` (plural array)
+        # only — accessing `.framework` directly throws under StrictMode. Probe
+        # property existence before reading either shape so we tolerate both.
+        $rtOpts = $rc.runtimeOptions
+        if ($rtOpts -and $rtOpts.PSObject.Properties['framework']) {
+            $runtimeVersion = $rtOpts.framework.version
+        }
+        if (-not $runtimeVersion -and $rtOpts -and $rtOpts.PSObject.Properties['frameworks']) {
+            $runtimeVersion = ($rtOpts.frameworks | Where-Object { $_.name -eq 'Microsoft.NETCore.App' }).version
         }
         if (-not $runtimeVersion -or -not $runtimeVersion.StartsWith('8.')) {
             throw ".NET 8 guardrail FAILED: runtime version is '$runtimeVersion' (expected 8.x)"

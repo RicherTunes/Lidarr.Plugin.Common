@@ -38,7 +38,10 @@ jobs:
       - name: Restore & Build (no analyzers)
         run: |
           dotnet restore -p:UseLidarrTagLib=true
-          dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1 -p:UseLidarrTagLib=true
+          # DisablePathMap=true so the test step's coverlet collector can resolve source
+          # paths from PDBs. SourceLink + Deterministic still provide reproducible PDBs
+          # for shipping packages.
+          dotnet build -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1 -p:UseLidarrTagLib=true -p:DisablePathMap=true
 
       - name: Public API drift
         run: dotnet format src/Abstractions/Lidarr.Plugin.Abstractions.csproj analyzers --verify-no-changes --diagnostics RS0016,RS0017 -p:TargetFramework=net8.0

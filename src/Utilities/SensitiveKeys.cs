@@ -2,7 +2,7 @@ using System;
 
 namespace Lidarr.Plugin.Common.Utilities
 {
-    internal static class SensitiveKeys
+    public static class SensitiveKeys
     {
         private static readonly string[] ContainsFragments = new[]
         {
