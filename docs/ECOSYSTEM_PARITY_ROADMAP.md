@@ -338,19 +338,17 @@ Design:
 
 All three plugins can coexist in the same Lidarr instance and pass Schema gate simultaneously
 
-#### ⚠️ Multi-Plugin Stability Caveat
+#### Multi-Plugin Co-existence (FIXED 2026-05-10)
 
-**Port :8691 is "best-effort" until Lidarr AssemblyLoadContext fix.**
+Previously documented as "upstream Lidarr ALC lifecycle bug" requiring single-plugin instances. **Root-caused and fixed plugin-side** — see `docs/dev-guide/ALC_MULTIPLUGIN_FIX.md` for the full retrospective. Summary:
 
-Multi-plugin testing on a shared Lidarr instance (e.g., `:8691`) may exhibit intermittent failures due to an upstream Lidarr ALC lifecycle bug. Known symptoms:
-- Plugin schemas occasionally missing after restart
-- Type identity errors when multiple plugins reference shared types
-- Non-deterministic test failures in CI
+The bug was that each plugin shipped `Lidarr.Plugin.Abstractions.dll` alongside its merged plugin DLL. When Lidarr loaded plugin A's Abstractions into the default ALC, loading plugin B's identical-but-different-file copy threw `0x80131509 An operation is not legal in the current state`.
 
-**Recommendation**:
-- Use dedicated single-plugin instances (`:8690` Tidalarr, `:8692` Qobuzarr) for reliable E2E
-- Treat `:8691` multi-plugin results as informational, not blocking
-- Track upstream: [Lidarr ALC issue](https://github.com/Lidarr/Lidarr/issues) (pending link)
+The fix: ILRepack `Lidarr.Plugin.Abstractions.dll` into the merged plugin DLL with `Internalize="true"`. Lidarr's host has its own `NzbDrone.Core.Plugins.IPlugin` (verified by reading `Lidarr.Core.dll` metadata) and zero `AssemblyRef`s to `Lidarr.Plugin.Abstractions` — the Abstractions sidecar was never needed by the host.
+
+**Verification**: `scripts/multi-plugin-coexistence-proof.ps1` mounts all 4 plugins into one Lidarr container and asserts each appears in its expected schema endpoint. Runs locally and in CI on every push (`.github/workflows/multi-plugin-coexistence-proof.yml`).
+
+**Single-plugin instances are still recommended** for E2E test isolation (faster startup, easier log diffing, no risk of cross-plugin DI registration collisions), but they are no longer required for reliability.
 
 ---
 
