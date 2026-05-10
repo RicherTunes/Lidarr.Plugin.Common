@@ -24,10 +24,19 @@ function Normalize-PluginAbstractions {
 
     $abstractionDlls = @(Get-ChildItem -LiteralPath $PluginsRoot -Recurse -File -Filter 'Lidarr.Plugin.Abstractions.dll' -ErrorAction SilentlyContinue)
     if (-not $abstractionDlls -or $abstractionDlls.Count -eq 0) {
-        throw "No Lidarr.Plugin.Abstractions.dll found under '$PluginsRoot'. Plugins must ship it (it is not present in the host image)."
+        # Post multi-plugin co-existence fix (PR #485, see docs/dev-guide/ALC_MULTIPLUGIN_FIX.md):
+        # Lidarr.Plugin.Abstractions.dll is now ILRepacked + internalized into each plugin's
+        # merged DLL — sidecar Abstractions.dll is intentionally absent. That's the new
+        # normal and is REQUIRED for multi-plugin co-existence (the sidecar caused the
+        # 0x80131509 cross-ALC conflict). The old "must ship it" requirement is wrong now.
+        Write-Host "No sidecar Lidarr.Plugin.Abstractions.dll found under '$PluginsRoot' — assuming merged-DLL builds (post PR #485). Skipping cross-plugin Abstractions identity check." -ForegroundColor DarkGray
+        return
     }
 
     if ($abstractionDlls.Count -eq 1) {
+        # Mixed-mode: one plugin still ships sidecar (legacy build) while others are merged.
+        # Tolerated; each plugin's merged DLL self-resolves Abstractions internally and the
+        # one sidecar gets loaded into the default ALC for the legacy plugin.
         return
     }
 
