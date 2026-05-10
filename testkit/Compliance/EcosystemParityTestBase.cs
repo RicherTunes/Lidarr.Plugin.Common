@@ -428,6 +428,14 @@ public abstract partial class EcosystemParityTestBase : IDisposable
             // global.json
             [nameof(GlobalJson_Exists)] = GlobalJson_Exists(),
             [nameof(GlobalJson_SdkVersion_Is8_0_100)] = GlobalJson_SdkVersion_Is8_0_100(),
+
+            // Behavior contracts (post-unification invariants — see EcosystemParityTestBase.BehaviorContracts.cs)
+            [nameof(Check_UsesCommonFileTokenStore)] = Check_UsesCommonFileTokenStore(),
+            [nameof(Check_UsesCommonHttpResponseCache)] = Check_UsesCommonHttpResponseCache(),
+            [nameof(Check_RegistersBridgeDefaults)] = Check_RegistersBridgeDefaults(),
+            [nameof(Check_PluginManifest_Capabilities_HaveBackingTypes)] = Check_PluginManifest_Capabilities_HaveBackingTypes(),
+            [nameof(Check_NoFluentValidation_ErrorsApi_Drift)] = Check_NoFluentValidation_ErrorsApi_Drift(),
+            [nameof(Check_UsesCommonPluginConfigRoots)] = Check_UsesCommonPluginConfigRoots(),
         };
 
         var passed = results.Values.Count(r => r.Passed);

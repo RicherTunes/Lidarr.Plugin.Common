@@ -1,0 +1,29 @@
+{
+  "// status": "EXPERIMENTAL — Stryker.NET on this codebase produces 0 testable mutants",
+  "// reason": [
+    "On a full-suite run (mutate-all-files), Stryker reports 'Safe Mode! Stryker will remove all mutations in",
+    "ExecuteWithResilienceAsyncCore' and ~1455 mutants hit compile errors. Even when scoped to a single file",
+    "via the 'mutate' filter, Stryker still generates ~13,650 mutants project-wide and filters to zero before",
+    "test execution. Likely cause: the complex async/await + source-generator + handler-chain patterns in this",
+    "codebase don't survive Stryker's MutantControl.IsActive() wrapping cleanly.",
+    "",
+    "Repro: dotnet stryker --config-file stryker-config.json — completes in ~45s with 0 testable mutants.",
+    "",
+    "Future investigation paths:",
+    " 1. Try Stryker --solution mode instead of --project",
+    " 2. Pick a simpler non-async-heavy file (e.g. src/Utilities/Guard.cs, src/Utilities/HashingUtility.cs) to",
+    "    verify Stryker works AT ALL on this project before targeting hot paths",
+    " 3. Try with concurrency 1 + verbose logging to see what triggers compile errors",
+    " 4. Consider an alternative quality signal — property-based testing via FsCheck on the same hot paths"
+  ],
+  "stryker-config": {
+    "project": "Lidarr.Plugin.Common.csproj",
+    "test-projects": ["tests/Lidarr.Plugin.Common.Tests.csproj"],
+    "mutate": [
+      "src/Utilities/Guard.cs"
+    ],
+    "thresholds": { "high": 80, "low": 60, "break": 0 },
+    "concurrency": 2,
+    "reporters": ["html", "json", "cleartext"]
+  }
+}

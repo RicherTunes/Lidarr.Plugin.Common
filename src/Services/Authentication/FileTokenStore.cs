@@ -14,7 +14,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
     /// Persists token envelopes to disk using <see cref="System.Text.Json"/>.
     /// </summary>
     /// <typeparam name="TSession">Session representation type.</typeparam>
-    internal sealed class FileTokenStore<TSession> : ITokenStore<TSession>
+    public sealed class FileTokenStore<TSession> : ITokenStore<TSession>
         where TSession : class
     {
         private readonly string _filePath;
@@ -178,6 +178,22 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                         continue;
                     }
                 }
+
+                // Defense-in-depth: restrict file permissions to owner-only on Unix-like systems.
+                // Encryption-at-rest already mitigates exposure; this prevents accidental world/group reads.
+#if NET8_0_OR_GREATER
+                if (!OperatingSystem.IsWindows())
+                {
+                    try
+                    {
+                        File.SetUnixFileMode(_filePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
+                    }
+                    catch (Exception ex) when (ex is PlatformNotSupportedException or UnauthorizedAccessException or IOException)
+                    {
+                        _logger?.LogDebug(ex, "Failed to set Unix file mode on {FilePath}", _filePath);
+                    }
+                }
+#endif
             }
             catch (Exception ex) when (ex is IOException or JsonException)
             {

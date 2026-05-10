@@ -105,8 +105,11 @@ namespace Lidarr.Plugin.Common.Utilities
                     var opName = operationName ?? "operation";
                     onRetry?.Invoke(ex, attempt, $"Attempt {attempt} of {maxRetries} failed for {opName}. Retrying in {delay}ms...");
 
-                    // Add jitter to prevent thundering herd
-                    var jitter = new Random().Next(0, 500);
+                    // Add jitter to prevent thundering herd. Use Random.Shared (thread-safe,
+                    // well-mixed) — per-call `new Random()` seeded from system clock would
+                    // produce the same jitter on near-simultaneous retries from concurrent
+                    // callers, defeating the "prevent thundering herd" intent.
+                    var jitter = Random.Shared.Next(0, 500);
                     await Task.Delay(delay + jitter);
                     delay = Math.Min(delay * 2, 30000); // Exponential backoff with max 30s cap
                 }

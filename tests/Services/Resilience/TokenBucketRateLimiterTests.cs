@@ -57,12 +57,18 @@ namespace Lidarr.Plugin.Common.Tests.Services.Resilience
             var tokensAfterConsumption = _limiter.GetAvailableTokens(resource);
             Assert.Equal(0, tokensAfterConsumption);
 
-            // Wait for refill period and check one token is available
-            Thread.Sleep(period);
+            // Wait long enough for at least one token to refill (capped to keep the test fast).
+            // Refill rate = maxRequests / periodSeconds tokens per second, so seconds-per-token =
+            // periodSeconds / maxRequests. We sleep ~2x that to absorb scheduling jitter, but never
+            // longer than 5 seconds — sleeping the full period for the (1000, 3600) case would
+            // hang the test host for an hour and previously crashed xUnit.
+            var secondsPerToken = (double)periodSeconds / maxRequests;
+            var waitMs = Math.Min(5000, Math.Max(50, secondsPerToken * 2 * 1000));
+            Thread.Sleep(TimeSpan.FromMilliseconds(waitMs));
 
             // Assert: at least 1 token should be available (allowing for timing variance)
             var tokensAfterRefill = _limiter.GetAvailableTokens(resource);
-            Assert.True(tokensAfterRefill >= 1, $"Expected at least 1 token after {periodSeconds}s, got {tokensAfterRefill}");
+            Assert.True(tokensAfterRefill >= 1, $"Expected at least 1 token after {waitMs}ms (refill rate {maxRequests}/{periodSeconds}s), got {tokensAfterRefill}");
         }
 
         [Fact]

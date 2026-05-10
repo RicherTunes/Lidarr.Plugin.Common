@@ -43,4 +43,22 @@ public record LlmResponse
     /// Contains additional information that varies by provider.
     /// </summary>
     public IReadOnlyDictionary<string, object>? Metadata { get; init; }
+
+    /// <summary>
+    /// Gets the tool calls the model emitted in this response. Populated when the model chose
+    /// to invoke one or more of the tools supplied via <see cref="LlmRequest.Tools"/>. Each entry
+    /// carries an <see cref="LlmToolCall.Id"/> that the host echoes back on the corresponding
+    /// follow-up <see cref="LlmToolResult"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>Backward-compatible: defaults to <see langword="null"/>. Callers should check for
+    /// <c>ToolCalls != null</c> regardless of <see cref="FinishReason"/> — different vendors set
+    /// it differently (OpenAI: <c>"tool_calls"</c>; Anthropic: <c>"tool_use"</c>; Gemini may keep
+    /// the OpenAI-style stop reason or omit it entirely) and the abstraction does not normalize
+    /// the string.</para>
+    /// <para>Source: brainarr Phase 5e P1 — closes the deferred tool-calling gap so that
+    /// providers advertising <see cref="LlmCapabilityFlags.ToolCalling"/> have a shared data
+    /// shape to surface model-emitted calls.</para>
+    /// </remarks>
+    public IReadOnlyList<LlmToolCall>? ToolCalls { get; init; }
 }

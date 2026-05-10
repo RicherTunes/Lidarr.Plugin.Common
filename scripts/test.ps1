@@ -317,6 +317,8 @@ if ($filter) {
 
 if ($Coverage) {
     $testArgs += @("--collect", "XPlat Code Coverage")
+    # Disable PathMap so coverlet can resolve source paths from PDBs.
+    $testArgs += @("-p:DisablePathMap=true")
 }
 
 if ($VerboseOutput) {
