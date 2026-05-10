@@ -146,13 +146,16 @@ public sealed class LidarrContainerFixtureTests
     }
 
     [Fact]
-    public async Task InitializeAsync_SetsSkipReason_WhenHostBridgeMissing()
+    public async Task InitializeAsync_SetsSkipReason_WhenPluginRefsAbstractionsButSidecarMissing()
     {
-        // Build a temp dir containing the plugin DLL but NOT Lidarr.Plugin.Abstractions.dll
+        // Build a real plugin DLL that has an AssemblyRef to Lidarr.Plugin.Abstractions
+        // (i.e., NOT ILRepack-merged) but DOESN'T ship the sidecar — that's an unloadable
+        // dev mistake the fixture must skip on.
         string tempDir = Path.Combine(Path.GetTempPath(), "lpc-fixture-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(tempDir);
         string dllPath = Path.Combine(tempDir, "Lidarr.Plugin.Test.dll");
-        File.WriteAllText(dllPath, "stub");
+        // Use this test assembly itself — it references Lidarr.Plugin.Abstractions transitively.
+        File.Copy(typeof(LidarrContainerFixtureTests).Assembly.Location, dllPath, overwrite: true);
 
         try
         {
@@ -162,6 +165,49 @@ public sealed class LidarrContainerFixtureTests
 
             Assert.NotNull(fixture.SkipReason);
             Assert.Contains("host-bridge", fixture.SkipReason!, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, recursive: true); } catch { }
+        }
+    }
+
+    [Fact]
+    public async Task InitializeAsync_AcceptsMergedBuild_WithoutAbstractionsSidecar()
+    {
+        // Post PR #485: merged plugin DLLs have Abstractions ILRepacked + internalized.
+        // No external AssemblyRef to Abstractions, no sidecar. The fixture MUST accept
+        // this shape — otherwise every E2E test silently skips post-rollout (the C1 risk
+        // the adversarial review caught).
+        string tempDir = Path.Combine(Path.GetTempPath(), "lpc-fixture-merged-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(tempDir);
+        string dllPath = Path.Combine(tempDir, "Lidarr.Plugin.Test.dll");
+
+        // Generate a minimal valid PE+managed assembly with no Abstractions AssemblyRef
+        // by emitting one via System.Reflection.Emit + saving to disk.
+        var an = new System.Reflection.AssemblyName("Lidarr.Plugin.Test");
+        var asmBuilder = System.Reflection.Emit.AssemblyBuilder.DefineDynamicAssembly(an, System.Reflection.Emit.AssemblyBuilderAccess.Run);
+        // Emit minimal IL — but since we can't save dynamic assemblies on .NET 8 without
+        // the SaveAssembly NuGet, fall back to writing a tiny but valid empty PE manifest.
+        // Even simpler: copy any small DLL from .NET runtime that has zero Abstractions ref
+        // (System.Runtime.dll qualifies).
+        var sysRuntime = typeof(object).Assembly.Location;
+        File.Copy(sysRuntime, dllPath, overwrite: true);
+
+        try
+        {
+            var opts = BuildOptions(findDll: _ => dllPath);
+            using var fixture = new TestableContainerFixture(opts, dockerAvailable: true);
+            // Stub docker so we don't actually try to run a container — we only care that
+            // IsHostBridgeBuild accepts the merged shape (no skip due to sidecar absence).
+            await fixture.InitializeAsync();
+
+            // Either no skip (full pass) or a skip that's NOT about host-bridge. The
+            // critical assertion is that the missing sidecar alone doesn't trigger skip.
+            if (fixture.SkipReason is { } reason)
+            {
+                Assert.DoesNotContain("host-bridge", reason, StringComparison.OrdinalIgnoreCase);
+            }
         }
         finally
         {
