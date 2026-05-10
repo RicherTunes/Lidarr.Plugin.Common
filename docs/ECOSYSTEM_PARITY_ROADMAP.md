@@ -352,6 +352,47 @@ The fix: ILRepack `Lidarr.Plugin.Abstractions.dll` into the merged plugin DLL wi
 
 ---
 
+## Dead-Wire Audit Punch List (2026-05-10)
+
+After fixing the Tidal 429 storms (a `TidalRateLimiter` registered in DI but never invoked), an adversarial audit ran across all 4 plugins + Common to find similar "infrastructure-registered-but-never-used" inconsistencies. Findings, ranked by severity:
+
+### Shipped fixes
+- **HIGH** — Tidal: `TidalRateLimiter` was dead code; wired via new `TidalRateLimitingHandler` (DelegatingHandler) on every `AddHttpClient`. Honors `Retry-After`. Commit `305ec71`.
+- **HIGH** — Qobuz: `IUniversalAdaptiveRateLimiter` was unregistered → optional ctor parameter on `QobuzHttpClient` silently passed null. Plus the bridge `BridgeQobuzApiClient` used a raw `HttpClient` with no DelegatingHandler chain. Fixed via explicit `IUniversalAdaptiveRateLimiter -> UniversalAdaptiveRateLimiter` registration + new `QobuzRateLimitingHandler`. Commit `da88095`.
+
+### Tracked follow-ups (in priority order)
+
+1. **HIGH — `NetworkResilienceService` orphan in tidalarr** (`TidalModule.cs:252`): registered as singleton, zero callers in `src/`. Either inject into `TidalChunkDownloader`/`SimpleDownloadOrchestrator` (so chunk fan-out gets circuit-breaker / network-health gating), or delete the registration.
+
+2. **HIGH — `IUniversalAdaptiveRateLimiter` interface registration is misleading** (`tidalarr/TidalModule.cs:250`): `TidalRateLimitingHandler` ctor takes the concrete `TidalRateLimiter`, not the interface. Future devs assume the interface is wired but DI swap-ins silently no-op. Switch handler ctor to the interface OR drop the interface registration.
+
+3. **HIGH — Qobuz raw `HttpClient` constructions still bypass everything**:
+   - `QobuzAuthenticationService.cs:87,102` — two `new SocketsHttpHandler` + `new HttpClient` per auth flow
+   - `Services/Http/SharedSystemHttpClient.cs:21-31` — Lazy singleton `new HttpClient`
+   - These auth/streaming paths still skip the rate-limit gate the bridge fix established. Migrate to `IHttpClientFactory` with the same `QobuzRateLimitingHandler` chain.
+
+4. **MEDIUM — Tidal UI lies**:
+   - `TidalarrSettings.ReEncodeAAC` — exposed in UI, no production code reads it
+   - `TidalarrSettings.UseLRCLIB` — same; no LRCLIB integration found
+   - `TidalarrSettings.EarlyReleaseLimit` — validated + propagated, but no search/filter path uses it
+   - Either implement consumers (post-processor / lyrics service / search filter) OR remove from `TidalarrPlugin.DescribeSettings()`.
+
+5. **MEDIUM — applemusicarr's `RequestsPerSecond` setting is informational only**: stored but not wired into the runtime limiter. UI description updated to disclose this; proper fix needs `UniversalAdaptiveRateLimiter` to accept per-service config overrides at construction time.
+
+6. **MEDIUM — brainarr legacy `RateLimiter` coexists with `IUniversalAdaptiveRateLimiter`**: `Services/RateLimiter.cs` (legacy) is still consumed via fallback `_rateLimiter ?? new RateLimiter(...)` in `SecureProviderBase.cs:50`. Per-provider 429 backoff isn't coordinated with global budget. Deprecate the legacy class or have `SecureProviderBase` resolve from DI.
+
+7. **LOW — Common `BaseStreamingIndexer.cs:69` and `BaseStreamingDownloadClient.cs:497`** create `new HttpClient` fallbacks inside the base class when no factory is provided. Sidesteps the entire DelegatingHandler chain. Inverting this so the base class requires `IHttpClientFactory` (or an explicit client) prevents accidental bypass.
+
+8. **LOW — Tidalarr `_httpClient` field in `TidalIndexer.cs:19`**: used (not dead) but constructed manually in ctor, bypassing `TidalRateLimitingHandler`. Switch to typed-client injection so the handler chain applies.
+
+9. **LOW — `AdaptiveQobuzApiClient.cs`**: registered no callers; pure dead code. Delete.
+
+10. **LOW — `applemusicarr` `AppleMusicSdkComposer.s_http`**: static `HttpClient` with raw `SocketsHttpHandler`. Limiter is bolted on via SDK `LidarrLimiterAdapter` (partially mitigated), but auth refresh / decoding / observability handlers are absent.
+
+The pattern across all of these: a service is **registered** so the IL graph compiles and the test assertion `services.GetService<X>().NotNull()` passes, but no production-path call site actually depends on it. Tests that verify "X is in DI" miss the bigger question of "is X actually invoked." For new code, prefer integration-style tests that exercise the call path (or the `UniversalAdaptiveRateLimiter`-style audit grep: search for `WaitIfNeededAsync` consumers, not just registrations).
+
+---
+
 ## Quick Reference: File Locations
 
 ### Packaging Tests
