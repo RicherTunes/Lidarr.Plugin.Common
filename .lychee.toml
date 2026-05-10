@@ -12,6 +12,8 @@ exclude = [
     "https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/.*",
     # TODO docs (planned but not yet written)
     ".*IMPLEMENT_DOWNLOAD_CLIENT.*",
+    # OpenAI restructured their API auth docs URL — referenced from a research ADR.
+    "https://platform\\.openai\\.com/docs/api-reference/authentication",
 ]
 
 # Accept these status codes as valid
