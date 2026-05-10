@@ -1,3 +1,5 @@
+using System.Linq;
+using System.Net.Http;
 using Lidarr.Plugin.Abstractions.Capabilities;
 using Lidarr.Plugin.Common.Services.Registration;
 using Microsoft.Extensions.DependencyInjection;
