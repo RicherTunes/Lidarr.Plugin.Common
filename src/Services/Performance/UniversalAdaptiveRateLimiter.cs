@@ -87,10 +87,23 @@ namespace Lidarr.Plugin.Common.Services.Performance
             ["Default"] = new ServiceConfig(200, 50, 400) // Conservative default
         };
 
+        private readonly UniversalAdaptiveRateLimiterOptions? _options;
+
         public UniversalAdaptiveRateLimiter()
         {
             _serviceLimiters = new ConcurrentDictionary<string, ServiceRateLimiter>(StringComparer.OrdinalIgnoreCase);
             _globalSemaphore = new SemaphoreSlim(1, 1);
+        }
+
+        /// <summary>
+        /// Construct with per-service rate overrides drawn from user-facing settings.
+        /// See <see cref="UniversalAdaptiveRateLimiterOptions.WithServiceLimit"/> for
+        /// how to populate the options object.
+        /// </summary>
+        public UniversalAdaptiveRateLimiter(UniversalAdaptiveRateLimiterOptions options)
+            : this()
+        {
+            _options = options ?? throw new ArgumentNullException(nameof(options));
         }
 
         public async Task<bool> WaitIfNeededAsync(string service, string endpoint, CancellationToken cancellationToken = default)
@@ -164,8 +177,19 @@ namespace Lidarr.Plugin.Common.Services.Performance
             });
         }
 
-        private static ServiceConfig GetServiceConfig(string service)
+        private ServiceConfig GetServiceConfig(string service)
         {
+            // User-supplied override wins. Derive adaptive bounds around the
+            // configured rate so backoff has room to move:
+            //   default = configured rpm
+            //   min     = max(1, 30% of configured rpm)
+            //   max     = 130% of configured rpm
+            if (_options is not null && _options.TryGetServiceLimit(service, out var rpm))
+            {
+                int min = Math.Max(1, (int)Math.Round(rpm * 0.30));
+                int max = Math.Max(rpm, (int)Math.Round(rpm * 1.30));
+                return new ServiceConfig(rpm, min, max);
+            }
             return DefaultServiceConfigs.GetValueOrDefault(service) ?? DefaultServiceConfigs["Default"];
         }
 
