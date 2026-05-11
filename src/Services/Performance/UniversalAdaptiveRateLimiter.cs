@@ -102,22 +102,17 @@ namespace Lidarr.Plugin.Common.Services.Performance
             ["Default"] = new ServiceConfig(200, 50, 400) // Conservative default
         };
 
-        /// <summary>
-        /// Conservative service config: ~1 req/sec (60 RPM), 30-second circuit open
-        /// on repeated non-auth errors.  Used by <see cref="WithConservativeDefaults"/>.
-        /// </summary>
         private static readonly Dictionary<string, ServiceConfig> ConservativeServiceConfigs =
             new(StringComparer.OrdinalIgnoreCase)
             {
-                // All services get the same conservative cap.
-                // Key = "Default" is the fall-through used by GetServiceConfig.
                 ["Default"] = new ServiceConfig(
-                    defaultReqPerMin: 60,  // ~1 req/s
-                    minReqPerMin: 2,       // floor at ~2 RPM so the limiter never fully stalls
-                    maxReqPerMin: 60)      // cap at 60 RPM — won't auto-expand beyond initial
+                    defaultReqPerMin: 60,
+                    minReqPerMin: 2,
+                    maxReqPerMin: 60)
             };
 
         private readonly bool _conservativeProfile;
+        private readonly UniversalAdaptiveRateLimiterOptions? _options;
 
         public UniversalAdaptiveRateLimiter()
             : this(conservativeProfile: false)
@@ -132,15 +127,19 @@ namespace Lidarr.Plugin.Common.Services.Performance
         }
 
         /// <summary>
-        /// Creates a new <see cref="UniversalAdaptiveRateLimiter"/> pre-configured with the
-        /// Conservative preset: ~1 req/s (60 RPM), 2–60 RPM window, and a tighter
-        /// circuit-open threshold (3 consecutive non-auth errors vs. 5 on the default profile).
+        /// Creates a rate limiter with the Conservative preset (~1 req/s, 2-60 RPM window).
         /// </summary>
-        /// <remarks>
-        /// Existing default behaviour for non-Conservative instances is unchanged.
-        /// </remarks>
         public static UniversalAdaptiveRateLimiter WithConservativeDefaults()
             => new UniversalAdaptiveRateLimiter(conservativeProfile: true);
+
+        /// <summary>
+        /// Construct with per-service rate overrides drawn from user-facing settings.
+        /// </summary>
+        public UniversalAdaptiveRateLimiter(UniversalAdaptiveRateLimiterOptions options)
+            : this()
+        {
+            _options = options ?? throw new ArgumentNullException(nameof(options));
+        }
 
         public async Task<bool> WaitIfNeededAsync(string service, string endpoint, CancellationToken cancellationToken = default)
         {
@@ -221,10 +220,15 @@ namespace Lidarr.Plugin.Common.Services.Performance
 
         private ServiceConfig GetServiceConfig(string service)
         {
+            if (_options is not null && _options.TryGetServiceLimit(service, out var rpm))
+            {
+                int min = Math.Max(1, (int)Math.Round(rpm * 0.30));
+                int max = Math.Max(rpm, (int)Math.Round(rpm * 1.30));
+                return new ServiceConfig(rpm, min, max);
+            }
+
             if (_conservativeProfile)
             {
-                // Conservative profile: look up service-specific entry, fall back to
-                // the single "Default" conservative config.
                 return ConservativeServiceConfigs.GetValueOrDefault(service)
                     ?? ConservativeServiceConfigs["Default"];
             }
