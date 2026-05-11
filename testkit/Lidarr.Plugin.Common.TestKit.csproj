@@ -48,11 +48,11 @@
     <!-- xunit + SkippableFact: needed by Hosting/LidarrContainerFixture (wave 22a).
          xunit.assert provides Assert; xunit.extensibility.core provides IAsyncLifetime. -->
     <PackageReference Include="xunit.assert" Version="2.9.2" />
-    <PackageReference Include="xunit.extensibility.core" Version="2.9.2" />
+    <PackageReference Include="xunit.extensibility.core" Version="2.9.3" />
     <!-- Xunit.SkippableFact 1.5.23 transitively pins xunit.extensibility.execution to 2.4.0,
          which in turn requires xunit.extensibility.core==2.4.0 — conflicting with our 2.9.2 pin.
          Forcing execution to the matching 2.9.2 silences NU1608 and keeps the xunit family in sync. -->
-    <PackageReference Include="xunit.extensibility.execution" Version="2.9.2" />
+    <PackageReference Include="xunit.extensibility.execution" Version="2.9.3" />
     <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
   </ItemGroup>
 
