@@ -35,7 +35,25 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
-_No changes yet._
+**Upgrade note:** Adds five UX-focused primitives that consuming plugins can adopt to remove boilerplate and produce uniform first-run UX for download-path validation, connection-test error messages, rate-limit handling, lyrics fallback, and per-service rate caps. Also retires several dead-wire APIs that had zero ecosystem consumers. Drop-in for existing consumers — every change is additive or removes API surface that was never used.
+
+**Highlights**
+- `Services/Validation/DownloadPathValidator` (#498) — uniform syntactic validation for plugin `DownloadPath` / `OutputFolder` settings. Distinguishes Empty / NotAbsolute / ContainsTraversal / InvalidSyntax / Ok with actionable user-readable messages. Already adopted by qobuzarr, applemusicarr, tidalarr (see [`docs/COMMON_PRIMITIVES_ADOPTION.md`](docs/COMMON_PRIMITIVES_ADOPTION.md)).
+- `Services/Diagnostics/HttpExceptionClassifier` (#499) — maps HTTP-call exceptions to `HttpFailureCategory` (Network / Timeout / Cancelled / Auth / RateLimit / ClientRequest / Server / Unknown) with user-readable hints. Replaces the common `"Test failed: {ex.GetType().Name}: {ex.Message}"` leak in plugin `Test()` methods.
+- `Services/Http/RateLimitHeaderUtilities` (#492) — `ResolveRetryAfter` parser and host-first-segment endpoint-key builder, lifted from byte-for-byte duplicates in tidalarr's and qobuzarr's rate-limit handlers.
+- `Services/Performance/UniversalAdaptiveRateLimiterOptions` (#496) — fluent options builder lets plugins feed user-facing "Requests per second" settings through to the limiter; previously the only ctor was parameterless and ignored user-supplied rate caps.
+- `Services/Lyrics/LrclibClient` (#497) — public-API client for the LRCLIB lyrics service. `TryFetchSyncedLyricsAsync` returns LRC body or `null` for any failure (lyrics are best-effort and must never break a download). Defensive URL escaping protects against parameter injection via metadata.
+- `Services/Caching/FileStreamingResponseCache` (#495) — accepts an optional `ILogger<FileStreamingResponseCache>` so silent IO/permission/disk-full failures become observable at Debug level. Default `NullLogger` preserves existing zero-arg consumers; fully backward-compatible.
+- Dead-wire deletions: `StreamingIndexerMixin.ApplyRateLimitAsync` (deadlock-prone, 0 callers, #493) and `StreamingDownloadMixin` / `StreamingAuthMixin` / `DownloadJobInfo` (180+ LOC, 0 ecosystem consumers, #494).
+- Cleanups: cargo-cult catches around type-safe `HttpRequestOptions.TryGetValue` (#491); flaky TTL window in `JsonFileStoreEdgeCaseTests` widened from 75ms/150ms to 300ms/600ms (#506).
+
+**Breaking changes:** None. Every new API surface has a backward-compatible default; deletions had no ecosystem consumers.
+
+**Deprecations:** None.
+
+**Reviewer aid:** [`docs/COMMON_PRIMITIVES_ADOPTION.md`](docs/COMMON_PRIMITIVES_ADOPTION.md) (#507) is the single navigation index for the arc — lists every primitive, which consuming plugins have adopted it, and the three predictable adoption shapes (inline-swap / additive-validation / extract-then-test) so reviewers can read one example per shape and skim the rest.
+
+**Test coverage:** 61 new TDD test cases added across the five primitives + cleanups. Consumer-side adoptions in plugin repos add another 44 characterisation tests.
 
 ## [1.7.1] - 2026-03-27
 **Upgrade note:** Patch release hardening bridge defaults, sandbox resilience, and test coverage. No new public API surface.
