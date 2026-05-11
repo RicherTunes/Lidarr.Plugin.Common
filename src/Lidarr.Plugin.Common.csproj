@@ -124,7 +124,7 @@
          8.0.0 — manifests as "Could not load ... Version=9.0.0.0" during plugin
          discovery, blocking multi-plugin loading. -->
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.25" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.26" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.25" />
   </ItemGroup>
   <!-- CLI Framework Dependencies - Optional for development/testing only -->
@@ -157,7 +157,7 @@
        (~10 MB of dead weight; also breaks packaging closure when the merged
        plugin DLL has a hard ref but the host doesn't ship Azure assemblies). -->
   <ItemGroup>
-    <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" Version="1.6.1" PrivateAssets="all" ExcludeAssets="runtime" />
+    <PackageReference Include="Azure.Extensions.AspNetCore.DataProtection.Keys" Version="1.6.3" PrivateAssets="all" ExcludeAssets="runtime" />
     <PackageReference Include="Azure.Identity" Version="1.12.0" PrivateAssets="all" ExcludeAssets="runtime" />
   </ItemGroup>
 
