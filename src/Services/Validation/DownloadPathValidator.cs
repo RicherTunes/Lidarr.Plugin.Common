@@ -8,7 +8,7 @@ namespace Lidarr.Plugin.Common.Services.Validation
     /// Reusable validator for streaming-plugin <c>DownloadPath</c> settings.
     ///
     /// Each plugin used to roll its own check (typically just
-    /// "did <see cref="System.IO.Path.GetFullPath"/> not throw?"), which let
+    /// "did <see cref="System.IO.Path.GetFullPath(string)"/> not throw?"), which let
     /// traversal segments, relative paths, and other surprises through. This
     /// validator returns a structured result with a specific
     /// <see cref="Reason"/> so plugin UIs can show actionable error text
