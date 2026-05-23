@@ -92,8 +92,11 @@ $plugins = @(
         # applemusicarr keeps the standard SDK output layout (Release/net8.0/...),
         # unlike tidalarr/qobuzarr which set AppendTargetFrameworkToOutputPath=false.
         DllCandidates = @(
-            'src/AppleMusicarr.Plugin/bin/Release/net8.0/AppleMusicarr.Plugin.dll',
-            'src/AppleMusicarr.Plugin/bin/Debug/net8.0/AppleMusicarr.Plugin.dll'
+            # Post-rename (May 2026): applemusicarr DLL filename now matches Lidarr's PluginLoader
+            # glob "Lidarr.Plugin.*.dll" (NzbDrone.Common/Extensions/PathExtensions.cs:334).
+            # Before this, the plugin loaded silently into nothing.
+            'src/AppleMusicarr.Plugin/bin/Release/net8.0/Lidarr.Plugin.AppleMusicarr.dll',
+            'src/AppleMusicarr.Plugin/bin/Debug/net8.0/Lidarr.Plugin.AppleMusicarr.dll'
         )
         Mount = '/config/plugins/RicherTunes/AppleMusicarr'
         Substring = 'AppleMusic'
