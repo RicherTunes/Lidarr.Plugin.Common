@@ -35,6 +35,39 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-05-23
+**Upgrade note:** Hot-fix for a Lidarr Docker startup failure that affected every plugin consuming Common's token protection. The DataProtection key-dir resolver no longer falls back to a *relative* path when `$HOME` is empty; the factory degrades gracefully to a `NullTokenProtector` (with a loud one-line diagnostic) when the backend can't initialise. Plugins do not need code changes — bump the submodule pointer.
+
+**Highlights**
+- **`DataProtectionTokenProtector.GetDefaultKeysDir` candidate chain.** Previous implementation returned `Path.Combine(home, ".config", …)` where `home` came from `Environment.SpecialFolder.UserProfile`. In hotio / linuxserver Lidarr Docker images, the abc user's home directory is sometimes absent from `/etc/passwd` after PUID/PGID adjustments; `UserProfile` returns empty; the resulting `Path.Combine("", ".config", …)` is a *relative* path that resolves against the process cwd (`/app/bin`, the read-only install dir). `Directory.CreateDirectory` then fails with `UnauthorizedAccessException: Access to the path '/app/bin/.config' is denied`, which propagated up through `StringTokenProtector.Protect` → every `set_ApiKey` call. The new resolver chains: `$XDG_DATA_HOME` → `$XDG_CONFIG_HOME` → `SpecialFolder.LocalApplicationData` → `$HOME/.local/share` → `SpecialFolder.ApplicationData` → `$HOME/.config` → `Path.GetTempPath()`. Every candidate is checked with `Path.IsPathRooted`; non-rooted candidates are skipped (this is the rule that prevents the bug from recurring).
+- **`NullTokenProtector` graceful fallback.** When the configured backend fails to initialise (typically: key dir unwritable), the factory now substitutes a `NullTokenProtector` that returns plaintext bytes verbatim. The wrapping `StringTokenProtector` still produces a well-formed envelope, but the embedded algorithm id is `"null"` (base64-url-encoded as `bnVsbA`) so an audit can recognise unprotected blobs at a glance. `TokenProtectorFactory.IsDegradedToPlaintext` flips to `true`; `LastDiagnostics` carries the cause and the path that failed, so plugin-startup code can surface the degradation to the operator.
+- **`LP_COMMON_REQUIRE_PROTECTOR=true` opt-in for hard-fail mode.** Production deployments that would rather see the plugin fail loudly than silently store secrets as plaintext can set this env var; the factory then propagates the initialisation exception instead of substituting `NullTokenProtector`.
+- **`LP_COMMON_PROTECTOR=null` explicit opt-in.** Dev environments where the operator accepts plaintext storage for convenience can request the null backend by name; honoured even when `LP_COMMON_REQUIRE_PROTECTOR=true`.
+- **Pre-flight write probe.** Before constructing the DataProtection provider, the factory now creates+deletes a 0-byte probe file in the candidate keys dir. Surfaces "directory not writable" failures with a clearer error path than waiting for the first `Protect` call to throw.
+- **`TokenProtectorDiagnostics` record.** Public surface so plugin startup code can read `BackendName`, `KeysPath`, `Cause`, and `DegradedReason`. Recommended log line on plugin startup: `"Token protection: {BackendName} (keys={KeysPath ?? "(in-memory)"})"`.
+
+**Test coverage**
+- `tests/Security/TokenProtection/TokenProtectorFactoryFallbackTests.cs` (NEW, 7 tests):
+  - `GetDefaultKeysDir_AlwaysReturnsRootedPath_EvenWhenHomeAndXdgAreEmpty` — pins the original bug fix.
+  - `GetDefaultKeysDir_FallsBackToTempPath_AsLastResort` — verifies the temp-path safety net.
+  - `GetDefaultKeysDir_PrefersXdgDataHome_WhenSet` — XDG ordering.
+  - `CreateFromEnvironment_FallsBackToNullProtector_WhenKeysDirIsUnwritable` — graceful degradation.
+  - `CreateFromEnvironment_Throws_WhenRequireProtectorIsSet_AndBackendFails` — hard-fail opt-in.
+  - `CreateFromEnvironment_ExplicitNullMode_ReturnsNullProtector_WithoutInitialisingBackend` — explicit null.
+  - `NullProtector_WrappedByStringTokenProtector_RoundTripsAndIdentifiesAsNull` — audit-visibility.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+**Affected plugins** (no code changes needed — bump the submodule pointer):
+- Brainarr (BrainarrSettings.set_ApiKey)
+- AppleMusicarr (AppleMusicSecretProtection / FileAppleMusicSettingsStore)
+- Tidalarr (FileTokenStore<TidalTokens>)
+- Qobuzarr (TokenRefresher, CredentialValidator)
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.1...v1.9.2)
+
 ## [1.9.1] - 2026-05-23
 **Upgrade note:** Adds `Services.Diagnostics.HttpExceptionClassifier` on top of v1.9.0. Plugins that surface categorised connection-test failures in their `Test()` indicator (auth / rate-limit / network / server) can now consume this from Common instead of copy-pasting. Tidalarr's HTTP-error categorisation is the first consumer.
 
