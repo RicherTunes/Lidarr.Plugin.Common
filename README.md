@@ -10,16 +10,19 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.7.0 — March 26, 2026
+Latest: v1.8.0 — May 23, 2026
 
-- Bridge contracts shipped: `IAuthFailureHandler`, `IIndexerStatusReporter`, `IRateLimitReporter` + 5 more
-- Default implementations with `AddBridgeDefaults()` DI extension
-- Fixture-backed compliance tests for bridge contracts
-- CliWrap, coverlet, DataProtection dependency updates
-- Hygiene: Ignore `.trx` and coverage artifacts; SECURITY.md added.
-- Docs: Minor polish and brand disclaimer.
+- Ecosystem version contract introduced via `versionContract` section in `scripts/parity-spec.json`.
+  Plugin authors must invoke `ecosystem-parity-lint.ps1 -Check VersionContract` from their CI pipeline
+  to ensure their plugin's `VERSION` file and manifest version are consistent with the Common library
+  version they depend on. This check is enforced during the nightly parity run and should be added
+  to every plugin's `pr-validation.yml` as `pwsh scripts/ecosystem-parity-lint.ps1 -Check VersionContract`.
+- `forbiddenFields` enforcement now wired into the parity-lint pipeline.
+- ALC multi-plugin co-existence fix landed (see CHANGELOG for details).
+- `StreamingPluginMixins`: rate-limit wait refactored to async (`SemaphoreSlim` + `await Task.Delay`), eliminating the blocking-wait-inside-lock anti-pattern.
+- `SmartCache`: flaky expiry and eviction tests fixed with deterministic `TimeProvider` injection.
 
-Release notes: [v1.7.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.7.0)
+Release notes: [v1.8.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.8.0)
 
 ## Choose your adventure
 
