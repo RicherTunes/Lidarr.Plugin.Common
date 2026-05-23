@@ -222,6 +222,61 @@
     <Message Text="[PluginPackaging] Injected build metadata: gitSha=$(_PluginGitSha), buildTimestamp=$(_PluginBuildTimestamp)" Importance="high" Condition="Exists('$(_PluginManifestPath)')" />
   </Target>
 
+  <!--
+    ENFORCEMENT GATE: Reject forbidden DLLs in the plugin package output directory.
+
+    Runs after InjectPluginBuildMetadata (which runs after RepackPlugin/Build).
+    Reads forbiddenPackageContents from parity-spec.json and fails the build if any
+    forbidden DLL is present in the output directory.
+
+    Forbidden DLLs are host-provided assemblies that cause COR_E_INVALIDOPERATION
+    type-identity conflicts when multiple plugins are installed simultaneously.
+
+    HOW TO FIX if this gate fires:
+      Add  PrivateAssets="all" ExcludeAssets="runtime"  to the PackageReference
+      for the offending package so it is not copied to the output directory.
+      The DLL should either be ILRepack-merged (add to _PluginDeps in RepackPlugin)
+      or excluded entirely (host-provided).
+      See docs/MULTI_PLUGIN_ALC_VALIDATION.md for the full explanation.
+  -->
+  <Target Name="ValidatePackageClosure" AfterTargets="InjectPluginBuildMetadata" Condition="'$(PluginPackagingDisable)' != 'true'">
+    <PropertyGroup>
+      <_VpcOutputDir>$(TargetDir)</_VpcOutputDir>
+      <!-- Path to parity-spec.json relative to this targets file -->
+      <_VpcParitySpecPath>$(MSBuildThisFileDirectory)../scripts/parity-spec.json</_VpcParitySpecPath>
+    </PropertyGroup>
+
+    <!--
+      Use PowerShell to parse parity-spec.json and check for forbidden DLLs.
+      We use pwsh (cross-platform) with a fallback to powershell.exe on Windows.
+      The script exits 1 if any forbidden DLL is found, causing the build to fail.
+    -->
+    <Exec Command="pwsh -NoProfile -NonInteractive -Command &quot;$spec = Get-Content -LiteralPath '$(_VpcParitySpecPath)' -Raw | ConvertFrom-Json; $forbidden = $spec.versionContract.forbiddenPackageContents; $found = @(); foreach ($name in $forbidden) { $candidate = Join-Path '$(_VpcOutputDir)' $name; if (Test-Path -LiteralPath $candidate) { $found += $name } }; if ($found.Count -gt 0) { Write-Error ('FORBIDDEN DLLs in plugin output: ' + ($found -join ', ') + '. Add PrivateAssets=all ExcludeAssets=runtime to PackageReference or ILRepack-merge them. See docs/MULTI_PLUGIN_ALC_VALIDATION.md'); exit 1 } else { Write-Host ('[ValidatePackageClosure] OK - no forbidden DLLs found in ' + '$(_VpcOutputDir)') }&quot;"
+          Condition="Exists('$(_VpcParitySpecPath)') and Exists('$(_VpcOutputDir)')"
+          StandardOutputImportance="normal"
+          StandardErrorImportance="high">
+      <Output TaskParameter="ExitCode" PropertyName="_VpcPwshExitCode" />
+    </Exec>
+
+    <!-- Fallback to powershell.exe on Windows if pwsh is unavailable -->
+    <Exec Command="powershell -NoProfile -NonInteractive -Command &quot;$spec = Get-Content -LiteralPath '$(_VpcParitySpecPath)' -Raw | ConvertFrom-Json; $forbidden = $spec.versionContract.forbiddenPackageContents; $found = @(); foreach ($name in $forbidden) { $candidate = Join-Path '$(_VpcOutputDir)' $name; if (Test-Path -LiteralPath $candidate) { $found += $name } }; if ($found.Count -gt 0) { Write-Error ('FORBIDDEN DLLs in plugin output: ' + ($found -join ', ') + '. Add PrivateAssets=all ExcludeAssets=runtime to PackageReference or ILRepack-merge them. See docs/MULTI_PLUGIN_ALC_VALIDATION.md'); exit 1 } else { Write-Host ('[ValidatePackageClosure] OK - no forbidden DLLs found in ' + '$(_VpcOutputDir)') }&quot;"
+          Condition="Exists('$(_VpcParitySpecPath)') and Exists('$(_VpcOutputDir)') and '$(_VpcPwshExitCode)' != '0'"
+          StandardOutputImportance="normal"
+          StandardErrorImportance="high">
+      <Output TaskParameter="ExitCode" PropertyName="_VpcPsExitCode" />
+    </Exec>
+
+    <!-- Emit a hard MSBuild Error if forbidden DLLs were found (exit code != 0 from either shell) -->
+    <Error
+      Condition="'$(_VpcPwshExitCode)' != '' and '$(_VpcPwshExitCode)' != '0' and ('$(_VpcPsExitCode)' == '' or '$(_VpcPsExitCode)' != '0')"
+      Text="[ValidatePackageClosure] FORBIDDEN assemblies found in plugin package output '$(_VpcOutputDir)'. These are host-provided DLLs that cause COR_E_INVALIDOPERATION type-identity conflicts when multiple plugins are installed. FIX: add PrivateAssets=&quot;all&quot; ExcludeAssets=&quot;runtime&quot; to the PackageReference for the offending package, or ILRepack-merge it. See docs/MULTI_PLUGIN_ALC_VALIDATION.md for the full explanation." />
+
+    <Message
+      Condition="'$(_VpcPwshExitCode)' == '0' or '$(_VpcPsExitCode)' == '0'"
+      Text="[ValidatePackageClosure] Package closure validated — no forbidden DLLs in '$(_VpcOutputDir)'."
+      Importance="high" />
+  </Target>
+
   <Target Name="DeployPluginArtifacts" AfterTargets="InjectPluginBuildMetadata" Condition="'$(EnablePluginDeployment)' == 'true' and '$(LidarrPluginDeployPath)' != ''">
     <ItemGroup>
       <PluginDeploymentFiles Include="$(OutputPath)$(PluginAssemblyFileName)" />
