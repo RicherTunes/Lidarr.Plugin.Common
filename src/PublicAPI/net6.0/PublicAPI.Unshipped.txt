@@ -1,2 +1,6 @@
 #nullable enable
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.ActualBytes.get -> long
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.ExpectedBytes.get -> long
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.DownloadIntegrityException(long actualBytes, long expectedBytes, string? filePath = null, System.Exception? inner = null) -> void
 

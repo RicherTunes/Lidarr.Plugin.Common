@@ -103,3 +103,7 @@ Lidarr.Plugin.Common.Services.Caching.CachePolicy.WithExecutor(System.TimeSpan? 
 static Lidarr.Plugin.Common.Errors.LlmErrorMapper.MapHttpError(string! providerId, int statusCode, string? responseBody, System.TimeSpan? retryAfter, System.Exception? inner) -> Lidarr.Plugin.Common.Errors.LlmProviderException!
 static Lidarr.Plugin.Common.Errors.LlmErrorMapper.MapHttpError(string! providerId, System.Net.Http.HttpResponseMessage! response, string? responseBody = null, System.Exception? inner = null) -> Lidarr.Plugin.Common.Errors.LlmProviderException!
 static Lidarr.Plugin.Common.Errors.LlmErrorMapper.ParseRetryAfterHeader(System.Net.Http.Headers.RetryConditionHeaderValue? header) -> System.TimeSpan?
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.ActualBytes.get -> long
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.ExpectedBytes.get -> long
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.DownloadIntegrityException(long actualBytes, long expectedBytes, string? filePath = null, System.Exception? inner = null) -> void
