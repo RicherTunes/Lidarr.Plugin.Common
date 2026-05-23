@@ -85,6 +85,17 @@ public static class SecureMemory
         if (pem is null)
             return;
 
+        // Skip empty strings entirely. On modern .NET, `new string(Array.Empty<char>())`
+        // and other zero-length constructions return the interned `string.Empty`
+        // singleton. Overwriting its char buffer would corrupt every reference to
+        // `string.Empty` across the AppDomain — and there's nothing to overwrite
+        // anyway. Just null the reference and return.
+        if (pem.Length == 0)
+        {
+            pem = null;
+            return;
+        }
+
         // Reinterpret the string's internal char data as bytes and overwrite
         // each byte with 0.  MemoryMarshal.AsBytes works on any MemoryMarshal-
         // compatible span; string.AsSpan() returns a ReadOnlySpan<char> which

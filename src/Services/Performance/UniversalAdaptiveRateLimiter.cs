@@ -37,7 +37,13 @@ namespace Lidarr.Plugin.Common.Services.Performance
         /// <c>AuthFailureGate</c>, and tightening RPM on credential issues
         /// causes the post-recovery throughput to be artificially low.
         /// </summary>
-        void RecordAuthFailure(string service, string endpoint);
+        /// <remarks>
+        /// Default implementation is a no-op so adding this method does not
+        /// silently break alternate <see cref="IUniversalAdaptiveRateLimiter"/>
+        /// implementations (mocks, custom limiters in downstream plugins).
+        /// Production limiters SHOULD override to track auth-failure stats.
+        /// </remarks>
+        void RecordAuthFailure(string service, string endpoint) { }
 
         /// <summary>
         /// Get current rate limit for a specific service/endpoint
