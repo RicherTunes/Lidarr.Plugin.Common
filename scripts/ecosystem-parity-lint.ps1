@@ -18,7 +18,10 @@ param(
     [string]$RepoPath,
     [switch]$AllRepos,
     [ValidateSet('interactive', 'ci')]
-    [string]$Mode = 'interactive'
+    [string]$Mode = 'interactive',
+    [ValidateSet('all', 'Structural', 'VersionContract')]
+    [string]$Check = 'all',
+    [string]$CommonRoot
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,7 +32,8 @@ if (-not (Test-Path $specPath)) {
     Write-Host "ERROR: parity-spec.json not found at $specPath" -ForegroundColor Red
     exit 2
 }
-$spec = Get-Content $specPath -Raw | ConvertFrom-Json
+$script:Spec = Get-Content $specPath -Raw | ConvertFrom-Json
+$spec = $script:Spec  # legacy alias
 
 $script:IsCIMode = ($Mode -eq 'ci')
 
@@ -245,6 +249,150 @@ function Test-DirectoryPackagesProps {
     return $violations
 }
 
+function Get-CanonicalCommonVersion {
+    param([string]$CommonRootPath)
+    $csprojRel = $script:Spec.versionContract.commonVersionSource
+    $csprojAbs = Join-Path $CommonRootPath $csprojRel
+    if (-not (Test-Path $csprojAbs)) {
+        throw "Common csproj not found at $csprojAbs (versionContract.commonVersionSource)"
+    }
+    $content = Get-Content $csprojAbs -Raw
+    if ($content -notmatch '<Version>([^<]+)</Version>') {
+        throw "Could not parse <Version> from $csprojAbs"
+    }
+    return $matches[1]
+}
+
+function Test-VersionContract {
+    param([string]$RepoPath, [string]$RepoName, [string]$CanonicalCommonVersion)
+    $violations = @()
+    $vc = $script:Spec.versionContract
+
+    $pluginJsonPaths = @()
+    foreach ($candidate in @('plugin.json', 'src/plugin.json')) {
+        $p = Join-Path $RepoPath $candidate
+        if (Test-Path $p) { $pluginJsonPaths += $p }
+    }
+    if ($pluginJsonPaths.Count -eq 0) {
+        $pluginJsonPaths += @(Get-ChildItem -Path $RepoPath -Recurse -Filter 'plugin.json' -ErrorAction SilentlyContinue |
+            Where-Object { $_.FullName -notmatch '[\\/](bin|obj|node_modules|ext|artifacts|_plugins|\.worktrees|\.git)[\\/]' } |
+            Select-Object -ExpandProperty FullName)
+    }
+    if ($pluginJsonPaths.Count -eq 0) {
+        $violations += [PSCustomObject]@{
+            Repo = $RepoName; Category = 'VersionContract'; Path = 'plugin.json'
+            Message = "No plugin.json found in repo"
+            Severity = 'error'
+        }
+        return $violations
+    }
+
+    foreach ($pjPath in $pluginJsonPaths) {
+        $pjRel = $pjPath.Substring($RepoPath.Length).TrimStart('\','/')
+        try {
+            $pj = Get-Content $pjPath -Raw | ConvertFrom-Json
+        } catch {
+            $violations += [PSCustomObject]@{
+                Repo = $RepoName; Category = 'VersionContract'; Path = $pjRel
+                Message = "Failed to parse plugin.json: $($_.Exception.Message)"
+                Severity = 'error'
+            }
+            continue
+        }
+
+        # 1. commonVersion must match Common's canonical <Version>
+        $pluginCommonVer = $pj.commonVersion
+        if (-not $pluginCommonVer -or $pluginCommonVer -ne $CanonicalCommonVersion) {
+            $violations += [PSCustomObject]@{
+                Repo = $RepoName; Category = 'VersionContract'; Path = $pjRel
+                Message = "plugin.json commonVersion is '$pluginCommonVer', expected canonical '$CanonicalCommonVersion' from Common csproj"
+                Severity = 'error'
+            }
+        }
+
+        # 2. targetFramework must equal canonical
+        if ($pj.PSObject.Properties.Match('targetFramework').Count -gt 0) {
+            if ($pj.targetFramework -ne $vc.targetFramework) {
+                $violations += [PSCustomObject]@{
+                    Repo = $RepoName; Category = 'VersionContract'; Path = $pjRel
+                    Message = "plugin.json targetFramework is '$($pj.targetFramework)', expected '$($vc.targetFramework)'"
+                    Severity = 'error'
+                }
+            }
+        }
+
+        # 2b. Enforce pluginJson.forbiddenFields (was dead config — now wired into lint)
+        if ($script:Spec.pluginJson -and $script:Spec.pluginJson.forbiddenFields) {
+            foreach ($ff in $script:Spec.pluginJson.forbiddenFields) {
+                if ($pj.PSObject.Properties.Match($ff.field).Count -gt 0) {
+                    $violations += [PSCustomObject]@{
+                        Repo = $RepoName; Category = 'VersionContract'; Path = $pjRel
+                        Message = "plugin.json contains forbidden field '$($ff.field)': $($ff.reason)"
+                        Severity = 'error'
+                    }
+                }
+            }
+        }
+
+        # 3. Look for sibling manifest.json — if present, version + commonVersion must match plugin.json
+        $manifestPath = Join-Path (Split-Path $pjPath -Parent) 'manifest.json'
+        if (Test-Path $manifestPath) {
+            $manRel = $manifestPath.Substring($RepoPath.Length).TrimStart('\','/')
+            try {
+                $man = Get-Content $manifestPath -Raw | ConvertFrom-Json
+            } catch {
+                $violations += [PSCustomObject]@{
+                    Repo = $RepoName; Category = 'VersionContract'; Path = $manRel
+                    Message = "Failed to parse manifest.json: $($_.Exception.Message)"
+                    Severity = 'error'
+                }
+                continue
+            }
+
+            if ($pj.version -and $man.version -and $pj.version -ne $man.version) {
+                $violations += [PSCustomObject]@{
+                    Repo = $RepoName; Category = 'VersionContract'; Path = $manRel
+                    Message = "plugin.json version '$($pj.version)' does not match manifest.json version '$($man.version)'"
+                    Severity = 'error'
+                }
+            }
+            if ($man.PSObject.Properties.Match('commonVersion').Count -gt 0 -and $man.commonVersion -ne $CanonicalCommonVersion) {
+                $violations += [PSCustomObject]@{
+                    Repo = $RepoName; Category = 'VersionContract'; Path = $manRel
+                    Message = "manifest.json commonVersion is '$($man.commonVersion)', expected canonical '$CanonicalCommonVersion'"
+                    Severity = 'error'
+                }
+            }
+            if ($man.PSObject.Properties.Match('targetFrameworks').Count -gt 0) {
+                foreach ($fw in $man.targetFrameworks) {
+                    if ($vc.forbiddenTargetFrameworks -contains $fw) {
+                        $violations += [PSCustomObject]@{
+                            Repo = $RepoName; Category = 'VersionContract'; Path = $manRel
+                            Message = "manifest.json targetFrameworks contains forbidden framework '$fw'"
+                            Severity = 'error'
+                        }
+                    }
+                }
+            }
+
+            # Enforce manifestJson.forbiddenFields (catches minimumVersion, etc.)
+            if ($script:Spec.manifestJson -and $script:Spec.manifestJson.forbiddenFields) {
+                foreach ($ff in $script:Spec.manifestJson.forbiddenFields) {
+                    if ($man.PSObject.Properties.Match($ff.field).Count -gt 0) {
+                        $violations += [PSCustomObject]@{
+                            Repo = $RepoName; Category = 'VersionContract'; Path = $manRel
+                            Message = "manifest.json contains forbidden field '$($ff.field)': $($ff.reason)"
+                            Severity = 'error'
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    return $violations
+}
+
 function Test-BridgeExempt {
     param([string]$RepoPath)
     # Repos that place a .bridge-exempt marker in their root are excluded from
@@ -255,15 +403,24 @@ function Test-BridgeExempt {
 }
 
 function Find-AllViolations {
-    param([string]$RepoPath, [string]$RepoName)
+    param(
+        [string]$RepoPath,
+        [string]$RepoName,
+        [string]$CheckScope = 'all',
+        [string]$CanonicalCommonVersion
+    )
     $all = @()
-    $all += @(Test-RequiredFiles -RepoPath $RepoPath -RepoName $RepoName)
-    $all += @(Test-RequiredDirectories -RepoPath $RepoPath -RepoName $RepoName)
-    $all += @(Test-RequiredWorkflows -RepoPath $RepoPath -RepoName $RepoName)
-    $all += @(Test-GlobalJson -RepoPath $RepoPath -RepoName $RepoName)
-    $all += @(Test-DirectoryBuildProps -RepoPath $RepoPath -RepoName $RepoName)
-    $all += @(Test-DirectoryPackagesProps -RepoPath $RepoPath -RepoName $RepoName)
-    # Future: bridge wiring checks go here, gated by Test-BridgeExempt
+    if ($CheckScope -eq 'all' -or $CheckScope -eq 'Structural') {
+        $all += @(Test-RequiredFiles -RepoPath $RepoPath -RepoName $RepoName)
+        $all += @(Test-RequiredDirectories -RepoPath $RepoPath -RepoName $RepoName)
+        $all += @(Test-RequiredWorkflows -RepoPath $RepoPath -RepoName $RepoName)
+        $all += @(Test-GlobalJson -RepoPath $RepoPath -RepoName $RepoName)
+        $all += @(Test-DirectoryBuildProps -RepoPath $RepoPath -RepoName $RepoName)
+        $all += @(Test-DirectoryPackagesProps -RepoPath $RepoPath -RepoName $RepoName)
+    }
+    if ($CheckScope -eq 'all' -or $CheckScope -eq 'VersionContract') {
+        $all += @(Test-VersionContract -RepoPath $RepoPath -RepoName $RepoName -CanonicalCommonVersion $CanonicalCommonVersion)
+    }
     return $all | Sort-Object Repo, Category, Path
 }
 
@@ -271,12 +428,24 @@ function Find-AllViolations {
 # Main
 # ═══════════════════════════════════════════════════════════
 
-$commonRoot = Split-Path $PSScriptRoot -Parent
+if ($CommonRoot) {
+    $commonRoot = (Resolve-Path $CommonRoot).Path
+} else {
+    $commonRoot = Split-Path $PSScriptRoot -Parent
+    # When this script is consumed as a submodule (ext/Lidarr.Plugin.Common/scripts/...) the
+    # default falls back to the SUBMODULE csproj, whose <Version> may be stale relative to
+    # the canonical Common HEAD. Warn so callers can override with -CommonRoot when needed.
+    if ($commonRoot -match '[\\/]ext[\\/]Lidarr\.Plugin\.Common[\\/]?$') {
+        Write-Warning "ecosystem-parity-lint: -CommonRoot not passed; resolved Common from submodule path '$commonRoot'. Pass -CommonRoot explicitly to validate against an external canonical Common."
+    }
+}
+$script:CanonicalCommonVersion = Get-CanonicalCommonVersion -CommonRootPath $commonRoot
 
 Write-Host "=================================================" -ForegroundColor Cyan
 Write-Host "Ecosystem Parity Lint — Structural Gap Detection" -ForegroundColor Cyan
 if ($script:IsCIMode) { Write-Host "Mode: CI (strict)" -ForegroundColor Yellow }
 else { Write-Host "Mode: Interactive (non-blocking)" -ForegroundColor DarkGray }
+Write-Host "Check scope: $Check  |  Canonical commonVersion: $script:CanonicalCommonVersion" -ForegroundColor DarkGray
 Write-Host "=================================================" -ForegroundColor Cyan
 Write-Host ""
 
@@ -302,7 +471,7 @@ $totalViolations = @()
 
 foreach ($repo in $reposToScan) {
     Write-Host "Scanning: $($repo.Name)" -ForegroundColor Cyan
-    $violations = @(Find-AllViolations -RepoPath $repo.Path -RepoName $repo.Name)
+    $violations = @(Find-AllViolations -RepoPath $repo.Path -RepoName $repo.Name -CheckScope $Check -CanonicalCommonVersion $script:CanonicalCommonVersion)
 
     if ($violations.Count -eq 0) {
         Write-Host "  [OK] No violations" -ForegroundColor Green
