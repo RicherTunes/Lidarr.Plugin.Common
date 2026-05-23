@@ -13,7 +13,7 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <Version>1.9.0</Version>
+    <Version>1.9.1</Version>
     <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
@@ -26,7 +26,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.9.0: AuthFailureGate surface (fail-fast latch + delegating handler + per-key registry), SecureMemory + Conservative rate-limit + PagedResponseValidator, testkit-lifted plugin contracts, Lidarr.Plugin.*.dll naming enforcement. See CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.9.1: Adds Services.Diagnostics.HttpExceptionClassifier (categorised connection-test failures) on top of v1.9.0. See CHANGELOG.md.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <!-- Build Configuration -->
