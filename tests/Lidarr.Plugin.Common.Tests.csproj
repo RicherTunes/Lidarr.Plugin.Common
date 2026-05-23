@@ -23,6 +23,8 @@
     <!-- Required because Common has PrivateAssets=all for FluentValidation,
          so the transitive reference does not flow to test project -->
     <PackageReference Include="FluentValidation" Version="11.12.0" />
+    <!-- Phase 2: MultiPluginAlc + PackageClosure suites use [SkippableFact]/[Theory] -->
+    <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
   </ItemGroup>
 
   <!-- Include golden fixture files as embedded resources -->
