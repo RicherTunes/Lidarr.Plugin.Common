@@ -45,17 +45,10 @@ public sealed record PluginPackagePolicy(
 /// PluginPackagingContract.AssertZipMatchesPolicy(zipPath, policy);
 /// </code>
 ///
-/// <para>Usage (sidecar plugin, e.g. applemusicarr):</para>
-/// <code>
-/// var policy = new PluginPackagePolicy(
-///     MainDllName: "AppleMusicarr.Plugin.dll",
-///     RequiredFiles: ["AppleMusicarr.Plugin.dll", "AppleMusicarr.Core.dll",
-///                     "Lidarr.Plugin.Common.dll", "Lidarr.Plugin.Abstractions.dll",
-///                     "plugin.json", "manifest.json"],
-///     ForbiddenAssemblies: PluginPackagingContract.DefaultForbiddenHostAssemblies,
-///     MainDllMinimumBytes: 0);
-/// PluginPackagingContract.AssertZipMatchesPolicy(zipPath, policy);
-/// </code>
+/// <para>Note on naming: <c>MainDllName</c> MUST start with <c>"Lidarr.Plugin."</c>
+/// — Lidarr's PluginLoader globs <c>Lidarr.Plugin.*.dll</c> and silently ignores
+/// any other filename (see <see cref="AssertMainDllMatchesLoaderNamingConvention"/>).
+/// This is enforced by <see cref="AssertZipMatchesPolicy"/>.</para>
 /// </summary>
 public static class PluginPackagingContract
 {
@@ -133,10 +126,38 @@ public static class PluginPackagingContract
     }
 
     /// <summary>
+    /// Lidarr's PluginLoader globs <c>Lidarr.Plugin.*.dll</c> when scanning
+    /// <c>/config/plugins/&lt;owner&gt;/&lt;name&gt;/</c>
+    /// (<c>NzbDrone.Common/Extensions/PathExtensions.cs:334</c>). Any DLL whose filename
+    /// does NOT start with <c>"Lidarr.Plugin."</c> is silently ignored at host bootstrap —
+    /// no error, no warning, no log line; the plugin just never appears in
+    /// <c>/api/v1/system/plugins</c> and never registers any services.
+    /// </summary>
+    /// <remarks>
+    /// Caught the May 2026 AppleMusicarr incident: install worked, files were on disk,
+    /// but <c>AppleMusicarr.Plugin.dll</c> didn't match the glob → plugin invisible.
+    /// Fix: <c>&lt;AssemblyName&gt;Lidarr.Plugin.AppleMusicarr&lt;/AssemblyName&gt;</c>.
+    /// </remarks>
+    public static void AssertMainDllMatchesLoaderNamingConvention(PluginPackagePolicy policy)
+    {
+        if (policy is null) throw new ArgumentNullException(nameof(policy));
+
+        Assert.True(
+            policy.MainDllName.StartsWith("Lidarr.Plugin.", StringComparison.OrdinalIgnoreCase) &&
+                policy.MainDllName.EndsWith(".dll", StringComparison.OrdinalIgnoreCase),
+            $"Main DLL '{policy.MainDllName}' does not match Lidarr's PluginLoader glob " +
+            $"'Lidarr.Plugin.*.dll' (NzbDrone.Common/Extensions/PathExtensions.cs:334). " +
+            $"Set <AssemblyName>Lidarr.Plugin.<Name></AssemblyName> in the .Plugin .csproj. " +
+            $"Without this the plugin loads silently into nothing — it won't appear in " +
+            $"/api/v1/system/plugins and won't register any services.");
+    }
+
+    /// <summary>
     /// Asserts the zip at <paramref name="zipPath"/> satisfies the policy:
     /// every <see cref="PluginPackagePolicy.RequiredFiles"/> is present (case-insensitive),
     /// every <see cref="PluginPackagePolicy.ForbiddenAssemblies"/> is absent,
-    /// and the main DLL meets the size minimum.
+    /// the main DLL meets the size minimum, and the main DLL filename satisfies the
+    /// PluginLoader naming convention (<see cref="AssertMainDllMatchesLoaderNamingConvention"/>).
     /// </summary>
     public static void AssertZipMatchesPolicy(string zipPath, PluginPackagePolicy policy)
     {
@@ -146,6 +167,8 @@ public static class PluginPackagingContract
             throw new FileNotFoundException("Plugin zip not found.", zipPath);
         if (policy is null)
             throw new ArgumentNullException(nameof(policy));
+
+        AssertMainDllMatchesLoaderNamingConvention(policy);
 
         using var archive = ZipFile.OpenRead(zipPath);
 
