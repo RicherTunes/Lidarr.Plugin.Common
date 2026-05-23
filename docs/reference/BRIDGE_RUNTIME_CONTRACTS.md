@@ -37,6 +37,109 @@ All authentication failures are considered potentially recoverable via re-authen
 
 The host may query `Status` to display authentication state in the UI. The host does NOT call these methods — they are for plugin-internal use, with state exposed to the host via the property.
 
+### Auth: AuthFailureGate (request-side enforcement)
+
+`IAuthFailureHandler` is notification-only — it tracks state but does NOT gate
+outbound requests. Plugins that simply propagate 401/403 to Lidarr's search
+loop will keep hammering the upstream at full rate (real-world driver: a Qobuz
+user got IP-banned when Lidarr searched while the OAuth session was expired).
+
+`AuthFailureGate` (in `Lidarr.Plugin.Common.Services.Bridge`) is the fail-fast
+latch built on top of a registered `IAuthFailureHandler`.
+
+| Method / Property | Behavior |
+|---|---|
+| `IsHealthy` | `true` when status is `Authenticated` or `Unknown` (initial). |
+| `EnsureCanProceed()` | Throws `AuthGatedException` (carrying `RetryAfter`) when status is `Failed`/`Expired`. |
+| `TryAcquireProbeSlot()` | When healthy, always `true`. When latched bad, returns `true` at most once per `probeInterval` (default 60s) so the plugin can attempt a single network call to detect that re-auth succeeded. |
+| `ForceReset()` | Clear latch + probe budget; used by `IAuthFailureGateRegistry.Reset(key)` for settings-UI "Test Connection" flows. |
+| `Metrics` | `AuthFailureGateMetrics` snapshot — counters for `LatchTransitions`, `RecoveryTransitions`, `ProbeAcquired`, `ProbeRejected`, `ProbeRefunded`, plus `LastLatchAt`/`LastRecoveryAt` timestamps. |
+
+#### K-of-N failure threshold
+
+`DefaultAuthFailureHandler` accepts a `failureThreshold` constructor parameter
+(default `1` for back-compat). Higher values require K consecutive failures
+within a single streak before flipping status to `Failed` — useful when the
+upstream is known to flake on edge-side load shedding. An intervening
+`HandleSuccessAsync` resets the streak.
+
+#### Auto-wire via DelegatingHandler
+
+`AuthFailureDelegatingHandler` drops the gate into any `HttpClient` pipeline:
+
+```csharp
+services.AddTransient<AuthFailureDelegatingHandler>();
+services.AddHttpClient<MyApi>(c => c.BaseAddress = new Uri(...))
+    .AddHttpMessageHandler<AuthFailureDelegatingHandler>(); // outermost
+```
+
+It short-circuits to `AuthGatedException` when latched, marks bad on 401/403,
+recovers on first 2xx after bad, and **refunds the probe slot** on pre-network
+failures (cancellation, DNS, TLS) so the budget isn't burned on calls that
+never reached the upstream.
+
+#### Multi-provider plugins: IAuthFailureGateRegistry
+
+For plugins with N independent credentials (brainarr's 11 LLM providers),
+register the registry instead of a single gate:
+
+```csharp
+services.AddSingleton<IAuthFailureGateRegistry>(_ =>
+    new AuthFailureGateRegistry(TimeProvider.System, TimeSpan.FromSeconds(60), maxKeys: 256));
+
+// Per-provider gate, case-insensitive lookup:
+var gate = registry.Get("openai");
+// Mutations for settings-UI flows:
+registry.Reset("openai"); // re-arm without waiting for the probe interval
+registry.Remove("openai"); // drop entirely; next Get allocates fresh
+```
+
+#### Pipeline ordering
+
+`AuthFailureDelegatingHandler` MUST sit **outermost** in the pipeline (added
+first to `AddHttpMessageHandler`), so it short-circuits *before* the rate
+limiter / OAuth refresh handlers run. The OAuth refresh client (the one that
+exchanges credentials for new tokens) should be **exempt** from the gate —
+gating it would create a deadlock where the only path that can clear the gate
+is itself gated.
+
+#### Observability
+
+Metrics counters update inside the gate's lock. Read-coherent snapshots via
+`gate.Metrics`. Structured logs emit at LATCH (`LogWarning`) and RECOVERY
+(`LogInformation`) transitions, with elapsed latch duration on recovery. The
+registry exposes `Count` for per-process gate inventory.
+
+### Auth: recommended adapter wiring
+
+```csharp
+services.AddSingleton(sp => new AuthFailureGate(
+    sp.GetRequiredService<IAuthFailureHandler>(),
+    TimeProvider.System,
+    TimeSpan.FromSeconds(60),
+    sp.GetService<ILogger<AuthFailureGate>>()));
+
+// In the indexer/import adapter:
+if (_authGate is not null && !_authGate.IsHealthy && !_authGate.TryAcquireProbeSlot())
+{
+    return Array.Empty<StreamingAlbum>(); // short-circuit; no network call
+}
+
+try { /* ... call upstream ... */ }
+catch (Exception ex) when (LooksLikeAuthFailure(ex))
+{
+    await _authGate.Handler.HandleFailureAsync(new AuthFailure { Message = ex.Message });
+    throw;
+}
+```
+
+### Auth: known consumers
+
+- `applemusicarr` — wired into `AppleMusicIndexerAdapter` (cycle 39, prior arc) AND `HttpClientFactory` (wave 6, 50-wave plan) — every catalog + playback HttpClient is gated.
+- `qobuzarr` — wired into `QobuzIndexerAdapter` (cycle 40, closes the original IP-ban incident) AND the bridge `HttpClient` pipeline via `AuthFailureDelegatingHandler` (wave 3).
+- `tidalarr` — wired into `TidalIndexer` (cycle 41) AND 3 of 4 bridge `HttpClient` pipelines (`TidalApiClient`, `TidalOrchestrator`, `TidalChunkDownloader`); `TidalOAuthService` intentionally exempt (wave 4).
+- `brainarr` — wired via `IAuthFailureGateRegistry` per-provider (wave 5). Each LLM provider gets its own gate so a bad OpenAI key doesn't block Anthropic / Ollama / local providers.
+
 ## IIndexerStatusReporter
 
 ### Status: triggers

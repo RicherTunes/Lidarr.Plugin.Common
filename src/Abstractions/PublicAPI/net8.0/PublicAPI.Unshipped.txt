@@ -1,2 +1,2 @@
 #nullable enable
-
+Lidarr.Plugin.Abstractions.Contracts.IAuthFailureHandler.LastFailure.get -> Lidarr.Plugin.Abstractions.Contracts.AuthFailure?

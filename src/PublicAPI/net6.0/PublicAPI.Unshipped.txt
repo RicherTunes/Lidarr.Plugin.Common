@@ -1,2 +1,17 @@
 #nullable enable
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.ActualBytes.get -> long
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.ExpectedBytes.get -> long
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.DownloadIntegrityException(long actualBytes, long expectedBytes, string? filePath = null, System.Exception? inner = null) -> void
+Lidarr.Plugin.Common.Security.SecureMemory
+static Lidarr.Plugin.Common.Security.SecureMemory.ZeroBytes(System.Span<byte> buffer) -> void
+static Lidarr.Plugin.Common.Security.SecureMemory.ZeroPemKey(ref string? pem) -> void
+Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException
+Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException.ReceivedItemCount.get -> int
+Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException.DeclaredTotalCount.get -> int
+Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException.ContextName.get -> string!
+Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException.PagedResponseIntegrityException(int receivedItemCount, int declaredTotalCount, string! contextName) -> void
+Lidarr.Plugin.Common.Services.Http.PagedResponseValidator
+static Lidarr.Plugin.Common.Services.Http.PagedResponseValidator.Validate(int receivedItemCount, int? declaredTotalCount, string! contextName) -> void
+static Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.WithConservativeDefaults() -> Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter!
 

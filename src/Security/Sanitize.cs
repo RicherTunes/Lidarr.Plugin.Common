@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace Lidarr.Plugin.Common.Security
 {
@@ -18,6 +19,16 @@ namespace Lidarr.Plugin.Common.Security
             "COM1","COM2","COM3","COM4","COM5","COM6","COM7","COM8","COM9",
             "LPT1","LPT2","LPT3","LPT4","LPT5","LPT6","LPT7","LPT8","LPT9"
         };
+
+        // Regex to decode percent-encoded sequences (%XX) — applied once before segment checks.
+        private static readonly Regex PercentEncodePattern = new(@"%([0-9A-Fa-f]{2})", RegexOptions.Compiled);
+
+        // All characters that can act as path separators (forward, back, URL-encoded variants).
+        private static readonly char[] PathSeparatorChars = { '/', '\\' };
+
+        // Unicode look-alike dots that NFKC-normalise to U+002E (FULL STOP).
+        // U+FF0E FULLWIDTH FULL STOP, U+2024 ONE DOT LEADER, U+FE52 SMALL FULL STOP.
+        private static readonly char[] UnicodeDotLookalikes = { '．', '․', '﹒' };
 
         /// <summary>
         /// Encodes a URL component using RFC 3986 rules.
@@ -52,12 +63,70 @@ namespace Lidarr.Plugin.Common.Security
         }
 
         /// <summary>
-        /// Basic path traversal guard. Use when accepting relative segments.
+        /// Path traversal guard with full normalisation.
+        ///
+        /// Checks that no path segment, after all normalisation passes, is a plain ".."
+        /// that would traverse upward. Normalisation applied (in order):
+        ///   1. Null-byte / control-character rejection.
+        ///   2. Reject extended-length UNC prefix (\\?\).
+        ///   3. Percent-decode once (URI %XX → char).
+        ///   4. NFKC unicode normalisation (collapses fullwidth dots, etc.).
+        ///   5. Replace all separator variants with the platform separator.
+        ///   6. Split into segments and reject any segment that is exactly "..".
+        ///
+        /// Well-formed callers are unaffected: simple relative paths, absolute OS paths,
+        /// and paths where ".." appears as a substring of a filename component continue
+        /// to be accepted (or rejected) exactly as before.
         /// </summary>
         public static bool IsSafePath(string? path)
         {
             if (string.IsNullOrWhiteSpace(path)) return true;
-            return !path.Contains("..") && !path.Contains("../") && !path.Contains("..\\");
+
+            // 1. Reject null bytes and ASCII control characters (C0 range except HT/LF/CR).
+            foreach (var ch in path)
+            {
+                if (ch == '\0' || (ch < ' ' && ch != '\t' && ch != '\n' && ch != '\r'))
+                    return false;
+            }
+
+            // 2. Reject extended-length UNC prefix (\\?\ or //?) — these bypass OS path checks.
+            if (path.StartsWith(@"\\?\", StringComparison.Ordinal) ||
+                path.StartsWith(@"\\?/", StringComparison.Ordinal) ||
+                path.StartsWith(@"//?/", StringComparison.Ordinal))
+            {
+                return false;
+            }
+
+            // 3. Decode percent-encoded characters once (fold %2e → '.', %2f → '/', etc.).
+            var decoded = PercentEncodePattern.Replace(path, m =>
+            {
+                var hex = m.Groups[1].Value;
+                var byteVal = Convert.ToByte(hex, 16);
+                return ((char)byteVal).ToString();
+            });
+
+            // 4. NFKC Unicode normalisation: collapses fullwidth/compatibility forms.
+            decoded = decoded.Normalize(NormalizationForm.FormKC);
+
+            // 4a. Also replace known dot look-alikes that survive NFKC with ASCII dot.
+            foreach (var lookalike in UnicodeDotLookalikes)
+            {
+                decoded = decoded.Replace(lookalike, '.');
+            }
+
+            // 5. Normalise separators: replace all variants with a single forward slash for segment splitting.
+            decoded = decoded.Replace('\\', '/');
+
+            // 6. Split into segments and check each one.
+            var segments = decoded.Split('/', StringSplitOptions.None);
+            foreach (var segment in segments)
+            {
+                // A segment that is exactly ".." is always a traversal, regardless of surrounding context.
+                if (segment == "..")
+                    return false;
+            }
+
+            return true;
         }
 
         /// <summary>
