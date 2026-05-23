@@ -139,6 +139,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
         private readonly Func<TKey, string> _keySerializer;
         private readonly Func<TValue, TValue>? _valueClone;
         private readonly object _evictionLock = new object();
+        private readonly TimeProvider _timeProvider;
 
         // Performance metrics
         private long _hits;
@@ -155,7 +156,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
             Func<TKey, string> keySerializer,
             SmartCacheOptions? options = null,
             ILogger? logger = null)
-            : this(keySerializer, options, logger, valueClone: null)
+            : this(keySerializer, options, logger, valueClone: null, timeProvider: null)
         {
         }
 
@@ -177,11 +178,32 @@ namespace Lidarr.Plugin.Common.Services.Caching
             SmartCacheOptions? options,
             ILogger? logger,
             Func<TValue, TValue>? valueClone)
+            : this(keySerializer, options, logger, valueClone, timeProvider: null)
+        {
+        }
+
+        /// <summary>
+        /// Initializes a new instance of the SmartCache class with all injectable dependencies.
+        /// </summary>
+        /// <param name="keySerializer">Function to convert keys to string for hashing.</param>
+        /// <param name="options">Cache configuration options.</param>
+        /// <param name="logger">Optional logger for diagnostic output.</param>
+        /// <param name="valueClone">Optional defensive-copy hook; see the 4-parameter overload.</param>
+        /// <param name="timeProvider">
+        /// Optional time provider for deterministic testing. Defaults to <c>TimeProvider.System</c>.
+        /// </param>
+        public SmartCache(
+            Func<TKey, string> keySerializer,
+            SmartCacheOptions? options,
+            ILogger? logger,
+            Func<TValue, TValue>? valueClone,
+            TimeProvider? timeProvider)
         {
             _keySerializer = keySerializer ?? throw new ArgumentNullException(nameof(keySerializer));
             _options = options ?? SmartCacheOptions.Default;
             _logger = logger;
             _valueClone = valueClone;
+            _timeProvider = timeProvider ?? TimeProvider.System;
             _cache = new ConcurrentDictionary<string, CacheEntry>();
             _patterns = new ConcurrentDictionary<string, AccessPattern>();
 
@@ -198,12 +220,13 @@ namespace Lidarr.Plugin.Common.Services.Caching
         {
             var cacheKey = GenerateCacheKey(key);
 
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
             if (_cache.TryGetValue(cacheKey, out var entry))
             {
-                if (!entry.IsExpired)
+                if (!entry.IsExpired(now))
                 {
                     Interlocked.Increment(ref _hits);
-                    entry.RecordAccess();
+                    entry.RecordAccess(now);
                     var stored = entry.Data;
                     if (_valueClone is not null && stored is not null)
                     {
@@ -239,15 +262,16 @@ namespace Lidarr.Plugin.Common.Services.Caching
         {
             var cacheKey = GenerateCacheKey(key);
             var expiry = CalculateExpiry(patternKey, priority);
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
 
             var entry = new CacheEntry
             {
                 Key = cacheKey,
                 Data = value,
-                CreatedAt = DateTime.UtcNow,
-                ExpiresAt = DateTime.UtcNow.Add(expiry),
+                CreatedAt = now,
+                ExpiresAt = now.Add(expiry),
                 Priority = priority,
-                LastAccessed = DateTime.UtcNow
+                LastAccessed = now
             };
 
             _cache.AddOrUpdate(cacheKey, entry, (k, old) => entry);
@@ -281,15 +305,16 @@ namespace Lidarr.Plugin.Common.Services.Caching
         public void Set(TKey key, TValue value, TimeSpan ttl)
         {
             var cacheKey = GenerateCacheKey(key);
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
 
             var entry = new CacheEntry
             {
                 Key = cacheKey,
                 Data = value,
-                CreatedAt = DateTime.UtcNow,
-                ExpiresAt = DateTime.UtcNow.Add(ttl),
+                CreatedAt = now,
+                ExpiresAt = now.Add(ttl),
                 Priority = CacheEntryPriority.Normal,
-                LastAccessed = DateTime.UtcNow
+                LastAccessed = now
             };
 
             _cache.AddOrUpdate(cacheKey, entry, (k, old) => entry);
@@ -407,6 +432,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
         private void RecordAccessPattern(string patternKey, CacheEntryPriority priority)
         {
             var normalizedKey = patternKey.ToLowerInvariant();
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
 
             _patterns.AddOrUpdate(
                 normalizedKey,
@@ -414,22 +440,23 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 {
                     Key = normalizedKey,
                     Priority = priority,
-                    FirstSeen = DateTime.UtcNow,
-                    LastSeen = DateTime.UtcNow,
+                    FirstSeen = now,
+                    LastSeen = now,
                     AccessFrequency = 1
                 },
                 (k, existing) =>
                 {
                     existing.AccessFrequency++;
-                    existing.LastSeen = DateTime.UtcNow;
+                    existing.LastSeen = _timeProvider.GetUtcNow().UtcDateTime;
                     return existing;
                 });
         }
 
         private void EvictLeastValuable()
         {
+            var now = _timeProvider.GetUtcNow().UtcDateTime;
             var candidates = _cache.Values
-                .OrderBy(e => CalculateEvictionScore(e))
+                .OrderBy(e => CalculateEvictionScore(e, now))
                 .Take(_options.EvictionBatchSize)
                 .ToList();
 
@@ -448,10 +475,10 @@ namespace Lidarr.Plugin.Common.Services.Caching
         /// Calculates eviction score using LFU-LRU hybrid algorithm.
         /// Lower score = more likely to be evicted.
         /// </summary>
-        private double CalculateEvictionScore(CacheEntry entry)
+        private static double CalculateEvictionScore(CacheEntry entry, DateTime now)
         {
-            var age = (DateTime.UtcNow - entry.CreatedAt).TotalHours;
-            var recency = (DateTime.UtcNow - entry.LastAccessed).TotalHours;
+            var age = (now - entry.CreatedAt).TotalHours;
+            var recency = (now - entry.LastAccessed).TotalHours;
             var frequency = entry.AccessCount;
 
             // LFU-LRU hybrid: balance frequency and recency
@@ -490,11 +517,11 @@ namespace Lidarr.Plugin.Common.Services.Caching
             private int _accessCount;
             public int AccessCount => _accessCount;
 
-            public bool IsExpired => DateTime.UtcNow > ExpiresAt;
+            public bool IsExpired(DateTime now) => now > ExpiresAt;
 
-            public void RecordAccess()
+            public void RecordAccess(DateTime now)
             {
-                LastAccessed = DateTime.UtcNow;
+                LastAccessed = now;
                 Interlocked.Increment(ref _accessCount);
             }
         }

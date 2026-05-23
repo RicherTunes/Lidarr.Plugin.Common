@@ -31,6 +31,21 @@ namespace Lidarr.Plugin.Common.Services.Performance
         void RecordResponse(string service, string endpoint, HttpResponseMessage response);
 
         /// <summary>
+        /// Explicitly signal an authentication failure (401/403 detected via
+        /// exception or out-of-band). Auth failures are tracked for stats but
+        /// MUST NOT influence the rate-limit budget — auth is gated by
+        /// <c>AuthFailureGate</c>, and tightening RPM on credential issues
+        /// causes the post-recovery throughput to be artificially low.
+        /// </summary>
+        /// <remarks>
+        /// Default implementation is a no-op so adding this method does not
+        /// silently break alternate <see cref="IUniversalAdaptiveRateLimiter"/>
+        /// implementations (mocks, custom limiters in downstream plugins).
+        /// Production limiters SHOULD override to track auth-failure stats.
+        /// </remarks>
+        void RecordAuthFailure(string service, string endpoint) { }
+
+        /// <summary>
         /// Get current rate limit for a specific service/endpoint
         /// </summary>
         /// <param name="service">Service name</param>
@@ -87,11 +102,45 @@ namespace Lidarr.Plugin.Common.Services.Performance
             ["Default"] = new ServiceConfig(200, 50, 400) // Conservative default
         };
 
+        /// <summary>
+        /// Conservative service config: ~1 req/sec (60 RPM), 30-second circuit open
+        /// on repeated non-auth errors.  Used by <see cref="WithConservativeDefaults"/>.
+        /// </summary>
+        private static readonly Dictionary<string, ServiceConfig> ConservativeServiceConfigs =
+            new(StringComparer.OrdinalIgnoreCase)
+            {
+                // All services get the same conservative cap.
+                // Key = "Default" is the fall-through used by GetServiceConfig.
+                ["Default"] = new ServiceConfig(
+                    defaultReqPerMin: 60,  // ~1 req/s
+                    minReqPerMin: 2,       // floor at ~2 RPM so the limiter never fully stalls
+                    maxReqPerMin: 60)      // cap at 60 RPM — won't auto-expand beyond initial
+            };
+
+        private readonly bool _conservativeProfile;
+
         public UniversalAdaptiveRateLimiter()
+            : this(conservativeProfile: false)
         {
+        }
+
+        private UniversalAdaptiveRateLimiter(bool conservativeProfile)
+        {
+            _conservativeProfile = conservativeProfile;
             _serviceLimiters = new ConcurrentDictionary<string, ServiceRateLimiter>(StringComparer.OrdinalIgnoreCase);
             _globalSemaphore = new SemaphoreSlim(1, 1);
         }
+
+        /// <summary>
+        /// Creates a new <see cref="UniversalAdaptiveRateLimiter"/> pre-configured with the
+        /// Conservative preset: ~1 req/s (60 RPM), 2–60 RPM window, and a tighter
+        /// circuit-open threshold (3 consecutive non-auth errors vs. 5 on the default profile).
+        /// </summary>
+        /// <remarks>
+        /// Existing default behaviour for non-Conservative instances is unchanged.
+        /// </remarks>
+        public static UniversalAdaptiveRateLimiter WithConservativeDefaults()
+            => new UniversalAdaptiveRateLimiter(conservativeProfile: true);
 
         public async Task<bool> WaitIfNeededAsync(string service, string endpoint, CancellationToken cancellationToken = default)
         {
@@ -100,6 +149,12 @@ namespace Lidarr.Plugin.Common.Services.Performance
 
             var serviceLimiter = GetOrCreateServiceLimiter(service);
             return await serviceLimiter.WaitIfNeededAsync(endpoint, cancellationToken);
+        }
+
+        public void RecordAuthFailure(string service, string endpoint)
+        {
+            var serviceLimiter = GetOrCreateServiceLimiter(service);
+            serviceLimiter.RecordAuthFailure(endpoint);
         }
 
         public void RecordResponse(string service, string endpoint, HttpResponseMessage response)
@@ -160,12 +215,20 @@ namespace Lidarr.Plugin.Common.Services.Performance
             return _serviceLimiters.GetOrAdd(service, serviceName =>
             {
                 var config = GetServiceConfig(serviceName);
-                return new ServiceRateLimiter(serviceName, config);
+                return new ServiceRateLimiter(serviceName, config, _conservativeProfile);
             });
         }
 
-        private static ServiceConfig GetServiceConfig(string service)
+        private ServiceConfig GetServiceConfig(string service)
         {
+            if (_conservativeProfile)
+            {
+                // Conservative profile: look up service-specific entry, fall back to
+                // the single "Default" conservative config.
+                return ConservativeServiceConfigs.GetValueOrDefault(service)
+                    ?? ConservativeServiceConfigs["Default"];
+            }
+
             return DefaultServiceConfigs.GetValueOrDefault(service) ?? DefaultServiceConfigs["Default"];
         }
 
@@ -195,10 +258,15 @@ namespace Lidarr.Plugin.Common.Services.Performance
         private readonly object _lock = new();
         private bool _disposed;
 
-        public ServiceRateLimiter(string serviceName, ServiceConfig config)
+        // Conservative profile opens the circuit after 3 consecutive non-auth errors;
+        // the default profile uses 5.
+        private readonly int _circuitOpenThreshold;
+
+        public ServiceRateLimiter(string serviceName, ServiceConfig config, bool conservativeProfile = false)
         {
             _serviceName = serviceName;
             _config = config;
+            _circuitOpenThreshold = conservativeProfile ? 3 : 5;
             _endpointLimits = new ConcurrentDictionary<string, EndpointRateLimit>();
             _semaphore = new SemaphoreSlim(1, 1);
         }
@@ -256,9 +324,15 @@ namespace Lidarr.Plugin.Common.Services.Performance
                 {
                     HandleRateLimitResponse(limit);
                 }
-                else if (response.StatusCode == HttpStatusCode.Unauthorized && limit.ConsecutiveErrors > 2)
+                else if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
                 {
-                    HandleSoftRateLimit(limit);
+                    // Auth failures are gated by AuthFailureGate, not by the
+                    // rate limiter. The old behavior counted 401s toward
+                    // ConsecutiveErrors and tightened the per-endpoint budget
+                    // after 5 in a row — that gave a real Qobuz user a tightened
+                    // rate limit post-recovery for a failure that had nothing
+                    // to do with upstream capacity. Track for stats only.
+                    HandleAuthFailureResponse(limit);
                 }
                 else if (!response.IsSuccessStatusCode)
                 {
@@ -269,6 +343,32 @@ namespace Lidarr.Plugin.Common.Services.Performance
                     HandleSuccessResponse(limit);
                 }
             }
+        }
+
+        public void RecordAuthFailure(string endpoint)
+        {
+            if (_disposed) return;
+            var limit = _endpointLimits.GetOrAdd(endpoint, _ => new EndpointRateLimit
+            {
+                RequestsPerMinute = _config.DefaultRequestsPerMinute,
+                LastRequest = DateTime.MinValue
+            });
+            lock (_lock)
+            {
+                HandleAuthFailureResponse(limit);
+            }
+        }
+
+        /// <summary>
+        /// Track an auth failure without touching the rate-limit budget or
+        /// the success/error streak counters. Auth gating is the
+        /// <c>AuthFailureGate</c>'s responsibility; the rate limiter would
+        /// otherwise interfere by tightening the per-endpoint RPM and
+        /// resetting the streak that drives budget expansion post-recovery.
+        /// </summary>
+        private void HandleAuthFailureResponse(EndpointRateLimit limit)
+        {
+            limit.AuthFailures++;
         }
 
         public int GetCurrentLimit(string endpoint)
@@ -330,9 +430,8 @@ namespace Lidarr.Plugin.Common.Services.Performance
             limit.ConsecutiveSuccesses = 0;
             limit.TotalErrors++;
 
-            if (limit.ConsecutiveErrors >= 5)
+            if (limit.ConsecutiveErrors >= _circuitOpenThreshold)
             {
-                var oldLimit = limit.RequestsPerMinute;
                 limit.RequestsPerMinute = Math.Max(_config.MinRequestsPerMinute,
                     (int)(limit.RequestsPerMinute * 0.9));
             }
@@ -373,6 +472,7 @@ namespace Lidarr.Plugin.Common.Services.Performance
             public long SuccessfulRequests { get; set; }
             public long TotalErrors { get; set; }
             public long RateLimitHits { get; set; }
+            public long AuthFailures { get; set; }
         }
     }
 

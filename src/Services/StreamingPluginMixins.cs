@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Abstractions.Models;
 using Lidarr.Plugin.Common.Utilities;
@@ -17,39 +18,53 @@ namespace Lidarr.Plugin.Common.Services
     {
         private readonly string _serviceName;
         private readonly StreamingCacheHelper _cache;
-        private readonly object _rateLimitLock = new object();
-        private DateTime _lastRequestTime = DateTime.MinValue;
+        private readonly SemaphoreSlim _rateLimitSemaphore = new SemaphoreSlim(1, 1);
+        private DateTimeOffset _lastRequestTime = DateTimeOffset.MinValue;
+        private readonly TimeProvider _timeProvider;
 
-        public StreamingIndexerMixin(string serviceName, StreamingCacheHelper cache = null)
+        /// <summary>
+        /// Initializes a new instance of <see cref="StreamingIndexerMixin"/>.
+        /// </summary>
+        /// <param name="serviceName">Name of the streaming service (used for logging/cache keys).</param>
+        /// <param name="cache">Optional shared response cache helper.</param>
+        /// <param name="timeProvider">
+        /// Optional time provider for testability. Defaults to <c>TimeProvider.System</c>.
+        /// </param>
+        public StreamingIndexerMixin(string serviceName, StreamingCacheHelper cache = null, TimeProvider timeProvider = null)
         {
             _serviceName = serviceName ?? throw new ArgumentNullException(nameof(serviceName));
             _cache = cache;
+            _timeProvider = timeProvider ?? TimeProvider.System;
         }
 
         /// <summary>
         /// Applies rate limiting using shared patterns.
+        /// Uses async/await with SemaphoreSlim to avoid blocking the calling thread.
         /// Call this before making API requests.
         /// </summary>
         public async Task ApplyRateLimitAsync(int requestsPerMinute)
         {
             if (requestsPerMinute <= 0) return;
 
-            await Task.Run(() =>
+            await _rateLimitSemaphore.WaitAsync().ConfigureAwait(false);
+            try
             {
-                lock (_rateLimitLock)
+                var now = _timeProvider.GetUtcNow();
+                var timeSinceLastRequest = now - _lastRequestTime;
+                var minInterval = TimeSpan.FromMinutes(1.0 / requestsPerMinute);
+
+                if (timeSinceLastRequest < minInterval)
                 {
-                    var timeSinceLastRequest = DateTime.UtcNow - _lastRequestTime;
-                    var minInterval = TimeSpan.FromMinutes(1.0 / requestsPerMinute);
-
-                    if (timeSinceLastRequest < minInterval)
-                    {
-                        var waitTime = minInterval - timeSinceLastRequest;
-                        Task.Delay(waitTime).Wait();
-                    }
-
-                    _lastRequestTime = DateTime.UtcNow;
+                    var waitTime = minInterval - timeSinceLastRequest;
+                    await Task.Delay(waitTime, _timeProvider, CancellationToken.None).ConfigureAwait(false);
                 }
-            });
+
+                _lastRequestTime = _timeProvider.GetUtcNow();
+            }
+            finally
+            {
+                _rateLimitSemaphore.Release();
+            }
         }
 
         /// <summary>

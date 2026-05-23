@@ -35,7 +35,27 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
-_No changes yet._
+### Documentation
+
+- `docs/ECOSYSTEM_VERSION_CONTRACT.md` added: explains why the contract exists, walks through the `versionContract` section of `parity-spec.json` field-by-field, documents the lint command plugin authors must run, and describes the manual propagation procedure until automation is in place.
+- README updated with a Documentation section linking to CHANGELOG, CONTRIBUTING, SECURITY, and docs/.
+- Phase 0 + Phase 1 work captured in the v1.8.0 entry below.
+
+## [1.8.0] - 2026-05-23
+**Upgrade note:** Ecosystem version contract, parity-lint forbiddenFields enforcement, ALC fix, and async rate-limit refactor. No breaking API changes.
+
+**Highlights**
+- Ecosystem version contract (`versionContract`) added to `scripts/parity-spec.json`; plugin CI should call `ecosystem-parity-lint.ps1 -Check VersionContract` to enforce that a plugin's `VERSION` file and manifest version align with the Common library version.
+- `forbiddenFields` enforcement wired into parity-lint — fields listed as forbidden in `parity-spec.json` now cause lint failures.
+- ALC multi-plugin co-existence fix: isolated `AssemblyLoadContext` per plugin prevents type-identity collisions when multiple streaming plugins are loaded simultaneously.
+- `StreamingPluginMixins.StreamingIndexerMixin.ApplyRateLimitAsync`: replaced `Task.Delay(...).Wait()` inside a lock with `SemaphoreSlim` + `await Task.Delay`, eliminating the blocking-wait-inside-lock anti-pattern and enabling proper async flow.
+- `SmartCache` test suite: removed `Skip` from two flaky tests (`TryGet_ReturnsFalseForExpiredItem`, `Eviction_LowPriorityItemsEvictedFirst`) by injecting a `TimeProvider` for deterministic time control.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.7.1...v1.8.0)
 
 ## [1.7.1] - 2026-03-27
 **Upgrade note:** Patch release hardening bridge defaults, sandbox resilience, and test coverage. No new public API surface.
