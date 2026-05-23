@@ -35,6 +35,18 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-05-23
+**Upgrade note:** Adds `Services.Diagnostics.HttpExceptionClassifier` on top of v1.9.0. Plugins that surface categorised connection-test failures in their `Test()` indicator (auth / rate-limit / network / server) can now consume this from Common instead of copy-pasting. Tidalarr's HTTP-error categorisation is the first consumer.
+
+**Highlights**
+- `Services.Diagnostics.HttpExceptionClassifier` — classifies `HttpRequestException` / `TaskCanceledException` chains into actionable categories (`UnauthorizedOrForbidden`, `RateLimited`, `NetworkUnreachable`, `Timeout`, `ServerError`, `Unknown`). Used by streaming-plugin `Test()` methods to surface a category-tagged failure message in the Lidarr settings UI instead of "connection failed".
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.0...v1.9.1)
+
 ## [1.9.0] - 2026-05-23
 **Upgrade note:** Adds the AuthFailureGate surface (fail-fast latch + delegating handler + per-key registry) plus SecureMemory, Conservative rate-limit profile, PagedResponseValidator, testkit-lifted plugin contracts, and `Lidarr.Plugin.*.dll` naming enforcement. The new surface is additive — `IUniversalAdaptiveRateLimiter.RecordAuthFailure` is a default interface method so existing alternate implementations continue to compile without changes.
 
