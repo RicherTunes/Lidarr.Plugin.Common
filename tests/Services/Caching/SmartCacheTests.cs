@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Caching;
+using Lidarr.Plugin.Common.TestKit.Testing;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -110,20 +111,28 @@ namespace Lidarr.Plugin.Common.Tests.Services.Caching
             Assert.Equal("value1", value);
         }
 
-        [Fact(Skip = "Fix needed: Test timing is unreliable - expiration check may race with Thread.Sleep")]
+        [Fact]
         public void TryGet_ReturnsFalseForExpiredItem()
         {
-            // Arrange
+            // Arrange — use FakeTimeProvider for deterministic time control; no Thread.Sleep needed.
+            // Set NormalPriorityExpiry to 10 seconds so Set(key, value) [default Normal priority]
+            // creates entries that expire after 10s of fake time.
+            var fakeTime = new FakeTimeProvider();
             var options = new SmartCacheOptions
             {
-                DefaultExpiry = TimeSpan.FromMilliseconds(10)
+                NormalPriorityExpiry = TimeSpan.FromSeconds(10)
             };
             var cache = new SmartCache<string, string>(
                 key => key,
-                options);
+                options,
+                logger: null,
+                valueClone: null,
+                timeProvider: fakeTime);
 
-            cache.Set("key1", "value1");
-            Thread.Sleep(50);
+            cache.Set("key1", "value1"); // Normal priority → expires in 10 fake-seconds
+
+            // Advance fake time past the TTL — no real sleep needed.
+            fakeTime.Advance(TimeSpan.FromSeconds(11));
 
             // Act
             var result = cache.TryGet("key1", out var value);
@@ -403,32 +412,50 @@ namespace Lidarr.Plugin.Common.Tests.Services.Caching
             Assert.True(cache.TryGet(5, out _)); // Should still exist
         }
 
-        [Fact(Skip = "Fix needed: Eviction scoring may remove any low-priority or older items; test needs to account for age/recency factors")]
+        [Fact]
         public void Eviction_LowPriorityItemsEvictedFirst()
         {
-            // Arrange
+            // Arrange — use FakeTimeProvider so recency/age are deterministic.
+            // The eviction score formula is: (frequency * 10.0) / (recency + 1.0) * priorityMultiplier
+            // We give high-priority items multiple accesses (high frequency) so their scores dwarf
+            // the zero-access low-priority items and the eviction order is fully deterministic.
+            var fakeTime = new FakeTimeProvider();
             var options = new SmartCacheOptions
             {
                 MaxCacheSize = 5,
                 EvictionBatchSize = 2
             };
-            var cache = new SmartCache<int, string>(key => key.ToString(), options);
+            var cache = new SmartCache<int, string>(
+                key => key.ToString(), options,
+                logger: null, valueClone: null, timeProvider: fakeTime);
 
-            // Add high priority items
+            // Add high priority items and access each several times to give them
+            // a high eviction score (frequency >> 0) so they survive eviction.
             cache.Set(1, "high1", CacheEntryPriority.High);
             cache.Set(2, "high2", CacheEntryPriority.High);
+            for (int i = 0; i < 5; i++)
+            {
+                cache.TryGet(1, out _);
+                cache.TryGet(2, out _);
+            }
 
-            // Add low priority items
+            // Advance time slightly so low-priority items have non-zero recency at eviction time.
+            fakeTime.Advance(TimeSpan.FromSeconds(1));
+
+            // Add low priority items (0 accesses, slightly older relative to the next Set calls)
             cache.Set(3, "low1", CacheEntryPriority.Low);
             cache.Set(4, "low2", CacheEntryPriority.Low);
             cache.Set(5, "low3", CacheEntryPriority.Low);
 
-            // Act - Add normal priority item to trigger eviction
+            // Act - Add one more item to push over MaxCacheSize=5 and trigger eviction of 2 items.
+            // The 2 evicted should be from low-priority (3, 4, or 5) because:
+            //   - high items score: (5 * 10) / (recency + 1) * 3.0  → large positive
+            //   - low  items score: (0 * 10) / (recency + 1) * 1.0  = 0            → evicted first
             cache.Set(6, "normal1", CacheEntryPriority.Normal);
 
-            // Assert - High priority items should be preserved
-            Assert.True(cache.TryGet(1, out _));
-            Assert.True(cache.TryGet(2, out _));
+            // Assert - High priority items (with many accesses) must survive.
+            Assert.True(cache.TryGet(1, out _), "Item 1 (High priority, 5 accesses) should survive eviction");
+            Assert.True(cache.TryGet(2, out _), "Item 2 (High priority, 5 accesses) should survive eviction");
         }
 
         [Fact]
