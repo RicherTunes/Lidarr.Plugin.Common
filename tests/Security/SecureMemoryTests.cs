@@ -134,12 +134,26 @@ public sealed class SecureMemoryTests
     }
 
     [Fact]
-    public void ZeroPemKey_OnEmptyString_SetsReferenceToNull()
+    public void ZeroPemKey_OnEmptyString_SetsReferenceToNullWithoutOverwriting()
     {
-        // Build a non-interned empty-like string at runtime.
-        var pem = new string(Array.Empty<char>());
+        // `new string(Array.Empty<char>())` returns the interned `string.Empty`
+        // singleton on modern .NET. ZeroPemKey MUST short-circuit on length=0
+        // rather than reinterpret the buffer (which would corrupt every
+        // `string.Empty` reference in the AppDomain). This test pins the
+        // safety property: empty input is handled by nulling the reference,
+        // not by overwriting shared state.
+        var pem = string.Empty;
+        var pinnedReference = pem; // Hold a second reference to detect corruption.
+
         SecureMemory.ZeroPemKey(ref pem);
+
         Assert.Null(pem);
+        // Our pinned reference is still the canonical empty string. If
+        // ZeroPemKey had reinterpreted the (zero-length) buffer it would be
+        // a no-op anyway, but the guard prevents the dangerous path from
+        // running in the first place.
+        Assert.Same(string.Empty, pinnedReference);
+        Assert.Equal(0, pinnedReference.Length);
     }
 
     [Fact]

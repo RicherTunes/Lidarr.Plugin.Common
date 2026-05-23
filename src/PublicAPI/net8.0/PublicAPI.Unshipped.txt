@@ -118,3 +118,54 @@ Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException.PagedResponseIntegri
 Lidarr.Plugin.Common.Services.Http.PagedResponseValidator
 static Lidarr.Plugin.Common.Services.Http.PagedResponseValidator.Validate(int receivedItemCount, int? declaredTotalCount, string! contextName) -> void
 static Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.WithConservativeDefaults() -> Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter!
+Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter.RecordAuthFailure(string! service, string! endpoint) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.AuthFailureGate(Lidarr.Plugin.Abstractions.Contracts.IAuthFailureHandler! handler, System.TimeProvider? clock = null, System.TimeSpan? probeInterval = null, Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate!>? logger = null) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.Handler.get -> Lidarr.Plugin.Abstractions.Contracts.IAuthFailureHandler!
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.IsHealthy.get -> bool
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.Metrics.get -> Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.EnsureCanProceed() -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.TryAcquireProbeSlot() -> bool
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.ForceReset() -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.HandleFailureAsync(Lidarr.Plugin.Abstractions.Contracts.AuthFailure! failure, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.HandleSuccessAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.AuthFailureGateMetrics() -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.AuthFailureGateMetrics(long LatchTransitions, long RecoveryTransitions, long ProbeAcquired, long ProbeRejected, long ProbeRefunded, System.DateTimeOffset? LastLatchAt, System.DateTimeOffset? LastRecoveryAt) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LatchTransitions.get -> long
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LatchTransitions.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.RecoveryTransitions.get -> long
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.RecoveryTransitions.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeAcquired.get -> long
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeAcquired.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeRejected.get -> long
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeRejected.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeRefunded.get -> long
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeRefunded.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LastLatchAt.get -> System.DateTimeOffset?
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LastLatchAt.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LastRecoveryAt.get -> System.DateTimeOffset?
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LastRecoveryAt.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthGatedException
+Lidarr.Plugin.Common.Services.Bridge.AuthGatedException.AuthGatedException(Lidarr.Plugin.Abstractions.Contracts.AuthStatus status, string! message, string? errorCode = null, System.TimeSpan? retryAfter = null) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthGatedException.Status.get -> Lidarr.Plugin.Abstractions.Contracts.AuthStatus
+Lidarr.Plugin.Common.Services.Bridge.AuthGatedException.ErrorCode.get -> string?
+Lidarr.Plugin.Common.Services.Bridge.AuthGatedException.RetryAfter.get -> System.TimeSpan?
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry.Get(string! key) -> Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate!
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry.Reset(string! key) -> void
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry.Remove(string! key) -> bool
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry.Keys.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry.Count.get -> int
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.AuthFailureGateRegistry(System.TimeProvider? clock = null, System.TimeSpan? probeInterval = null, Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory = null, int maxKeys = 256) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.Get(string! key) -> Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate!
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.Reset(string! key) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.Remove(string! key) -> bool
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.Keys.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.Count.get -> int
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureDelegatingHandler
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureDelegatingHandler.AuthFailureDelegatingHandler(Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate! gate) -> void
+Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.LastFailure.get -> Lidarr.Plugin.Abstractions.Contracts.AuthFailure?
+Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.ConsecutiveFailureCount.get -> int
+Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.ResetToUnknown() -> void

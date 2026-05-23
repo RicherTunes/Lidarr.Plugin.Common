@@ -13,6 +13,19 @@
 - Thread-safe singletons with volatile/lock patterns
 - Fixture-backed compliance tests (68 bridge/compliance tests)
 
+### Auth-Failure Gate (post-recovery, 2026-05-11)
+- `AuthFailureGate` (in `Services/Bridge`) is the request-side enforcement
+  layer on top of the notification-only `IAuthFailureHandler` contract.
+- Driver: a real user got IP-banned by Qobuz when Lidarr's search loop
+  hammered the API after the OAuth session expired — the plugin propagated
+  401s without gating, Lidarr retried at full rate, Qobuz banned.
+- Latched-bad → exactly one probe call per `probeInterval` (default 60s);
+  every other request short-circuits without touching the network.
+- Adopted by `applemusicarr`, `qobuzarr`, `tidalarr` adapters. Brainarr
+  needs a per-provider variant (multi-LLM-provider architecture — single
+  global gate would block healthy providers when one provider's key is bad).
+- See `docs/reference/BRIDGE_RUNTIME_CONTRACTS.md` for wiring patterns.
+
 ### Plugin Integration
 | Plugin | Bridge Slice | Indexer Reporting | Download Reporting | Runtime Tests |
 |--------|-------------|-------------------|-------------------|---------------|
