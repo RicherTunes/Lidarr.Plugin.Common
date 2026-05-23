@@ -117,15 +117,104 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
             }
         }
 
-        private static string GetDefaultKeysDir()
+        /// <summary>
+        /// Resolves a writable directory for the DataProtection key ring,
+        /// trying multiple candidates in order before falling back to
+        /// <c>Path.GetTempPath()</c>. Designed for Lidarr Docker containers
+        /// (hotio / linuxserver) where <c>$HOME</c> can be empty if the
+        /// container PUID/PGID isn't reflected in <c>/etc/passwd</c> — the
+        /// original implementation returned a relative <c>.config/...</c>
+        /// path in that case which resolved against the cwd
+        /// (<c>/app/bin</c>), a read-only mount.
+        /// </summary>
+        /// <remarks>
+        /// Candidate order:
+        /// <list type="number">
+        ///   <item><description><c>$XDG_DATA_HOME</c> — the standard XDG location for persistent user data; Lidarr Docker images typically set this to <c>/config</c>.</description></item>
+        ///   <item><description><c>$XDG_CONFIG_HOME</c> — the standard XDG location for user config.</description></item>
+        ///   <item><description><c>Environment.SpecialFolder.LocalApplicationData</c> — on Linux, falls back to <c>~/.local/share</c> when XDG isn't set; on Windows, AppData/Local.</description></item>
+        ///   <item><description><c>$HOME/.local/share</c> — explicit XDG fallback when SpecialFolder resolution is broken.</description></item>
+        ///   <item><description><c>Environment.SpecialFolder.ApplicationData</c> — Windows AppData/Roaming; on Linux, <c>~/.config</c>.</description></item>
+        ///   <item><description><c>$HOME/.config</c> — explicit fallback when SpecialFolder.ApplicationData returns empty.</description></item>
+        ///   <item><description><c>Path.GetTempPath()</c> — LAST RESORT (writable but ephemeral). Caller emits a warning when this hits.</description></item>
+        /// </list>
+        /// Each candidate is only used if it produces a non-empty rooted (absolute) path. Empty or relative
+        /// candidates are skipped — the bug this fixes was caused by silently accepting <c>"" + "/.config/..."</c>
+        /// → a path that resolved relative to cwd.
+        /// </remarks>
+        internal static string GetDefaultKeysDir() => GetDefaultKeysDir(out _);
+
+        /// <summary>
+        /// Overload that reports back the candidate name that won, so the
+        /// factory can emit a one-line warning when the fallback to
+        /// <c>Path.GetTempPath()</c> is hit.
+        /// </summary>
+        internal static string GetDefaultKeysDir(out string source)
         {
-            if (OperatingSystem.IsWindows())
+            const string Leaf1 = "Lidarr.Plugin.Common";
+            const string Leaf2 = "keys";
+
+            string? candidate;
+
+            candidate = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+            if (IsUsableRootedDir(candidate))
             {
-                var appdata = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                return Path.Combine(appdata, "Lidarr.Plugin.Common", "keys");
+                source = "XDG_DATA_HOME";
+                return Path.Combine(candidate!, Leaf1, Leaf2);
             }
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return Path.Combine(home, ".config", "lidarr.plugin.common", "keys");
+
+            candidate = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+            if (IsUsableRootedDir(candidate))
+            {
+                source = "XDG_CONFIG_HOME";
+                return Path.Combine(candidate!, Leaf1, Leaf2);
+            }
+
+            candidate = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+            if (IsUsableRootedDir(candidate))
+            {
+                source = "SpecialFolder.LocalApplicationData";
+                return Path.Combine(candidate!, Leaf1, Leaf2);
+            }
+
+            // Explicit XDG-style fallback when LocalApplicationData was empty.
+            // On Linux+net8, SpecialFolder.LocalApplicationData usually returns
+            // $HOME/.local/share, but only when $HOME is set AND the user is
+            // in /etc/passwd. If both are broken, $HOME via env may still work.
+            var home = Environment.GetEnvironmentVariable("HOME");
+            if (!string.IsNullOrWhiteSpace(home) && Path.IsPathRooted(home))
+            {
+                source = "$HOME/.local/share";
+                return Path.Combine(home, ".local", "share", Leaf1, Leaf2);
+            }
+
+            candidate = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+            if (IsUsableRootedDir(candidate))
+            {
+                source = "SpecialFolder.ApplicationData";
+                return Path.Combine(candidate!, Leaf1, Leaf2);
+            }
+
+            // Final structured fallback: $HOME/.config when SpecialFolder.ApplicationData
+            // is empty. Already covered $HOME above, this is just for completeness.
+            if (!string.IsNullOrWhiteSpace(home) && Path.IsPathRooted(home))
+            {
+                source = "$HOME/.config";
+                return Path.Combine(home, ".config", Leaf1, Leaf2);
+            }
+
+            // Last resort: temp dir. Always writable, always rooted, but
+            // ephemeral — caller emits a warning so the operator knows the
+            // key ring won't survive a container restart.
+            source = "Path.GetTempPath() (ephemeral)";
+            return Path.Combine(Path.GetTempPath(), Leaf1, Leaf2);
+        }
+
+        private static bool IsUsableRootedDir(string? candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) return false;
+            if (!Path.IsPathRooted(candidate)) return false;
+            return true;
         }
 
         /// <summary>
