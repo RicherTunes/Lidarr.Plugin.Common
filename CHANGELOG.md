@@ -35,7 +35,11 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
-_No changes yet._
+### Documentation
+
+- `docs/ECOSYSTEM_VERSION_CONTRACT.md` added: explains why the contract exists, walks through the `versionContract` section of `parity-spec.json` field-by-field, documents the lint command plugin authors must run, and describes the manual propagation procedure until automation is in place.
+- README updated with a Documentation section linking to CHANGELOG, CONTRIBUTING, SECURITY, and docs/.
+- Phase 0 + Phase 1 work captured in the v1.8.0 entry below.
 
 ## [1.8.0] - 2026-05-23
 **Upgrade note:** Ecosystem version contract, parity-lint forbiddenFields enforcement, ALC fix, and async rate-limit refactor. No breaking API changes.

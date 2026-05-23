@@ -71,6 +71,13 @@ Release notes: [v1.8.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/rele
 - `docs/` – knowledge base described above.
 - `tools/` – Snippet verifier, manifest/package automation, docs lint scripts.
 
+## Documentation
+
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Docs directory](docs/)
+
 ## License
 MIT – see [LICENSE](LICENSE).
 
