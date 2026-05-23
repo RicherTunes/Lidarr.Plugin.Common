@@ -6,7 +6,24 @@ using Lidarr.Plugin.Common.Interfaces;
 
 namespace Lidarr.Plugin.Common.Security.TokenProtection
 {
-    internal static class TokenProtectorFactory
+    /// <summary>
+    /// Builds an <see cref="ITokenProtector"/> from environment configuration,
+    /// with graceful degradation to <see cref="NullTokenProtector"/> when the
+    /// configured backend can't initialise.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <strong>Diagnostics surface is public</strong> so downstream plugins —
+    /// which internalise Common via ILRepack — can read the
+    /// <see cref="IsDegradedToPlaintext"/> flag and
+    /// <see cref="LastDiagnostics"/> snapshot from their plugin-startup code
+    /// and surface a "secrets are stored as plaintext" warning to the
+    /// operator's log. Before v1.9.3 this class was <c>internal</c>, which
+    /// silently broke the loud-at-startup contract — internalised types
+    /// can't be reached even with reflection across plugin ALCs.
+    /// </para>
+    /// </remarks>
+    public static class TokenProtectorFactory
     {
         /// <summary>
         /// Set to <see langword="true"/> after the factory has fallen back to
@@ -112,7 +129,7 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
                 PublishDiagnostics(backendName, null, keysPath);
                 return protector;
             }
-            catch (Exception ex) when (!requireBackend)
+            catch (Exception ex) when (!requireBackend && IsExpectedBackendInitFailure(ex))
             {
                 // First-tier fallback: try DataProtection. If we were already trying
                 // DataProtection in the caller's switch arm, the second-tier fallback
@@ -152,12 +169,37 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
                     keysDir);
                 return protector;
             }
-            catch (Exception ex) when (!requireBackend)
+            catch (Exception ex) when (!requireBackend && IsExpectedBackendInitFailure(ex))
             {
                 return DegradeTo("null (degraded)",
                     $"dataprotection backend init failed: {ex.GetType().Name}: {ex.Message}",
                     ex);
             }
+        }
+
+        /// <summary>
+        /// Filters which exception types are eligible for the graceful-degradation
+        /// fallback path. Adversarial-review finding F6 (v1.9.2): the previous
+        /// <c>catch (Exception)</c> swallowed <see cref="OutOfMemoryException"/>,
+        /// <see cref="StackOverflowException"/>, and (more importantly)
+        /// <see cref="CryptographicException"/> signals from a corrupted keychain
+        /// or key ring — those should propagate so the operator sees the real
+        /// problem, not a misleading "we silently fell back to plaintext".
+        ///
+        /// Eligible (silently degraded):
+        /// - <see cref="IOException"/> family (file not found, sharing violation, disk full, etc.)
+        /// - <see cref="UnauthorizedAccessException"/> (the original bug — read-only mount)
+        /// - <see cref="PlatformNotSupportedException"/> (e.g. secret-service on a host without libsecret)
+        /// - <see cref="DllNotFoundException"/> / <see cref="EntryPointNotFoundException"/> (native deps missing)
+        /// - <see cref="InvalidOperationException"/> when the underlying message identifies a missing path/feature
+        /// </summary>
+        private static bool IsExpectedBackendInitFailure(Exception ex)
+        {
+            return ex is IOException
+                or UnauthorizedAccessException
+                or PlatformNotSupportedException
+                or DllNotFoundException
+                or EntryPointNotFoundException;
         }
 
         /// <summary>
@@ -188,11 +230,26 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
 
         private static ITokenProtector DegradeTo(string backendName, string reason, Exception? cause)
         {
-            Volatile.Write(ref _degraded, 1);
             PublishDiagnostics(backendName, cause, keysPath: null, degradedReason: reason);
             return new NullTokenProtector();
         }
 
+        /// <summary>
+        /// Publishes the diagnostic snapshot for the most recent factory call AND
+        /// updates the <see cref="IsDegradedToPlaintext"/> flag to reflect the
+        /// outcome.
+        /// </summary>
+        /// <remarks>
+        /// Adversarial-review finding F2 (v1.9.2): the previous implementation
+        /// only ever SET <c>_degraded</c> to 1 (in <c>DegradeTo</c>) and never
+        /// cleared it. A subsequent successful <c>CreateFromEnvironment</c> call
+        /// (transient I/O blip recovered, or a multi-plugin host where one plugin
+        /// degraded earlier and a later plugin's call would have succeeded) left
+        /// the flag globally stuck at true — every consumer reading
+        /// <see cref="IsDegradedToPlaintext"/> would lie about its own state.
+        /// Now the flag tracks the *current* call: set to 1 when this call
+        /// degraded; cleared to 0 when this call succeeded with a real backend.
+        /// </remarks>
         private static void PublishDiagnostics(string backendName, Exception? cause, string? keysPath, string? degradedReason = null)
         {
             LastDiagnostics = new TokenProtectorDiagnostics(
@@ -200,6 +257,11 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
                 KeysPath: keysPath,
                 Cause: cause,
                 DegradedReason: degradedReason);
+
+            // Reflect the current call's outcome. A subsequent successful call
+            // clears a prior degradation; a subsequent degraded call sets the
+            // flag even if a prior call had succeeded.
+            Volatile.Write(ref _degraded, degradedReason is null ? 0 : 1);
         }
     }
 

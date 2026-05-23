@@ -35,6 +35,37 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.9.3] - 2026-05-23
+**Upgrade note:** Adversarial-review hardening of v1.9.2's token-protection fallback. Four defects identified by post-release review have been corrected; the v1.9.2 bug fix proper (the candidate chain in `GetDefaultKeysDir`) is unchanged. Downstream plugins bumping from v1.9.2 to v1.9.3 do not need code changes — the API surface is wider, not narrower.
+
+**Highlights — fixes for adversarial-review findings F1–F3 + F6**
+
+- **F1 (HIGH) — `TokenProtectorFactory` is now `public`.** Was `internal` in v1.9.2, which (because Common is ILRepack-internalized into every consumer) made `IsDegradedToPlaintext` and `LastDiagnostics` *unreachable* from plugin code. The "loud at startup" warning the design depends on couldn't be logged by any plugin. Now plugins can read both surfaces from their startup code: `if (TokenProtectorFactory.IsDegradedToPlaintext) logger.Warn("Token protection degraded: {Reason}", TokenProtectorFactory.LastDiagnostics?.DegradedReason);`.
+- **F2 (HIGH) — `_degraded` flag now reflects the most-recent call, not OR-of-all-time.** Was sticky-set forever in v1.9.2 once any call failed; a subsequent successful call (transient I/O blip recovered, multi-plugin host) left the flag stuck at true and every downstream consumer would lie about its own state. Now `PublishDiagnostics` clears the flag to 0 on a successful (non-degraded) call.
+- **F3 (HIGH) — Null-protector envelopes use distinct `lpc:plain:v1:` prefix.** v1.9.2 wrapped `NullTokenProtector` output in the same `lpc:ps:v1:` envelope as real ciphertext — visually indistinguishable on casual inspection. An operator querying their settings DB with `WHERE value LIKE 'lpc:ps:v1:%'` to find "encrypted secrets" would have hit null-mode plaintext too. Now `StringTokenProtector` chooses the envelope prefix based on the wrapped protector's `AlgorithmId`: real backends use `lpc:ps:v1:`, the null fallback uses `lpc:plain:v1:`. `IsProtected` returns true for both shapes so the setter's "already-protected" round-trip still works.
+- **F6 (MED) — Catch filter narrowed.** v1.9.2 used `catch (Exception ex) when (!requireBackend)` which swallowed `CryptographicException` from a corrupted keychain / key ring (the operator wants to see that, not a misleading plaintext fallback), plus `OutOfMemoryException` and similar process-fatal signals. Now `IsExpectedBackendInitFailure` whitelists the I/O families (`IOException`, `UnauthorizedAccessException`, `PlatformNotSupportedException`, `DllNotFoundException`, `EntryPointNotFoundException`) and propagates everything else.
+
+**Test coverage additions**
+
+- `RealBackend_WrappedByStringTokenProtector_UsesProtectedPrefix` — pins F3.
+- `NullProtector_WrappedByStringTokenProtector_UsesPlaintextPrefix_AndRoundTrips` — replaces the v1.9.2 test that asserted the now-incorrect `lpc:ps:v1:` shape.
+- `CreateFromEnvironment_ClearsStickyDegradedFlag_OnSubsequentSuccess` — pins F2.
+- `TokenProtectorFactory_TypeIsPublic_SoDownstreamPluginsCanReadDiagnostics` — pins F1 via reflection (so a future re-internalization breaks the build).
+- `CreateFromEnvironment_DoesNotSwallow_CryptographicException` — pins F6.
+- `LastDiagnostics_ExposesBackendNameAndDegradedReason_AfterDegradation` — confirms the diagnostic surface contract.
+
+Deferred to a follow-up (acknowledged but not blocking v1.9.3):
+- F4 (TOCTOU + leak in `EnsureKeysDirIsWritable` probe).
+- F5 (`IsUsableRootedDir` only checks rooted, not writable — first rooted candidate wins even if unwritable).
+- F7 (Windows `ApplicationData` vs `LocalApplicationData` for Roaming users).
+- F8 (no event/callback surface beyond the static snapshot).
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.2...v1.9.3)
+
 ## [1.9.2] - 2026-05-23
 **Upgrade note:** Hot-fix for a Lidarr Docker startup failure that affected every plugin consuming Common's token protection. The DataProtection key-dir resolver no longer falls back to a *relative* path when `$HOME` is empty; the factory degrades gracefully to a `NullTokenProtector` (with a loud one-line diagnostic) when the backend can't initialise. Plugins do not need code changes — bump the submodule pointer.
 
