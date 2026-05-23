@@ -35,11 +35,26 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
-### Documentation
+## [1.9.0] - 2026-05-23
+**Upgrade note:** Adds the AuthFailureGate surface (fail-fast latch + delegating handler + per-key registry) plus SecureMemory, Conservative rate-limit profile, PagedResponseValidator, testkit-lifted plugin contracts, and `Lidarr.Plugin.*.dll` naming enforcement. The new surface is additive — `IUniversalAdaptiveRateLimiter.RecordAuthFailure` is a default interface method so existing alternate implementations continue to compile without changes.
 
-- `docs/ECOSYSTEM_VERSION_CONTRACT.md` added: explains why the contract exists, walks through the `versionContract` section of `parity-spec.json` field-by-field, documents the lint command plugin authors must run, and describes the manual propagation procedure until automation is in place.
-- README updated with a Documentation section linking to CHANGELOG, CONTRIBUTING, SECURITY, and docs/.
-- Phase 0 + Phase 1 work captured in the v1.8.0 entry below.
+**Highlights**
+- **AuthFailureGate** (`src/Services/Bridge/`): fail-fast latch built on `IAuthFailureHandler` that prevents plugins from hammering an upstream service when authentication is known bad — the failure mode that previously got Qobuzarr users IP-banned. `TryAcquireProbeSlot()` rate-limits one network call per probe-interval while latched so the plugin can detect re-credentialing without spamming the upstream. Per-key `AuthFailureGateRegistry` for multi-provider plugins (brainarr's 11 LLM providers each get an isolated gate). `AuthFailureDelegatingHandler` auto-wires the gate into any `AddHttpClient` typed client. New `HandleFailureAsync` / `HandleSuccessAsync` pass-throughs on the gate let callers signal without touching the underlying `IAuthFailureHandler` (which is internalized per plugin via ILRepack, so direct sharing across plugin ALC boundaries is unsafe).
+- **SecureMemory** + **Conservative rate-limit profile** + **PagedResponseValidator** consumed by applemusicarr's APL-006 / APL-009 / APL-010 closures.
+- **5 adversarial-review must-fixes**:
+  1. `IUniversalAdaptiveRateLimiter.RecordAuthFailure` is a default interface method (no compile break in alternate impls).
+  2. `SecureMemory.ZeroPemKey` short-circuits on length-0 strings (would otherwise corrupt the interned `string.Empty`).
+  3. `LogRedactor` split into bare-word + URL-query-context patterns; bare `state=available`, `status code=ETIMEDOUT`, etc. no longer false-positive-redact.
+  4. `PublicAPI.Unshipped.txt` baselines populated for the full new surface (clears RS0016 warning flood downstream).
+  5. `AuthFailureGate` cross-ALC hazard documented; pass-through methods added so callers don't need to touch the `Handler` property.
+- **TestKit plugin contracts lifted** (`testkit/Compliance/`): `PluginVersionContract`, `PluginPackagingContract`, `PublishedReleaseInstallability` are now part of the public TestKit so downstream plugins can run the same compliance checks without copy-paste.
+- **`Lidarr.Plugin.*.dll` naming convention** enforced by `PluginPackagingContract`. Lidarr's `PluginLoader` silently ignores any other DLL filename — the contract catches it at build time instead of at runtime.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.8.0...v1.9.0)
 
 ## [1.8.0] - 2026-05-23
 **Upgrade note:** Ecosystem version contract, parity-lint forbiddenFields enforcement, ALC fix, and async rate-limit refactor. No breaking API changes.
