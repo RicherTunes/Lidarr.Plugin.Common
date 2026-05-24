@@ -181,3 +181,26 @@ Lidarr.Plugin.Common.Validation.TestValidationBuilder.RequireNonEmpty(string! fi
 Lidarr.Plugin.Common.Validation.TestValidationBuilder.AddFailure(FluentValidation.Results.ValidationFailure! failure) -> Lidarr.Plugin.Common.Validation.TestValidationBuilder!
 Lidarr.Plugin.Common.Validation.TestValidationBuilder.HasFailures.get -> bool
 Lidarr.Plugin.Common.Validation.TestValidationBuilder.Build() -> System.Collections.Generic.IReadOnlyList<FluentValidation.Results.ValidationFailure!>!
+Lidarr.Plugin.Common.Resilience.BackendHealthCache
+Lidarr.Plugin.Common.Resilience.BackendHealthCache.BackendHealthCache() -> void
+Lidarr.Plugin.Common.Resilience.BackendHealthCache.BackendHealthCache(System.TimeProvider! timeProvider) -> void
+Lidarr.Plugin.Common.Resilience.BackendHealthCache.BackendHealthCache(System.TimeProvider! timeProvider, int graceSeconds) -> void
+Lidarr.Plugin.Common.Resilience.BackendHealthCache.DefaultGraceSeconds -> int
+Lidarr.Plugin.Common.Resilience.BackendHealthCache.Shared.get -> Lidarr.Plugin.Common.Resilience.BackendHealthCache!
+Lidarr.Plugin.Common.Resilience.BackendHealthCache.MarkDown(string! provider, string! baseUrl, System.Exception! exception) -> void
+Lidarr.Plugin.Common.Resilience.BackendHealthCache.MarkUp(string! provider, string! baseUrl) -> void
+Lidarr.Plugin.Common.Resilience.BackendHealthCache.IsKnownDown(string! provider, string! baseUrl, out string? reason) -> bool
+static Lidarr.Plugin.Common.Resilience.BackendHealthCache.IsConnectionClassFailure(System.Exception? exception) -> bool
+Lidarr.Plugin.Common.Observability.PluginLogContext
+Lidarr.Plugin.Common.Observability.PluginLogContext.PluginName.get -> string!
+Lidarr.Plugin.Common.Observability.PluginLogContext.Operation.get -> string!
+Lidarr.Plugin.Common.Observability.PluginLogContext.CorrelationId.get -> string!
+Lidarr.Plugin.Common.Observability.PluginLogContext.Provider.get -> string?
+Lidarr.Plugin.Common.Observability.PluginLogContext.LinePrefix() -> string!
+Lidarr.Plugin.Common.Observability.PluginLogContext.Dispose() -> void
+static Lidarr.Plugin.Common.Observability.PluginLogContext.Push(string! pluginName, string! operation, string? correlationId = null, string? provider = null) -> Lidarr.Plugin.Common.Observability.PluginLogContext!
+static Lidarr.Plugin.Common.Observability.PluginLogContext.Current.get -> Lidarr.Plugin.Common.Observability.PluginLogContext?
+Lidarr.Plugin.Common.Observability.Scrub
+static Lidarr.Plugin.Common.Observability.Scrub.Secret(string? value, int leadingVisible = 3) -> string!
+static Lidarr.Plugin.Common.Observability.Scrub.Headers(System.Collections.Generic.IDictionary<string!, string!>! headers) -> System.Collections.Generic.IDictionary<string!, string!>!
+static Lidarr.Plugin.Common.Observability.Scrub.Url(string! url) -> string!
