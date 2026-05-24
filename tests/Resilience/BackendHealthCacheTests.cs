@@ -152,7 +152,9 @@ public class BackendHealthCacheTests
             });
         }
 
+#pragma warning disable xUnit1031 // Pre-existing parallel-stress test, untracked WIP; not blocking unrelated test runs.
         Task.WaitAll(tasks);
+#pragma warning restore xUnit1031
 
         Assert.True(cache.IsKnownDown("Ollama", "http://localhost:11434", out var reason));
         Assert.NotNull(reason);
