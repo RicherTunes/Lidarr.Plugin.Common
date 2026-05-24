@@ -169,3 +169,9 @@ Lidarr.Plugin.Common.Services.Bridge.AuthFailureDelegatingHandler.AuthFailureDel
 Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.LastFailure.get -> Lidarr.Plugin.Abstractions.Contracts.AuthFailure?
 Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.ConsecutiveFailureCount.get -> int
 Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.ResetToUnknown() -> void
+Lidarr.Plugin.Common.Diagnostics.WarnOnce
+Lidarr.Plugin.Common.Diagnostics.WarnOnce.WarnOnce() -> void
+Lidarr.Plugin.Common.Diagnostics.WarnOnce.WarnOnce(System.Collections.Generic.IEqualityComparer<string!>! keyComparer) -> void
+Lidarr.Plugin.Common.Diagnostics.WarnOnce.TryWarn(string! key, System.Action! warnAction, System.Action? debugAction = null) -> bool
+Lidarr.Plugin.Common.Diagnostics.WarnOnce.TryWarn(string! key, System.Exception! ex, System.Action<System.Exception!>! warnAction, System.Action<System.Exception!>? debugAction = null) -> bool
+Lidarr.Plugin.Common.Diagnostics.WarnOnce.Reset() -> void
