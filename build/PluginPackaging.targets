@@ -246,21 +246,26 @@
       <_VpcParitySpecPath>$(MSBuildThisFileDirectory)../scripts/parity-spec.json</_VpcParitySpecPath>
     </PropertyGroup>
 
+    <PropertyGroup>
+      <_VpcScriptPath>$(MSBuildThisFileDirectory)../scripts/validate-package-closure.ps1</_VpcScriptPath>
+    </PropertyGroup>
+
     <!--
-      Use PowerShell to parse parity-spec.json and check for forbidden DLLs.
-      We use pwsh (cross-platform) with a fallback to powershell.exe on Windows.
-      The script exits 1 if any forbidden DLL is found, causing the build to fail.
+      Delegate to validate-package-closure.ps1 (cross-platform). Inline -Command
+      strings get mangled when MSBuild Exec passes them through bash on Linux
+      runners (bash expands $variable before pwsh sees them). A .ps1 file is
+      safer for parameterized logic.
     -->
-    <Exec Command="pwsh -NoProfile -NonInteractive -Command &quot;$spec = Get-Content -LiteralPath '$(_VpcParitySpecPath)' -Raw | ConvertFrom-Json; $forbidden = $spec.versionContract.forbiddenPackageContents; $found = @(); foreach ($name in $forbidden) { $candidate = Join-Path '$(_VpcOutputDir)' $name; if (Test-Path -LiteralPath $candidate) { $found += $name } }; if ($found.Count -gt 0) { Write-Error ('FORBIDDEN DLLs in plugin output: ' + ($found -join ', ') + '. Add PrivateAssets=all ExcludeAssets=runtime to PackageReference or ILRepack-merge them. See docs/MULTI_PLUGIN_ALC_VALIDATION.md'); exit 1 } else { Write-Host ('[ValidatePackageClosure] OK - no forbidden DLLs found in ' + '$(_VpcOutputDir)') }&quot;"
-          Condition="Exists('$(_VpcParitySpecPath)') and Exists('$(_VpcOutputDir)')"
+    <Exec Command="pwsh -NoProfile -NonInteractive -File &quot;$(_VpcScriptPath)&quot; -ParitySpecPath &quot;$(_VpcParitySpecPath)&quot; -OutputDir &quot;$(_VpcOutputDir)&quot;"
+          Condition="Exists('$(_VpcParitySpecPath)') and Exists('$(_VpcOutputDir)') and Exists('$(_VpcScriptPath)')"
           StandardOutputImportance="normal"
           StandardErrorImportance="high">
       <Output TaskParameter="ExitCode" PropertyName="_VpcPwshExitCode" />
     </Exec>
 
     <!-- Fallback to powershell.exe on Windows if pwsh is unavailable -->
-    <Exec Command="powershell -NoProfile -NonInteractive -Command &quot;$spec = Get-Content -LiteralPath '$(_VpcParitySpecPath)' -Raw | ConvertFrom-Json; $forbidden = $spec.versionContract.forbiddenPackageContents; $found = @(); foreach ($name in $forbidden) { $candidate = Join-Path '$(_VpcOutputDir)' $name; if (Test-Path -LiteralPath $candidate) { $found += $name } }; if ($found.Count -gt 0) { Write-Error ('FORBIDDEN DLLs in plugin output: ' + ($found -join ', ') + '. Add PrivateAssets=all ExcludeAssets=runtime to PackageReference or ILRepack-merge them. See docs/MULTI_PLUGIN_ALC_VALIDATION.md'); exit 1 } else { Write-Host ('[ValidatePackageClosure] OK - no forbidden DLLs found in ' + '$(_VpcOutputDir)') }&quot;"
-          Condition="Exists('$(_VpcParitySpecPath)') and Exists('$(_VpcOutputDir)') and '$(_VpcPwshExitCode)' != '0'"
+    <Exec Command="powershell -NoProfile -NonInteractive -File &quot;$(_VpcScriptPath)&quot; -ParitySpecPath &quot;$(_VpcParitySpecPath)&quot; -OutputDir &quot;$(_VpcOutputDir)&quot;"
+          Condition="Exists('$(_VpcParitySpecPath)') and Exists('$(_VpcOutputDir)') and Exists('$(_VpcScriptPath)') and '$(_VpcPwshExitCode)' != '0'"
           StandardOutputImportance="normal"
           StandardErrorImportance="high">
       <Output TaskParameter="ExitCode" PropertyName="_VpcPsExitCode" />
