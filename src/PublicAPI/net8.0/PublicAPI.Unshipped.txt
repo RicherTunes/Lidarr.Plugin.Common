@@ -260,3 +260,8 @@ static Lidarr.Plugin.Common.HostBridge.PlaceholderSearchUri.TryExtractQuery(stri
 # ── Validation extensions (May 2026) ─────────────────────────────────────────────────
 Lidarr.Plugin.Common.Validation.TestValidationBuilder.RequireIf(bool condition, string! fieldName, string? value, string? message = null) -> Lidarr.Plugin.Common.Validation.TestValidationBuilder!
 Lidarr.Plugin.Common.Validation.TestValidationBuilder.ApplyTo(System.Collections.Generic.List<FluentValidation.Results.ValidationFailure!>! failures) -> void
+
+# ── HostBridgeDownloadOrchestrator (May 2026 wave-A item 2) ──────────────────────────
+Lidarr.Plugin.Common.HostBridge.HostBridgeDownloadOrchestrator
+Lidarr.Plugin.Common.HostBridge.HostBridgeDownloadOrchestrator.HostBridgeDownloadOrchestrator(Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Lidarr.Plugin.Common.HostBridge.HostBridgeDownloadOrchestrator.StartTrackedDownloadAsync<TItem, TSettings>(TSettings settings, Lidarr.Plugin.Common.HostBridge.HostBridgeDownloadTrackerStore<TItem>! tracker, System.Func<TSettings, TSettings>! snapshotter, System.Func<TSettings, string!, TItem>! itemFactory, System.Func<TSettings, string!, TItem, System.Threading.CancellationToken, System.Threading.Tasks.Task!>! doWork, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<string!>!
