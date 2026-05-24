@@ -14,20 +14,20 @@ namespace Lidarr.Plugin.Common.HostBridge;
 ///   <item>Snapshot settings before <c>Task.Run</c> — prevents TOCTOU when settings change
 ///         mid-download (the "ProbeOnly read twice" race documented in PR #130 finding #9).</item>
 ///   <item>Generate a GUID <c>downloadId</c> (<c>Guid.NewGuid().ToString("N")</c>).</item>
-///   <item>Construct a tracked download item via caller-supplied <paramref name="itemFactory"/>.</item>
-///   <item>Insert into <paramref name="tracker"/> before Task.Run, so <c>GetItems()</c>
+///   <item>Construct a tracked download item via caller-supplied item factory.</item>
+///   <item>Insert into the tracker before Task.Run, so <c>GetItems()</c>
 ///         polling never misses a just-started download.</item>
 ///   <item>Fire-and-forget <c>Task.Run</c> the actual work. The work lambda receives the
 ///         SNAPSHOT, not the live settings object — defeating the race.</item>
 ///   <item>Return <c>downloadId</c>.</item>
 /// </list>
 ///
-/// <para><strong>Snapshot strategy</strong>: option (c) — caller supplies a
-/// <paramref name="snapshotter"/> lambda. This is zero-magic and explicit about which fields
-/// are included in the snapshot. Per-plugin call sites pass
-/// <c>s => new TSettings { Field1 = s.Field1, … }</c> or call a <c>Clone()</c> method if
-/// one exists. This is especially important for settings that hold reference types (lists,
-/// dicts): the snapshotter is responsible for deep-copying those fields.</para>
+/// <para><strong>Snapshot strategy</strong>: option (c) — caller supplies a snapshotter
+/// lambda. This is zero-magic and explicit about which fields are included in the snapshot.
+/// Per-plugin call sites pass <c>s => new TSettings { Field1 = s.Field1, … }</c> or call a
+/// <c>Clone()</c> method if one exists. This is especially important for settings that hold
+/// reference types (lists, dicts): the snapshotter is responsible for deep-copying those
+/// fields.</para>
 ///
 /// <para>Lifted from Tidalarr and AppleMusicarr as Wave A item 2 of the May 2026
 /// bridge-unification plan.</para>
