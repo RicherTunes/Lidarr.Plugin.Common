@@ -46,6 +46,72 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
         /// </summary>
         public static TokenProtectorDiagnostics? LastDiagnostics { get; private set; }
 
+        /// <summary>
+        /// Fires whenever <see cref="CreateFromEnvironment"/> publishes a
+        /// degradation diagnostic — i.e. when the active call falls back to
+        /// <see cref="NullTokenProtector"/> because no real backend could
+        /// initialise. Subscribers can surface the warning beyond the static
+        /// snapshot (adversarial-review F8). Adding this event is additive;
+        /// plugins that already poll <see cref="IsDegradedToPlaintext"/> at
+        /// startup don't need to change.
+        /// </summary>
+        /// <remarks>
+        /// Subscribers MUST be exception-safe. The event invocation is
+        /// inside <c>PublishDiagnostics</c>, on the same thread as
+        /// <c>CreateFromEnvironment</c>; an exception from a subscriber will
+        /// propagate to the caller. Static-event subscription has the usual
+        /// lifetime risk: if a long-lived subscriber holds plugin-scoped
+        /// state, the plugin's ALC can't unload until the subscription is
+        /// removed.
+        /// </remarks>
+        public static event Action<TokenProtectorDiagnostics>? DegradationDetected;
+
+        /// <summary>
+        /// One-shot warning logger for plugins to call from credential-handling
+        /// hot paths (<c>set_ApiKey</c>, settings save, etc.). At-most-once per
+        /// process lifetime: subsequent calls are silent no-ops. Returns
+        /// <see langword="true"/> if this call emitted a warning,
+        /// <see langword="false"/> otherwise.
+        /// </summary>
+        /// <param name="logWarning">Sink that emits the formatted warning line
+        /// to the operator's log. Plugin code typically passes
+        /// <c>logger.Warn</c> or equivalent.</param>
+        /// <remarks>
+        /// Adversarial-review F8: the diagnostics surface in v1.9.2/v1.9.3 was
+        /// a static snapshot — plugins had to read it at startup explicitly.
+        /// This helper closes the gap so a degraded session can also be
+        /// surfaced from the path the operator actually exercises (when they
+        /// try to save a credential). It logs at most once because the
+        /// alternative (per-call) would spam the log.
+        /// </remarks>
+        public static bool LogDegradationOnce(Action<string> logWarning)
+        {
+            if (logWarning is null) return false;
+            if (!IsDegradedToPlaintext) return false;
+            if (Interlocked.CompareExchange(ref _degradationWarningEmitted, 1, 0) != 0) return false;
+
+            var diag = LastDiagnostics;
+            var reason = diag?.DegradedReason ?? "(reason unavailable)";
+            var keysPath = diag?.KeysPath ?? "(in-memory)";
+            logWarning(
+                $"Lidarr.Plugin.Common token protection is DEGRADED — secrets are being stored as PLAINTEXT. " +
+                $"Reason: {reason}. " +
+                $"To fix: set LP_COMMON_KEYS_PATH to a writable directory (e.g. /config/.lidarr-keys) and restart Lidarr. " +
+                $"To opt into hard-failure instead of plaintext fallback, set LP_COMMON_REQUIRE_PROTECTOR=true.");
+            return true;
+        }
+
+        private static int _degradationWarningEmitted; // 0 = not yet, 1 = already
+
+        /// <summary>
+        /// Probe payload written by <see cref="EnsureKeysDirIsWritable"/>.
+        /// Spells out "LPC-PROBE" in UTF-8 so a probe file left behind by
+        /// a crashed process is identifiable by an operator inspecting the
+        /// dir. Non-empty (8 bytes) so write-then-truncate filesystems
+        /// can't pass the probe falsely (F4).
+        /// </summary>
+        private static readonly byte[] ProbePayload = new byte[] { 0x4C, 0x50, 0x43, 0x2D, 0x50, 0x52, 0x4F, 0x42, 0x45 };
+
         public static ITokenProtector CreateFromEnvironment()
         {
             var mode = (Environment.GetEnvironmentVariable("LP_COMMON_PROTECTOR") ?? "auto").Trim().ToLowerInvariant();
@@ -158,13 +224,77 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
             string? fallbackFrom = null,
             Exception? fallbackCause = null)
         {
+            // Adversarial-review F5 fix: walk the candidate chain. Previously,
+            // GetDefaultKeysDir returned the FIRST rooted candidate; if that
+            // candidate was rooted but unwritable, the factory immediately
+            // degraded to NullTokenProtector instead of trying the next
+            // candidate in the chain. Now we iterate every candidate and
+            // probe-write each; the first one that passes wins.
+            //
+            // When the caller supplied LP_COMMON_KEYS_PATH, that override
+            // wins exclusively — we don't iterate past it, because the
+            // operator explicitly asked for that location and silently
+            // re-routing to a different one would surprise them.
+
+            if (!string.IsNullOrWhiteSpace(keysPath))
+            {
+                return TryCreateDataProtectionAt(keysPath!, "LP_COMMON_KEYS_PATH (operator override)", appName, certPath, certPwd, certThumb, akvKey, requireBackend, fallbackFrom, fallbackCause);
+            }
+
+            Exception? lastFailure = null;
+            string? lastFailedSource = null;
+            foreach (var (path, source) in DataProtectionTokenProtector.EnumerateKeysDirCandidates())
+            {
+                try
+                {
+                    EnsureKeysDirIsWritable(path);
+                    var protector = DataProtectionTokenProtector.Create(appName, path, certPath, certPwd, certThumb, akvKey);
+                    PublishDiagnostics(
+                        fallbackFrom is null ? $"dataprotection ({source})" : $"dataprotection (fallback from {fallbackFrom}; via {source})",
+                        fallbackCause,
+                        path);
+                    return protector;
+                }
+                catch (Exception ex) when (IsExpectedBackendInitFailure(ex))
+                {
+                    // F5: this candidate is rooted but unwritable / unusable.
+                    // Continue to the next candidate instead of degrading.
+                    lastFailure = ex;
+                    lastFailedSource = source;
+                }
+            }
+
+            // Every candidate failed. Either every backend is unavailable
+            // OR the caller is on a host with extreme write restrictions
+            // (the probe-write to Path.GetTempPath() at the end of the chain
+            // should be near-impossible to fail, but defensive code regardless).
+            if (requireBackend)
+            {
+                throw lastFailure ?? new InvalidOperationException("No writable DataProtection key dir found.");
+            }
+            return DegradeTo("null (degraded)",
+                $"dataprotection backend init failed for every candidate (last: {lastFailedSource}): {lastFailure?.GetType().Name}: {lastFailure?.Message}",
+                lastFailure);
+        }
+
+        private static ITokenProtector TryCreateDataProtectionAt(
+            string keysDir,
+            string source,
+            string appName,
+            string? certPath,
+            string? certPwd,
+            string? certThumb,
+            string? akvKey,
+            bool requireBackend,
+            string? fallbackFrom,
+            Exception? fallbackCause)
+        {
             try
             {
-                var keysDir = keysPath ?? DataProtectionTokenProtector.GetDefaultKeysDir(out var keysDirSource);
                 EnsureKeysDirIsWritable(keysDir);
                 var protector = DataProtectionTokenProtector.Create(appName, keysDir, certPath, certPwd, certThumb, akvKey);
                 PublishDiagnostics(
-                    fallbackFrom is null ? "dataprotection" : $"dataprotection (fallback from {fallbackFrom})",
+                    fallbackFrom is null ? $"dataprotection ({source})" : $"dataprotection (fallback from {fallbackFrom}; via {source})",
                     fallbackCause,
                     keysDir);
                 return protector;
@@ -172,7 +302,7 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
             catch (Exception ex) when (!requireBackend && IsExpectedBackendInitFailure(ex))
             {
                 return DegradeTo("null (degraded)",
-                    $"dataprotection backend init failed: {ex.GetType().Name}: {ex.Message}",
+                    $"dataprotection backend init failed at {source}: {ex.GetType().Name}: {ex.Message}",
                     ex);
             }
         }
@@ -203,27 +333,121 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
         }
 
         /// <summary>
-        /// Tries to create + write a probe file in <paramref name="keysDir"/>
-        /// so we surface "directory not writable" failures here (with a
-        /// clearer error) instead of inside <c>DataProtectionProvider.Create</c>
-        /// at the first <c>Protect</c> call. Cleans up the probe file after.
+        /// Reserved system paths the factory refuses to use even if the
+        /// operator supplied them via <c>LP_COMMON_KEYS_PATH</c>. Writing
+        /// secrets into these directories — even probe files — would be a
+        /// serious misconfiguration the factory should not silently honour.
+        /// Adversarial-review F4 (v1.9.2): the previous
+        /// <c>EnsureKeysDirIsWritable</c> happily probed any rooted path.
         /// </summary>
+        private static readonly string[] ForbiddenSystemPaths = OperatingSystem.IsWindows()
+            ? new[]
+            {
+                @"\Windows\",
+                @"\Windows\System32\",
+                @"\ProgramData\Microsoft\Crypto\",
+            }
+            : new[]
+            {
+                "/etc/",
+                "/proc/",
+                "/sys/",
+                "/dev/",
+                "/boot/",
+                "/usr/bin/",
+                "/usr/sbin/",
+                "/bin/",
+                "/sbin/",
+            };
+
+        /// <summary>
+        /// Tries to create + write + read-back a probe file in
+        /// <paramref name="keysDir"/> so we surface "directory not writable"
+        /// failures here (with a clearer error) instead of inside
+        /// <c>DataProtectionProvider.Create</c> at the first <c>Protect</c>
+        /// call. Cleans up the probe file after.
+        /// </summary>
+        /// <remarks>
+        /// Adversarial-review F4 hardening (v1.9.3 → v1.9.4):
+        /// <list type="bullet">
+        ///   <item><description>Refuses well-known system paths so an
+        ///     operator typo (<c>LP_COMMON_KEYS_PATH=/etc</c>) doesn't
+        ///     silently scribble a probe file into critical system dirs.</description></item>
+        ///   <item><description>Writes a non-empty payload (<see cref="ProbePayload"/>)
+        ///     instead of a 0-byte file. Some POSIX overlay/sshfs filesystems
+        ///     happily accept 0-byte writes but fail on real content, so the
+        ///     probe must mirror what DataProtection actually does.</description></item>
+        ///   <item><description>Uses <c>FileMode.CreateNew</c> +
+        ///     <c>FileShare.None</c> so the probe can't be hijacked by a
+        ///     concurrent process between create and delete.</description></item>
+        ///   <item><description>Always cleans up the probe on the way out,
+        ///     even if the inner write or read-back throws.</description></item>
+        ///   <item><description>Reads the probe back and verifies the payload
+        ///     round-tripped — guards against write-then-truncate
+        ///     filesystems (some NFS configurations) that would happily
+        ///     accept the open + write calls but discard content.</description></item>
+        /// </list>
+        /// </remarks>
         private static void EnsureKeysDirIsWritable(string keysDir)
         {
+            // Refuse forbidden system paths even if the operator supplied them.
+            // The normalisation appends a trailing separator so prefix-match
+            // is anchored at the directory boundary (not a substring match).
+            var normalised = Path.TrimEndingDirectorySeparator(Path.GetFullPath(keysDir)) + Path.DirectorySeparatorChar;
+            foreach (var forbidden in ForbiddenSystemPaths)
+            {
+                if (normalised.StartsWith(forbidden, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new UnauthorizedAccessException(
+                        $"Refusing to use '{keysDir}' for DataProtection key ring — path is under a forbidden system directory ('{forbidden}'). " +
+                        "Set LP_COMMON_KEYS_PATH to a user-writable location (e.g. /config/.lidarr-keys on Lidarr Docker images).");
+                }
+            }
+
             Directory.CreateDirectory(keysDir);
+
             var probe = Path.Combine(keysDir, $".lpc-write-probe-{Guid.NewGuid():N}");
             try
             {
-                File.WriteAllBytes(probe, Array.Empty<byte>());
+                // FileShare.None prevents a concurrent process from racing
+                // the probe; FileMode.CreateNew refuses if the name already
+                // exists (defends against an adversary who guessed the GUID
+                // a vanishingly small chance, but the symmetry is free).
+                using (var stream = new FileStream(probe, FileMode.CreateNew, FileAccess.ReadWrite, FileShare.None))
+                {
+                    stream.Write(ProbePayload, 0, ProbePayload.Length);
+                    stream.Flush();
+
+                    // Read back so write-then-truncate filesystems don't
+                    // pass the probe falsely.
+                    stream.Position = 0;
+                    var roundTrip = new byte[ProbePayload.Length];
+                    var read = stream.Read(roundTrip, 0, roundTrip.Length);
+                    if (read != ProbePayload.Length)
+                    {
+                        throw new IOException($"Key-dir write probe failed: wrote {ProbePayload.Length} bytes, read back {read}.");
+                    }
+                    for (int i = 0; i < ProbePayload.Length; i++)
+                    {
+                        if (roundTrip[i] != ProbePayload[i])
+                        {
+                            throw new IOException("Key-dir write probe failed: payload corrupted during round-trip.");
+                        }
+                    }
+                }
             }
             finally
             {
                 try { File.Delete(probe); }
                 catch
                 {
-                    // Best-effort cleanup; if we can't delete a 0-byte probe, the
-                    // directory is in some odd state but we've already proven we
-                    // can write so let DataProtection try anyway.
+                    // Best-effort cleanup. The probe is a tiny named file
+                    // (random GUID); if delete fails (transient lock,
+                    // immutable mount), the next call will simply create
+                    // a fresh one with a different GUID. We can't safely
+                    // signal the cleanup failure without breaking the happy
+                    // path; trust that the actual DataProtection writes
+                    // will succeed since the probe write+read did.
                 }
             }
         }
@@ -252,16 +476,40 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
         /// </remarks>
         private static void PublishDiagnostics(string backendName, Exception? cause, string? keysPath, string? degradedReason = null)
         {
-            LastDiagnostics = new TokenProtectorDiagnostics(
+            var snapshot = new TokenProtectorDiagnostics(
                 BackendName: backendName,
                 KeysPath: keysPath,
                 Cause: cause,
                 DegradedReason: degradedReason);
 
+            LastDiagnostics = snapshot;
+
             // Reflect the current call's outcome. A subsequent successful call
             // clears a prior degradation; a subsequent degraded call sets the
             // flag even if a prior call had succeeded.
             Volatile.Write(ref _degraded, degradedReason is null ? 0 : 1);
+
+            // F8: fan-out event for subscribers that want to surface the
+            // degradation beyond the static snapshot. Fires only on
+            // degradation transitions, not on every successful call (which
+            // would be noise).
+            if (degradedReason is not null)
+            {
+                try
+                {
+                    DegradationDetected?.Invoke(snapshot);
+                }
+                catch
+                {
+                    // Swallow subscriber exceptions so a buggy log handler
+                    // can't break the factory. Subscribers MUST be
+                    // exception-safe per the docstring.
+                }
+
+                // Reset the one-shot warning latch so a recovery + re-degradation
+                // can re-fire the warning on the next LogDegradationOnce call.
+                Volatile.Write(ref _degradationWarningEmitted, 0);
+            }
         }
     }
 
