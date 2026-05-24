@@ -50,6 +50,24 @@ public sealed class TestValidationBuilder
     }
 
     /// <summary>
+    /// Conditional non-empty check: only validates when <paramref name="condition"/> is true.
+    /// The plugin idiom this serves is "X is required when Y is/isn't set" — e.g.
+    /// <c>RequireIf(!Settings.ProbeOnly, "UserToken", Settings.UserToken,
+    /// "required when ProbeOnly is unchecked")</c>. Cleaner than nesting <c>if</c>s around
+    /// chained calls.
+    /// </summary>
+    public TestValidationBuilder RequireIf(bool condition, string fieldName, string? value, string? message = null)
+    {
+        if (condition && string.IsNullOrWhiteSpace(value))
+        {
+            _failures.Add(new ValidationFailure(
+                fieldName,
+                message ?? $"{fieldName} is required."));
+        }
+        return this;
+    }
+
+    /// <summary>
     /// Appends an already-constructed <see cref="ValidationFailure"/>.
     /// Useful for failures whose message requires additional context unavailable at chain time.
     /// </summary>
@@ -57,6 +75,19 @@ public sealed class TestValidationBuilder
     {
         _failures.Add(failure);
         return this;
+    }
+
+    /// <summary>
+    /// Convenience: append the accumulated failures to an existing list (e.g. the
+    /// <c>List&lt;ValidationFailure&gt;</c> Lidarr passes to the <c>Test()</c> override).
+    /// Preserves any failures the host pre-populated, then adds this builder's failures.
+    /// Equivalent to <c>failures.AddRange(builder.Build())</c> but spelt as a single
+    /// fluent-friendly statement.
+    /// </summary>
+    public void ApplyTo(List<ValidationFailure> failures)
+    {
+        if (failures is null) return;
+        failures.AddRange(_failures);
     }
 
     /// <summary>
