@@ -35,6 +35,24 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.9.4] - 2026-05-23
+**Upgrade note:** Closes the four deferred adversarial-review findings from the v1.9.2/v1.9.3 review (F4 + F5 + F7 + F8). All changes are additive; downstream plugins bumping from v1.9.3 do not need code changes.
+
+**Highlights — F4/F5/F7/F8 fixes**
+
+- **F4 (MED) — Write probe hardened.** Previously `EnsureKeysDirIsWritable` wrote a 0-byte probe file with `File.WriteAllBytes`, which (a) some POSIX overlay/sshfs filesystems happily accept while rejecting real content, (b) couldn't detect write-then-truncate corruption, (c) had a TOCTOU window between create and delete. Now: writes a non-empty `LPC-PROBE` payload via `FileMode.CreateNew + FileShare.None`, reads it back to verify the round-trip, and refuses well-known system paths (`/etc/`, `/proc/`, `/sys/`, `/dev/`, `/boot/`, `/usr/bin/`, `/bin/`, etc. on Linux; `\Windows\`, `\Windows\System32\`, `\ProgramData\Microsoft\Crypto\` on Windows) so an operator typo on `LP_COMMON_KEYS_PATH` can't scribble even a probe file into a critical system dir.
+- **F5 (MED) — Candidate chain walks through unwritable entries.** v1.9.2/v1.9.3 used `GetDefaultKeysDir` which returned the FIRST rooted candidate. If that candidate was rooted but unwritable (e.g. a `/config:ro` bind-mount), the factory immediately degraded to `NullTokenProtector` instead of trying the next candidate. Now: factory iterates the full chain via new `EnumerateKeysDirCandidates`, write-probing each, and only degrades when every candidate fails. `LP_COMMON_KEYS_PATH` (operator override) is still honoured exclusively — silently re-routing an explicitly-set path would surprise operators.
+- **F7 (LOW) — Windows prefers Roaming AppData.** On Windows, `ApplicationData` (Roaming, survives profile migration / domain roam) is now tried before `LocalApplicationData` (which does NOT survive a profile roam). DPAPI ciphertext encrypted with a Local-AppData key ring would have been silently undecryptable after a roam. DPAPI-user is still the default backend on Windows (so this mostly affects forced `LP_COMMON_PROTECTOR=dataprotection` mode), but the ordering matters when DataProtection IS used. On Linux/macOS, the order stays `LocalApplicationData` (~/.local/share, XDG-canonical for data) before `ApplicationData` (~/.config).
+- **F8 (LOW) — Ongoing visibility into degradation.** v1.9.2/v1.9.3 only exposed degradation via the static `LastDiagnostics` snapshot, which plugin code had to read at startup. Now adds:
+  - `TokenProtectorFactory.DegradationDetected` — static event that fires on every degradation transition. Subscribers can surface the warning to host log / metrics / health checks.
+  - `TokenProtectorFactory.LogDegradationOnce(Action<string> logWarning)` — at-most-once-per-process helper for plugins to call from credential hot paths (`set_ApiKey`, settings save). Includes the actionable remediation hints (`LP_COMMON_KEYS_PATH`, `LP_COMMON_REQUIRE_PROTECTOR`).
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.3...v1.9.4)
+
 ## [1.9.3] - 2026-05-23
 **Upgrade note:** Adversarial-review hardening of v1.9.2's token-protection fallback. Four defects identified by post-release review have been corrected; the v1.9.2 bug fix proper (the candidate chain in `GetDefaultKeysDir`) is unchanged. Downstream plugins bumping from v1.9.2 to v1.9.3 do not need code changes — the API surface is wider, not narrower.
 

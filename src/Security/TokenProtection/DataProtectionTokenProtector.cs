@@ -145,69 +145,110 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
         internal static string GetDefaultKeysDir() => GetDefaultKeysDir(out _);
 
         /// <summary>
-        /// Overload that reports back the candidate name that won, so the
-        /// factory can emit a one-line warning when the fallback to
-        /// <c>Path.GetTempPath()</c> is hit.
+        /// Single-shot overload that returns the FIRST candidate path
+        /// (rooted, non-empty). Kept for back-compat — the factory's
+        /// <c>TryCreateDataProtection</c> now iterates the full chain via
+        /// <see cref="EnumerateKeysDirCandidates"/> and write-probes each
+        /// (adversarial-review F5: previously the chain stopped at the
+        /// first rooted candidate even when that candidate was unwritable).
         /// </summary>
         internal static string GetDefaultKeysDir(out string source)
+        {
+            foreach (var (path, name) in EnumerateKeysDirCandidates())
+            {
+                source = name;
+                return path;
+            }
+
+            // Defensive — the chain always yields at least Path.GetTempPath().
+            source = "Path.GetTempPath() (defensive)";
+            return Path.Combine(Path.GetTempPath(), "Lidarr.Plugin.Common", "keys");
+        }
+
+        /// <summary>
+        /// Enumerates all viable key-ring directory candidates in priority
+        /// order. The factory iterates and write-probes each, falling through
+        /// to the next on failure (adversarial-review F5).
+        /// </summary>
+        /// <remarks>
+        /// Each entry is <c>(path, name)</c>. The <c>path</c> is always
+        /// rooted + non-empty (the v1.9.2 rule that prevents the original
+        /// Lidarr-Docker relative-path bug). The <c>name</c> is a
+        /// human-readable label for diagnostics.
+        ///
+        /// Adversarial-review F7: on Windows, <c>ApplicationData</c> (Roaming)
+        /// is preferred over <c>LocalApplicationData</c> so DPAPI ciphertext
+        /// survives profile-roam in domain-joined Windows installs. On
+        /// Linux/macOS, <c>LocalApplicationData</c> is preferred because it
+        /// maps to <c>~/.local/share</c> — the XDG-canonical location for
+        /// persistent user data (<c>ApplicationData</c> maps to
+        /// <c>~/.config</c>, which is for config, not state).
+        ///
+        /// The final entry is unconditional and uses <c>Path.GetTempPath()</c>
+        /// so the chain always yields at least one candidate even when every
+        /// other resolver returns empty.
+        /// </remarks>
+        internal static System.Collections.Generic.IEnumerable<(string Path, string Source)> EnumerateKeysDirCandidates()
         {
             const string Leaf1 = "Lidarr.Plugin.Common";
             const string Leaf2 = "keys";
 
-            string? candidate;
-
-            candidate = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+            var candidate = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
             if (IsUsableRootedDir(candidate))
             {
-                source = "XDG_DATA_HOME";
-                return Path.Combine(candidate!, Leaf1, Leaf2);
+                yield return (Path.Combine(candidate!, Leaf1, Leaf2), "XDG_DATA_HOME");
             }
 
             candidate = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
             if (IsUsableRootedDir(candidate))
             {
-                source = "XDG_CONFIG_HOME";
-                return Path.Combine(candidate!, Leaf1, Leaf2);
+                yield return (Path.Combine(candidate!, Leaf1, Leaf2), "XDG_CONFIG_HOME");
             }
 
-            candidate = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-            if (IsUsableRootedDir(candidate))
+            // F7 platform-conditional preference.
+            if (OperatingSystem.IsWindows())
             {
-                source = "SpecialFolder.LocalApplicationData";
-                return Path.Combine(candidate!, Leaf1, Leaf2);
+                candidate = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                if (IsUsableRootedDir(candidate))
+                {
+                    yield return (Path.Combine(candidate!, Leaf1, Leaf2), "SpecialFolder.ApplicationData (Roaming)");
+                }
+
+                candidate = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (IsUsableRootedDir(candidate))
+                {
+                    yield return (Path.Combine(candidate!, Leaf1, Leaf2), "SpecialFolder.LocalApplicationData");
+                }
+            }
+            else
+            {
+                candidate = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (IsUsableRootedDir(candidate))
+                {
+                    yield return (Path.Combine(candidate!, Leaf1, Leaf2), "SpecialFolder.LocalApplicationData");
+                }
+
+                candidate = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                if (IsUsableRootedDir(candidate))
+                {
+                    yield return (Path.Combine(candidate!, Leaf1, Leaf2), "SpecialFolder.ApplicationData");
+                }
             }
 
-            // Explicit XDG-style fallback when LocalApplicationData was empty.
-            // On Linux+net8, SpecialFolder.LocalApplicationData usually returns
-            // $HOME/.local/share, but only when $HOME is set AND the user is
-            // in /etc/passwd. If both are broken, $HOME via env may still work.
+            // Explicit $HOME-based fallbacks for the case where the .NET
+            // SpecialFolder resolver returns empty (abc user not in
+            // /etc/passwd in some Lidarr Docker setups).
             var home = Environment.GetEnvironmentVariable("HOME");
             if (!string.IsNullOrWhiteSpace(home) && Path.IsPathRooted(home))
             {
-                source = "$HOME/.local/share";
-                return Path.Combine(home, ".local", "share", Leaf1, Leaf2);
-            }
-
-            candidate = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-            if (IsUsableRootedDir(candidate))
-            {
-                source = "SpecialFolder.ApplicationData";
-                return Path.Combine(candidate!, Leaf1, Leaf2);
-            }
-
-            // Final structured fallback: $HOME/.config when SpecialFolder.ApplicationData
-            // is empty. Already covered $HOME above, this is just for completeness.
-            if (!string.IsNullOrWhiteSpace(home) && Path.IsPathRooted(home))
-            {
-                source = "$HOME/.config";
-                return Path.Combine(home, ".config", Leaf1, Leaf2);
+                yield return (Path.Combine(home, ".local", "share", Leaf1, Leaf2), "$HOME/.local/share");
+                yield return (Path.Combine(home, ".config", Leaf1, Leaf2), "$HOME/.config");
             }
 
             // Last resort: temp dir. Always writable, always rooted, but
             // ephemeral — caller emits a warning so the operator knows the
             // key ring won't survive a container restart.
-            source = "Path.GetTempPath() (ephemeral)";
-            return Path.Combine(Path.GetTempPath(), Leaf1, Leaf2);
+            yield return (Path.Combine(Path.GetTempPath(), Leaf1, Leaf2), "Path.GetTempPath() (ephemeral)");
         }
 
         private static bool IsUsableRootedDir(string? candidate)
