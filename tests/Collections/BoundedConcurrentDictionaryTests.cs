@@ -252,7 +252,7 @@ namespace Lidarr.Plugin.Common.Tests.Collections
         ///   3. After all inserts settle, count is ≤ capacity.
         /// </summary>
         [Fact]
-        public void ConcurrentInserts_NoBoundedGrowth_NoExceptionsOrDeadlock()
+        public async Task ConcurrentInserts_NoBoundedGrowth_NoExceptionsOrDeadlock()
         {
             const int capacity = 50;
             const int threads = 20;
@@ -278,7 +278,8 @@ namespace Lidarr.Plugin.Common.Tests.Collections
                 }
             })).ToArray();
 
-            Task.WaitAll(tasks, TimeSpan.FromSeconds(30));
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            await Task.WhenAll(tasks).WaitAsync(cts.Token);
 
             // No exceptions thrown during concurrent access.
             Assert.Null(firstException);

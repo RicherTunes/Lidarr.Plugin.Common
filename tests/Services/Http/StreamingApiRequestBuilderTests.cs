@@ -581,6 +581,126 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
 
         #endregion
 
+        #region Reuse Guard (regression: Tidalarr v1.2.7 shared-builder bug)
+
+        // The Tidalarr search-spam bug had a shared StreamingApiRequestBuilder field stored
+        // on TidalApiClient. Each call appended to the SAME _queryParams list, so after Test()
+        // ran SearchAsync("test") every later search URL contained query=test as the first
+        // occurrence, which Tidal's API used in preference to the caller's actual query. Fix
+        // there was per-call factory, but a defensive seal here makes the misuse impossible
+        // to silently repeat in future plugins.
+
+        [Fact]
+        public void Build_CalledTwice_ThrowsInvalidOperationException()
+        {
+            var builder = new StreamingApiRequestBuilder(BaseUrl)
+                .Endpoint("search")
+                .Query("q", "first");
+
+            builder.Build();
+
+            var ex = Assert.Throws<InvalidOperationException>(() => builder.Build());
+            Assert.Contains("cannot be reused", ex.Message, StringComparison.OrdinalIgnoreCase);
+        }
+
+        [Fact]
+        public void Mutator_Query_AfterBuild_Throws()
+        {
+            var builder = new StreamingApiRequestBuilder(BaseUrl);
+            builder.Build();
+
+            Assert.Throws<InvalidOperationException>(() => builder.Query("q", "value"));
+        }
+
+        [Fact]
+        public void Mutator_QueryParams_AfterBuild_Throws()
+        {
+            var builder = new StreamingApiRequestBuilder(BaseUrl);
+            builder.Build();
+
+            Assert.Throws<InvalidOperationException>(() =>
+                builder.QueryParams(new Dictionary<string, string> { ["k"] = "v" }));
+        }
+
+        [Fact]
+        public void Mutator_Endpoint_AfterBuild_Throws()
+        {
+            var builder = new StreamingApiRequestBuilder(BaseUrl);
+            builder.Build();
+
+            Assert.Throws<InvalidOperationException>(() => builder.Endpoint("/foo"));
+        }
+
+        [Fact]
+        public void Mutator_Header_AfterBuild_Throws()
+        {
+            var builder = new StreamingApiRequestBuilder(BaseUrl);
+            builder.Build();
+
+            Assert.Throws<InvalidOperationException>(() => builder.Header("X-Custom", "v"));
+            Assert.Throws<InvalidOperationException>(() => builder.BearerToken("tok"));
+            Assert.Throws<InvalidOperationException>(() => builder.ApiKey("X-Key", "v"));
+        }
+
+        [Fact]
+        public void Mutator_Method_AfterBuild_Throws()
+        {
+            var builder = new StreamingApiRequestBuilder(BaseUrl);
+            builder.Build();
+
+            Assert.Throws<InvalidOperationException>(() => builder.Post());
+            Assert.Throws<InvalidOperationException>(() => builder.Method(HttpMethod.Put));
+        }
+
+        [Fact]
+        public void Mutator_Body_AfterBuild_Throws()
+        {
+            var builder = new StreamingApiRequestBuilder(BaseUrl);
+            builder.Build();
+
+            Assert.Throws<InvalidOperationException>(() => builder.JsonBody(new { x = 1 }));
+            Assert.Throws<InvalidOperationException>(() =>
+                builder.FormBody(new Dictionary<string, string>()));
+        }
+
+        [Fact]
+        public void BuildForLogging_DoesNotSealBuilder_AllowsSubsequentBuild()
+        {
+            // Read-only diagnostic call should be repeatable and must not prevent Build().
+            // Callers commonly log the request shape before dispatching it.
+            var builder = new StreamingApiRequestBuilder(BaseUrl).Endpoint("foo");
+
+            var info1 = builder.BuildForLogging();
+            var info2 = builder.BuildForLogging();
+            var request = builder.Build();
+
+            Assert.NotNull(info1);
+            Assert.NotNull(info2);
+            Assert.NotNull(request);
+        }
+
+        [Fact]
+        public void TwoIndependentBuilders_QueryParamsDoNotBleed()
+        {
+            // Verifies that fresh-per-call usage produces clean URLs even if the same
+            // base URL is used. This is the positive correspondent of the seal-on-reuse rule.
+            var first = new StreamingApiRequestBuilder(BaseUrl)
+                .Endpoint("search")
+                .Query("q", "test")
+                .Build();
+
+            var second = new StreamingApiRequestBuilder(BaseUrl)
+                .Endpoint("search")
+                .Query("q", "real-query")
+                .Build();
+
+            Assert.Contains("q=test", first.RequestUri!.AbsoluteUri);
+            Assert.DoesNotContain("q=test", second.RequestUri!.AbsoluteUri);
+            Assert.Contains("q=real-query", second.RequestUri!.AbsoluteUri);
+        }
+
+        #endregion
+
         #region Fluent Chaining
 
         [Fact]

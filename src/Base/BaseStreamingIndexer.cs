@@ -55,7 +55,6 @@ namespace Lidarr.Plugin.Common.Base
 
         #region Private Fields
 
-        private readonly StreamingApiRequestBuilder _requestBuilder;
         private readonly Func<HttpClient> _httpClientFactory;
         private readonly object _initializationLock = new object();
         private bool _isInitialized = false;
@@ -93,7 +92,6 @@ namespace Lidarr.Plugin.Common.Base
             Logger = logger ?? CreateDefaultLogger();
 
             PerformanceMonitor = new PerformanceMonitor(TimeSpan.FromMinutes(5));
-            _requestBuilder = new StreamingApiRequestBuilder(settings.BaseUrl);
             _httpClientFactory = httpClientFactory ?? (() => SharedHttpClient.Value);
         }
 
