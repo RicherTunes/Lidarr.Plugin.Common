@@ -19,9 +19,10 @@ namespace Lidarr.Plugin.Common.HostBridge;
 ///   <item><b>Auth-key invalidation</b> — subclass returns an opaque key string from auth
 ///         settings; when the key changes, a new runtime is built.</item>
 ///   <item><b>Deferred-disposal graveyard</b> — previous runtime is parked for
-///         <see cref="GraveyardLingerSeconds"/> seconds before disposal, so in-flight
-///         callers holding the prior runtime via captured locals don't crash with
-///         <c>ObjectDisposedException</c> (apple PR #130 review #1 finding #4).</item>
+///         <see cref="GraveyardLingerSeconds"/> seconds before its <c>DisposeAsync</c>
+///         runs, so in-flight callers holding the prior runtime via captured locals
+///         don't crash with <c>ObjectDisposedException</c> (apple PR #130 review #1
+///         finding #4).</item>
 ///   <item><b>Bounded graveyard</b> — under credential-thrash, the oldest entries are
 ///         force-disposed to keep the queue bounded (apple PR #130 review #2 finding #4).</item>
 ///   <item><b>Fire-and-forget disposal</b> — <see cref="DisposeAsync"/> runs on a
