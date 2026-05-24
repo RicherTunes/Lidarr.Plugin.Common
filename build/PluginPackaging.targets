@@ -11,7 +11,22 @@
     USAGE:
     1. Add ILRepack.Lib.MSBuild.Task package with ExcludeAssets="build" and GeneratePathProperty="true"
     2. Import this targets file
-    3. Optionally set LidarrAssembliesPath
+    3. Optionally set LidarrAssembliesPath (absolute or repo-relative; relative paths are
+       auto-resolved against MSBuildProjectDirectory)
+
+    REQUIRED SUPPRESSION FILE — easy to miss:
+    The plugin .csproj must have an EMPTY <Project/> sibling file at
+    `{plugin-csproj-dir}/ILRepack.targets`. The mere existence of that file
+    suppresses ILRepack.Lib.MSBuild.Task's built-in auto-target (whose condition
+    is `!Exists('$(ProjectDir)ILRepack.targets')`). Without the stub, the package's
+    target runs FIRST with no knowledge of LibraryPath / Internalize and fails to
+    resolve Lidarr.Core. Symptoms: `error : Failed to resolve assembly: 'Lidarr.Core'`
+    even when LidarrAssembliesPath is correct. (May 2026 apple ILRepack incident.)
+
+    Setting `<ILRepackEnabled>false</ILRepackEnabled>` in csproj/Directory.Build.props
+    does NOT suppress the auto-target — that property is read by nobody. The
+    RepackPlugin target below adds a hard MSBuild error if the stub is missing so
+    new plugins get a clear message instead of a confusing Lidarr.Core failure.
   -->
 
   <!-- Import ILRepack task from NuGet package - supports both netfx and netcore -->
@@ -32,7 +47,19 @@
   <!-- NOTE: PluginMergeDependency is defined INSIDE RepackPlugin target so Exists() checks
        happen AFTER the build copies dependencies to OutputPath, not at project load time -->
 
-  <Target Name="RepackPlugin" AfterTargets="Build" Condition="'$(PluginPackagingDisable)' != 'true'">
+  <!-- ARCHITECTURAL CONTRACT CHECK: empty `<Project/>` stub at $(ProjectDir)ILRepack.targets.
+       Without it, ILRepack.Lib.MSBuild.Task's built-in auto-target fires AfterTargets="Build"
+       with our merge inputs but no LibraryPath / Internalize config, and emits a confusing
+       "Failed to resolve assembly: 'Lidarr.Core'" error. Failing FAST here with an actionable
+       message saves the next maintainer the same 2-hour debugging cycle. -->
+  <Target Name="_CheckPluginPackagingPreconditions"
+          BeforeTargets="RepackPlugin"
+          Condition="'$(PluginPackagingDisable)' != 'true'">
+    <Error Condition="!Exists('$(MSBuildProjectDirectory)/ILRepack.targets')"
+           Text="$(MSBuildProjectName): Missing required stub file '$(MSBuildProjectDirectory)/ILRepack.targets'. Create an empty `&lt;Project /&gt;` file there to suppress ILRepack.Lib.MSBuild.Task's auto-target — without it the package's target fires first and breaks the merge. See ext/Lidarr.Plugin.Common/build/PluginPackaging.targets header for the full explanation." />
+  </Target>
+
+  <Target Name="RepackPlugin" AfterTargets="Build" Condition="'$(PluginPackagingDisable)' != 'true'" DependsOnTargets="_CheckPluginPackagingPreconditions">
     <!-- Compute library paths at runtime (after build) when OutputPath is fully resolved -->
     <PropertyGroup>
       <!-- Absolute path to plugin output directory (where all runtime deps are copied) -->
@@ -41,9 +68,20 @@
       <!-- Paths relative to this targets file (inside Common submodule) -->
       <_CommonLibraryPath>$(MSBuildThisFileDirectory)../src/bin/$(Configuration)/$(TargetFramework)</_CommonLibraryPath>
       <_AbstractionsPath>$(MSBuildThisFileDirectory)../src/Abstractions/bin/$(Configuration)/$(TargetFramework)</_AbstractionsPath>
-      <!-- Paths to Lidarr assemblies (for reference resolution, typically at repo root/ext/Lidarr) -->
-      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net6.0;$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net8.0</_LidarrAssembliesPath>
-      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' != ''">$(LidarrAssembliesPath)</_LidarrAssembliesPath>
+      <!-- Paths to Lidarr assemblies (for reference resolution, typically at repo root/ext/Lidarr).
+           Both branches use absolute paths: ILRepack's working directory is NOT the project
+           directory, so a relative path silently fails to resolve Lidarr.Core (you'd see
+           "Failed to resolve assembly: 'Lidarr.Core'" even with the file on disk in the
+           correct relative spot). Anchoring on MSBuildProjectDirectory + GetFullPath
+           guarantees ILRepack can find the dir regardless of where it runs from. -->
+      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net6.0'));$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net8.0'))</_LidarrAssembliesPath>
+      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' != ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\$(LidarrAssembliesPath)'))</_LidarrAssembliesPath>
+      <!-- Probe whether the resolved Lidarr extraction is complete enough for ILRepack to
+           resolve all transitive deps. Lidarr.Core depends on Dapper / DryIoc / FluentMigrator
+           / Azure.Core / etc.; a minimal extraction (just Lidarr.*.dll) makes ILRepack fail
+           with "Failed to resolve assembly". The probe DLL is Dapper.dll — a load-bearing
+           Lidarr.Core dep that doesn't ship in stripped-down extractions. -->
+      <_LidarrExtractionProbeDll>Dapper.dll</_LidarrExtractionProbeDll>
       <!-- Combined library paths for ILRepack - plugin output first (has all NuGet deps) -->
       <_ILRepackLibraryPaths>$(_PluginOutputDir);$(_LidarrAssembliesPath);$(_CommonLibraryPath);$(_AbstractionsPath)</_ILRepackLibraryPaths>
     </PropertyGroup>
