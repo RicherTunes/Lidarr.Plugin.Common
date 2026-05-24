@@ -75,6 +75,46 @@ public static partial class LogRedactor
     private static partial Regex JsonSensitiveValuePattern();
 
     /// <summary>
+    /// Matches OAuth and short-form vendor secrets in shell-style
+    /// <c>name=value</c> pairs where the parameter name is unambiguously a
+    /// credential label. Bare-word match is safe for these keys because they
+    /// virtually never appear in non-credential log content.
+    /// </summary>
+    /// <remarks>
+    /// Ambiguous keys like <c>code</c>, <c>state</c>, plain <c>secret</c>,
+    /// <c>signature</c>, <c>sig</c> are handled separately in
+    /// <see cref="AmbiguousQueryParamTokenPattern"/> — those require URL-query
+    /// context (preceded by <c>?</c>, <c>&amp;</c>, or <c>;</c>) to avoid
+    /// false positives on normal log content (<c>state=available</c>,
+    /// <c>status code=ETIMEDOUT</c>, <c>method signature=...</c>).
+    /// </remarks>
+    [GeneratedRegex(@"\b(access[_-]?token|id[_-]?token|refresh[_-]?token|client[_-]?secret|code[_-]?verifier|code[_-]?challenge|app[_-]?secret|api[_-]?key|password|pwd|bearer)=([^&\s,;|}""'\r\n]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex KeyValuePairTokenPattern();
+
+    /// <summary>
+    /// Matches ambiguous credential-shaped keys (<c>code</c>, <c>state</c>,
+    /// plain <c>secret</c>, <c>signature</c>, <c>sig</c>) but ONLY when they
+    /// appear in URL-query context — preceded by <c>?</c>, <c>&amp;</c>, or
+    /// <c>;</c> (the three common query-parameter separators). This narrows
+    /// the bare-word match that previously over-redacted normal log content
+    /// like <c>state=available</c>, <c>status code=200</c>, or
+    /// <c>method signature=...</c> while preserving redaction for real OAuth
+    /// callback URLs (<c>?code=...&amp;state=...</c>).
+    /// </summary>
+    [GeneratedRegex(@"(?<=[?&;])(code|state|secret|signature|sig)=([^&\s,;|}""'\r\n]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex AmbiguousQueryParamTokenPattern();
+
+    /// <summary>
+    /// Matches Windows <c>C:\Users\&lt;name&gt;\</c> and POSIX <c>/home/&lt;name&gt;/</c>
+    /// (and macOS <c>/Users/&lt;name&gt;/</c>) home directory path prefixes.
+    /// Logging full paths leaks the operator's username (PII) and the
+    /// install layout. Captures the username segment only, leaving the
+    /// rest of the path intact for diagnostics.
+    /// </summary>
+    [GeneratedRegex(@"((?:[A-Za-z]:)?[\\/](?:Users|home)[\\/])([^\\/]+)([\\/])", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    private static partial Regex UserHomePathPattern();
+
+    /// <summary>
     /// Redacts sensitive values from a string.
     /// Call this before logging any content that might contain credentials.
     /// </summary>
@@ -122,6 +162,32 @@ public static partial class LogRedactor
             var keyPart = match.Value[..quoteIdx].TrimEnd();
             return $"{keyPart}: \"{REDACTED}\"";
         });
+
+        // URL query parameters and shell-style key=value pairs covering short
+        // OAuth tokens and bare-hex vendor secrets that the 32-char generic
+        // catch-all misses. Preserve the parameter name; replace just the value.
+        value = KeyValuePairTokenPattern().Replace(value, match =>
+        {
+            var eqIdx = match.Value.IndexOf('=');
+            if (eqIdx <= 0) return REDACTED;
+            return $"{match.Value[..eqIdx]}={REDACTED}";
+        });
+
+        // Ambiguous keys (code, state, secret, signature, sig) — match ONLY in
+        // URL-query context (lookbehind for ?, &, or ; required), so normal log
+        // lines like `state=available` or `status code=200` are not redacted.
+        // The match itself does not include the delimiter; just rewrite key=value.
+        value = AmbiguousQueryParamTokenPattern().Replace(value, match =>
+        {
+            var eqIdx = match.Value.IndexOf('=');
+            if (eqIdx <= 0) return REDACTED;
+            return $"{match.Value[..eqIdx]}={REDACTED}";
+        });
+
+        // User-home path redaction: replace the username segment so we keep
+        // the rest of the path (e.g. .config/qobuz/session.json) intact for
+        // diagnostics without leaking who owns the box.
+        value = UserHomePathPattern().Replace(value, "$1<USER>$3");
 
         // PII patterns — applied before the generic catch-all so emails and IPs aren't first
         // claimed by the 32-char alphanumeric rule (and so 13-16 digit sequences don't get
