@@ -340,7 +340,8 @@ namespace Lidarr.Plugin.Common.Services.Registration
         protected virtual bool SupportsQualitySelection() => true;
 
         /// <summary>
-        /// Disposes of plugin resources.
+        /// Disposes of plugin resources and shuts down the shared <see cref="Utilities.HostGateRegistry"/>
+        /// background timer so it does not continue firing after the plugin AssemblyLoadContext is unloaded.
         /// </summary>
         public virtual void Dispose()
         {
@@ -362,6 +363,11 @@ namespace Lidarr.Plugin.Common.Services.Registration
                 }
                 _singletonInstances.Clear();
             }
+
+            // Release the static background sweeper Timer.  This prevents the Timer from
+            // continuing to fire against an already-unloaded AssemblyLoadContext after a
+            // plugin hot-reload.  Idempotent and safe to call multiple times.
+            Lidarr.Plugin.Common.Utilities.HostGateRegistry.Shutdown();
         }
     }
 
