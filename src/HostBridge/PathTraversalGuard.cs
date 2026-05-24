@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Runtime.InteropServices;
 
 namespace Lidarr.Plugin.Common.HostBridge;
 
@@ -63,13 +64,27 @@ public static class PathTraversalGuard
     }
 
     /// <summary>
+    /// Path comparison is filesystem-case-sensitive: Linux is case-sensitive, Windows / macOS
+    /// (default HFS+/APFS) are case-insensitive. Using OrdinalIgnoreCase universally would
+    /// let an attacker on Linux escape via a case-twin: <c>/mnt/Music</c> root would accept
+    /// output paths under <c>/mnt/music</c> as "within root" even though those are two
+    /// distinct directories. This `OsAwareComparison` is the safety boundary
+    /// (PR #130 review #2 finding #3).
+    /// </summary>
+    private static readonly StringComparison OsAwareComparison =
+        RuntimeInformation.IsOSPlatform(OSPlatform.Linux)
+            ? StringComparison.Ordinal
+            : StringComparison.OrdinalIgnoreCase;
+
+    /// <summary>
     /// Verify the canonical form of <paramref name="outputPath"/> resolves to within
     /// <paramref name="root"/> (or, optionally, <paramref name="alternateRoot"/> — used for
     /// fallback dirs like <c>%TEMP%/&lt;plugin&gt;</c> in probe-only modes that allow
     /// blank-root configurations).
     ///
-    /// Comparison is case-insensitive (matches Lidarr's default behavior on both Windows and
-    /// Linux). Returns true if the canonical output equals or is a descendant of the root.
+    /// Comparison case-sensitivity matches the underlying filesystem (case-sensitive on Linux,
+    /// case-insensitive on Windows/macOS) to prevent the case-twin escape vector.
+    /// Returns true if the canonical output equals or is a descendant of the root.
     /// </summary>
     public static bool IsPathWithinRoot(string outputPath, string? root, string? alternateRoot = null)
     {
@@ -96,12 +111,14 @@ public static class PathTraversalGuard
     private static bool IsDescendant(string canonical, string root)
     {
         var rootCanonical = Path.GetFullPath(root);
-        if (canonical.Equals(rootCanonical, StringComparison.OrdinalIgnoreCase))
+        if (canonical.Equals(rootCanonical, OsAwareComparison))
         {
             return true;
         }
-        return canonical.StartsWith(rootCanonical + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
-            || canonical.StartsWith(rootCanonical + Path.AltDirectorySeparatorChar, StringComparison.OrdinalIgnoreCase);
+        // Defends against sibling-prefix attack: /foo/musicEvil starting with /foo/music.
+        // Appending the directory separator guarantees we only match true descendants.
+        return canonical.StartsWith(rootCanonical + Path.DirectorySeparatorChar, OsAwareComparison)
+            || canonical.StartsWith(rootCanonical + Path.AltDirectorySeparatorChar, OsAwareComparison);
     }
 
     private static bool AllDots(string s)
