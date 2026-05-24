@@ -6,6 +6,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
+using Lidarr.Plugin.Common.Hosting;
 using Lidarr.Plugin.Common.Interfaces;
 
 namespace Lidarr.Plugin.Common.Services.Caching
@@ -25,7 +26,11 @@ namespace Lidarr.Plugin.Common.Services.Caching
 
         public FileStreamingResponseCache(string? folder = null, TimeSpan? defaultDuration = null)
         {
-            _root = folder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ArrPlugins", "resp-cache");
+            // When no explicit folder is supplied, resolve the canonical per-host config root
+            // (Docker /config, %AppData%, XDG_CONFIG_HOME, $HOME/.config, ...) so empty $HOME
+            // inside Lidarr's Docker container doesn't anchor a relative path at /app/bin.
+            // "ArrPlugins" remains the shared cross-plugin root; "resp-cache" is the per-feature leaf.
+            _root = folder ?? Path.Combine(PluginConfigRoots.Resolve("ArrPlugins"), "resp-cache");
             Directory.CreateDirectory(_root);
             _defaultDuration = defaultDuration ?? TimeSpan.FromHours(6);
             _maxEntries = ReadIntEnv("ARR_RESP_CACHE_MAX_ENTRIES", 20000);
