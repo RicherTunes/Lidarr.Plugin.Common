@@ -226,7 +226,12 @@ public class WarnOnceTests
     [Fact]
     public async Task TryWarn_ConcurrentCalls_ExactlyOneWarnFires()
     {
-        const int threadCount = 64;
+        // Reduced from 64 → 16 threads to keep the Barrier ungated under CI thread-pool
+        // constraints. CI hosts have low parallel core counts and Task.Run() can queue
+        // rather than execute concurrently — Barrier(64) waits forever for tasks that
+        // haven't been scheduled. 16 is enough to demonstrate the concurrency contract
+        // (TryAdd race resolution) and reliably fits in 2-4 core CI runners.
+        const int threadCount = 16;
         var sut = new WarnOnce();
         var warnCount = 0;
         var debugCount = 0;
@@ -254,8 +259,9 @@ public class WarnOnceTests
     [Fact]
     public async Task TryWarn_ConcurrentCallsDifferentKeys_EachKeyWarnsFiredExactlyOnce()
     {
-        const int keyCount = 16;
-        const int threadsPerKey = 8;
+        // 4 keys × 4 threads/key = 16 total — same Barrier scheduling concern as above.
+        const int keyCount = 4;
+        const int threadsPerKey = 4;
         var sut = new WarnOnce();
         var warnCounts = new int[keyCount];
         var barrier = new Barrier(keyCount * threadsPerKey);
