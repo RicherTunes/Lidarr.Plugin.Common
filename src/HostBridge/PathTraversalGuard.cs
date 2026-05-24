@@ -122,15 +122,25 @@ public static class PathTraversalGuard
 
     private static bool IsDescendant(string canonical, string root)
     {
-        var rootCanonical = Path.GetFullPath(root);
-        if (canonical.Equals(rootCanonical, OsAwareComparison))
+        // Normalize root: GetFullPath preserves trailing separators on Linux
+        // ("/downloads/qobuz/" -> "/downloads/qobuz/"), so without TrimEnd we'd
+        // append a SECOND separator below and look for "//" which never matches
+        // a valid canonical descendant path. Strip trailing separators FIRST,
+        // then append exactly one for the prefix comparison.
+        var rootCanonical = Path.GetFullPath(root)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var canonicalTrimmed = canonical
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+
+        if (canonicalTrimmed.Equals(rootCanonical, OsAwareComparison))
         {
             return true;
         }
+
         // Defends against sibling-prefix attack: /foo/musicEvil starting with /foo/music.
         // Appending the directory separator guarantees we only match true descendants.
-        return canonical.StartsWith(rootCanonical + Path.DirectorySeparatorChar, OsAwareComparison)
-            || canonical.StartsWith(rootCanonical + Path.AltDirectorySeparatorChar, OsAwareComparison);
+        return canonicalTrimmed.StartsWith(rootCanonical + Path.DirectorySeparatorChar, OsAwareComparison)
+            || canonicalTrimmed.StartsWith(rootCanonical + Path.AltDirectorySeparatorChar, OsAwareComparison);
     }
 
     private static bool AllDots(string s)
