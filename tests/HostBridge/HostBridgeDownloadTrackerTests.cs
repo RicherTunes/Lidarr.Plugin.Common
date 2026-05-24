@@ -74,7 +74,7 @@ public class HostBridgeDownloadTrackerTests
     public void TrackerStore_Add_ItemAppearsInSnapshot()
     {
         var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>();
-        store.Add(new HostBridgeDownloadItem { DownloadId = "abc", Title = "T", Artist = "A" });
+        store.AddOrReplace(new HostBridgeDownloadItem { DownloadId = "abc", Title = "T", Artist = "A" });
 
         var snapshot = store.GetSnapshot().ToList();
         Assert.Single(snapshot);
@@ -90,7 +90,7 @@ public class HostBridgeDownloadTrackerTests
         var item = new HostBridgeDownloadItem { DownloadId = "old", Title = "T", Artist = "A" };
         item.SetStatus(HostBridgeDownloadItemStatus.Completed);
         item.CompletedAt = DateTime.UtcNow.AddMilliseconds(-100); // already past retention
-        store.Add(item);
+        store.AddOrReplace(item);
 
         var snapshot = store.GetSnapshot().ToList();
         Assert.Empty(snapshot);
@@ -105,7 +105,7 @@ public class HostBridgeDownloadTrackerTests
         var item = new HostBridgeDownloadItem { DownloadId = "live", Title = "T", Artist = "A" };
         item.SetStatus(HostBridgeDownloadItemStatus.Downloading);
         item.StartedAt = DateTime.UtcNow.AddHours(-1); // very old start, but never completed
-        store.Add(item);
+        store.AddOrReplace(item);
 
         Thread.Sleep(50);
 
@@ -123,7 +123,7 @@ public class HostBridgeDownloadTrackerTests
         var item = new HostBridgeDownloadItem { DownloadId = "recent-fail", Title = "T", Artist = "A" };
         item.SetStatus(HostBridgeDownloadItemStatus.Failed);
         item.CompletedAt = DateTime.UtcNow; // just failed
-        store.Add(item);
+        store.AddOrReplace(item);
 
         var snapshot = store.GetSnapshot().ToList();
         Assert.Single(snapshot);
@@ -133,7 +133,7 @@ public class HostBridgeDownloadTrackerTests
     public void TrackerStore_Remove_DropsItem()
     {
         var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>();
-        store.Add(new HostBridgeDownloadItem { DownloadId = "to-remove", Title = "T", Artist = "A" });
+        store.AddOrReplace(new HostBridgeDownloadItem { DownloadId = "to-remove", Title = "T", Artist = "A" });
 
         Assert.True(store.Remove("to-remove", deleteData: false, out _));
 
@@ -152,7 +152,7 @@ public class HostBridgeDownloadTrackerTests
     public void TrackerStore_TryGet_RetrievesByDownloadId()
     {
         var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>();
-        store.Add(new HostBridgeDownloadItem { DownloadId = "find-me", Title = "T", Artist = "A" });
+        store.AddOrReplace(new HostBridgeDownloadItem { DownloadId = "find-me", Title = "T", Artist = "A" });
 
         Assert.True(store.TryGet("find-me", out var item));
         Assert.NotNull(item);

@@ -25,6 +25,8 @@ public class PrefixedReleaseGuidParserTests
     [InlineData("APPLEMUSIC:album:abc", "applemusic", "abc")] // case-insensitive scheme
     [InlineData("tidal:ALBUM:99999", "tidal", "99999")]      // case-insensitive segment 2
     [InlineData("tidal:album:99999:Lossless", "tidal", "99999")] // segment 4 is per-scheme metadata
+    [InlineData("tidal:album: 99999 ", "tidal", "99999")]   // whitespace trimmed in ID segment
+    [InlineData("tidal:album:\t99999\n", "tidal", "99999")] // tab + newline also trimmed
     public void ExtractAlbumIdFromGuid_RecognizedShapes(string guid, string prefix, string expected)
     {
         Assert.Equal(expected, PrefixedReleaseGuidParser.ExtractAlbumIdFromGuid(guid, prefix));
