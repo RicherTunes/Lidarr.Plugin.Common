@@ -104,7 +104,9 @@ public sealed class BackendHealthCache
             var now = _timeProvider.GetUtcNow().UtcDateTime;
             if (now < entry.ExpiresAt)
             {
-                var remaining = (int)(entry.ExpiresAt - now).TotalSeconds;
+                // Math.Ceiling keeps the "another ~Ns" hint from rounding down to 0
+                // when sub-second remainder is left, which would mislead operators.
+                var remaining = (int)Math.Ceiling((entry.ExpiresAt - now).TotalSeconds);
                 reason = $"{entry.Reason} (known-down for another ~{remaining}s)";
                 return true;
             }

@@ -66,6 +66,19 @@ namespace Lidarr.Plugin.Common.Hosting
                 throw new ArgumentException("Application name must be supplied", nameof(appName));
             }
 
+            // Defense-in-depth: appName becomes a directory under a parent root, so
+            // path-traversal segments would escape the intended root. Reject them
+            // explicitly even though Path.Combine doesn't traverse `..` on its own —
+            // the resolved string would still contain `..` which downstream code may
+            // not normalize before file IO.
+            if (appName.Contains("..", StringComparison.Ordinal) ||
+                appName.IndexOfAny(new[] { '/', '\\' }) >= 0)
+            {
+                throw new ArgumentException(
+                    "Application name must not contain path separators or traversal segments (got '" + appName + "').",
+                    nameof(appName));
+            }
+
             environment ??= ProcessConfigEnvironment.Instance;
 
             // 1. Explicit override
