@@ -7,6 +7,18 @@ namespace Lidarr.Plugin.Common.HostBridge;
 /// <summary>
 /// Defense-in-depth helpers for keeping a plugin's download output under its configured root.
 ///
+/// <para><b>Threat model and limitations:</b> the guard performs LEXICAL canonicalization
+/// via <c>Path.GetFullPath</c>, which resolves <c>.</c>/<c>..</c>/separator quirks but does
+/// NOT resolve symlinks (Linux), junctions (Windows), or NTFS reparse points. If an attacker
+/// can plant a symlink inside the configured download root pointing to <c>/etc</c>, the
+/// guard accepts paths under that symlink even though the resolved physical target escapes
+/// the root. This is acceptable when the threat model is "hostile metadata source can inject
+/// only string segments" (artist/album names from MusicBrainz / search results / manual
+/// artist creation in Lidarr's UI) — those threats can't write filesystem symlinks. If your
+/// threat model includes a writable-inside-root attacker, add an explicit symlink resolution
+/// step at the call site (e.g. <c>new DirectoryInfo(path).ResolveLinkTarget(returnFinalTarget: true)</c>
+/// on .NET 6+).</para>
+///
 /// <para>Lidarr-native bridge plugins (apple/tidalarr/qobuzarr) build per-download paths by
 /// <c>Path.Combine(downloadRoot, artistName, albumTitle)</c>. The artist/album segments come
 /// from a metadata source (MusicBrainz, search results) that's normally trusted — but Lidarr

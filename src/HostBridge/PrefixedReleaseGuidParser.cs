@@ -81,10 +81,13 @@ public static class PrefixedReleaseGuidParser
         var parts = normalized.Split(':');
         if (parts.Length >= 3 &&
             parts[0].Equals(prefix, StringComparison.OrdinalIgnoreCase) &&
-            parts[1].Equals("album", StringComparison.OrdinalIgnoreCase) &&
-            !string.IsNullOrWhiteSpace(parts[2]))
+            parts[1].Equals("album", StringComparison.OrdinalIgnoreCase))
         {
-            return parts[2];
+            // Trim leading/trailing whitespace inside the ID segment: real Lidarr GUIDs
+            // are clean, but a tampered source could inject `tidal:album: 99999 ` and the
+            // downstream service API would 404 on the un-trimmed value. Cheap insurance.
+            var id = parts[2].Trim();
+            return string.IsNullOrWhiteSpace(id) ? null : id;
         }
         return null;
     }

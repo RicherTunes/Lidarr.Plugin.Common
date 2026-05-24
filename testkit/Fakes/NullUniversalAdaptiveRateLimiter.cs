@@ -38,6 +38,17 @@ public sealed class NullUniversalAdaptiveRateLimiter : IUniversalAdaptiveRateLim
         // No-op: null object discards observations.
     }
 
+    /// <summary>
+    /// Explicitly implemented so callers holding a concrete <c>NullUniversalAdaptiveRateLimiter</c>
+    /// reference can invoke this method — relying on the interface's default implementation
+    /// would only work for callers holding an <c>IUniversalAdaptiveRateLimiter</c>-typed
+    /// reference. Tests written against the fake's concrete type benefit from the explicit method.
+    /// </summary>
+    public void RecordAuthFailure(string service, string endpoint)
+    {
+        // No-op: null object discards observations.
+    }
+
     public int GetCurrentLimit(string service, string endpoint) => int.MaxValue;
 
     public ServiceRateLimitStats GetServiceStats(string service) => new();
