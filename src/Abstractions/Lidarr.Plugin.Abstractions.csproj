@@ -14,7 +14,9 @@
     <NoWarn>SA1200;SA1633;CS1591;RS0016;RS0017;RS0025</NoWarn>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
-    <Version>1.8.0</Version>
+    <!-- Version is inherited from Directory.Build.props (single source of truth shared with Common).
+         Do NOT hardcode <Version> here — it would override Directory.Build.props and the two
+         packages would drift silently. -->
 
     <!-- NuGet package metadata -->
     <PackageId>Lidarr.Plugin.Abstractions</PackageId>

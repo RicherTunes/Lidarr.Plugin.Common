@@ -35,7 +35,160 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
-_No changes yet._
+## [1.9.5] - 2026-05-23
+**Upgrade note:** Adds six new host-bridge primitives and three helper/testkit additions from lift wave A. All changes are purely additive — plugins bumping from v1.9.4 do not need code changes, but can now replace hand-rolled implementations with the new Common types.
+
+**Highlights — host-bridge primitives**
+- `PathTraversalGuard` — defense-in-depth for plugin download paths; OS-aware case sensitivity.
+- `HostBridgeDownloadTracker` — unified per-download state (lift wave A item 1).
+- `PrefixedReleaseGuidParser` — unified GUID/URL extraction from prefixed release identifiers (lift wave A item 3).
+- `PlaceholderSearchUri` — unified search-query placeholder URI construction (lift wave A item 5).
+
+**Highlights — hosting / path fixes**
+- `FileStreamingResponseCache` + `FileConditionalRequestState` now resolve storage paths via `PluginConfigRoots` instead of `SpecialFolder.ApplicationData` chains (fixes Docker/hotio path issues for file-caching consumers).
+
+**Highlights — new helpers**
+- `WarnOnce` (in `Services.Diagnostics`) — warn-then-debug log-gating latch; eliminates hand-rolled static `HashSet` guards across plugins.
+- `TestValidationBuilder` (in `Services.Validation`) — accumulate-then-build pattern for plugin `Test()` pipelines; fixes latent multi-field failures where the first error silently swallowed subsequent ones.
+- `JsonFileStore<TKey, TValue>` (in `Services.Storage`) — type-safe JSON-backed key-value store.
+- `NullUniversalAdaptiveRateLimiter` (in `TestKit`) — single source of truth for plugin test stubs; no more per-plugin `NullRateLimiter` copies.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.4...v1.9.5)
+
+## [1.9.4] - 2026-05-23
+**Upgrade note:** Closes the four deferred adversarial-review findings from the v1.9.2/v1.9.3 review (F4 + F5 + F7 + F8). All changes are additive; downstream plugins bumping from v1.9.3 do not need code changes.
+
+**Highlights — F4/F5/F7/F8 fixes**
+
+- **F4 (MED) — Write probe hardened.** Previously `EnsureKeysDirIsWritable` wrote a 0-byte probe file with `File.WriteAllBytes`, which (a) some POSIX overlay/sshfs filesystems happily accept while rejecting real content, (b) couldn't detect write-then-truncate corruption, (c) had a TOCTOU window between create and delete. Now: writes a non-empty `LPC-PROBE` payload via `FileMode.CreateNew + FileShare.None`, reads it back to verify the round-trip, and refuses well-known system paths (`/etc/`, `/proc/`, `/sys/`, `/dev/`, `/boot/`, `/usr/bin/`, `/bin/`, etc. on Linux; `\Windows\`, `\Windows\System32\`, `\ProgramData\Microsoft\Crypto\` on Windows) so an operator typo on `LP_COMMON_KEYS_PATH` can't scribble even a probe file into a critical system dir.
+- **F5 (MED) — Candidate chain walks through unwritable entries.** v1.9.2/v1.9.3 used `GetDefaultKeysDir` which returned the FIRST rooted candidate. If that candidate was rooted but unwritable (e.g. a `/config:ro` bind-mount), the factory immediately degraded to `NullTokenProtector` instead of trying the next candidate. Now: factory iterates the full chain via new `EnumerateKeysDirCandidates`, write-probing each, and only degrades when every candidate fails. `LP_COMMON_KEYS_PATH` (operator override) is still honoured exclusively — silently re-routing an explicitly-set path would surprise operators.
+- **F7 (LOW) — Windows prefers Roaming AppData.** On Windows, `ApplicationData` (Roaming, survives profile migration / domain roam) is now tried before `LocalApplicationData` (which does NOT survive a profile roam). DPAPI ciphertext encrypted with a Local-AppData key ring would have been silently undecryptable after a roam. DPAPI-user is still the default backend on Windows (so this mostly affects forced `LP_COMMON_PROTECTOR=dataprotection` mode), but the ordering matters when DataProtection IS used. On Linux/macOS, the order stays `LocalApplicationData` (~/.local/share, XDG-canonical for data) before `ApplicationData` (~/.config).
+- **F8 (LOW) — Ongoing visibility into degradation.** v1.9.2/v1.9.3 only exposed degradation via the static `LastDiagnostics` snapshot, which plugin code had to read at startup. Now adds:
+  - `TokenProtectorFactory.DegradationDetected` — static event that fires on every degradation transition. Subscribers can surface the warning to host log / metrics / health checks.
+  - `TokenProtectorFactory.LogDegradationOnce(Action<string> logWarning)` — at-most-once-per-process helper for plugins to call from credential hot paths (`set_ApiKey`, settings save). Includes the actionable remediation hints (`LP_COMMON_KEYS_PATH`, `LP_COMMON_REQUIRE_PROTECTOR`).
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.3...v1.9.4)
+
+## [1.9.3] - 2026-05-23
+**Upgrade note:** Adversarial-review hardening of v1.9.2's token-protection fallback. Four defects identified by post-release review have been corrected; the v1.9.2 bug fix proper (the candidate chain in `GetDefaultKeysDir`) is unchanged. Downstream plugins bumping from v1.9.2 to v1.9.3 do not need code changes — the API surface is wider, not narrower.
+
+**Highlights — fixes for adversarial-review findings F1–F3 + F6**
+
+- **F1 (HIGH) — `TokenProtectorFactory` is now `public`.** Was `internal` in v1.9.2, which (because Common is ILRepack-internalized into every consumer) made `IsDegradedToPlaintext` and `LastDiagnostics` *unreachable* from plugin code. The "loud at startup" warning the design depends on couldn't be logged by any plugin. Now plugins can read both surfaces from their startup code: `if (TokenProtectorFactory.IsDegradedToPlaintext) logger.Warn("Token protection degraded: {Reason}", TokenProtectorFactory.LastDiagnostics?.DegradedReason);`.
+- **F2 (HIGH) — `_degraded` flag now reflects the most-recent call, not OR-of-all-time.** Was sticky-set forever in v1.9.2 once any call failed; a subsequent successful call (transient I/O blip recovered, multi-plugin host) left the flag stuck at true and every downstream consumer would lie about its own state. Now `PublishDiagnostics` clears the flag to 0 on a successful (non-degraded) call.
+- **F3 (HIGH) — Null-protector envelopes use distinct `lpc:plain:v1:` prefix.** v1.9.2 wrapped `NullTokenProtector` output in the same `lpc:ps:v1:` envelope as real ciphertext — visually indistinguishable on casual inspection. An operator querying their settings DB with `WHERE value LIKE 'lpc:ps:v1:%'` to find "encrypted secrets" would have hit null-mode plaintext too. Now `StringTokenProtector` chooses the envelope prefix based on the wrapped protector's `AlgorithmId`: real backends use `lpc:ps:v1:`, the null fallback uses `lpc:plain:v1:`. `IsProtected` returns true for both shapes so the setter's "already-protected" round-trip still works.
+- **F6 (MED) — Catch filter narrowed.** v1.9.2 used `catch (Exception ex) when (!requireBackend)` which swallowed `CryptographicException` from a corrupted keychain / key ring (the operator wants to see that, not a misleading plaintext fallback), plus `OutOfMemoryException` and similar process-fatal signals. Now `IsExpectedBackendInitFailure` whitelists the I/O families (`IOException`, `UnauthorizedAccessException`, `PlatformNotSupportedException`, `DllNotFoundException`, `EntryPointNotFoundException`) and propagates everything else.
+
+**Test coverage additions**
+
+- `RealBackend_WrappedByStringTokenProtector_UsesProtectedPrefix` — pins F3.
+- `NullProtector_WrappedByStringTokenProtector_UsesPlaintextPrefix_AndRoundTrips` — replaces the v1.9.2 test that asserted the now-incorrect `lpc:ps:v1:` shape.
+- `CreateFromEnvironment_ClearsStickyDegradedFlag_OnSubsequentSuccess` — pins F2.
+- `TokenProtectorFactory_TypeIsPublic_SoDownstreamPluginsCanReadDiagnostics` — pins F1 via reflection (so a future re-internalization breaks the build).
+- `CreateFromEnvironment_DoesNotSwallow_CryptographicException` — pins F6.
+- `LastDiagnostics_ExposesBackendNameAndDegradedReason_AfterDegradation` — confirms the diagnostic surface contract.
+
+Deferred to a follow-up (acknowledged but not blocking v1.9.3):
+- F4 (TOCTOU + leak in `EnsureKeysDirIsWritable` probe).
+- F5 (`IsUsableRootedDir` only checks rooted, not writable — first rooted candidate wins even if unwritable).
+- F7 (Windows `ApplicationData` vs `LocalApplicationData` for Roaming users).
+- F8 (no event/callback surface beyond the static snapshot).
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.2...v1.9.3)
+
+## [1.9.2] - 2026-05-23
+**Upgrade note:** Hot-fix for a Lidarr Docker startup failure that affected every plugin consuming Common's token protection. The DataProtection key-dir resolver no longer falls back to a *relative* path when `$HOME` is empty; the factory degrades gracefully to a `NullTokenProtector` (with a loud one-line diagnostic) when the backend can't initialise. Plugins do not need code changes — bump the submodule pointer.
+
+**Highlights**
+- **`DataProtectionTokenProtector.GetDefaultKeysDir` candidate chain.** Previous implementation returned `Path.Combine(home, ".config", …)` where `home` came from `Environment.SpecialFolder.UserProfile`. In hotio / linuxserver Lidarr Docker images, the abc user's home directory is sometimes absent from `/etc/passwd` after PUID/PGID adjustments; `UserProfile` returns empty; the resulting `Path.Combine("", ".config", …)` is a *relative* path that resolves against the process cwd (`/app/bin`, the read-only install dir). `Directory.CreateDirectory` then fails with `UnauthorizedAccessException: Access to the path '/app/bin/.config' is denied`, which propagated up through `StringTokenProtector.Protect` → every `set_ApiKey` call. The new resolver chains: `$XDG_DATA_HOME` → `$XDG_CONFIG_HOME` → `SpecialFolder.LocalApplicationData` → `$HOME/.local/share` → `SpecialFolder.ApplicationData` → `$HOME/.config` → `Path.GetTempPath()`. Every candidate is checked with `Path.IsPathRooted`; non-rooted candidates are skipped (this is the rule that prevents the bug from recurring).
+- **`NullTokenProtector` graceful fallback.** When the configured backend fails to initialise (typically: key dir unwritable), the factory now substitutes a `NullTokenProtector` that returns plaintext bytes verbatim. The wrapping `StringTokenProtector` still produces a well-formed envelope, but the embedded algorithm id is `"null"` (base64-url-encoded as `bnVsbA`) so an audit can recognise unprotected blobs at a glance. `TokenProtectorFactory.IsDegradedToPlaintext` flips to `true`; `LastDiagnostics` carries the cause and the path that failed, so plugin-startup code can surface the degradation to the operator.
+- **`LP_COMMON_REQUIRE_PROTECTOR=true` opt-in for hard-fail mode.** Production deployments that would rather see the plugin fail loudly than silently store secrets as plaintext can set this env var; the factory then propagates the initialisation exception instead of substituting `NullTokenProtector`.
+- **`LP_COMMON_PROTECTOR=null` explicit opt-in.** Dev environments where the operator accepts plaintext storage for convenience can request the null backend by name; honoured even when `LP_COMMON_REQUIRE_PROTECTOR=true`.
+- **Pre-flight write probe.** Before constructing the DataProtection provider, the factory now creates+deletes a 0-byte probe file in the candidate keys dir. Surfaces "directory not writable" failures with a clearer error path than waiting for the first `Protect` call to throw.
+- **`TokenProtectorDiagnostics` record.** Public surface so plugin startup code can read `BackendName`, `KeysPath`, `Cause`, and `DegradedReason`. Recommended log line on plugin startup: `"Token protection: {BackendName} (keys={KeysPath ?? "(in-memory)"})"`.
+
+**Test coverage**
+- `tests/Security/TokenProtection/TokenProtectorFactoryFallbackTests.cs` (NEW, 7 tests):
+  - `GetDefaultKeysDir_AlwaysReturnsRootedPath_EvenWhenHomeAndXdgAreEmpty` — pins the original bug fix.
+  - `GetDefaultKeysDir_FallsBackToTempPath_AsLastResort` — verifies the temp-path safety net.
+  - `GetDefaultKeysDir_PrefersXdgDataHome_WhenSet` — XDG ordering.
+  - `CreateFromEnvironment_FallsBackToNullProtector_WhenKeysDirIsUnwritable` — graceful degradation.
+  - `CreateFromEnvironment_Throws_WhenRequireProtectorIsSet_AndBackendFails` — hard-fail opt-in.
+  - `CreateFromEnvironment_ExplicitNullMode_ReturnsNullProtector_WithoutInitialisingBackend` — explicit null.
+  - `NullProtector_WrappedByStringTokenProtector_RoundTripsAndIdentifiesAsNull` — audit-visibility.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+**Affected plugins** (no code changes needed — bump the submodule pointer):
+- Brainarr (BrainarrSettings.set_ApiKey)
+- AppleMusicarr (AppleMusicSecretProtection / FileAppleMusicSettingsStore)
+- Tidalarr (FileTokenStore<TidalTokens>)
+- Qobuzarr (TokenRefresher, CredentialValidator)
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.1...v1.9.2)
+
+## [1.9.1] - 2026-05-23
+**Upgrade note:** Adds `Services.Diagnostics.HttpExceptionClassifier` on top of v1.9.0. Plugins that surface categorised connection-test failures in their `Test()` indicator (auth / rate-limit / network / server) can now consume this from Common instead of copy-pasting. Tidalarr's HTTP-error categorisation is the first consumer.
+
+**Highlights**
+- `Services.Diagnostics.HttpExceptionClassifier` — classifies `HttpRequestException` / `TaskCanceledException` chains into actionable categories (`UnauthorizedOrForbidden`, `RateLimited`, `NetworkUnreachable`, `Timeout`, `ServerError`, `Unknown`). Used by streaming-plugin `Test()` methods to surface a category-tagged failure message in the Lidarr settings UI instead of "connection failed".
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.0...v1.9.1)
+
+## [1.9.0] - 2026-05-23
+**Upgrade note:** Adds the AuthFailureGate surface (fail-fast latch + delegating handler + per-key registry) plus SecureMemory, Conservative rate-limit profile, PagedResponseValidator, testkit-lifted plugin contracts, and `Lidarr.Plugin.*.dll` naming enforcement. The new surface is additive — `IUniversalAdaptiveRateLimiter.RecordAuthFailure` is a default interface method so existing alternate implementations continue to compile without changes.
+
+**Highlights**
+- **AuthFailureGate** (`src/Services/Bridge/`): fail-fast latch built on `IAuthFailureHandler` that prevents plugins from hammering an upstream service when authentication is known bad — the failure mode that previously got Qobuzarr users IP-banned. `TryAcquireProbeSlot()` rate-limits one network call per probe-interval while latched so the plugin can detect re-credentialing without spamming the upstream. Per-key `AuthFailureGateRegistry` for multi-provider plugins (brainarr's 11 LLM providers each get an isolated gate). `AuthFailureDelegatingHandler` auto-wires the gate into any `AddHttpClient` typed client. New `HandleFailureAsync` / `HandleSuccessAsync` pass-throughs on the gate let callers signal without touching the underlying `IAuthFailureHandler` (which is internalized per plugin via ILRepack, so direct sharing across plugin ALC boundaries is unsafe).
+- **SecureMemory** + **Conservative rate-limit profile** + **PagedResponseValidator** consumed by applemusicarr's APL-006 / APL-009 / APL-010 closures.
+- **5 adversarial-review must-fixes**:
+  1. `IUniversalAdaptiveRateLimiter.RecordAuthFailure` is a default interface method (no compile break in alternate impls).
+  2. `SecureMemory.ZeroPemKey` short-circuits on length-0 strings (would otherwise corrupt the interned `string.Empty`).
+  3. `LogRedactor` split into bare-word + URL-query-context patterns; bare `state=available`, `status code=ETIMEDOUT`, etc. no longer false-positive-redact.
+  4. `PublicAPI.Unshipped.txt` baselines populated for the full new surface (clears RS0016 warning flood downstream).
+  5. `AuthFailureGate` cross-ALC hazard documented; pass-through methods added so callers don't need to touch the `Handler` property.
+- **TestKit plugin contracts lifted** (`testkit/Compliance/`): `PluginVersionContract`, `PluginPackagingContract`, `PublishedReleaseInstallability` are now part of the public TestKit so downstream plugins can run the same compliance checks without copy-paste.
+- **`Lidarr.Plugin.*.dll` naming convention** enforced by `PluginPackagingContract`. Lidarr's `PluginLoader` silently ignores any other DLL filename — the contract catches it at build time instead of at runtime.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.8.0...v1.9.0)
+
+## [1.8.0] - 2026-05-23
+**Upgrade note:** Ecosystem version contract, parity-lint forbiddenFields enforcement, ALC fix, and async rate-limit refactor. No breaking API changes.
+
+**Highlights**
+- Ecosystem version contract (`versionContract`) added to `scripts/parity-spec.json`; plugin CI should call `ecosystem-parity-lint.ps1 -Check VersionContract` to enforce that a plugin's `VERSION` file and manifest version align with the Common library version.
+- `forbiddenFields` enforcement wired into parity-lint — fields listed as forbidden in `parity-spec.json` now cause lint failures.
+- ALC multi-plugin co-existence fix: isolated `AssemblyLoadContext` per plugin prevents type-identity collisions when multiple streaming plugins are loaded simultaneously.
+- `StreamingPluginMixins.StreamingIndexerMixin.ApplyRateLimitAsync`: replaced `Task.Delay(...).Wait()` inside a lock with `SemaphoreSlim` + `await Task.Delay`, eliminating the blocking-wait-inside-lock anti-pattern and enabling proper async flow.
+- `SmartCache` test suite: removed `Skip` from two flaky tests (`TryGet_ReturnsFalseForExpiredItem`, `Eviction_LowPriorityItemsEvictedFirst`) by injecting a `TimeProvider` for deterministic time control.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.7.1...v1.8.0)
 
 ## [1.7.1] - 2026-03-27
 **Upgrade note:** Patch release hardening bridge defaults, sandbox resilience, and test coverage. No new public API surface.

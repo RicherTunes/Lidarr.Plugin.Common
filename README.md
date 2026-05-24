@@ -10,16 +10,16 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.7.0 — March 26, 2026
+Latest: v1.9.5 — May 23, 2026
 
-- Bridge contracts shipped: `IAuthFailureHandler`, `IIndexerStatusReporter`, `IRateLimitReporter` + 5 more
-- Default implementations with `AddBridgeDefaults()` DI extension
-- Fixture-backed compliance tests for bridge contracts
-- CliWrap, coverlet, DataProtection dependency updates
-- Hygiene: Ignore `.trx` and coverage artifacts; SECURITY.md added.
-- Docs: Minor polish and brand disclaimer.
+- `PathTraversalGuard`, `HostBridgeDownloadTracker`, `PrefixedReleaseGuidParser`, `PlaceholderSearchUri` — new host-bridge primitives (lift wave A).
+- `WarnOnce` log-gating helper eliminates hand-rolled static `HashSet` guards across plugins.
+- `TestValidationBuilder` for accumulate-then-build `Test()` pipelines.
+- `JsonFileStore<TKey,TValue>` type-safe JSON-backed key-value store.
+- `NullUniversalAdaptiveRateLimiter` testkit stub — single source of truth for plugin test fakes.
+- `FileStreamingResponseCache` + `FileConditionalRequestState` now use `PluginConfigRoots` (fixes Docker/hotio storage paths).
 
-Release notes: [v1.7.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.7.0)
+Release notes: [v1.9.5](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.9.5)
 
 ## Choose your adventure
 
@@ -67,6 +67,13 @@ Release notes: [v1.7.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/rele
 - `examples/` – sample hosts, plugin bridge snippets, manifest helpers.
 - `docs/` – knowledge base described above.
 - `tools/` – Snippet verifier, manifest/package automation, docs lint scripts.
+
+## Documentation
+
+- [Changelog](CHANGELOG.md)
+- [Contributing](CONTRIBUTING.md)
+- [Security](SECURITY.md)
+- [Docs directory](docs/)
 
 ## License
 MIT – see [LICENSE](LICENSE).

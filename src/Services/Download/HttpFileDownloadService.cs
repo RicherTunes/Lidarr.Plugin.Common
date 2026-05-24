@@ -4,6 +4,7 @@ using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Threading;
 using System.Threading.Tasks;
+using Lidarr.Plugin.Common.Errors;
 using Lidarr.Plugin.Common.Services.Http;
 using Lidarr.Plugin.Common.Utilities;
 using Microsoft.Extensions.Logging;
@@ -74,6 +75,20 @@ namespace Lidarr.Plugin.Common.Services.Download
                 existing = 0;
             }
 
+            // COM-011: Determine the expected total byte count for integrity verification.
+            // For 206 Partial Content responses the total is the Content-Range "complete-length" field.
+            // For 200 OK responses it is the Content-Length.
+            // When neither is present (chunked transfer encoding) we skip the byte-count check.
+            long? expectedTotalBytes = null;
+            if (isPartial && response.Content.Headers.ContentRange?.Length != null)
+            {
+                expectedTotalBytes = response.Content.Headers.ContentRange.Length;
+            }
+            else if (!isPartial && contentLength.HasValue)
+            {
+                expectedTotalBytes = contentLength.Value;
+            }
+
             await using var responseStream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
             var buffer = new byte[131072];
@@ -109,6 +124,19 @@ namespace Lidarr.Plugin.Common.Services.Download
                 }
 
                 await fileStream.FlushAsync(cancellationToken).ConfigureAwait(false);
+            }
+
+            // COM-011: Byte-count integrity check — must happen before the atomic move so
+            // we can delete the partial file on mismatch rather than leaving corrupt data.
+            if (expectedTotalBytes.HasValue && totalWritten != expectedTotalBytes.Value)
+            {
+                // Delete the partial file so the next attempt starts from scratch.
+                try { File.Delete(partialPath); } catch { /* best-effort */ }
+
+                throw new DownloadIntegrityException(
+                    actualBytes: totalWritten,
+                    expectedBytes: expectedTotalBytes.Value,
+                    filePath: filePath);
             }
 
             File.Move(partialPath, filePath, overwrite: true);
