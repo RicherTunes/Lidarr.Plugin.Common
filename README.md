@@ -10,16 +10,15 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.9.5 — May 23, 2026
+Latest: v1.10.0 — May 24, 2026
 
-- `PathTraversalGuard`, `HostBridgeDownloadTracker`, `PrefixedReleaseGuidParser`, `PlaceholderSearchUri` — new host-bridge primitives (lift wave A).
-- `WarnOnce` log-gating helper eliminates hand-rolled static `HashSet` guards across plugins.
-- `TestValidationBuilder` for accumulate-then-build `Test()` pipelines.
-- `JsonFileStore<TKey,TValue>` type-safe JSON-backed key-value store.
-- `NullUniversalAdaptiveRateLimiter` testkit stub — single source of truth for plugin test fakes.
-- `FileStreamingResponseCache` + `FileConditionalRequestState` now use `PluginConfigRoots` (fixes Docker/hotio storage paths).
+- `HostBridgeRuntimeCache` — generic gated runtime cache (lift wave D item 6); replaces per-plugin hand-rolled TTL maps.
+- `BackendHealthCache`, `BoundedConcurrentDictionary`, `PluginLifecycle` — new resilience primitives.
+- `PluginLogContext`, `Scrub` — structured-log observability helpers.
+- `HostGateRegistry.Shutdown()` — timer-leak fix for multi-plugin Lidarr hosts.
+- `PluginConfigRoots` path-traversal guard + `BackendHealthCache` rounding fix.
 
-Release notes: [v1.9.5](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.9.5)
+Release notes: [v1.10.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.10.0)
 
 ## Choose your adventure
 

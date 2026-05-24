@@ -35,6 +35,34 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-05-24
+**Upgrade note:** Minor bump — large batch of new primitives, all additive. Plugins bumping from v1.9.5 need no code changes but can now replace hand-rolled implementations with the lifted types.
+
+**Highlights — host-bridge primitives**
+- `HostBridgeRuntimeCache` — generic gated runtime cache (lift wave D item 6); replaces per-plugin hand-rolled TTL maps.
+
+**Highlights — resilience primitives**
+- `BackendHealthCache` lifted to Common — 30 s grace cache for known-down backends; eliminates hand-rolled per-plugin copies.
+- `BoundedConcurrentDictionary<TKey,TValue>` — clear-on-overflow capped dict; bounds in-memory registries.
+- `PluginLifecycle` — static teardown hook registry; plugins register cleanup once, Common calls them on shutdown.
+
+**Highlights — observability primitives**
+- `PluginLogContext` — pluginName / correlationId / provider / operation ambient scope for structured logs.
+- `Scrub` helpers — secret-redaction for log strings and URLs.
+
+**Highlights — hosting / lifecycle**
+- `HostGateRegistry.Shutdown()` — releases timer on plugin unload; prevents timer-thread leaks in multi-plugin Lidarr hosts.
+
+**Highlights — hardening**
+- `PluginConfigRoots` path-traversal guard — defense-in-depth against operator-supplied path segments containing `..`.
+- `BackendHealthCache` remaining-time rounding fix — sub-second display no longer shows negative values.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.5...v1.10.0)
+
 ## [1.9.5] - 2026-05-23
 **Upgrade note:** Adds six new host-bridge primitives and three helper/testkit additions from lift wave A. All changes are purely additive — plugins bumping from v1.9.4 do not need code changes, but can now replace hand-rolled implementations with the new Common types.
 
