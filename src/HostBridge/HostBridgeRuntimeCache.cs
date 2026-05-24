@@ -25,7 +25,7 @@ namespace Lidarr.Plugin.Common.HostBridge;
 ///         finding #4).</item>
 ///   <item><b>Bounded graveyard</b> — under credential-thrash, the oldest entries are
 ///         force-disposed to keep the queue bounded (apple PR #130 review #2 finding #4).</item>
-///   <item><b>Fire-and-forget disposal</b> — <see cref="DisposeAsync"/> runs on a
+///   <item><b>Fire-and-forget disposal</b> — <c>DisposeAsync</c> runs on a
 ///         background <see cref="Task"/> so request threads don't block on HttpClient
 ///         shutdown.</item>
 ///   <item><b>Test-only reset</b> — <see cref="ResetAsync"/> drains both the cache and
