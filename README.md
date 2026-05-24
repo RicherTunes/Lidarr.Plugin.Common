@@ -10,15 +10,13 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.10.0 — May 24, 2026
+Latest: v1.11.0 — May 24, 2026
 
-- `HostBridgeRuntimeCache` — generic gated runtime cache (lift wave D item 6); replaces per-plugin hand-rolled TTL maps.
-- `BackendHealthCache`, `BoundedConcurrentDictionary`, `PluginLifecycle` — new resilience primitives.
-- `PluginLogContext`, `Scrub` — structured-log observability helpers.
-- `HostGateRegistry.Shutdown()` — timer-leak fix for multi-plugin Lidarr hosts.
-- `PluginConfigRoots` path-traversal guard + `BackendHealthCache` rounding fix.
+- `AlbumReleaseInfoBuilder` — unified `ReleaseInfo` string construction (lift wave A item 8).
+- `HostBridgeDownloadOrchestrator` — settings-snapshot + tracked-enqueue orchestrator; ProbeOnly race fix (lift wave A item 2).
+- `RetryPolicyOptions.ForLocalProviders` preset + `RetryPolicyFactory.CreateForLocalProviders` — 100 ms/2 s/3-attempt profile for local/LAN providers.
 
-Release notes: [v1.10.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.10.0)
+Release notes: [v1.11.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.11.0)
 
 ## Choose your adventure
 
