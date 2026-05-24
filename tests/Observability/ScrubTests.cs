@@ -224,4 +224,77 @@ public class ScrubTests
         Assert.StartsWith("https://api.qobuz.com/v1/album/get", result);
         Assert.DoesNotContain("secret", result);
     }
+
+    // ── Parity with LogRedactor.IsSensitiveParameter (Wave 17F unification) ─────
+    // Before this wave Scrub.Url's regex hand-listed sensitive names but LogRedactor's
+    // IsSensitiveParameter knew about more exact names (signature, sessionid, credential)
+    // AND used a contains-rule for compound names (my_secret_token, app_password).
+    // Unifying so both surfaces agree — same param recognised whether logged via
+    // structured property or substituted into a URL string.
+
+    [Theory]
+    [InlineData("https://api.example.com/sign?signature=abc123def")]
+    [InlineData("https://api.example.com/sign?Signature=abc123def")]
+    [InlineData("https://api.example.com/req?request_sig=xyz789")]
+    public void Url_SignatureParam_Redacted(string url)
+    {
+        var result = Scrub.Url(url);
+        Assert.DoesNotContain("abc123def", result);
+        Assert.DoesNotContain("xyz789", result);
+    }
+
+    [Theory]
+    [InlineData("https://api.example.com/play?sessionid=sess-abc")]
+    [InlineData("https://api.example.com/play?session_id=sess-abc")]
+    [InlineData("https://api.example.com/play?session=sess-abc")]
+    public void Url_SessionParam_Redacted(string url)
+    {
+        var result = Scrub.Url(url);
+        Assert.DoesNotContain("sess-abc", result);
+    }
+
+    [Theory]
+    [InlineData("https://api.example.com/login?credential=u%3Ap")]
+    [InlineData("https://api.example.com/login?credentials=u%3Ap")]
+    public void Url_CredentialParam_Redacted(string url)
+    {
+        var result = Scrub.Url(url);
+        Assert.DoesNotContain("u%3Ap", result);
+    }
+
+    [Theory]
+    [InlineData("https://api.example.com/call?my_secret_token=zzz")]
+    [InlineData("https://api.example.com/call?app_password=zzz")]
+    [InlineData("https://api.example.com/call?user_auth_blob=zzz")]
+    [InlineData("https://api.example.com/call?private_key=zzz")]
+    public void Url_CompoundSensitiveParamName_Redacted_ViaContainsRule(string url)
+    {
+        // LogRedactor.IsSensitiveParameter uses a contains-rule for these terms:
+        // secret, password, token, auth, credential, key, apikey. Scrub.Url should
+        // honor the same rule so a parameter named "my_secret_token" is caught.
+        var result = Scrub.Url(url);
+        Assert.DoesNotContain("zzz", result);
+    }
+
+    [Fact]
+    public void Url_CompoundNonSensitive_NotRedacted()
+    {
+        // A param whose name contains a sensitive term as a substring legitimately
+        // (e.g. "keyboard" contains "key", "secretariat" contains "secret") would
+        // false-positive-redact. The contains-rule treats this as acceptable — secrets
+        // leaking into logs is worse than a UI param value being masked. This test
+        // pins that behaviour so future readers know it's intentional, not a bug.
+        const string url = "https://example.com/?keyboard=qwerty";
+        var result = Scrub.Url(url);
+        // "key" is a sensitive contains-term, so this DOES get redacted.
+        Assert.DoesNotContain("qwerty", result);
+    }
+
+    [Fact]
+    public void Url_NonSensitiveParamsRemainUnchangedAfterUnification()
+    {
+        // Regression: the refactor must not start redacting q/limit/offset/filter etc.
+        const string url = "https://api.example.com/tracks?q=radiohead&limit=10&offset=0&filter=studio";
+        Assert.Equal(url, Scrub.Url(url));
+    }
 }

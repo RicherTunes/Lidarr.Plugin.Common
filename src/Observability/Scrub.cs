@@ -81,26 +81,40 @@ public static class Scrub
     /// Returns a copy of <paramref name="url"/> where the values of known
     /// sensitive query parameters are replaced with <c>"***"</c>.
     ///
-    /// Known sensitive parameter names (case-insensitive):
-    /// <c>api_key</c>, <c>apikey</c>, <c>api-key</c>, <c>token</c>,
-    /// <c>access_token</c>, <c>refresh_token</c>, <c>key</c>, <c>secret</c>,
-    /// <c>client_secret</c>, <c>password</c>, <c>pwd</c>, <c>authorization</c>,
-    /// <c>bearer</c>, <c>auth</c>.
+    /// Recognition delegates to <see cref="LogRedactor.IsSensitiveParameter"/>,
+    /// which uses both exact-name matching (<c>apikey</c>, <c>authorization</c>,
+    /// <c>signature</c>, <c>sessionid</c>, <c>credential</c>, <c>x-api-key</c>, …)
+    /// AND a contains-rule for compound names — anything whose param name
+    /// contains <c>secret</c>, <c>password</c>, <c>token</c>, <c>auth</c>,
+    /// <c>credential</c>, <c>key</c>, or <c>apikey</c> is redacted. This keeps
+    /// URL and structured-property redaction in lockstep so the same value is
+    /// recognised across observability surfaces (Wave 17F unification).
     ///
-    /// The URL scheme, host, path, and non-sensitive parameters are preserved.
+    /// <para>The contains-rule will false-positive-mask param names that legitimately
+    /// embed a sensitive term as a substring (e.g. <c>keyboard</c> contains
+    /// <c>key</c>). That's intentional: a secret leaking to logs is strictly worse
+    /// than a UI param value being masked.</para>
+    ///
+    /// <para>The URL scheme, host, path, and non-sensitive parameter values are preserved.</para>
     /// </summary>
     public static string Url(string url)
     {
         if (string.IsNullOrEmpty(url))
             return url ?? string.Empty;
 
-        // Replace sensitive parameter values using regex.
-        // Pattern: capture (name=)(value) where name is in the sensitive list.
-        // Works for ?name=val&name2=val2 and semicolon-separated params.
-        return SensitiveQueryParamPattern.Replace(url, m =>
+        // Match every (separator)(name)=(value) triple in the query/fragment portion.
+        // Separator can be `?`, `&`, or `;` (legacy). Callback consults
+        // LogRedactor.IsSensitiveParameter so the recognition matches structured-property
+        // redaction; the redactor handles exact + contains rules in one place.
+        return AnyQueryParamPattern.Replace(url, m =>
         {
-            // m.Groups[1] = "name=", m.Groups[2] = the value
-            return m.Groups[1].Value + "***";
+            var separator = m.Groups[1].Value;
+            var name = m.Groups[2].Value;
+            if (LogRedactor.IsSensitiveParameter(name))
+            {
+                return $"{separator}{name}=***";
+            }
+            return m.Value;
         });
     }
 
@@ -122,8 +136,11 @@ public static class Scrub
     private static bool IsSensitiveHeader(string name)
         => SensitiveHeaderNames.Contains(name);
 
-    // Matches: (param_name=)(value) for known sensitive names, terminated by & ; # end-of-string.
-    private static readonly Regex SensitiveQueryParamPattern = new(
-        @"(?i)((?:api[_-]?key|apikey|token|access[_-]?token|refresh[_-]?token|key|secret|client[_-]?secret|password|pwd|authorization|bearer|auth)=)([^&;#\s]*)",
-        RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    // Matches every (separator)(name)=(value) triple in a URL's query/fragment portion.
+    // Separator captures `?`, `&`, or `;` (legacy URL param separator). The replacement
+    // callback decides whether to redact by consulting LogRedactor.IsSensitiveParameter,
+    // so URL scrubbing and structured-property redaction stay in lockstep.
+    private static readonly Regex AnyQueryParamPattern = new(
+        @"([?&;])([^=&;#\s]+)=([^&;#\s]*)",
+        RegexOptions.Compiled);
 }
