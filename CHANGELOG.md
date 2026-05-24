@@ -35,6 +35,30 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.9.5] - 2026-05-23
+**Upgrade note:** Adds six new host-bridge primitives and three helper/testkit additions from lift wave A. All changes are purely additive — plugins bumping from v1.9.4 do not need code changes, but can now replace hand-rolled implementations with the new Common types.
+
+**Highlights — host-bridge primitives**
+- `PathTraversalGuard` — defense-in-depth for plugin download paths; OS-aware case sensitivity.
+- `HostBridgeDownloadTracker` — unified per-download state (lift wave A item 1).
+- `PrefixedReleaseGuidParser` — unified GUID/URL extraction from prefixed release identifiers (lift wave A item 3).
+- `PlaceholderSearchUri` — unified search-query placeholder URI construction (lift wave A item 5).
+
+**Highlights — hosting / path fixes**
+- `FileStreamingResponseCache` + `FileConditionalRequestState` now resolve storage paths via `PluginConfigRoots` instead of `SpecialFolder.ApplicationData` chains (fixes Docker/hotio path issues for file-caching consumers).
+
+**Highlights — new helpers**
+- `WarnOnce` (in `Services.Diagnostics`) — warn-then-debug log-gating latch; eliminates hand-rolled static `HashSet` guards across plugins.
+- `TestValidationBuilder` (in `Services.Validation`) — accumulate-then-build pattern for plugin `Test()` pipelines; fixes latent multi-field failures where the first error silently swallowed subsequent ones.
+- `JsonFileStore<TKey, TValue>` (in `Services.Storage`) — type-safe JSON-backed key-value store.
+- `NullUniversalAdaptiveRateLimiter` (in `TestKit`) — single source of truth for plugin test stubs; no more per-plugin `NullRateLimiter` copies.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.4...v1.9.5)
+
 ## [1.9.4] - 2026-05-23
 **Upgrade note:** Closes the four deferred adversarial-review findings from the v1.9.2/v1.9.3 review (F4 + F5 + F7 + F8). All changes are additive; downstream plugins bumping from v1.9.3 do not need code changes.
 
