@@ -50,6 +50,26 @@ public class BackendHealthCacheTests
         Assert.Contains("known-down", reason);
     }
 
+    [Fact]
+    public void IsKnownDown_FractionalRemainder_RoundsUpInReason()
+    {
+        // Regression: integer cast of TotalSeconds previously rounded DOWN, so 0.4s
+        // remaining was reported as "another ~0s". Math.Ceiling preserves operator
+        // signal that "the gate is still active."
+        var fake = MakeFake(DateTimeOffset.UtcNow);
+        var cache = new BackendHealthCache(fake, graceSeconds: 5);
+
+        cache.MarkDown("Ollama", "http://localhost:11434", MakeSocketException());
+        fake.Advance(TimeSpan.FromMilliseconds(4_600)); // 0.4s remaining
+
+        var result = cache.IsKnownDown("Ollama", "http://localhost:11434", out var reason);
+
+        Assert.True(result);
+        Assert.NotNull(reason);
+        Assert.Contains("~1s", reason); // Math.Ceiling(0.4) == 1
+        Assert.DoesNotContain("~0s", reason);
+    }
+
     // ------------------------------------------------------------------ //
     // 2. MarkDown → IsKnownDown after grace expired returns false
     // ------------------------------------------------------------------ //

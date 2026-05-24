@@ -42,6 +42,19 @@ public class PluginConfigRootsTests
         Assert.Throws<ArgumentException>(() => PluginConfigRoots.Resolve("   "));
     }
 
+    [Theory]
+    [InlineData("..")]
+    [InlineData("../foo")]
+    [InlineData("foo/..")]
+    [InlineData("foo/bar")]
+    [InlineData("foo\\bar")]
+    [InlineData("..\\evil")]
+    public void Resolve_PathTraversalOrSeparatorInAppName_Throws(string appName)
+    {
+        var ex = Assert.Throws<ArgumentException>(() => PluginConfigRoots.Resolve(appName));
+        Assert.Contains("path separators", ex.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
     [Fact]
     public void Resolve_OverrideEnvVar_TakesPrecedence()
     {
