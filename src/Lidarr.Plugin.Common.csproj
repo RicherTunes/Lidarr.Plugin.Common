@@ -13,7 +13,9 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <Version>1.9.5</Version>
+    <!-- Version is inherited from Directory.Build.props (single source of truth shared with Abstractions).
+         Do NOT hardcode <Version> here — it would override Directory.Build.props and the two
+         packages would drift silently. -->
     <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>

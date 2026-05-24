@@ -1,4 +1,15 @@
 <Project>
+  <!--
+    SINGLE SOURCE OF TRUTH for Common + Abstractions package version.
+    Both Lidarr.Plugin.Common.csproj and Lidarr.Plugin.Abstractions.csproj inherit
+    this <Version> property.  Do NOT hardcode <Version> in either csproj — any value
+    set there overrides this one and the two packages drift silently.
+    To bump: change the value here only.
+  -->
+  <PropertyGroup>
+    <Version>1.9.5</Version>
+  </PropertyGroup>
+
   <PropertyGroup Condition="'$(UseHostVersioning)' == 'true'">
     <!-- // Matches Lidarr 2.14.2.4786 host binaries -->
     <AssemblyVersion>10.0.0.35686</AssemblyVersion>
