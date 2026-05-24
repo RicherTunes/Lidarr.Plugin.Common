@@ -175,3 +175,9 @@ Lidarr.Plugin.Common.Diagnostics.WarnOnce.WarnOnce(System.Collections.Generic.IE
 Lidarr.Plugin.Common.Diagnostics.WarnOnce.TryWarn(string! key, System.Action! warnAction, System.Action? debugAction = null) -> bool
 Lidarr.Plugin.Common.Diagnostics.WarnOnce.TryWarn(string! key, System.Exception! ex, System.Action<System.Exception!>! warnAction, System.Action<System.Exception!>? debugAction = null) -> bool
 Lidarr.Plugin.Common.Diagnostics.WarnOnce.Reset() -> void
+Lidarr.Plugin.Common.Validation.TestValidationBuilder
+Lidarr.Plugin.Common.Validation.TestValidationBuilder.TestValidationBuilder() -> void
+Lidarr.Plugin.Common.Validation.TestValidationBuilder.RequireNonEmpty(string! fieldName, string? value, string? message = null) -> Lidarr.Plugin.Common.Validation.TestValidationBuilder!
+Lidarr.Plugin.Common.Validation.TestValidationBuilder.AddFailure(FluentValidation.Results.ValidationFailure! failure) -> Lidarr.Plugin.Common.Validation.TestValidationBuilder!
+Lidarr.Plugin.Common.Validation.TestValidationBuilder.HasFailures.get -> bool
+Lidarr.Plugin.Common.Validation.TestValidationBuilder.Build() -> System.Collections.Generic.IReadOnlyList<FluentValidation.Results.ValidationFailure!>!
