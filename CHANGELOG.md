@@ -35,6 +35,22 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-05-24
+**Upgrade note:** Minor bump — two new host-bridge primitives and a resilience preset, all additive. Plugins bumping from v1.10.0 need no code changes but can now replace hand-rolled orchestration and retry logic with the new Common types.
+
+**Highlights — host-bridge primitives**
+- `AlbumReleaseInfoBuilder` — unified `ReleaseInfo` string construction (lift wave A item 8); eliminates per-plugin format divergence for release-info payloads sent to Lidarr.
+- `HostBridgeDownloadOrchestrator` — settings-snapshot + tracked-enqueue orchestrator (lift wave A item 2); fixes a ProbeOnly race where an in-flight snapshot could observe partial settings writes.
+
+**Highlights — resilience**
+- `RetryPolicyOptions.ForLocalProviders` preset — 100 ms / 2 s backoff, 3 attempts, tuned for low-latency local/LAN providers; companion `RetryPolicyFactory.CreateForLocalProviders` for one-line wiring.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.10.0...v1.11.0)
+
 ## [1.10.0] - 2026-05-24
 **Upgrade note:** Minor bump — large batch of new primitives, all additive. Plugins bumping from v1.9.5 need no code changes but can now replace hand-rolled implementations with the lifted types.
 
