@@ -109,6 +109,19 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             MaxDelay = TimeSpan.FromMinutes(1),
             UseJitter = true
         };
+
+        /// <summary>
+        /// Options for local-process / loopback providers (Ollama, LM Studio, etc.).
+        /// Tight delays since latency is low and connection-refused is the dominant failure;
+        /// a long backoff just makes the user wait when the backend is permanently down.
+        /// </summary>
+        public static RetryPolicyOptions ForLocalProviders => new RetryPolicyOptions
+        {
+            MaxRetries = 3,
+            InitialDelay = TimeSpan.FromMilliseconds(100),
+            MaxDelay = TimeSpan.FromSeconds(2),
+            UseJitter = true
+        };
     }
 
     /// <summary>
@@ -338,6 +351,16 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         public static IRetryPolicy CreateForRateLimitedApi(ILogger logger = null)
         {
             return new ExponentialBackoffRetryPolicy(logger, RetryPolicyOptions.ForRateLimitedApi);
+        }
+
+        /// <summary>
+        /// Creates a retry policy tuned for local-process providers (Ollama, LM Studio).
+        /// Tight delays (100ms initial, 2s max) — when the loopback backend is down, long
+        /// backoffs just make the user wait.
+        /// </summary>
+        public static IRetryPolicy CreateForLocalProviders(ILogger logger = null)
+        {
+            return new ExponentialBackoffRetryPolicy(logger, RetryPolicyOptions.ForLocalProviders);
         }
     }
 }
