@@ -131,4 +131,30 @@ public class PathTraversalGuardTests
     {
         Assert.False(PathTraversalGuard.IsPathWithinRoot(output!, "/some/root"));
     }
+
+    // Regression: user reported "Qobuzarr: refusing to build output path '/downloads/qobuz/Artist/Album'
+    // — resolves outside the configured DownloadPath '/downloads/qobuz/'." (2026-05-24)
+    // Root with trailing separator was rejected because GetFullPath on Linux preserves it,
+    // then IsDescendant appended ANOTHER separator and looked for "//" which never matched.
+    [Theory]
+    [InlineData("/downloads/qobuz/")]
+    [InlineData("/downloads/qobuz//")]   // double trailing, edge case
+    [InlineData("/downloads/qobuz")]     // no trailing — control case
+    public void IsPathWithinRoot_RootWithTrailingSeparator_AcceptsValidDescendant(string root)
+    {
+        // Use a relative-style descendant that GetFullPath will resolve consistently
+        // across OSs. We construct from the (possibly trailing-slash) root so the test
+        // exercises the bug regardless of how the caller normalized it.
+        var descendant = Path.Combine(root.TrimEnd('/', '\\'), "Artist", "Album");
+        Assert.True(PathTraversalGuard.IsPathWithinRoot(descendant, root));
+    }
+
+    [Fact]
+    public void IsPathWithinRoot_OutputPathWithTrailingSeparator_AcceptsValidDescendant()
+    {
+        // Symmetry: caller might pass a directory-style output path with trailing slash.
+        var root = RandomRoot();
+        var descendant = Path.Combine(root, "Artist", "Album") + Path.DirectorySeparatorChar;
+        Assert.True(PathTraversalGuard.IsPathWithinRoot(descendant, root));
+    }
 }
