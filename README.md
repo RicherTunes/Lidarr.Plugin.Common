@@ -10,19 +10,16 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.8.0 — May 23, 2026
+Latest: v1.9.5 — May 23, 2026
 
-- Ecosystem version contract introduced via `versionContract` section in `scripts/parity-spec.json`.
-  Plugin authors must invoke `ecosystem-parity-lint.ps1 -Check VersionContract` from their CI pipeline
-  to ensure their plugin's `VERSION` file and manifest version are consistent with the Common library
-  version they depend on. This check is enforced during the nightly parity run and should be added
-  to every plugin's `pr-validation.yml` as `pwsh scripts/ecosystem-parity-lint.ps1 -Check VersionContract`.
-- `forbiddenFields` enforcement now wired into the parity-lint pipeline.
-- ALC multi-plugin co-existence fix landed (see CHANGELOG for details).
-- `StreamingPluginMixins`: rate-limit wait refactored to async (`SemaphoreSlim` + `await Task.Delay`), eliminating the blocking-wait-inside-lock anti-pattern.
-- `SmartCache`: flaky expiry and eviction tests fixed with deterministic `TimeProvider` injection.
+- `PathTraversalGuard`, `HostBridgeDownloadTracker`, `PrefixedReleaseGuidParser`, `PlaceholderSearchUri` — new host-bridge primitives (lift wave A).
+- `WarnOnce` log-gating helper eliminates hand-rolled static `HashSet` guards across plugins.
+- `TestValidationBuilder` for accumulate-then-build `Test()` pipelines.
+- `JsonFileStore<TKey,TValue>` type-safe JSON-backed key-value store.
+- `NullUniversalAdaptiveRateLimiter` testkit stub — single source of truth for plugin test fakes.
+- `FileStreamingResponseCache` + `FileConditionalRequestState` now use `PluginConfigRoots` (fixes Docker/hotio storage paths).
 
-Release notes: [v1.8.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.8.0)
+Release notes: [v1.9.5](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.9.5)
 
 ## Choose your adventure
 
