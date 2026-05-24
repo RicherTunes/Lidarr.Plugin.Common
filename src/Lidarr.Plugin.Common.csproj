@@ -13,7 +13,7 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <Version>1.9.4</Version>
+    <Version>1.9.5</Version>
     <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
@@ -26,7 +26,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.9.4: Closes deferred adversarial-review findings F4 + F5 + F7 + F8 — probe-write hardened (real-byte payload, FileShare.None, refuses system paths), candidate chain falls through unwritable rooted candidates instead of immediately degrading, Windows prefers Roaming AppData for profile-roam safety, DegradationDetected event + LogDegradationOnce helper give plugins ongoing visibility. See CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.9.5: New host-bridge primitives (PathTraversalGuard, HostBridgeDownloadTracker, PrefixedReleaseGuidParser, PlaceholderSearchUri), WarnOnce log-gating helper, TestValidationBuilder for Test() pipelines, JsonFileStore key-value store, NullUniversalAdaptiveRateLimiter testkit stub, and FileStreamingResponseCache/FileConditionalRequestState PluginConfigRoots fix. All additive. See CHANGELOG.md.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <!-- Build Configuration -->
