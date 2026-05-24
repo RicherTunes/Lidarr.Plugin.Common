@@ -14,4 +14,9 @@ Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException.PagedResponseIntegri
 Lidarr.Plugin.Common.Services.Http.PagedResponseValidator
 static Lidarr.Plugin.Common.Services.Http.PagedResponseValidator.Validate(int receivedItemCount, int? declaredTotalCount, string! contextName) -> void
 static Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.WithConservativeDefaults() -> Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter!
-
+Lidarr.Plugin.Common.Validation.TestValidationBuilder
+Lidarr.Plugin.Common.Validation.TestValidationBuilder.TestValidationBuilder() -> void
+Lidarr.Plugin.Common.Validation.TestValidationBuilder.RequireNonEmpty(string! fieldName, string? value, string? message = null) -> Lidarr.Plugin.Common.Validation.TestValidationBuilder!
+Lidarr.Plugin.Common.Validation.TestValidationBuilder.AddFailure(FluentValidation.Results.ValidationFailure! failure) -> Lidarr.Plugin.Common.Validation.TestValidationBuilder!
+Lidarr.Plugin.Common.Validation.TestValidationBuilder.HasFailures.get -> bool
+Lidarr.Plugin.Common.Validation.TestValidationBuilder.Build() -> System.Collections.Generic.IReadOnlyList<FluentValidation.Results.ValidationFailure!>!
