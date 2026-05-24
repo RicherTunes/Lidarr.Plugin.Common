@@ -50,7 +50,7 @@ public sealed class BackendHealthCache
     /// <summary>Creates an instance with an injected time provider for testing.</summary>
     public BackendHealthCache(TimeProvider timeProvider) : this(timeProvider, DefaultGraceSeconds) { }
 
-    /// <summary>Creates an instance with an injected <see cref="System.TimeProvider"/> and a custom grace period.</summary>
+    /// <summary>Creates an instance with an injected <c>System.TimeProvider</c> and a custom grace period.</summary>
     public BackendHealthCache(TimeProvider timeProvider, int graceSeconds)
     {
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
