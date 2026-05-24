@@ -11,6 +11,14 @@ namespace Lidarr.Plugin.Common.Services.Http
     /// <summary>
     /// Builder for creating HTTP requests specific to streaming service APIs.
     /// Provides a fluent interface for common streaming service request patterns.
+    ///
+    /// <para><b>Single-use contract:</b> instances are sealed after <see cref="Build"/> and
+    /// throw <see cref="InvalidOperationException"/> from <see cref="Build"/> or any mutator
+    /// invoked thereafter. Create a fresh builder per request — never store one in a field.
+    /// Storing a shared instance silently bleeds query parameters across calls because the
+    /// internal <c>_queryParams</c> list is append-only (regression: Tidalarr v1.2.7 where
+    /// <c>Test()</c>'s <c>query=test</c> contaminated every later search). <see cref="BuildForLogging"/>
+    /// is read-only and does NOT seal the builder.</para>
     /// </summary>
     public class StreamingApiRequestBuilder
     {
@@ -24,6 +32,18 @@ namespace Lidarr.Plugin.Common.Services.Http
         private TimeSpan? _timeout;
         private ResiliencePolicy _policy;
         private string _authScopeToken;
+        private bool _built;
+
+        private void ThrowIfBuilt()
+        {
+            if (_built)
+            {
+                throw new InvalidOperationException(
+                    "StreamingApiRequestBuilder cannot be reused after Build(). " +
+                    "Create a new instance per request — never store the builder in a field. " +
+                    "See class XML docs for the rationale (Tidalarr v1.2.7 query-bleed regression).");
+            }
+        }
 
         public StreamingApiRequestBuilder(string baseUrl)
         {
@@ -35,6 +55,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder Endpoint(string endpoint)
         {
+            ThrowIfBuilt();
             _endpoint = endpoint?.TrimStart('/');
             return this;
         }
@@ -44,6 +65,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder Method(HttpMethod method)
         {
+            ThrowIfBuilt();
             _method = method ?? throw new ArgumentNullException(nameof(method));
             return this;
         }
@@ -73,6 +95,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder BearerToken(string token)
         {
+            ThrowIfBuilt();
             if (!string.IsNullOrEmpty(token))
             {
                 _headers["Authorization"] = $"Bearer {token}";
@@ -85,6 +108,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder ApiKey(string headerName, string apiKey)
         {
+            ThrowIfBuilt();
             if (!string.IsNullOrEmpty(headerName) && !string.IsNullOrEmpty(apiKey))
             {
                 _headers[headerName] = apiKey;
@@ -97,6 +121,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder Header(string name, string value)
         {
+            ThrowIfBuilt();
             if (!string.IsNullOrEmpty(name) && !string.IsNullOrEmpty(value))
             {
                 _headers[name] = value;
@@ -109,6 +134,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder Headers(Dictionary<string, string> headers)
         {
+            ThrowIfBuilt();
             if (headers != null)
             {
                 foreach (var header in headers)
@@ -124,6 +150,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder Query(string name, string value)
         {
+            ThrowIfBuilt();
             if (!string.IsNullOrEmpty(name))
             {
                 _queryParams.Add(new KeyValuePair<string, string>(name, value ?? string.Empty));
@@ -136,6 +163,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder Query(string name, int value)
         {
+            ThrowIfBuilt();
             if (!string.IsNullOrEmpty(name))
             {
                 _queryParams.Add(new KeyValuePair<string, string>(name, value.ToString(System.Globalization.CultureInfo.InvariantCulture)));
@@ -148,6 +176,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder Query(string name, bool value)
         {
+            ThrowIfBuilt();
             if (!string.IsNullOrEmpty(name))
             {
                 _queryParams.Add(new KeyValuePair<string, string>(name, value ? "true" : "false"));
@@ -160,6 +189,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder QueryParams(Dictionary<string, string> parameters)
         {
+            ThrowIfBuilt();
             if (parameters != null)
             {
                 foreach (var param in parameters)
@@ -178,6 +208,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder JsonBody(object content)
         {
+            ThrowIfBuilt();
             _bodyContent = content;
             _headers["Content-Type"] = "application/json";
             return this;
@@ -188,6 +219,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder FormBody(Dictionary<string, string> formData)
         {
+            ThrowIfBuilt();
             _bodyContent = formData;
             _headers["Content-Type"] = "application/x-www-form-urlencoded";
             return this;
@@ -198,6 +230,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder Timeout(TimeSpan timeout)
         {
+            ThrowIfBuilt();
             _timeout = timeout;
             return this;
         }
@@ -210,6 +243,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder WithPolicy(ResiliencePolicy policy)
         {
+            ThrowIfBuilt();
             _policy = policy ?? throw new ArgumentNullException(nameof(policy));
             return this;
         }
@@ -222,6 +256,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder WithAuthScope(string scopeRaw)
         {
+            ThrowIfBuilt();
             if (!string.IsNullOrWhiteSpace(scopeRaw))
             {
                 var hash = HashingUtility.ComputeSHA256(scopeRaw);
@@ -232,6 +267,7 @@ namespace Lidarr.Plugin.Common.Services.Http
 
         public StreamingApiRequestBuilder WithStreamingDefaults(string userAgent = null)
         {
+            ThrowIfBuilt();
             StreamingHeaderDefaults.ApplyTo(_headers, userAgent);
             return this;
         }
@@ -241,6 +277,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// </summary>
         public StreamingApiRequestBuilder NoCache()
         {
+            ThrowIfBuilt();
             _headers["Cache-Control"] = "no-cache, no-store, must-revalidate";
             _headers["Pragma"] = "no-cache";
             _headers["Expires"] = "0";
@@ -248,10 +285,13 @@ namespace Lidarr.Plugin.Common.Services.Http
         }
 
         /// <summary>
-        /// Builds the final HttpRequestMessage.
+        /// Builds the final HttpRequestMessage. After this call the builder is sealed; any
+        /// subsequent mutator call or second <c>Build()</c> throws <see cref="InvalidOperationException"/>.
         /// </summary>
         public HttpRequestMessage Build()
         {
+            ThrowIfBuilt();
+            _built = true;
             var url = BuildUrl();
             var request = new HttpRequestMessage(_method, url);
 

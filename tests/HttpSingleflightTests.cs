@@ -47,7 +47,8 @@ namespace Lidarr.Plugin.Common.Tests
             });
 
             using var client = new HttpClient(handler);
-            var builder = new StreamingApiRequestBuilder("https://dedup.test")
+
+            StreamingApiRequestBuilder Build() => new StreamingApiRequestBuilder("https://dedup.test")
                 .Endpoint("search")
                 .Query("q", "beatles")
                 .WithPolicy(ResiliencePolicy.Search);
@@ -55,18 +56,20 @@ namespace Lidarr.Plugin.Common.Tests
             using var deduper = new RequestDeduplicator(NullLogger<RequestDeduplicator>.Instance,
                 requestTimeout: TimeSpan.FromSeconds(10), cleanupInterval: TimeSpan.FromSeconds(5));
 
-            // Sanity: keys should match for identical requests
-            using (var reqA = builder.Build())
-            using (var reqB = builder.Build())
+            // Sanity: keys should match for identical requests built from independent builders.
+            // Builders are single-use (sealed after Build()), so each sanity check uses its own.
+            using (var reqA = Build().Build())
+            using (var reqB = Build().Build())
             {
                 var kA = HttpClientExtensions.BuildRequestDedupKey(reqA);
                 var kB = HttpClientExtensions.BuildRequestDedupKey(reqB);
                 Assert.Equal(kA, kB);
             }
 
-            // Fire two identical GETs concurrently
-            var t1 = client.SendWithResilienceAsync(builder, deduper, maxRetries: 0, retryBudget: TimeSpan.FromSeconds(1), maxConcurrencyPerHost: 2);
-            var t2 = client.SendWithResilienceAsync(builder, deduper, maxRetries: 0, retryBudget: TimeSpan.FromSeconds(1), maxConcurrencyPerHost: 2);
+            // Fire two identical GETs concurrently — each gets its own builder. Dedup keys on
+            // URL/method, not on builder identity, so coalescing still works.
+            var t1 = client.SendWithResilienceAsync(Build(), deduper, maxRetries: 0, retryBudget: TimeSpan.FromSeconds(1), maxConcurrencyPerHost: 2);
+            var t2 = client.SendWithResilienceAsync(Build(), deduper, maxRetries: 0, retryBudget: TimeSpan.FromSeconds(1), maxConcurrencyPerHost: 2);
 
             using var r1 = await t1;
             using var r2 = await t2;

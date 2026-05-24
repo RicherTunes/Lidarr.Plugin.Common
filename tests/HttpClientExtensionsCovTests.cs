@@ -989,16 +989,21 @@ namespace Lidarr.Plugin.Common.Tests
             });
 
             using var client = new HttpClient(handler);
-            var builder = new StreamingApiRequestBuilder("https://example.com")
-                .Endpoint("test");
+
+            // Two independent builders that produce the same URL/method — dedup keys on the
+            // request itself, not on builder identity, so coalescing still works. Sharing one
+            // builder is not allowed (sealed after Build()) and would silently bleed query
+            // params across calls if it were.
+            StreamingApiRequestBuilder Build() =>
+                new StreamingApiRequestBuilder("https://example.com").Endpoint("test");
             var deduplicator = new RequestDeduplicator(new NullLogger<RequestDeduplicator>());
 
-            // Kick off two concurrent calls with the same builder; only one should
-            // reach the handler (the other coalesces).
-            var task1 = client.SendWithResilienceAsync(builder, deduplicator);
+            // Kick off two concurrent calls with identical (but separate) builders; only one
+            // should reach the handler (the other coalesces on the dedup key).
+            var task1 = client.SendWithResilienceAsync(Build(), deduplicator);
             // Give task1 a moment to register its pending request.
             await Task.Delay(50);
-            var task2 = client.SendWithResilienceAsync(builder, deduplicator);
+            var task2 = client.SendWithResilienceAsync(Build(), deduplicator);
             await Task.Delay(50);
 
             gate.SetResult(true);
