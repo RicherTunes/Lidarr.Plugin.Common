@@ -224,7 +224,7 @@ public class WarnOnceTests
     // -----------------------------------------------------------------------
 
     [Fact]
-    public void TryWarn_ConcurrentCalls_ExactlyOneWarnFires()
+    public async Task TryWarn_ConcurrentCalls_ExactlyOneWarnFires()
     {
         const int threadCount = 64;
         var sut = new WarnOnce();
@@ -245,14 +245,14 @@ public class WarnOnceTests
             });
         }
 
-        Task.WaitAll(tasks);
+        await Task.WhenAll(tasks);
 
         Assert.Equal(1, warnCount);
         Assert.Equal(threadCount - 1, debugCount);
     }
 
     [Fact]
-    public void TryWarn_ConcurrentCallsDifferentKeys_EachKeyWarnsFiredExactlyOnce()
+    public async Task TryWarn_ConcurrentCallsDifferentKeys_EachKeyWarnsFiredExactlyOnce()
     {
         const int keyCount = 16;
         const int threadsPerKey = 8;
@@ -276,7 +276,7 @@ public class WarnOnceTests
             }
         }
 
-        Task.WaitAll(tasks.ToArray());
+        await Task.WhenAll(tasks);
 
         for (var k = 0; k < keyCount; k++)
         {
