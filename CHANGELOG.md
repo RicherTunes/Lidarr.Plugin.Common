@@ -35,6 +35,21 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-05-24
+**Upgrade note:** Minor bump with one defensive behavior change. `StreamingApiRequestBuilder.Build()` now seals the instance; calling `Build()` again or any mutator after `Build()` throws `InvalidOperationException`. Plugins that already create a fresh builder per request (the documented pattern) need no changes. Plugins that stored a shared builder in a field will hit the throw — fix the call site to use a per-call factory. `BuildForLogging()` is read-only and does NOT seal.
+
+**Highlights — defensive hardening**
+- `StreamingApiRequestBuilder` is now single-use after `Build()`. Regression class caught in Tidalarr v1.2.7: a shared builder field accumulated query parameters across calls, so after `Test()` sent `query=test` every later search URL contained `query=test` as the first param and the API ignored the caller's actual query. The seal makes the misuse impossible to repeat silently — it fails fast at the throw instead of bleeding corrupted requests in production.
+
+**Cleanup**
+- Removed dead `_requestBuilder` field from `BaseStreamingIndexer` — declared and initialized but never read, never accessible to subclasses (private). The protected `CreateRequest` method already builds fresh per call (the correct pattern). Saves one allocation per indexer instance.
+
+**Breaking changes:** None for plugins following the documented per-call factory pattern. Plugins that stored a shared builder will now see `InvalidOperationException` on the second call — that's the regression class this commit prevents from silently corrupting requests.
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.11.0...v1.12.0)
+
 ## [1.11.0] - 2026-05-24
 **Upgrade note:** Minor bump — two new host-bridge primitives and a resilience preset, all additive. Plugins bumping from v1.10.0 need no code changes but can now replace hand-rolled orchestration and retry logic with the new Common types.
 
