@@ -8,7 +8,28 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
 {
     public sealed class StringTokenProtector : IStringProtector
     {
-        private const string Prefix = "lpc:ps:v1:";
+        /// <summary>Envelope prefix for ciphertext from a real protection backend.</summary>
+        private const string ProtectedPrefix = "lpc:ps:v1:";
+
+        /// <summary>
+        /// Envelope prefix for blobs from <see cref="NullTokenProtector"/> — plaintext
+        /// (not encrypted). The prefix is intentionally DIFFERENT from
+        /// <see cref="ProtectedPrefix"/> so an audit query
+        /// (<c>LIKE 'lpc:ps:v1:%'</c>) does not match unprotected entries.
+        /// Adversarial-review F3 (v1.9.2): previous design embedded the
+        /// algorithm id <c>"null"</c> inside the same <c>lpc:ps:v1:</c>
+        /// envelope where it was visually indistinguishable from a base64-encoded
+        /// algorithm-id slot of a real ciphertext — operators searching for
+        /// "encrypted blobs" would have treated null-mode entries as protected.
+        /// </summary>
+        private const string PlaintextPrefix = "lpc:plain:v1:";
+
+        /// <summary>
+        /// Algorithm id that <see cref="NullTokenProtector"/> returns. Drives
+        /// the envelope-prefix decision in <see cref="Protect"/>.
+        /// </summary>
+        private const string NullAlgorithmId = "null";
+
         private readonly ITokenProtector _tokenProtector;
 
         public StringTokenProtector(ITokenProtector tokenProtector)
@@ -18,7 +39,9 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
 
         public bool IsProtected(string? value)
         {
-            return !string.IsNullOrEmpty(value) && value.StartsWith(Prefix, StringComparison.Ordinal);
+            if (string.IsNullOrEmpty(value)) return false;
+            return value.StartsWith(ProtectedPrefix, StringComparison.Ordinal)
+                || value.StartsWith(PlaintextPrefix, StringComparison.Ordinal);
         }
 
         public string? Protect(string? plaintext)
@@ -38,16 +61,24 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
                 return plaintext;
             }
 
+            // Adversarial-review F3 fix: choose the envelope prefix based on the
+            // wrapped protector's algorithm id. Real backends use the standard
+            // `lpc:ps:v1:` envelope; the null fallback uses `lpc:plain:v1:` so
+            // the on-disk format is unambiguously identifiable as unprotected.
+            var algorithmId = _tokenProtector.AlgorithmId ?? string.Empty;
+            var isNullBackend = string.Equals(algorithmId, NullAlgorithmId, StringComparison.Ordinal);
+            var envelopePrefix = isNullBackend ? PlaintextPrefix : ProtectedPrefix;
+
             var plaintextBytes = Encoding.UTF8.GetBytes(plaintext);
             try
             {
                 var protectedBytes = _tokenProtector.Protect(plaintextBytes);
 
-                var algorithmIdBytes = Encoding.UTF8.GetBytes(_tokenProtector.AlgorithmId ?? string.Empty);
+                var algorithmIdBytes = Encoding.UTF8.GetBytes(algorithmId);
                 var algB64Url = Base64UrlEncode(algorithmIdBytes);
                 var payloadB64Url = Base64UrlEncode(protectedBytes);
 
-                return $"{Prefix}{algB64Url}:{payloadB64Url}";
+                return $"{envelopePrefix}{algB64Url}:{payloadB64Url}";
             }
             finally
             {
@@ -80,7 +111,19 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
                 return false;
             }
 
-            var remainder = protectedValue!.Substring(Prefix.Length);
+            // Adversarial-review F3 fix: identify which envelope shape this is
+            // so we strip the right prefix. Both shapes carry an algorithm-id
+            // segment + payload after the prefix.
+            string remainder;
+            if (protectedValue!.StartsWith(PlaintextPrefix, StringComparison.Ordinal))
+            {
+                remainder = protectedValue!.Substring(PlaintextPrefix.Length);
+            }
+            else
+            {
+                remainder = protectedValue!.Substring(ProtectedPrefix.Length);
+            }
+
             var parts = remainder.Split(new[] { ':' }, 2, StringSplitOptions.None);
             if (parts.Length != 2 || string.IsNullOrWhiteSpace(parts[1]))
             {

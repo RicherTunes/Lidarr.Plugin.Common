@@ -4,6 +4,7 @@ using System.IO;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Lidarr.Plugin.Common.Hosting;
 using Lidarr.Plugin.Common.Interfaces;
 
 namespace Lidarr.Plugin.Common.Services.Http
@@ -19,7 +20,11 @@ namespace Lidarr.Plugin.Common.Services.Http
 
         public FileConditionalRequestState(string? folder = null)
         {
-            _folder = folder ?? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ArrPlugins", "etag-validators");
+            // When no explicit folder is supplied, resolve the canonical per-host config root
+            // (Docker /config, %AppData%, XDG_CONFIG_HOME, $HOME/.config, ...) so empty $HOME
+            // inside Lidarr's Docker container doesn't anchor a relative path at /app/bin.
+            // "ArrPlugins" remains the shared cross-plugin root; "etag-validators" is the per-feature leaf.
+            _folder = folder ?? Path.Combine(PluginConfigRoots.Resolve("ArrPlugins"), "etag-validators");
             Directory.CreateDirectory(_folder);
         }
 

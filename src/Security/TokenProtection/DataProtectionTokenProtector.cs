@@ -117,15 +117,145 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
             }
         }
 
-        private static string GetDefaultKeysDir()
+        /// <summary>
+        /// Resolves a writable directory for the DataProtection key ring,
+        /// trying multiple candidates in order before falling back to
+        /// <c>Path.GetTempPath()</c>. Designed for Lidarr Docker containers
+        /// (hotio / linuxserver) where <c>$HOME</c> can be empty if the
+        /// container PUID/PGID isn't reflected in <c>/etc/passwd</c> — the
+        /// original implementation returned a relative <c>.config/...</c>
+        /// path in that case which resolved against the cwd
+        /// (<c>/app/bin</c>), a read-only mount.
+        /// </summary>
+        /// <remarks>
+        /// Candidate order:
+        /// <list type="number">
+        ///   <item><description><c>$XDG_DATA_HOME</c> — the standard XDG location for persistent user data; Lidarr Docker images typically set this to <c>/config</c>.</description></item>
+        ///   <item><description><c>$XDG_CONFIG_HOME</c> — the standard XDG location for user config.</description></item>
+        ///   <item><description><c>Environment.SpecialFolder.LocalApplicationData</c> — on Linux, falls back to <c>~/.local/share</c> when XDG isn't set; on Windows, AppData/Local.</description></item>
+        ///   <item><description><c>$HOME/.local/share</c> — explicit XDG fallback when SpecialFolder resolution is broken.</description></item>
+        ///   <item><description><c>Environment.SpecialFolder.ApplicationData</c> — Windows AppData/Roaming; on Linux, <c>~/.config</c>.</description></item>
+        ///   <item><description><c>$HOME/.config</c> — explicit fallback when SpecialFolder.ApplicationData returns empty.</description></item>
+        ///   <item><description><c>Path.GetTempPath()</c> — LAST RESORT (writable but ephemeral). Caller emits a warning when this hits.</description></item>
+        /// </list>
+        /// Each candidate is only used if it produces a non-empty rooted (absolute) path. Empty or relative
+        /// candidates are skipped — the bug this fixes was caused by silently accepting <c>"" + "/.config/..."</c>
+        /// → a path that resolved relative to cwd.
+        /// </remarks>
+        internal static string GetDefaultKeysDir() => GetDefaultKeysDir(out _);
+
+        /// <summary>
+        /// Single-shot overload that returns the FIRST candidate path
+        /// (rooted, non-empty). Kept for back-compat — the factory's
+        /// <c>TryCreateDataProtection</c> now iterates the full chain via
+        /// <see cref="EnumerateKeysDirCandidates"/> and write-probes each
+        /// (adversarial-review F5: previously the chain stopped at the
+        /// first rooted candidate even when that candidate was unwritable).
+        /// </summary>
+        internal static string GetDefaultKeysDir(out string source)
         {
+            foreach (var (path, name) in EnumerateKeysDirCandidates())
+            {
+                source = name;
+                return path;
+            }
+
+            // Defensive — the chain always yields at least Path.GetTempPath().
+            source = "Path.GetTempPath() (defensive)";
+            return Path.Combine(Path.GetTempPath(), "Lidarr.Plugin.Common", "keys");
+        }
+
+        /// <summary>
+        /// Enumerates all viable key-ring directory candidates in priority
+        /// order. The factory iterates and write-probes each, falling through
+        /// to the next on failure (adversarial-review F5).
+        /// </summary>
+        /// <remarks>
+        /// Each entry is <c>(path, name)</c>. The <c>path</c> is always
+        /// rooted + non-empty (the v1.9.2 rule that prevents the original
+        /// Lidarr-Docker relative-path bug). The <c>name</c> is a
+        /// human-readable label for diagnostics.
+        ///
+        /// Adversarial-review F7: on Windows, <c>ApplicationData</c> (Roaming)
+        /// is preferred over <c>LocalApplicationData</c> so DPAPI ciphertext
+        /// survives profile-roam in domain-joined Windows installs. On
+        /// Linux/macOS, <c>LocalApplicationData</c> is preferred because it
+        /// maps to <c>~/.local/share</c> — the XDG-canonical location for
+        /// persistent user data (<c>ApplicationData</c> maps to
+        /// <c>~/.config</c>, which is for config, not state).
+        ///
+        /// The final entry is unconditional and uses <c>Path.GetTempPath()</c>
+        /// so the chain always yields at least one candidate even when every
+        /// other resolver returns empty.
+        /// </remarks>
+        internal static System.Collections.Generic.IEnumerable<(string Path, string Source)> EnumerateKeysDirCandidates()
+        {
+            const string Leaf1 = "Lidarr.Plugin.Common";
+            const string Leaf2 = "keys";
+
+            var candidate = Environment.GetEnvironmentVariable("XDG_DATA_HOME");
+            if (IsUsableRootedDir(candidate))
+            {
+                yield return (Path.Combine(candidate!, Leaf1, Leaf2), "XDG_DATA_HOME");
+            }
+
+            candidate = Environment.GetEnvironmentVariable("XDG_CONFIG_HOME");
+            if (IsUsableRootedDir(candidate))
+            {
+                yield return (Path.Combine(candidate!, Leaf1, Leaf2), "XDG_CONFIG_HOME");
+            }
+
+            // F7 platform-conditional preference.
             if (OperatingSystem.IsWindows())
             {
-                var appdata = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
-                return Path.Combine(appdata, "Lidarr.Plugin.Common", "keys");
+                candidate = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                if (IsUsableRootedDir(candidate))
+                {
+                    yield return (Path.Combine(candidate!, Leaf1, Leaf2), "SpecialFolder.ApplicationData (Roaming)");
+                }
+
+                candidate = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (IsUsableRootedDir(candidate))
+                {
+                    yield return (Path.Combine(candidate!, Leaf1, Leaf2), "SpecialFolder.LocalApplicationData");
+                }
             }
-            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-            return Path.Combine(home, ".config", "lidarr.plugin.common", "keys");
+            else
+            {
+                candidate = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                if (IsUsableRootedDir(candidate))
+                {
+                    yield return (Path.Combine(candidate!, Leaf1, Leaf2), "SpecialFolder.LocalApplicationData");
+                }
+
+                candidate = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);
+                if (IsUsableRootedDir(candidate))
+                {
+                    yield return (Path.Combine(candidate!, Leaf1, Leaf2), "SpecialFolder.ApplicationData");
+                }
+            }
+
+            // Explicit $HOME-based fallbacks for the case where the .NET
+            // SpecialFolder resolver returns empty (abc user not in
+            // /etc/passwd in some Lidarr Docker setups).
+            var home = Environment.GetEnvironmentVariable("HOME");
+            if (!string.IsNullOrWhiteSpace(home) && Path.IsPathRooted(home))
+            {
+                yield return (Path.Combine(home, ".local", "share", Leaf1, Leaf2), "$HOME/.local/share");
+                yield return (Path.Combine(home, ".config", Leaf1, Leaf2), "$HOME/.config");
+            }
+
+            // Last resort: temp dir. Always writable, always rooted, but
+            // ephemeral — caller emits a warning so the operator knows the
+            // key ring won't survive a container restart.
+            yield return (Path.Combine(Path.GetTempPath(), Leaf1, Leaf2), "Path.GetTempPath() (ephemeral)");
+        }
+
+        private static bool IsUsableRootedDir(string? candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate)) return false;
+            if (!Path.IsPathRooted(candidate)) return false;
+            return true;
         }
 
         /// <summary>

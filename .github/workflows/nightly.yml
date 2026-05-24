@@ -65,7 +65,13 @@ jobs:
       - name: Build
         # DisablePathMap=true so the test step's coverlet collector can resolve source
         # paths from PDBs.
-        run: dotnet build lidarr.plugin.common.sln --configuration Release --no-restore -p:DisablePathMap=true
+        # -maxcpucount:1 (alias -m:1) forces single-threaded build to avoid the MSBuild
+        # parallel-execution file lock race on Windows where two parallel projects try
+        # to write the same Abstractions DLL simultaneously (CS2012). This race is
+        # specific to the multi-target solution graph and Windows's file-locking
+        # semantics — Linux runners don't see it because Linux file handles allow
+        # concurrent writes. The performance hit (~20%) is acceptable on a nightly.
+        run: dotnet build lidarr.plugin.common.sln --configuration Release --no-restore -p:DisablePathMap=true -maxcpucount:1
 
       - name: Run tests
         run: |

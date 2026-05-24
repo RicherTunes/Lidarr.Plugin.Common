@@ -25,6 +25,15 @@ namespace Lidarr.Plugin.Abstractions.Contracts
         /// <summary>
         /// Handles successful authentication.
         /// </summary>
+        /// <remarks>
+        /// IMPLEMENTATIONS MUST BE IDEMPOTENT. Callers (e.g.
+        /// <c>AuthFailureDelegatingHandler</c>) may invoke this method on
+        /// every successful response while the handler is in a non-healthy
+        /// state, and concurrent probes during recovery may produce overlapping
+        /// calls. The handler must not produce externally-visible side effects
+        /// beyond the first invocation per recovery (no double-counting
+        /// metrics, no duplicate event emission, no repeated DB writes).
+        /// </remarks>
         /// <param name="cancellationToken">Cancellation token</param>
         ValueTask HandleSuccessAsync(CancellationToken cancellationToken = default);
 
@@ -34,6 +43,16 @@ namespace Lidarr.Plugin.Abstractions.Contracts
         /// <param name="reason">Reason re-auth is needed</param>
         /// <param name="cancellationToken">Cancellation token</param>
         ValueTask RequestReauthenticationAsync(string reason, CancellationToken cancellationToken = default);
+
+        /// <summary>
+        /// Most recent failure details, or null if no failure has been observed
+        /// since the last <see cref="HandleSuccessAsync"/>. Implementers SHOULD
+        /// expose this so consumers (e.g. <c>AuthFailureGate</c>) can surface
+        /// actionable error messages without downcasting to a specific
+        /// implementation. Default returns null for backwards compatibility
+        /// with handlers that haven't been updated.
+        /// </summary>
+        AuthFailure? LastFailure => null;
     }
 
     /// <summary>
