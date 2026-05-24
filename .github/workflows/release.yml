@@ -106,10 +106,11 @@ jobs:
           set -euo pipefail
           TAG="${GITHUB_REF#refs/tags/}"
           VER="${TAG#v}"
-          echo "Verifying tag '$TAG' matches <Version> '$VER' in csprojs..."
-          grep -q "<Version>${VER}</Version>" src/Lidarr.Plugin.Common.csproj
-          grep -q "<Version>${VER}</Version>" src/Abstractions/Lidarr.Plugin.Abstractions.csproj
-          echo "OK: Tag matches package versions."
+          # Version moved to Directory.Build.props in Wave 6D — single source of truth
+          # for Common + Abstractions. csprojs no longer carry <Version>.
+          echo "Verifying tag '$TAG' matches <Version> '$VER' in Directory.Build.props..."
+          grep -q "<Version>${VER}</Version>" Directory.Build.props
+          echo "OK: Tag matches package version."
 
       - name: Pack
         run: |
