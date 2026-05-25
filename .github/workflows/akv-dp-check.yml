@@ -13,21 +13,28 @@ permissions:
 
 jobs:
   akv:
-    if: ${{ github.event.inputs.run == 'true' && secrets.AKV_KEY_ID != '' }}
+    if: github.event.inputs.run == 'true'
     runs-on: ubuntu-latest
+    env:
+      AKV_KEY_ID: ${{ secrets.AKV_KEY_ID }}
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
     steps:
-      - uses: actions/checkout@v6
+      - if: env.AKV_KEY_ID != ''
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-dotnet@v5
+      - if: env.AKV_KEY_ID != ''
+        uses: actions/setup-dotnet@v5
         with:
           dotnet-version: |
             8.0.x
 
       # Authenticate to Azure (OIDC or client secret). Prefer OIDC; fall back to secret if provided.
       - name: Azure login (OIDC)
-        if: ${{ secrets.AZURE_CLIENT_ID != '' && secrets.AZURE_TENANT_ID != '' && secrets.AZURE_SUBSCRIPTION_ID != '' && github.event.inputs.run == 'true' }}
+        if: env.AKV_KEY_ID != '' && env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != '' && env.AZURE_SUBSCRIPTION_ID != ''
         uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -35,6 +42,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Run DP + AKV wrap test
+        if: env.AKV_KEY_ID != ''
         env:
           LP_COMMON_PROTECTOR: dataprotection
           LP_COMMON_AKV_KEY_ID: ${{ secrets.AKV_KEY_ID }}

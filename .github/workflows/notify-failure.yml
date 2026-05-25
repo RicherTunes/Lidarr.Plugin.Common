@@ -58,9 +58,9 @@ jobs:
           fi
 
       - name: Send Discord notification
-        if: ${{ secrets.DISCORD_WEBHOOK != '' }}
         env:
           DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        if: env.DISCORD_WEBHOOK != ''
         run: |
           curl -H "Content-Type: application/json" \
             -d '{
@@ -79,9 +79,9 @@ jobs:
             "$DISCORD_WEBHOOK"
 
       - name: Send Slack notification
-        if: ${{ secrets.SLACK_WEBHOOK != '' }}
         env:
           SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        if: env.SLACK_WEBHOOK != ''
         run: |
           curl -X POST -H "Content-Type: application/json" \
             -d '{
@@ -113,7 +113,10 @@ jobs:
             "$SLACK_WEBHOOK"
 
       - name: Log notification (fallback if no webhook configured)
-        if: ${{ secrets.DISCORD_WEBHOOK == '' && secrets.SLACK_WEBHOOK == '' }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          SLACK_WEBHOOK: ${{ secrets.SLACK_WEBHOOK }}
+        if: env.DISCORD_WEBHOOK == '' && env.SLACK_WEBHOOK == ''
         run: |
           echo "::warning::No notification webhook configured (DISCORD_WEBHOOK or SLACK_WEBHOOK)"
           echo ""
