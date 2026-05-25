@@ -322,14 +322,36 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
         /// - <see cref="PlatformNotSupportedException"/> (e.g. secret-service on a host without libsecret)
         /// - <see cref="DllNotFoundException"/> / <see cref="EntryPointNotFoundException"/> (native deps missing)
         /// - <see cref="InvalidOperationException"/> when the underlying message identifies a missing path/feature
+        ///   (e.g. <c>SecretServiceTokenProtector</c> throws "secret-tool not available" when libsecret
+        ///   tooling isn't installed — a "feature missing" signal that should fall back, not throw).
         /// </summary>
         private static bool IsExpectedBackendInitFailure(Exception ex)
         {
-            return ex is IOException
+            if (ex is IOException
                 or UnauthorizedAccessException
                 or PlatformNotSupportedException
                 or DllNotFoundException
-                or EntryPointNotFoundException;
+                or EntryPointNotFoundException)
+            {
+                return true;
+            }
+
+            // Wave 17O: InvalidOperationException with a "not available" / "failed to run" /
+            // "is not installed" message is a feature-missing signal that should degrade
+            // silently. Without this, LP_COMMON_PROTECTOR=secret-service on a host without
+            // libsecret tooling propagates the exception instead of falling back to
+            // DataProtection (the explicit-mode auto-fallback contract the XML doc and the
+            // SecretServiceMode_Linux_ReturnsSecretServiceOrFallback test both assert).
+            if (ex is InvalidOperationException ioe && ioe.Message is string m)
+            {
+                if (m.Contains("not available", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("failed to run", StringComparison.OrdinalIgnoreCase)
+                    || m.Contains("is not installed", StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            return false;
         }
 
         /// <summary>
