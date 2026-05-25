@@ -35,6 +35,25 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-05-24
+**Upgrade note:** Minor bump that completes the long-overdue obsolete-grace removal of the legacy `AdaptiveRateLimiter` family and the deprecated `CachePolicy.WithExecutor` overload. Plugins that still target the legacy types must migrate before bumping (no migration was required in this ecosystem — verified zero production call sites in apple/tidalarr/qobuzarr/brainarr; Qobuzarr's last `WithExecutor` call site migrated in companion commit).
+
+**Removed (had been `[Obsolete]` since v1.2 or earlier)**
+- `Lidarr.Plugin.Common.Services.Performance.AdaptiveRateLimiter` (the legacy class — replaced by `UniversalAdaptiveRateLimiter` in v1.2)
+- `Lidarr.Plugin.Common.Services.Performance.IAdaptiveRateLimiter` interface
+- `Lidarr.Plugin.Common.Services.Performance.EndpointRateLimit` (the public version — `UniversalAdaptiveRateLimiter` has its own private nested copy that's unaffected)
+- `Lidarr.Plugin.Common.Services.Performance.RateLimitConfig`
+- `Lidarr.Plugin.Common.Services.Caching.CachePolicy.WithExecutor` overload (callers should use `.With(hotHitMode: …, softRevalidateWindow: …, staleIfErrorTtl: …, evictOnTerminalStatus: …)` directly)
+
+**Kept**
+- `Lidarr.Plugin.Common.Services.Performance.RateLimitStats` (still consumed by Qobuzarr's `AdaptiveQobuzApiClient.GetRateLimitStats` API). Moved to its own file so the legacy `AdaptiveRateLimiter.cs` could be deleted cleanly.
+
+**Breaking changes:** Public API surface narrowed — the removed types have been `[Obsolete]` since v1.2 (`AdaptiveRateLimiter`: "will be removed in 1.3"). 10 minor versions of grace.
+**Deprecations:** None new
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.13.1...v1.14.0)
+
 ## [1.13.1] - 2026-05-24
 **Upgrade note:** Patch — fixes a build-side bug for plugin authors who pass an absolute `LidarrAssembliesPath` to `dotnet build`. Prior to this patch the path got prefixed with the project directory, producing `C:\repo\C:\repo\…` which ILRepack could not resolve and failed with "Failed to resolve assembly: 'Lidarr.Core'". Affects CI release workflows that supply an extract dir as an absolute path. No runtime impact, no plugin code changes needed.
 
