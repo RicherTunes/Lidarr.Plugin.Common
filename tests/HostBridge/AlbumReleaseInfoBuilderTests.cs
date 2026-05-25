@@ -212,4 +212,92 @@ public class AlbumReleaseInfoBuilderTests
         var extractedId = PrefixedReleaseGuidParser.ExtractAlbumIdFromGuid(guid, "tidal");
         Assert.Equal("12345", extractedId);
     }
+
+    // ================================================================== //
+    // Edition / Explicit / Live bracket slots (Wave 19D)
+    // ================================================================== //
+    //
+    // Qobuzarr's TitleGenerator emits a 5-bracket shape:
+    //   {Artist} - {Album} ({Year}) [Edition] [Explicit] [LIVE] [Format] [WEB]
+    // These slots sit BEFORE [Format] / [Extra] so adding them is additive — tidalarr/
+    // apple builds (which don't set them) produce byte-identical output to today.
+
+    [Fact]
+    public void Build_WithEditionMarker_InsertedBeforeFormat()
+    {
+        var (_, _, title) = BaseBuilder().WithEditionMarker("Deluxe Edition").Build();
+        Assert.Equal("Miles Davis - Kind of Blue (1959) [Deluxe Edition] [FLAC] [WEB]", title);
+    }
+
+    [Fact]
+    public void Build_WithExplicitMarker_InsertedBetweenEditionAndFormat()
+    {
+        var (_, _, title) = BaseBuilder().WithExplicitMarker(true).Build();
+        Assert.Equal("Miles Davis - Kind of Blue (1959) [Explicit] [FLAC] [WEB]", title);
+    }
+
+    [Fact]
+    public void Build_WithLiveMarker_InsertedBetweenExplicitAndFormat()
+    {
+        var (_, _, title) = BaseBuilder().WithLiveMarker(true).Build();
+        Assert.Equal("Miles Davis - Kind of Blue (1959) [LIVE] [FLAC] [WEB]", title);
+    }
+
+    [Fact]
+    public void Build_WithEditionExplicitLive_AllInOrderBeforeFormat()
+    {
+        // Verifies the full qobuzarr shape: Artist - Album (Year) [Edition] [Explicit] [LIVE] [Format] [WEB]
+        var (_, _, title) = BaseBuilder()
+            .WithEditionMarker("Anniversary Edition")
+            .WithExplicitMarker(true)
+            .WithLiveMarker(true)
+            .Build();
+        Assert.Equal(
+            "Miles Davis - Kind of Blue (1959) [Anniversary Edition] [Explicit] [LIVE] [FLAC] [WEB]",
+            title);
+    }
+
+    [Fact]
+    public void Build_ExplicitMarkerFalse_Omitted()
+    {
+        var (_, _, title) = BaseBuilder().WithExplicitMarker(false).Build();
+        Assert.Equal("Miles Davis - Kind of Blue (1959) [FLAC] [WEB]", title);
+    }
+
+    [Fact]
+    public void Build_LiveMarkerFalse_Omitted()
+    {
+        var (_, _, title) = BaseBuilder().WithLiveMarker(false).Build();
+        Assert.Equal("Miles Davis - Kind of Blue (1959) [FLAC] [WEB]", title);
+    }
+
+    [Fact]
+    public void Build_EditionMarkerNullOrEmpty_Omitted()
+    {
+        Assert.Equal(
+            "Miles Davis - Kind of Blue (1959) [FLAC] [WEB]",
+            BaseBuilder().WithEditionMarker(null).Build().Title);
+        Assert.Equal(
+            "Miles Davis - Kind of Blue (1959) [FLAC] [WEB]",
+            BaseBuilder().WithEditionMarker("").Build().Title);
+        Assert.Equal(
+            "Miles Davis - Kind of Blue (1959) [FLAC] [WEB]",
+            BaseBuilder().WithEditionMarker("   ").Build().Title);
+    }
+
+    [Fact]
+    public void Build_EditionExplicitLiveWithExtraMarker_AllSlotsInOrder()
+    {
+        // Combined with tidalarr's ExtraMarker pattern — full theoretical shape:
+        //   Artist - Album (Year) [Edition] [Explicit] [LIVE] [Format] [Extra] [WEB]
+        var (_, _, title) = BaseBuilder()
+            .WithEditionMarker("Deluxe")
+            .WithExplicitMarker(true)
+            .WithLiveMarker(true)
+            .WithExtraMarker("HIRES")
+            .Build();
+        Assert.Equal(
+            "Miles Davis - Kind of Blue (1959) [Deluxe] [Explicit] [LIVE] [FLAC] [HIRES] [WEB]",
+            title);
+    }
 }
