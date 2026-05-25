@@ -27,6 +27,25 @@ public sealed class PackageClosureTests
     // ─────────────────────────────────────────────────────────────────────────
 
     /// <summary>
+    /// Resolves the plugin-ecosystem root. The 4 plugin repos are expected to live
+    /// side-by-side with Common — typical layout: <c>&lt;root&gt;/lidarr.plugin.common/</c>,
+    /// <c>&lt;root&gt;/brainarr/</c>, <c>&lt;root&gt;/qobuzarr/</c>, etc.
+    ///
+    /// Resolution order (first match wins):
+    /// <list type="number">
+    /// <item><c>LP_PLUGIN_REPOS_ROOT</c> environment variable (CI override)</item>
+    /// <item>Parent of the directory containing this Common repo, walked up from the
+    ///     test assembly location until a sibling directory matching any plugin name exists</item>
+    /// <item>Hardcoded developer-machine fallback (Alex's path, preserved so existing
+    ///     local runs aren't disrupted)</item>
+    /// </list>
+    ///
+    /// Declared BEFORE <see cref="ForbiddenPackageContents"/> so the static-field
+    /// initialization order populates this string before the loader reads it.
+    /// </summary>
+    private static readonly string PluginReposRoot = ResolvePluginReposRoot();
+
+    /// <summary>
     /// Forbidden DLLs loaded from parity-spec.json at startup.
     /// Falls back to a hardcoded list when the spec file cannot be read
     /// (e.g., when the test assembly is loaded outside the repo tree).
@@ -34,10 +53,38 @@ public sealed class PackageClosureTests
     private static readonly IReadOnlyList<string> ForbiddenPackageContents =
         LoadForbiddenPackageContents();
 
+    private static string ResolvePluginReposRoot()
+    {
+        var fromEnv = Environment.GetEnvironmentVariable("LP_PLUGIN_REPOS_ROOT");
+        if (!string.IsNullOrEmpty(fromEnv) && Directory.Exists(fromEnv))
+            return fromEnv;
+
+        // Walk up from the test assembly location looking for a directory whose
+        // siblings include any of the known plugin repos.
+        var candidate = AppContext.BaseDirectory;
+        for (int depth = 0; depth < 12 && candidate is not null; depth++)
+        {
+            var parent = Directory.GetParent(candidate)?.FullName;
+            if (parent is null) break;
+            if (Directory.Exists(Path.Combine(parent, "brainarr"))
+                || Directory.Exists(Path.Combine(parent, "qobuzarr"))
+                || Directory.Exists(Path.Combine(parent, "tidalarr"))
+                || Directory.Exists(Path.Combine(parent, "applemusicarr")))
+            {
+                return parent;
+            }
+            candidate = parent;
+        }
+
+        // Final fallback: original hardcoded path so Alex's existing local runs still work.
+        return @"C:\R\Alex\github";
+    }
+
     /// <summary>
-    /// Maps repo names to their canonical plugin package output directories.
-    /// The test uses the FIRST directory that exists and contains the main plugin DLL.
-    /// Directories are listed most-specific → least-specific so the best build wins.
+    /// Maps repo names to their canonical plugin package output directories. Paths are
+    /// composed from <see cref="PluginReposRoot"/>; tests still skip cleanly via
+    /// <see cref="Skip.If"/> when no candidate directory exists (e.g. CI runner that
+    /// doesn't check out sibling repos).
     /// </summary>
     private static readonly IReadOnlyDictionary<string, PluginPackageSpec> PluginSpecs =
         new Dictionary<string, PluginPackageSpec>(StringComparer.OrdinalIgnoreCase)
@@ -46,34 +93,34 @@ public sealed class PackageClosureTests
                 MainDllName: "Lidarr.Plugin.Brainarr.dll",
                 CandidateDirs:
                 [
-                    @"C:\R\Alex\github\brainarr\Brainarr.Plugin\bin",
-                    @"C:\R\Alex\github\brainarr\_plugins\Brainarr.Plugin",
-                    @"C:\R\Alex\github\brainarr\Brainarr.Tests\bin\Release\net8.0",
+                    Path.Combine(PluginReposRoot, "brainarr", "Brainarr.Plugin", "bin"),
+                    Path.Combine(PluginReposRoot, "brainarr", "_plugins", "Brainarr.Plugin"),
+                    Path.Combine(PluginReposRoot, "brainarr", "Brainarr.Tests", "bin", "Release", "net8.0"),
                 ]),
 
             ["qobuzarr"] = new PluginPackageSpec(
                 MainDllName: "Lidarr.Plugin.Qobuzarr.dll",
                 CandidateDirs:
                 [
-                    @"C:\R\Alex\github\qobuzarr\bin",
-                    @"C:\R\Alex\github\qobuzarr\plugin-dist",
-                    @"C:\R\Alex\github\qobuzarr\tests\Qobuzarr.Tests\bin\Release\net8.0",
+                    Path.Combine(PluginReposRoot, "qobuzarr", "bin"),
+                    Path.Combine(PluginReposRoot, "qobuzarr", "plugin-dist"),
+                    Path.Combine(PluginReposRoot, "qobuzarr", "tests", "Qobuzarr.Tests", "bin", "Release", "net8.0"),
                 ]),
 
             ["tidalarr"] = new PluginPackageSpec(
                 MainDllName: "Lidarr.Plugin.Tidalarr.dll",
                 CandidateDirs:
                 [
-                    @"C:\R\Alex\github\tidalarr\src\Tidalarr\bin",
-                    @"C:\R\Alex\github\tidalarr\tests\Tidalarr.Tests\bin\Release\net8.0",
+                    Path.Combine(PluginReposRoot, "tidalarr", "src", "Tidalarr", "bin"),
+                    Path.Combine(PluginReposRoot, "tidalarr", "tests", "Tidalarr.Tests", "bin", "Release", "net8.0"),
                 ]),
 
             ["applemusicarr"] = new PluginPackageSpec(
                 MainDllName: "AppleMusicarr.Plugin.dll",
                 CandidateDirs:
                 [
-                    @"C:\R\Alex\github\applemusicarr\src\AppleMusicarr.Plugin\bin\Release\net8.0",
-                    @"C:\R\Alex\github\applemusicarr\src\AppleMusicarr.Cli\bin\Release\net8.0",
+                    Path.Combine(PluginReposRoot, "applemusicarr", "src", "AppleMusicarr.Plugin", "bin", "Release", "net8.0"),
+                    Path.Combine(PluginReposRoot, "applemusicarr", "src", "AppleMusicarr.Cli", "bin", "Release", "net8.0"),
                 ]),
         };
 
@@ -103,7 +150,7 @@ public sealed class PackageClosureTests
         {
             Skip.If(true,
                 $"Build output for '{repoName}' not found. " +
-                $"Run 'dotnet build --configuration Release' in C:\\R\\Alex\\github\\{repoName} " +
+                $"Run 'dotnet build --configuration Release' in {Path.Combine(PluginReposRoot, repoName)} " +
                 $"before running this suite.");
             return;
         }
@@ -163,7 +210,7 @@ public sealed class PackageClosureTests
         {
             Skip.If(true,
                 $"Build output for '{repoName}' not found. " +
-                $"Run 'dotnet build --configuration Release' in C:\\R\\Alex\\github\\{repoName} " +
+                $"Run 'dotnet build --configuration Release' in {Path.Combine(PluginReposRoot, repoName)} " +
                 $"before running this suite.");
             return;
         }
@@ -211,7 +258,7 @@ public sealed class PackageClosureTests
         {
             Skip.If(true,
                 $"Build output for '{repoName}' not found. " +
-                $"Run 'dotnet build --configuration Release' in C:\\R\\Alex\\github\\{repoName}.");
+                $"Run 'dotnet build --configuration Release' in {Path.Combine(PluginReposRoot, repoName)}.");
             return;
         }
 
@@ -245,7 +292,7 @@ public sealed class PackageClosureTests
         }
 
         // Check for a pre-built ZIP first (artifacts/*.zip pattern).
-        var repoRoot = Path.Combine(@"C:\R\Alex\github", repoName);
+        var repoRoot = Path.Combine(PluginReposRoot, repoName);
         var zipPath = FindPluginZip(repoRoot, repoName);
         if (zipPath is not null)
         {
@@ -357,7 +404,7 @@ public sealed class PackageClosureTests
         {
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "scripts", "parity-spec.json"),
             Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", "..", "scripts", "parity-spec.json"),
-            @"C:\R\Alex\github\lidarr.plugin.common\scripts\parity-spec.json",
+            Path.Combine(PluginReposRoot, "lidarr.plugin.common", "scripts", "parity-spec.json"),
         };
 
         foreach (var candidate in candidates)
