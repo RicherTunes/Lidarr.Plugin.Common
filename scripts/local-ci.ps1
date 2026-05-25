@@ -494,6 +494,10 @@ if ($SkipTests) {
 
             # Restore test project with build flags (separate from plugin csproj restore)
             $testRestoreArgs = @($testProj)
+            # Wave 17O: initialize $resolvedFlags BEFORE the conditional so the later
+            # `if ($resolvedFlags) { ... }` on line ~510 doesn't trip Set-StrictMode
+            # strict-var when $buildFlags is empty (which is Apple's local-ci config).
+            $resolvedFlags = @()
             if ($buildFlags) {
                 $resolvedFlags = $buildFlags | ForEach-Object {
                     $_ -replace '\{HOST_PATH\}', $hostPathAbsolute
@@ -507,7 +511,7 @@ if ($SkipTests) {
 
             # Build test project (disable plugin packaging, exclude host bridge tests)
             $testBuildArgs = @($testProj, '-c', $Configuration, '--no-restore')
-            if ($resolvedFlags) { $testBuildArgs += $resolvedFlags }
+            if ($resolvedFlags.Count -gt 0) { $testBuildArgs += $resolvedFlags }
             $testBuildArgs += '-p:PluginPackagingDisable=true'
             $testBuildArgs += '-p:ExcludeHostBridge=true'
 
