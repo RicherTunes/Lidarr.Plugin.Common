@@ -1,7 +1,7 @@
 # RicherTunes Lidarr Plugin Ecosystem — Parity Matrix
 
-**Generated**: 2026-05-25 (Wave 21 parity-mission session). **Refreshed**: 2026-05-25 (Wave-22 adversarial-review pass).
-**Common pin**: `v1.16.0` (936556e — consistent across all 4 plugins; Common's local main has moved to v1.17.0 with 4 post-v1.16 commits that the plugins have not yet bumped to).
+**Generated**: 2026-05-25 (Wave 21 parity-mission session). **Refreshed**: 2026-05-25 (Wave-22 adversarial-review pass). **Refreshed again**: 2026-05-25 (Wave-23 adversarial-review pass — apple-drift correction + security hardening + parity convergence).
+**Common pin**: `v1.17.0` (639d573 — restored lockstep Wave-23 after applemusicarr was discovered ahead by one tag; siblings brainarr/tidalarr/qobuzarr bumped to match).
 **Plugins covered**: `applemusicarr`, `tidalarr`, `qobuzarr`, `brainarr` + the shared `lidarr.plugin.common`
 
 This document is the single source of truth for "does every plugin follow the same canonical pattern, or does the divergence have a documented architectural reason?" Each row is a cross-cutting concern; each column is a plugin; each cell is a status + evidence pointer.
@@ -31,7 +31,7 @@ This document is the single source of truth for "does every plugin follow the sa
 
 | # | Axis | applemusicarr | tidalarr | qobuzarr | brainarr |
 |---|------|:-:|:-:|:-:|:-:|
-| 5 | Constants file w/ `PluginName` + `ServiceName` + `PluginVendor` | ✓ `AppleMusicarrConstants.cs:13-35` | ⚠ `TidalConstants.cs:5-39` uses API constants instead of `PluginName/ServiceName/PluginVendor` block | ✓ `QobuzarrConstants.cs:10-15` | ⚠ `Configuration/Constants.cs` config-driven; brand strings hardcoded in `BrainarrInstalledPlugin` |
+| 5 | Constants file w/ `PluginName` + `ServiceName` + `PluginVendor` | ✓ `AppleMusicarrConstants.cs:13-35` | ⚠ `TidalConstants.cs:5-39` uses API constants instead of `PluginName/ServiceName/PluginVendor` block | ✓ `QobuzarrConstants.cs:10-15` | ✓ **Wave-23**: `BrainarrConstants.cs:7-13` adds the triple (commit `88ad013`). InstalledPlugin still uses literals (load-bearing host registration) but the named-block source of truth now exists. |
 
 **Tidal / brainarr divergence (#5)**: both expose their plugin/service/vendor strings via different mechanisms (Tidal — API constants; Brainarr — hardcoded plugin registration). Convergence is cosmetic; the canonical fields are reachable, just not in one named block. Deferred low-impact tech debt.
 
@@ -143,6 +143,26 @@ These items are NOT blocking shipping any plugin; they are recorded for future c
 13. **Brainarr `BackendHealthCache` partial adoption** — **Open**. Wired in 2 of 14 providers (Ollama + LM Studio — the local ones); the 11 cloud + 1 OpenAI-compatible providers don't wrap their HTTP pipelines in `BackendHealthCache.Shared`. Streaming plugins (apple/tidal/qobuz) wrap ALL HTTP pipelines. The local-only adoption is defensible (cloud providers have their own latency budgets) but should be a documented N/A-with-rationale, not a ✓.
 14. **Common `main` 20 commits unpushed to origin** — **Pending push at end of session**. Local main contains v1.14/v1.15/v1.16/v1.17 work + parity matrix; `release/v1.9.0` was the currently-checked-out branch at session start. Cherry-picked Wave-22 README refresh onto main; pending `git push origin main && git push --tags` to publish.
 15. **22+ stale May-10/11 feature branches** across all 5 repos — **Pending triage**. Most named `feat/adopt-common-plugin-contracts`, `feat/wire-requests-per-second`, etc. Look superseded by direct main merges or abandoned. Triage decision (rebase/merge/delete) deferred.
+
+---
+
+## Wave-23 closures + new findings (added 2026-05-25)
+
+### Closed in Wave-23
+16. **Apple ecosystem-version drift** — applemusicarr submodule was at v1.17.0 (639d573) while ext-common-sha.txt was at v1.16.0 (936556e) after the Wave-22 fix accidentally INTRODUCED this drift. Plugin.json + manifest.json already declared `commonVersion: 1.17.0`. Resolved Wave-23 by bumping the 3 sibling plugins (brainarr `49ba473`, tidalarr `7e2bdd0`, qobuzarr `13a299b`) to v1.17.0 + aligning apple's ext-common-sha (`5ef3ca4`). Ecosystem now back at lockstep v1.17.0.
+17. **qobuz appSecret-reconstruction surfaces** — regex calls in `ExtractAppSecretFromBundle` lacked timeouts (defense-in-depth, not catastrophic ReDoS — patterns are linear). `request_sig` (appSecret-derivative signature) was logged at Debug. `loginResponse.Message` interpolated into exception text could echo attacker-controlled API response content. All three fixed in qobuzarr `45e240b`.
+18. **brainarr MakeKey whitespace gap** — Wave-22 fix used `IsNullOrEmpty`; whitespace `"   "` would still produce a single collision-prone hash slot. Tightened to `IsNullOrWhiteSpace` in `20b133f`; new `[Theory] MakeKey_WhitespaceApiKey_ThrowsArgumentException` covers " ", "\t", "\n", " \t\n ". Same fix applied to `GeminiModelDiscovery.CreateCacheKey` (sibling pattern).
+19. **qobuz AuthFailureGate registration shape** — used `AddSingleton<AuthFailureGate>()` (default ctor) while apple+tidal passed explicit `(handler, TimeProvider.System, TimeSpan.FromSeconds(60), logger)`. Probe interval was implicit. Aligned in qobuzarr `342ee99`.
+20. **tidal+qobuz floating Docker tags** — 10 workflow files used `ghcr.io/hotio/lidarr:pr-plugins` without version suffix while apple+brainarr pin `pr-plugins-3.1.2.4913`. Pinned in tidalarr `cb2e43e` + qobuzarr `342ee99`.
+21. **brainarr constants triple** — added (see row 5 update).
+22. **Cleanup leftovers** — stale TechDebt refs in 4 brainarr docs purged; DIWiringAndParityTests relocated; QobuzarrPluginComplianceTests renamed (referred to deleted symbol). brainarr `8830609`, qobuzarr `fe685cf`.
+
+### Open after Wave-23 (deferred follow-ups)
+23. **Apple `AppleMusicLidarrDownloadClient` entry-point gate helpers** — apple's indexer adapter has `IsAuthShortCircuited` + `RecordAuthOutcomeFromException` but the download client doesn't. Apple's DC uses primary-ctor (C# 12) with fixed Lidarr `DownloadClientBase<T>` signature; would need tidal-style static helpers + `IServiceProvider` lookup. UX gap (cleaner "auth latched" message vs generic 401), not security gap — apple's runtime still consults the gate at HTTP layer.
+24. **Qobuz `QobuzIndexer` + `QobuzDownloadClient` entry-point gate helpers** — same shape gap as #23. `QobuzIndexer` routes through `BridgeQobuzApiClient` which holds the gate as a field, so 401s ARE recorded and the gate latches; entry-point helpers would just pre-flight short-circuit (saves time + log noise) and surface a clean auth-latched validation failure instead of a generic HTTP error.
+25. **8 missing per-provider OpenCircuit adoption tests in brainarr** — Perplexity, OpenRouter, DeepSeek, Groq, Gemini, ZaiGlm, ZaiCoding, OpenAiCodexSub. ~80 LOC of mechanical copy from the OpenAi/Anthropic/ClaudeCodeSub template.
+26. **PublicAPI net6.0 / net8.0 format mismatch** — Unshipped files use Roslyn analyzer format; Shipped files use doc-id (T:/F:/P:) format. Suggests non-standard pipeline. Investigate before promoting Wave-22/Wave-23 surfaces to Shipped.
+27. **qobuz log-scrub regression test** — Phase-2 security fix (commit 45e240b) is well-commented but not covered by a sentinel-based test. Recommended shape: capture logs via existing `Helpers/TestLogger.cs`, invoke `ExtractAppSecretFromBundle` via reflection with a controlled bundle, assert no sentinel seed/info/extras value appears in any captured log line.
 
 ---
 
