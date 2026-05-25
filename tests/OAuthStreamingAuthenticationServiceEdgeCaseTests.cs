@@ -278,29 +278,21 @@ namespace Lidarr.Plugin.Common.Tests
         // ============================================================================
 
         [Fact]
-        public async Task Auth_Quirk_RefreshTokensAsync_NoSingleFlight_ThunderingHerd()
+        public async Task RefreshTokensAsync_SingleFlight_OnlyOneInternalCallForConcurrentCallers()
         {
-            // BUG (Wave 11C audit): OAuthStreamingAuthenticationService.RefreshTokensAsync
-            // does NOT serialize concurrent callers — every caller invokes
-            // RefreshTokensInternalAsync independently. With N parallel callers and
-            // a slow auth server, this triggers a thundering herd of refresh
-            // requests, any one of which could be rejected by an OAuth server that
-            // single-uses refresh tokens (token rotation) — leaving the user
-            // unauthenticated. The base class has a _refreshLock for the
-            // GetValidSessionAsync path, but the OAuth-specific RefreshTokensAsync
-            // does not use it.
-            //
-            // This test pins the current (broken) behaviour: it asserts that with
-            // 5 concurrent callers, the internal refresh is called 5 times.
-            // When fixed (proper single-flight), this assertion should be flipped
-            // to Equal(1, …) and the test renamed.
+            // Wave 17M fix: RefreshTokensAsync now serializes concurrent callers via a
+            // SemaphoreSlim(1,1). The first caller refreshes; later callers, after
+            // acquiring the gate, see the freshly-cached session and return it without
+            // re-hitting the auth server. This prevents the thundering herd that would
+            // otherwise be fatal on providers that single-use refresh tokens (most
+            // major OAuth servers — token rotation is security best practice).
             var svc = new ProbeOAuthService
             {
                 RefreshGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously),
                 RefreshResult = new EdgeSession
                 {
                     AccessToken = "single-flight-acc",
-                    RefreshToken = "same-ref",
+                    RefreshToken = "rotated-ref",
                     ExpiresAt = DateTime.UtcNow.AddHours(1)
                 }
             };
@@ -311,18 +303,28 @@ namespace Lidarr.Plugin.Common.Tests
                 .Select(_ => Task.Run(() => svc.RefreshTokensAsync(session)))
                 .ToArray();
 
-            // Wait until all callers have entered RefreshTokensInternalAsync
-            // (deterministic — no real timing, just spin on the counter).
-            await WaitFor(() => Volatile.Read(ref svc.RefreshInternalCallCount) == Callers,
+            // Wait until at least one caller has entered RefreshTokensInternalAsync
+            // (the gate-holder). Others should be waiting on _refreshGate.
+            await WaitFor(() => Volatile.Read(ref svc.RefreshInternalCallCount) >= 1,
                 timeoutMs: 5000);
 
-            // Release the gate; all callers complete.
+            // Release the gate; gate-holder completes refresh, caches the rotated session,
+            // releases the semaphore, then later callers run, see the cached rotated
+            // refresh token, and short-circuit without re-calling RefreshTokensInternalAsync.
             svc.RefreshGate.SetResult(true);
             await Task.WhenAll(tasks);
 
-            // BUG: thundering herd — every caller hit the internal method.
-            // A single-flight implementation would yield 1 here.
-            Assert.Equal(Callers, svc.RefreshInternalCallCount);
+            // Single-flight: only ONE internal refresh call regardless of caller count.
+            Assert.Equal(1, svc.RefreshInternalCallCount);
+
+            // Every caller gets the SAME refreshed session (promise sharing). All
+            // five awaited the same in-flight Task and the result propagated to each.
+            foreach (var t in tasks)
+            {
+                var result = await t;
+                Assert.Equal("single-flight-acc", result.AccessToken);
+                Assert.Equal("rotated-ref", result.RefreshToken);
+            }
         }
 
         private static async Task WaitFor(Func<bool> condition, int timeoutMs)
