@@ -41,6 +41,9 @@ public sealed class AlbumReleaseInfoBuilder
     private string? _artist;
     private string? _album;
     private int? _year;
+    private string? _editionMarker;
+    private bool _explicitMarker;
+    private bool _liveMarker;
     private string? _formatMarker;
     private string? _extraMarker;
     private string _releaseGroup = "WEB";
@@ -68,6 +71,39 @@ public sealed class AlbumReleaseInfoBuilder
     public AlbumReleaseInfoBuilder WithYear(int? year)
     {
         _year = year;
+        return this;
+    }
+
+    /// <summary>
+    /// Optional edition bracket inserted between <c>({Year})</c> and the format bracket.
+    /// Used for variant labels like <c>Deluxe</c>, <c>Anniversary Edition</c>,
+    /// <c>Remastered</c>, etc. When null, empty, or whitespace, the bracket is omitted.
+    /// </summary>
+    public AlbumReleaseInfoBuilder WithEditionMarker(string? edition)
+    {
+        _editionMarker = edition;
+        return this;
+    }
+
+    /// <summary>
+    /// Toggle for an <c>[Explicit]</c> bracket inserted between <see cref="WithEditionMarker"/>
+    /// and the format bracket. When true, the literal <c>[Explicit]</c> string is appended;
+    /// when false the bracket is omitted.
+    /// </summary>
+    public AlbumReleaseInfoBuilder WithExplicitMarker(bool isExplicit)
+    {
+        _explicitMarker = isExplicit;
+        return this;
+    }
+
+    /// <summary>
+    /// Toggle for a <c>[LIVE]</c> bracket inserted between <see cref="WithExplicitMarker"/>
+    /// and the format bracket. When true, the literal <c>[LIVE]</c> string is appended;
+    /// when false the bracket is omitted.
+    /// </summary>
+    public AlbumReleaseInfoBuilder WithLiveMarker(bool isLive)
+    {
+        _liveMarker = isLive;
         return this;
     }
 
@@ -202,6 +238,24 @@ public sealed class AlbumReleaseInfoBuilder
             sb.Append(" (");
             sb.Append(_year!.Value);
             sb.Append(')');
+        }
+
+        // Wave 19D: optional brackets between Year and Format, in canonical order
+        // (Edition, Explicit, Live). Qobuzarr's TitleGenerator emits this shape;
+        // tidalarr/apple don't set them so their titles are unaffected.
+        if (!string.IsNullOrWhiteSpace(_editionMarker))
+        {
+            sb.Append(" [");
+            sb.Append(_editionMarker);
+            sb.Append(']');
+        }
+        if (_explicitMarker)
+        {
+            sb.Append(" [Explicit]");
+        }
+        if (_liveMarker)
+        {
+            sb.Append(" [LIVE]");
         }
 
         if (!string.IsNullOrWhiteSpace(_formatMarker))
