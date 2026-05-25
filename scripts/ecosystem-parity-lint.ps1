@@ -257,10 +257,21 @@ function Get-CanonicalCommonVersion {
         throw "Common csproj not found at $csprojAbs (versionContract.commonVersionSource)"
     }
     $content = Get-Content $csprojAbs -Raw
-    if ($content -notmatch '<Version>([^<]+)</Version>') {
-        throw "Could not parse <Version> from $csprojAbs"
+    if ($content -match '<Version>([^<]+)</Version>') {
+        return $matches[1]
     }
-    return $matches[1]
+    # Wave 6D: <Version> moved to Directory.Build.props as the single source of truth
+    # for both Lidarr.Plugin.Common and Lidarr.Plugin.Abstractions. Fall back to reading
+    # the props file from the canonical Common root. Probing this way keeps the script
+    # forward-compatible for both layouts.
+    $propsPath = Join-Path $CommonRootPath 'Directory.Build.props'
+    if (Test-Path $propsPath) {
+        $propsContent = Get-Content $propsPath -Raw
+        if ($propsContent -match '<Version>([^<]+)</Version>') {
+            return $matches[1]
+        }
+    }
+    throw "Could not parse <Version> from $csprojAbs or fallback $propsPath"
 }
 
 function Test-VersionContract {
