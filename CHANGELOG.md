@@ -35,6 +35,51 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.15.0] - 2026-05-25
+**Upgrade note:** Minor bump — `BoundedConcurrentDictionary<TKey, TValue>` gains the
+`ConcurrentDictionary`-equivalent API surface needed by callers that currently
+hand-roll `if (Count >= Cap) Clear()` patterns: indexer setter, `ContainsKey`,
+`Values`, and `IEnumerable<KeyValuePair<,>>` (foreach support). Plugins that use
+`ConcurrentDictionary` with a manual cap can now migrate to
+`BoundedConcurrentDictionary` without rewriting their access patterns. Existing
+callers of the v1.10.0 API see no behavior change.
+
+**Highlights**
+- `BoundedConcurrentDictionary<TKey, TValue>.this[TKey key]` — indexer get (throws
+  `KeyNotFoundException` on absent) and set (runs `EvictIfNeeded` before the
+  assignment, so capacity is enforced).
+- `ContainsKey(TKey)` — mirrors `ConcurrentDictionary.ContainsKey`.
+- `Values` — snapshot of all values, mirrors `ConcurrentDictionary.Values`.
+- `IEnumerable<KeyValuePair<TKey, TValue>>` implementation — `foreach` and LINQ now
+  work directly over the dict. Snapshot-style enumerator (same semantics as
+  `ConcurrentDictionary`'s).
+
+**Why this matters**
+- Brainarr's `LimiterRegistry` and `MetricsCollector` use these missing APIs
+  (indexer setter, `foreach (kvp in dict)`, `Values`) on `ConcurrentDictionary`
+  with hand-rolled `EnforceDictCaps()` / `EnforceMetricsCap()` clear-on-overflow
+  helpers. The hand-rolled bounding works but duplicates the pattern at every
+  insert site. With this API extension the two classes can migrate to a single
+  `BoundedConcurrentDictionary` field and drop the explicit cap-enforcement
+  helpers entirely.
+
+**Test coverage additions** (10 new tests in `BoundedConcurrentDictionaryTests`)
+- `ContainsKey_Present/AbsentKey_Returns…`
+- `Values_SnapshotsCurrentValues`
+- `Indexer_Set_NewKey_InsertsEntry`
+- `Indexer_Set_ExistingKey_OverwritesValue`
+- `Indexer_Get_AbsentKey_ThrowsKeyNotFound`
+- `Indexer_Set_AtCapacity_EvictsAllThenInserts` (pins capacity behavior on the
+  indexer setter path — was the gap the previous API surface didn't cover)
+- `GetEnumerator_YieldsAllPairs` / `GetEnumerator_EmptyDict_YieldsNothing`
+- `LinqIntegration_WorksOverDictPairs` (representative of brainarr's usage)
+
+**Breaking changes:** None — all additions are additive.
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.14.2...v1.15.0)
+
 ## [1.14.2] - 2026-05-24
 **Upgrade note:** Patch — single-flights `OAuthStreamingAuthenticationService.RefreshTokensAsync` to prevent the thundering herd that breaks providers single-using refresh tokens (most major OAuth servers — token rotation is security best practice). Plugins that have multiple concurrent code paths needing the same access token now coalesce on a single in-flight refresh; the first caller hits the auth server, the rest await the shared `Task` and receive the same rotated session.
 

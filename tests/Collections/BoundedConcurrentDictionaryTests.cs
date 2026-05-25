@@ -290,5 +290,136 @@ namespace Lidarr.Plugin.Common.Tests.Collections
             Assert.True(dict.Count <= capacity,
                 $"Expected count ≤ {capacity} after concurrent inserts settled, but got {dict.Count}.");
         }
+
+        // ── ContainsKey ─────────────────────────────────────────────────────────────
+
+        [Fact]
+        public void ContainsKey_PresentKey_ReturnsTrue()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+            dict.TryAdd("a", 1);
+            Assert.True(dict.ContainsKey("a"));
+        }
+
+        [Fact]
+        public void ContainsKey_AbsentKey_ReturnsFalse()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+            Assert.False(dict.ContainsKey("missing"));
+        }
+
+        // ── Values ──────────────────────────────────────────────────────────────────
+
+        [Fact]
+        public void Values_SnapshotsCurrentValues()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+            dict.TryAdd("a", 1);
+            dict.TryAdd("b", 2);
+            dict.TryAdd("c", 3);
+
+            var values = dict.Values.OrderBy(v => v).ToArray();
+            Assert.Equal(new[] { 1, 2, 3 }, values);
+        }
+
+        // ── Indexer ─────────────────────────────────────────────────────────────────
+
+        [Fact]
+        public void Indexer_Set_NewKey_InsertsEntry()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+            dict["a"] = 42;
+            Assert.Equal(42, dict["a"]);
+            Assert.Equal(1, dict.Count);
+        }
+
+        [Fact]
+        public void Indexer_Set_ExistingKey_OverwritesValue()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+            dict["a"] = 1;
+            dict["a"] = 99;
+            Assert.Equal(99, dict["a"]);
+            Assert.Equal(1, dict.Count);
+        }
+
+        [Fact]
+        public void Indexer_Get_AbsentKey_ThrowsKeyNotFound()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+            Assert.Throws<KeyNotFoundException>(() => _ = dict["missing"]);
+        }
+
+        [Fact]
+        public void Indexer_Set_AtCapacity_EvictsAllThenInserts()
+        {
+            // Same overflow semantics as TryAdd: clear-all when an insert would push past
+            // capacity, then set the new entry. Indexer setter must respect the cap.
+            int evictionCount = -1;
+            var dict = new BoundedConcurrentDictionary<string, int>(
+                capacity: 3,
+                comparer: null,
+                onEvicted: cleared => evictionCount = cleared);
+
+            dict["a"] = 1;
+            dict["b"] = 2;
+            dict["c"] = 3;
+            Assert.Equal(3, dict.Count);
+
+            dict["d"] = 4; // triggers eviction
+
+            Assert.Equal(3, evictionCount);
+            Assert.Equal(1, dict.Count);
+            Assert.Equal(4, dict["d"]);
+        }
+
+        // ── Enumeration ─────────────────────────────────────────────────────────────
+
+        [Fact]
+        public void GetEnumerator_YieldsAllPairs()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+            dict.TryAdd("a", 1);
+            dict.TryAdd("b", 2);
+            dict.TryAdd("c", 3);
+
+            var pairs = new List<KeyValuePair<string, int>>();
+            foreach (var kvp in dict)
+            {
+                pairs.Add(kvp);
+            }
+
+            Assert.Equal(3, pairs.Count);
+            Assert.Contains(new KeyValuePair<string, int>("a", 1), pairs);
+            Assert.Contains(new KeyValuePair<string, int>("b", 2), pairs);
+            Assert.Contains(new KeyValuePair<string, int>("c", 3), pairs);
+        }
+
+        [Fact]
+        public void GetEnumerator_EmptyDict_YieldsNothing()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+            var count = 0;
+            foreach (var _ in dict)
+            {
+                count++;
+            }
+            Assert.Equal(0, count);
+        }
+
+        [Fact]
+        public void LinqIntegration_WorksOverDictPairs()
+        {
+            // foreach is the most common path, but LINQ over the IEnumerable<KeyValuePair>
+            // surface is the second-most-common (e.g. brainarr's MetricsCollector uses
+            // `Metrics.Values` and `foreach (var kvp in Metrics)`).
+            var dict = new BoundedConcurrentDictionary<string, int>(10);
+            dict.TryAdd("a", 1);
+            dict.TryAdd("b", 2);
+            dict.TryAdd("c", 3);
+
+            var sum = dict.Sum(kvp => kvp.Value);
+            Assert.Equal(6, sum);
+        }
     }
 }
