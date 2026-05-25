@@ -48,6 +48,10 @@ Template to copy when drafting a release:
 **Kept**
 - `Lidarr.Plugin.Common.Services.Performance.RateLimitStats` (still consumed by Qobuzarr's `AdaptiveQobuzApiClient.GetRateLimitStats` API). Moved to its own file so the legacy `AdaptiveRateLimiter.cs` could be deleted cleanly.
 
+**Test-coverage uplift (Wave 11C audit Priority 2)**
+- `OAuthStreamingAuthenticationServiceEdgeCaseTests` (+8 tests) — PKCE verifier round-trip, cross-flow isolation, state CSRF gate, refresh-token rotation persistence, and 3 documented production quirks (`Auth_Quirk_…`): no single-flight on `RefreshTokensAsync` (thundering herd risk on single-use refresh tokens), `IsExpired` uses `<` instead of `<=` (off-by-one at exact expiry), and `ExchangeCodeForTokens` removes flow state under lock before the token-endpoint call (blocks retry on transient 503).
+- `SimpleDownloadOrchestratorCancellationAndBackpressureTests` (+9 tests) — pre/mid-flight cancellation (sequential + parallel), MaxConcurrent boundary (Theory over 1/2/4), partial-completion reporting, backpressure under slow downstream, and 1 documented production quirk (`Orchestrator_Quirk_…`): the `IAudioStreamProvider` catch at `SimpleDownloadOrchestrator.cs:285-288` swallows `OperationCanceledException` and converts it into `TrackDownloadResult{Success=false}`, contradicting `DownloadViaUrlAsync` and rendering the outer OCE catch unreachable.
+
 **Breaking changes:** Public API surface narrowed — the removed types have been `[Obsolete]` since v1.2 (`AdaptiveRateLimiter`: "will be removed in 1.3"). 10 minor versions of grace.
 **Deprecations:** None new
 **Dependency changes:** None
