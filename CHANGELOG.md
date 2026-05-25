@@ -35,6 +35,19 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.14.1] - 2026-05-24
+**Upgrade note:** Patch — fixes the `OperationCanceledException`-swallow regression caught in v1.14.0's bundled `SimpleDownloadOrchestratorCancellationAndBackpressureTests`. The IAudioStreamProvider catch at `SimpleDownloadOrchestrator.cs:285-296` now rethrows OCE when the caller's token requested cancellation, matching `DownloadViaUrlAsync`'s behavior. Plugins that subclass `SimpleDownloadOrchestrator` or use it directly via the stream-provider path will see cancellation surface as OCE instead of silently returning `TrackDownloadResult{Success=false}`.
+
+**Highlights**
+- `SimpleDownloadOrchestrator.DownloadTrackInternalAsync` adds a narrow `catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)` that rethrows so the outer OCE catch at line 300 fires (it was previously unreachable on the stream-provider path). Telemetry now correctly emits "Canceled" instead of a generic failure string.
+- Companion test renamed from `Orchestrator_Quirk_…StreamProviderCancellationSwallowedAsFailureResult` to `DownloadTrackAsync_StreamProviderPathRethrowsOperationCanceledException` and updated to assert `ThrowsAnyAsync<OperationCanceledException>`.
+
+**Breaking changes:** None for plugins that don't actively rely on cancellation surfacing as a failure result. Plugins that had compensated for the bug by ignoring the `ErrorMessage` and re-checking the cancellation token will see OCE propagate to their normal exception handler — the documented contract.
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.14.0...v1.14.1)
+
 ## [1.14.0] - 2026-05-24
 **Upgrade note:** Minor bump that completes the long-overdue obsolete-grace removal of the legacy `AdaptiveRateLimiter` family and the deprecated `CachePolicy.WithExecutor` overload. Plugins that still target the legacy types must migrate before bumping (no migration was required in this ecosystem — verified zero production call sites in apple/tidalarr/qobuzarr/brainarr; Qobuzarr's last `WithExecutor` call site migrated in companion commit).
 

@@ -7,7 +7,7 @@
     To bump: change the value here only.
   -->
   <PropertyGroup>
-    <Version>1.14.0</Version>
+    <Version>1.14.1</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(UseHostVersioning)' == 'true'">
