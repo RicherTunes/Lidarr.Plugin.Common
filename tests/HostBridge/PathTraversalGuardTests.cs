@@ -212,4 +212,65 @@ public class PathTraversalGuardTests
 
         Assert.False(PathTraversalGuard.IsPathWithinRoot(output, hostileRoot));
     }
+
+    // ================================================================== //
+    // ContainsTraversalAttempt — predicate-only probe (Wave 19A)
+    // ================================================================== //
+    //
+    // SanitizeSegment + IsPathWithinRoot are for SANITIZING/CONTAINING actual
+    // file paths. The probe is for places where you just want to ANSWER the
+    // question "does this user-supplied string look like a traversal attempt?"
+    // without normalizing or building a real path. Examples:
+    //   - URL validators that reject /api/foo/../../etc style paths
+    //   - text fields that should never contain `..` segments
+    //   - audit logs that want to flag suspicious input
+
+    [Theory]
+    [InlineData("../etc/passwd")]
+    [InlineData("..\\windows\\system32")]
+    [InlineData("foo/../../bar")]
+    [InlineData("legit\\..\\bad")]
+    [InlineData("..")]
+    [InlineData("../")]
+    [InlineData("..\\")]
+    public void ContainsTraversalAttempt_LiteralDotDotSegments_ReturnsTrue(string input)
+    {
+        Assert.True(PathTraversalGuard.ContainsTraversalAttempt(input));
+    }
+
+    [Theory]
+    [InlineData("%2e%2e/etc")]              // URL-encoded ../
+    [InlineData("%2e%2e%2f")]
+    [InlineData("%2E%2E/passwd")]           // upper-case hex
+    [InlineData("%2e%2e\\system32")]
+    [InlineData("%2e%2e%5cwindows")]        // URL-encoded ..\
+    public void ContainsTraversalAttempt_UrlEncodedDotDot_ReturnsTrue(string input)
+    {
+        Assert.True(PathTraversalGuard.ContainsTraversalAttempt(input));
+    }
+
+    [Theory]
+    [InlineData("Pink Floyd")]
+    [InlineData("AC/DC")]
+    [InlineData("foo.bar.baz")]             // dots in filenames are fine
+    [InlineData("artist.album.2024")]
+    [InlineData("a..b")]                    // double-dot inside a name (no separator)
+    [InlineData("legitimate/sub/dir")]
+    [InlineData("/api/v1/get")]
+    [InlineData("https://example.com/album/123")]
+    public void ContainsTraversalAttempt_NormalInputs_ReturnsFalse(string input)
+    {
+        Assert.False(PathTraversalGuard.ContainsTraversalAttempt(input));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(null)]
+    [InlineData("   ")]
+    public void ContainsTraversalAttempt_NullOrEmpty_ReturnsFalse(string? input)
+    {
+        // No content → no attempt. Callers that want to reject empty strings
+        // should add their own check; the probe answers only its narrow question.
+        Assert.False(PathTraversalGuard.ContainsTraversalAttempt(input));
+    }
 }
