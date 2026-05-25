@@ -1,4 +1,5 @@
 using System;
+using System.Collections;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 
@@ -19,6 +20,7 @@ namespace Lidarr.Plugin.Common.Collections
     /// <typeparam name="TKey">The type of keys in the dictionary.</typeparam>
     /// <typeparam name="TValue">The type of values in the dictionary.</typeparam>
     public sealed class BoundedConcurrentDictionary<TKey, TValue>
+        : IEnumerable<KeyValuePair<TKey, TValue>>
         where TKey : notnull
     {
         private readonly ConcurrentDictionary<TKey, TValue> _inner;
@@ -57,6 +59,45 @@ namespace Lidarr.Plugin.Common.Collections
         /// Returns a snapshot of all current keys.
         /// </summary>
         public ICollection<TKey> Keys => _inner.Keys;
+
+        /// <summary>
+        /// Returns a snapshot of all current values. Mirrors
+        /// <see cref="ConcurrentDictionary{TKey, TValue}.Values"/>.
+        /// </summary>
+        public ICollection<TValue> Values => _inner.Values;
+
+        /// <summary>
+        /// Returns true if the dictionary contains the specified key. Mirrors
+        /// <see cref="ConcurrentDictionary{TKey, TValue}.ContainsKey"/>; useful for "miss"
+        /// caches whose values are byte sentinels and where TryGetValue is overkill.
+        /// </summary>
+        public bool ContainsKey(TKey key) => _inner.ContainsKey(key);
+
+        /// <summary>
+        /// Indexer that mirrors <see cref="ConcurrentDictionary{TKey, TValue}"/>'s.
+        /// <para>Get: <see cref="KeyNotFoundException"/> when absent.</para>
+        /// <para>Set: capacity-checked then assigns (overwrite semantics). Insert path runs
+        /// <see cref="EvictIfNeeded"/> first so the indexer setter respects the cap.</para>
+        /// </summary>
+        public TValue this[TKey key]
+        {
+            get => _inner[key];
+            set
+            {
+                EvictIfNeeded();
+                _inner[key] = value;
+            }
+        }
+
+        /// <summary>
+        /// Enumerates key/value pairs. Mirrors
+        /// <see cref="ConcurrentDictionary{TKey, TValue}"/>'s snapshot-style enumerator —
+        /// safe under concurrent mutation but does not observe writes that happen after
+        /// enumeration begins.
+        /// </summary>
+        public IEnumerator<KeyValuePair<TKey, TValue>> GetEnumerator() => _inner.GetEnumerator();
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
         /// <summary>
         /// Attempts to add the key/value pair. If the dictionary is at or above capacity,
