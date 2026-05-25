@@ -297,4 +297,89 @@ public class ScrubTests
         const string url = "https://api.example.com/tracks?q=radiohead&limit=10&offset=0&filter=studio";
         Assert.Equal(url, Scrub.Url(url));
     }
+
+    // ================================================================== //
+    // Scrub.UrlAndStripQuery
+    // ================================================================== //
+    //
+    // The conservative sibling to Scrub.Url: drops the entire query string +
+    // fragment instead of selectively redacting known-sensitive parameter values.
+    // Use when you can't enumerate the sensitive parameters ahead of time —
+    // signed CDN URLs, HLS streams with rotating tokens, vendor proprietary
+    // query schemas. The cost is losing any non-sensitive context (region,
+    // format, expires) from the logged URL; the upside is no leak risk if a
+    // new sensitive param name appears upstream.
+
+    [Fact]
+    public void UrlAndStripQuery_Null_ReturnsEmpty()
+    {
+        Assert.Equal(string.Empty, Scrub.UrlAndStripQuery(null!));
+    }
+
+    [Fact]
+    public void UrlAndStripQuery_Empty_ReturnsEmpty()
+    {
+        Assert.Equal(string.Empty, Scrub.UrlAndStripQuery(string.Empty));
+    }
+
+    [Fact]
+    public void UrlAndStripQuery_NoQueryString_ReturnedUnchanged()
+    {
+        const string url = "https://cdn.example.com/v1/segment.ts";
+        Assert.Equal(url, Scrub.UrlAndStripQuery(url));
+    }
+
+    [Fact]
+    public void UrlAndStripQuery_DropsAllQueryParams_SensitiveAndNot()
+    {
+        // Unlike Scrub.Url which preserves q=music, this strips EVERYTHING after '?'.
+        const string url = "https://cdn.example.com/seg.ts?token=abc&sig=def&format=ts&expires=1234";
+        Assert.Equal("https://cdn.example.com/seg.ts", Scrub.UrlAndStripQuery(url));
+    }
+
+    [Fact]
+    public void UrlAndStripQuery_DropsFragment()
+    {
+        const string url = "https://cdn.example.com/playlist.m3u8#variant-3";
+        Assert.Equal("https://cdn.example.com/playlist.m3u8", Scrub.UrlAndStripQuery(url));
+    }
+
+    [Fact]
+    public void UrlAndStripQuery_DropsFragmentAndQuery()
+    {
+        const string url = "https://cdn.example.com/playlist.m3u8?token=abc#variant-3";
+        Assert.Equal("https://cdn.example.com/playlist.m3u8", Scrub.UrlAndStripQuery(url));
+    }
+
+    [Fact]
+    public void UrlAndStripQuery_PreservesPath_IncludingSegmentsThatLookLikeQueries()
+    {
+        // The slash-segments before '?' MUST be preserved even if they contain
+        // characters that look like query syntax in other contexts.
+        const string url = "https://cdn.example.com/v1/streams/abc123/segment.ts?token=x";
+        Assert.Equal("https://cdn.example.com/v1/streams/abc123/segment.ts", Scrub.UrlAndStripQuery(url));
+    }
+
+    [Fact]
+    public void UrlAndStripQuery_PreservesPort()
+    {
+        const string url = "https://localhost:8443/api/test?key=secret";
+        Assert.Equal("https://localhost:8443/api/test", Scrub.UrlAndStripQuery(url));
+    }
+
+    [Fact]
+    public void UrlAndStripQuery_HttpScheme_Works()
+    {
+        const string url = "http://example.com/path?token=x";
+        Assert.Equal("http://example.com/path", Scrub.UrlAndStripQuery(url));
+    }
+
+    [Fact]
+    public void UrlAndStripQuery_RelativeOrInvalidUrl_ReturnsInputUnchanged()
+    {
+        // No scheme/host to parse — return as-is. Caller can detect this by
+        // checking whether the result equals the input.
+        Assert.Equal("not a url", Scrub.UrlAndStripQuery("not a url"));
+        Assert.Equal("/just/a/path", Scrub.UrlAndStripQuery("/just/a/path"));
+    }
 }

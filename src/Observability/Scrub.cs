@@ -119,6 +119,50 @@ public static class Scrub
     }
 
     // ------------------------------------------------------------------ //
+    // URL (conservative — strip entire query+fragment)
+    // ------------------------------------------------------------------ //
+
+    /// <summary>
+    /// Returns <paramref name="url"/> with its query string AND fragment dropped,
+    /// leaving only <c>scheme://host[:port]/path</c>. The conservative sibling
+    /// to <see cref="Url"/>.
+    ///
+    /// <para>Use this when you can't enumerate sensitive parameter names ahead
+    /// of time — signed CDN URLs, HLS streams with rotating tokens, vendor
+    /// proprietary query schemas. The cost is losing any non-sensitive context
+    /// (region, format, expires) from the logged URL; the upside is no leak
+    /// risk if a new sensitive param name appears upstream and
+    /// <see cref="LogRedactor.IsSensitiveParameter"/> hasn't been updated to
+    /// recognise it.</para>
+    ///
+    /// <para>For known URL structures with stable parameter sets, prefer
+    /// <see cref="Url"/> — it preserves debugging-useful context.</para>
+    ///
+    /// <para>Behaviour:
+    /// <list type="bullet">
+    ///   <item><c>null</c> or empty → empty string.</item>
+    ///   <item>Valid absolute URL → scheme://host/path, query and fragment dropped.</item>
+    ///   <item>Unparseable input (relative paths, non-URLs) → returned unchanged.
+    ///         Caller can detect this by comparing the result to the input.</item>
+    /// </list>
+    /// </para>
+    /// </summary>
+    public static string UrlAndStripQuery(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return string.Empty;
+
+        try
+        {
+            return new Uri(url).GetLeftPart(UriPartial.Path);
+        }
+        catch (UriFormatException)
+        {
+            return url;
+        }
+    }
+
+    // ------------------------------------------------------------------ //
     // Private helpers
     // ------------------------------------------------------------------ //
 
