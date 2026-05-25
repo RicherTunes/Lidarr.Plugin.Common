@@ -817,5 +817,59 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         #endregion
+
+        #region Default Folder Resolution Tests
+
+        /// <summary>
+        /// Regression test for the Docker bug where Lidarr's container has empty HOME, so the
+        /// old chain <c>Path.Combine(Environment.GetFolderPath(SpecialFolder.ApplicationData), ...)</c>
+        /// resolved to a relative path anchored at the readonly /app/bin cwd. The constructor
+        /// must now defer to <see cref="Lidarr.Plugin.Common.Hosting.PluginConfigRoots.Resolve"/>
+        /// so the resulting path is always absolute (rooted).
+        /// </summary>
+        [Fact]
+        public void Constructor_DefaultFolder_ResolvesToRootedPath()
+        {
+            // Arrange: point the resolver at a known absolute root via the explicit override env var.
+            // We use a path under the system temp dir so we don't pollute %AppData% or /config.
+            var overrideRoot = Path.Combine(Path.GetTempPath(), "fsrc-resolver-test-" + Guid.NewGuid().ToString("N"));
+            var previousOverride = Environment.GetEnvironmentVariable(Lidarr.Plugin.Common.Hosting.PluginConfigRoots.OverrideEnvVar);
+            Environment.SetEnvironmentVariable(Lidarr.Plugin.Common.Hosting.PluginConfigRoots.OverrideEnvVar, overrideRoot);
+            string? createdRoot = null;
+            try
+            {
+                // Act: construct with no explicit folder argument so the default branch fires.
+                var cache = new FileStreamingResponseCache(folder: null, defaultDuration: TimeSpan.FromHours(1));
+
+                // Assert: write something and read back. If the constructor had resolved to a
+                // relative path, Directory.CreateDirectory or File.Create would have failed (or
+                // anchored the path at the test runner cwd). Reaching this point with successful
+                // round-trip proves the resolved path is rooted and writable.
+                Assert.NotNull(cache);
+                cache.Set(
+                    "/api/resolver-smoke",
+                    new Dictionary<string, string>(),
+                    new CachedHttpResponse { Body = Encoding.UTF8.GetBytes("ok") });
+                var roundtrip = cache.Get<CachedHttpResponse>("/api/resolver-smoke", new Dictionary<string, string>());
+                Assert.NotNull(roundtrip);
+
+                // And the resolved root should actually exist on disk under the override.
+                var expectedRoot = Path.Combine(overrideRoot, "ArrPlugins", "resp-cache");
+                Assert.True(Path.IsPathRooted(expectedRoot));
+                Assert.True(Directory.Exists(expectedRoot), $"Expected resolver-derived root '{expectedRoot}' to exist.");
+                createdRoot = overrideRoot;
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable(Lidarr.Plugin.Common.Hosting.PluginConfigRoots.OverrideEnvVar, previousOverride);
+                if (createdRoot != null)
+                {
+                    try { Directory.Delete(createdRoot, recursive: true); }
+                    catch { }
+                }
+            }
+        }
+
+        #endregion
     }
 }
