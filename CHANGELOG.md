@@ -35,6 +35,23 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-05-24
+**Upgrade note:** Minor bump bundling Wave 17F unification + hardening. The observable behavior change is that `Scrub.Url` now redacts more parameter names (it delegates to `LogRedactor.IsSensitiveParameter`'s exact + contains rules) — anything containing `secret`, `password`, `token`, `auth`, `credential`, `key`, or `apikey` in the param name will be masked. If a non-sensitive UI param of yours happens to contain one of these substrings, its value in logs will start appearing as `***`. Sentinel is `***` (was `***` already; only the recognition surface expanded).
+
+**Highlights — observability unification**
+- `Scrub.Url` delegates recognition to `LogRedactor.IsSensitiveParameter` so URL scrubbing and structured-property redaction stay in lockstep (Wave 17F). Catches Qobuz-specific names (`user_auth_token`, `app_secret`, `request_sig`) and any compound names (`my_secret_token`, `app_password`, `private_key`).
+
+**Highlights — hardening (PathTraversalGuard adversarial review)**
+- **Unicode NFC/NFD normalization** — root and descendant are both forced to NFC before the prefix comparison so a path entered in one form isn't rejected because the OS resolved the other. Fixes a legitimate-path DoS, no security-bypass implications.
+- **Windows DOS-device / long-path prefix stripping** — `\\?\`, `\\.\`, and `\\?\UNC\` prefixes are stripped from both sides before comparison on Windows. A root configured without the prefix but a descendant resolved with one (or vice-versa) is now accepted correctly.
+- **Fail-closed on Path.GetFullPath exceptions** — null bytes / control chars / over-long paths in either the output or the root now return `false` instead of escaping `ArgumentException`/`PathTooLongException`/`NotSupportedException`/`SecurityException`.
+
+**Breaking changes:** None for plugins using the documented API surface. The `Scrub.Url` recognition expansion is a defensive widening — any false-positive masking is intentional (a secret leaking is worse than a UI param being masked).
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.12.0...v1.13.0)
+
 ## [1.12.0] - 2026-05-24
 **Upgrade note:** Minor bump with one defensive behavior change. `StreamingApiRequestBuilder.Build()` now seals the instance; calling `Build()` again or any mutator after `Build()` throws `InvalidOperationException`. Plugins that already create a fresh builder per request (the documented pattern) need no changes. Plugins that stored a shared builder in a field will hit the throw — fix the call site to use a per-call factory. `BuildForLogging()` is read-only and does NOT seal.
 
