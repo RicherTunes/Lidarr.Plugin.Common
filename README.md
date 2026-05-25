@@ -10,19 +10,19 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.8.0 — May 23, 2026
+Latest: v1.17.0 — May 25, 2026
 
-- Ecosystem version contract introduced via `versionContract` section in `scripts/parity-spec.json`.
-  Plugin authors must invoke `ecosystem-parity-lint.ps1 -Check VersionContract` from their CI pipeline
-  to ensure their plugin's `VERSION` file and manifest version are consistent with the Common library
-  version they depend on. This check is enforced during the nightly parity run and should be added
-  to every plugin's `pr-validation.yml` as `pwsh scripts/ecosystem-parity-lint.ps1 -Check VersionContract`.
-- `forbiddenFields` enforcement now wired into the parity-lint pipeline.
-- ALC multi-plugin co-existence fix landed (see CHANGELOG for details).
-- `StreamingPluginMixins`: rate-limit wait refactored to async (`SemaphoreSlim` + `await Task.Delay`), eliminating the blocking-wait-inside-lock anti-pattern.
-- `SmartCache`: flaky expiry and eviction tests fixed with deterministic `TimeProvider` injection.
+- **v1.17.0** — Wave-21 parity helpers (PathTraversalGuard.ContainsTraversalAttempt probe, AlbumDownloadUri parser, AlbumReleaseInfoBuilder Edition/Explicit/Live slots, unified plugin version-bump helper).
+- **v1.16.0** — `SlidingWindowAuthFailureHandler` (K-of-N-in-W sliding-window circuit semantics, sibling of `DefaultAuthFailureHandler`); unblocks brainarr's `LlmAuthCircuit` convergence onto the shared Common stack.
+- **v1.15.0** — `BoundedConcurrentDictionary` richer API surface (indexer setter, `ContainsKey`, `Values`, `IEnumerable<KeyValuePair>`); SecureMemory + Conservative rate-limit profile + PagedResponseValidator.
+- **v1.14.x** — AuthFailureGate surface (registry, delegating handler, gated exception) + multi-plugin ALC coexistence proof + ecosystem version contract enforcement.
+- **v1.13.x** — Plugin packaging contract + plugin version contract + published-release installability checks (test kit).
+- **v1.12.0** — `AlbumReleaseInfoBuilder` (lift wave A item 8); `HostBridgeDownloadOrchestrator` (lift wave A item 2); `RetryPolicyOptions.ForLocalProviders` preset.
+- **v1.8.0** — ecosystem version contract via `versionContract` section in `scripts/parity-spec.json`; `forbiddenFields` enforcement wired into parity-lint; ALC multi-plugin co-existence fix.
 
-Release notes: [v1.8.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.8.0)
+Release notes: [v1.17.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.17.0) · [v1.16.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.16.0)
+
+Ecosystem-wide parity (every plugin × every cross-cutting concern): see [docs/ECOSYSTEM_PARITY_MATRIX.md](docs/ECOSYSTEM_PARITY_MATRIX.md).
 
 ## Choose your adventure
 
