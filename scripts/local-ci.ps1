@@ -294,15 +294,21 @@ if ($SkipExtract) {
         }
         $rc = Get-Content -LiteralPath $rcPath -Raw | ConvertFrom-Json
         $runtimeVersion = $null
-        # Newer Lidarr images ship runtimeconfig with `frameworks` (plural array)
-        # only — accessing `.framework` directly throws under StrictMode. Probe
-        # property existence before reading either shape so we tolerate both.
+        # Lidarr's runtimeconfig can use any of three shapes:
+        #   - `framework` (singular object with version)
+        #   - `frameworks` (plural array, .NET 6/7-era multi-target style)
+        #   - `includedFrameworks` (plural array, the shape Lidarr plugins-branch images
+        #     emit as of 3.x — discovered when the release agent for Wave 17M hit this).
+        # Accessing properties directly throws under StrictMode; probe existence first.
         $rtOpts = $rc.runtimeOptions
         if ($rtOpts -and $rtOpts.PSObject.Properties['framework']) {
             $runtimeVersion = $rtOpts.framework.version
         }
         if (-not $runtimeVersion -and $rtOpts -and $rtOpts.PSObject.Properties['frameworks']) {
             $runtimeVersion = ($rtOpts.frameworks | Where-Object { $_.name -eq 'Microsoft.NETCore.App' }).version
+        }
+        if (-not $runtimeVersion -and $rtOpts -and $rtOpts.PSObject.Properties['includedFrameworks']) {
+            $runtimeVersion = ($rtOpts.includedFrameworks | Where-Object { $_.name -eq 'Microsoft.NETCore.App' }).version
         }
         if (-not $runtimeVersion -or -not $runtimeVersion.StartsWith('8.')) {
             throw ".NET 8 guardrail FAILED: runtime version is '$runtimeVersion' (expected 8.x)"
