@@ -35,6 +35,18 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.13.1] - 2026-05-24
+**Upgrade note:** Patch — fixes a build-side bug for plugin authors who pass an absolute `LidarrAssembliesPath` to `dotnet build`. Prior to this patch the path got prefixed with the project directory, producing `C:\repo\C:\repo\…` which ILRepack could not resolve and failed with "Failed to resolve assembly: 'Lidarr.Core'". Affects CI release workflows that supply an extract dir as an absolute path. No runtime impact, no plugin code changes needed.
+
+**Highlights**
+- `build/PluginPackaging.targets:78` switched to `System.IO.Path.GetFullPath(path, basePath)` so absolute and relative `LidarrAssembliesPath` inputs both resolve correctly.
+
+**Breaking changes:** None
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.13.0...v1.13.1)
+
 ## [1.13.0] - 2026-05-24
 **Upgrade note:** Minor bump bundling Wave 17F unification + hardening. The observable behavior change is that `Scrub.Url` now redacts more parameter names (it delegates to `LogRedactor.IsSensitiveParameter`'s exact + contains rules) — anything containing `secret`, `password`, `token`, `auth`, `credential`, `key`, or `apikey` in the param name will be masked. If a non-sensitive UI param of yours happens to contain one of these substrings, its value in logs will start appearing as `***`. Sentinel is `***` (was `***` already; only the recognition surface expanded).
 
