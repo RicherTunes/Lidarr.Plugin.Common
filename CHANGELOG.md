@@ -35,6 +35,39 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.17.0] - 2026-05-25
+**Upgrade note:** Minor bump — adds four additive helpers to close cross-plugin parity
+gaps identified in the wave-17S ecosystem audit. All additions are non-breaking; plugins
+adopt them one site at a time. The wave-21 master tracker references each new helper as
+the unblocker for a specific plugin-side migration.
+
+**Highlights**
+- `Scrub.UrlAndStripQuery(string url)` — defensive sibling of `Scrub.Url`. Drops the
+  entire query+fragment instead of selectively redacting known-sensitive parameter
+  values. Apple's `RedactUrl` HLS-stream pattern; useful when the parameter name set
+  is not enumerable ahead of time (signed CDN URLs, vendor proprietary query schemas).
+- `PathTraversalGuard.ContainsTraversalAttempt(string? input)` — predicate-only probe.
+  Returns true for literal `../`, `..\\`, `/..`, `\..`, exact `..`, and URL-encoded
+  `%2e%2e/`, `%2e%2e%2f`, `%2e%2e\\`, `%2e%2e%5c` (case-insensitive). Six plugin sites
+  currently miss the URL-encoded variants — adopting the helper is also a hardening.
+- `AlbumDownloadUri.Build` / `TryExtractAlbumId` — sibling of `PlaceholderSearchUri`
+  covering the `{scheme}://album/{id}[?quality={q}]` grammar emitted as
+  `ReleaseInfo.DownloadUrl`. Parser is liberal — accepts new format (`?quality=`),
+  legacy path-segment format (`{id}/{q}`), and bare (`{id}`) so in-flight downloads
+  queued before a plugin migration continue to resolve.
+- `AlbumReleaseInfoBuilder` adds three bracket slots — `WithEditionMarker(string?)`,
+  `WithExplicitMarker(bool)`, `WithLiveMarker(bool)` — between `({Year})` and
+  `[{Format}]`. Closes qobuzarr's 5-bracket TitleGenerator shape so it can adopt the
+  builder. Tidalarr/apple unaffected — new slots default to omitted.
+- `scripts/bump-plugin-version.ps1` — unified plugin-version-bump helper. One command
+  to update VERSION + plugin.json + manifest.json + optional ext-common-sha.txt
+  atomically. `-Check` mode for pre-commit / CI consistency validation. Catches the
+  recurring drift pattern apple hit three times in May 2026.
+
+**Breaking changes:** none. All four library additions are additive.
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.16.0...v1.17.0)
+
 ## [1.16.0] - 2026-05-25
 **Upgrade note:** Minor bump — adds `SlidingWindowAuthFailureHandler` as a sibling
 to `DefaultAuthFailureHandler` for plugins whose auth-failure recovery patterns
