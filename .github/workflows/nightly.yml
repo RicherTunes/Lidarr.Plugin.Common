@@ -74,6 +74,7 @@ jobs:
         run: dotnet build lidarr.plugin.common.sln --configuration Release --no-restore -p:DisablePathMap=true -maxcpucount:1
 
       - name: Run tests
+        shell: bash
         run: |
           dotnet test lidarr.plugin.common.sln \
             --configuration Release \
