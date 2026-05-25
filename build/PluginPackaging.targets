@@ -75,7 +75,13 @@
            correct relative spot). Anchoring on MSBuildProjectDirectory + GetFullPath
            guarantees ILRepack can find the dir regardless of where it runs from. -->
       <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' == ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net6.0'));$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)/../../ext/Lidarr/_output/net8.0'))</_LidarrAssembliesPath>
-      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' != ''">$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\$(LidarrAssembliesPath)'))</_LidarrAssembliesPath>
+      <!-- Wave 17I: Path.GetFullPath(path, basePath) — the basePath argument is ONLY used
+           when path is relative. When LidarrAssembliesPath is already absolute (e.g.
+           CI passing a fully-qualified extract dir), the prior string-concat formed
+           "C:\repo\C:\repo\ext\Lidarr\_output\net8.0" which GetFullPath cannot resolve
+           and ILRepack fails with "Failed to resolve assembly: 'Lidarr.Core'". The
+           two-arg overload handles both relative and absolute correctly. -->
+      <_LidarrAssembliesPath Condition="'$(LidarrAssembliesPath)' != ''">$([System.IO.Path]::GetFullPath('$(LidarrAssembliesPath)', '$(MSBuildProjectDirectory)'))</_LidarrAssembliesPath>
       <!-- Probe whether the resolved Lidarr extraction is complete enough for ILRepack to
            resolve all transitive deps. Lidarr.Core depends on Dapper / DryIoc / FluentMigrator
            / Azure.Core / etc.; a minimal extraction (just Lidarr.*.dll) makes ILRepack fail
