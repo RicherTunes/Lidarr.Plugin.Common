@@ -275,24 +275,14 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
-        public async Task Orchestrator_Quirk_DownloadTrackAsync_StreamProviderCancellationSwallowedAsFailureResult()
+        public async Task DownloadTrackAsync_StreamProviderPathRethrowsOperationCanceledException()
         {
-            // BUG: SimpleDownloadOrchestrator.DownloadTrackInternalAsync wraps the
-            // IAudioStreamProvider call in a `catch (Exception ex)` (source lines ~285-288)
-            // that catches OperationCanceledException and converts it to a failure
-            // TrackDownloadResult instead of rethrowing. This contradicts:
-            //   (a) the URL-based path in DownloadViaUrlAsync which explicitly rethrows OCE
-            //       (source lines ~439-442)
-            //   (b) the public DownloadTrackAsync entry which begins with
-            //       ThrowIfCancellationRequested() -- callers expect OCE on cancel
-            //   (c) the outer `catch (OperationCanceledException)` at source line ~300
-            //       which is unreachable when a stream provider is configured
-            //
-            // Expected (eventually): OperationCanceledException is propagated to the caller.
-            // Observed (today):       Task completes with Success=false and ErrorMessage
-            //                          beginning "Track t1: ..." (sanitized OCE message).
-            //
-            // This test pins the current behavior so a future fix is visible in the diff.
+            // Wave 17M fix: the IAudioStreamProvider catch at SimpleDownloadOrchestrator.cs:285-296
+            // now rethrows OperationCanceledException when the caller's token requested cancellation,
+            // matching DownloadViaUrlAsync's behavior and reaching the outer OCE catch at ~300.
+            // Previously, an OCE was silently converted into TrackDownloadResult{Success=false}
+            // which broke the documented contract (callers expected OCE on cancel) and rendered
+            // the outer catch unreachable.
             var release = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var atGate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
             var streamProvider = new GatedStreamProvider(_ => new byte[16], releaseAll: release);
@@ -310,12 +300,7 @@ namespace Lidarr.Plugin.Common.Tests
                 await atGate.Task.WaitAsync(TimeSpan.FromSeconds(10));
                 cts.Cancel();
 
-                // Pin current behavior: cancellation is swallowed and surfaces as a
-                // failure result rather than an OperationCanceledException.
-                var result = await task;
-
-                Assert.False(result.Success, "Cancellation currently surfaces as a failure result");
-                Assert.False(string.IsNullOrEmpty(result.ErrorMessage));
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
 
                 // Atomic move never happens on cancellation, so the final file must be absent.
                 Assert.False(File.Exists(outputPath), "Final file must not be left behind after cancellation");
