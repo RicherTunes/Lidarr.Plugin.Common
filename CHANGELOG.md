@@ -35,6 +35,18 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.14.2] - 2026-05-24
+**Upgrade note:** Patch — single-flights `OAuthStreamingAuthenticationService.RefreshTokensAsync` to prevent the thundering herd that breaks providers single-using refresh tokens (most major OAuth servers — token rotation is security best practice). Plugins that have multiple concurrent code paths needing the same access token now coalesce on a single in-flight refresh; the first caller hits the auth server, the rest await the shared `Task` and receive the same rotated session.
+
+**Highlights**
+- `OAuthStreamingAuthenticationService.RefreshTokensAsync` uses promise-sharing single-flight: the first caller starts the refresh and stores the `Task<TSession>`; later callers see the in-flight `Task` and `await` it without re-hitting `RefreshTokensInternalAsync`. Slot clears after completion so the next expiry can refresh again.
+
+**Breaking changes:** None for plugins using the documented API. The fix narrows the previously-undefined behavior of concurrent refresh from "thundering herd" to "single-flight" — strictly an improvement for any caller.
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.14.1...v1.14.2)
+
 ## [1.14.1] - 2026-05-24
 **Upgrade note:** Patch — fixes the `OperationCanceledException`-swallow regression caught in v1.14.0's bundled `SimpleDownloadOrchestratorCancellationAndBackpressureTests`. The IAudioStreamProvider catch at `SimpleDownloadOrchestrator.cs:285-296` now rethrows OCE when the caller's token requested cancellation, matching `DownloadViaUrlAsync`'s behavior. Plugins that subclass `SimpleDownloadOrchestrator` or use it directly via the stream-provider path will see cancellation surface as OCE instead of silently returning `TrackDownloadResult{Success=false}`.
 
