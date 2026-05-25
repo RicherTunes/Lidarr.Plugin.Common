@@ -35,6 +35,59 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.16.0] - 2026-05-25
+**Upgrade note:** Minor bump — adds `SlidingWindowAuthFailureHandler` as a sibling
+to `DefaultAuthFailureHandler` for plugins whose auth-failure recovery patterns
+are minutes-to-hours rather than seconds-to-minutes. Pairs with the existing
+`AuthFailureGate.probeInterval` to give the brainarr-style "K-of-N-in-W → open
+for D → probe → close-or-reopen" circuit-breaker semantics on the shared Common
+API. Unblocks the brainarr `LlmAuthCircuit` ↔ Common convergence path that the
+wave-21 ecosystem parity matrix tracked.
+
+**Highlights**
+- `SlidingWindowAuthFailureHandler` — `IAuthFailureHandler` implementation with
+  `(failureThreshold, failureWindow, clock)` ctor. Latches `Status` to
+  `AuthStatus.Failed` after `failureThreshold` consecutive failures occur
+  within `failureWindow`. Failures older than the window are dropped so a stale
+  run of 401s against a now-rotated credential won't pre-latch the new one.
+  `HandleSuccessAsync` resets the counter + status to `Authenticated`.
+- "Open duration" semantics — how often a probe is allowed while latched — are
+  configured at the GATE layer via `AuthFailureGate.probeInterval`. So
+  `new AuthFailureGate(handler, clock, probeInterval: TimeSpan.FromMinutes(30), …)`
+  paired with a `SlidingWindowAuthFailureHandler(3, TimeSpan.FromMinutes(5))`
+  produces the brainarr `LlmAuthCircuit` shape: 3 failures in 5 min → open for
+  30 min → probe.
+- Exposes `FirstFailureInWindow` (operator-side observability for "how recent
+  is the current failure run") + `ResetToUnknown()` (for settings-UI "Test
+  Connection" flows).
+
+**Test coverage** (17 new tests in `SlidingWindowAuthFailureHandlerTests`)
+- Constructor rejection of bad inputs (null logger, threshold ≤ 0, non-positive window).
+- Initial state is `Unknown`.
+- Threshold behavior: sub-threshold doesn't latch, at-threshold latches, beyond
+  threshold stays Failed.
+- Sliding window: failures outside the window don't count toward threshold;
+  the window slides from the first failure in the current run.
+- Success recovery from Unknown / Failed; success is idempotent.
+- `Expired` status preservation (don't downgrade to `Failed`).
+- `ResetToUnknown()` clears latch and counter.
+- Integration with `AuthFailureGate` (threshold latch triggers gate, success
+  recovers gate, probeInterval rate-limits probes while latched).
+
+**Why this matters for the ecosystem**
+- Brainarr's `LlmAuthCircuit` (per-(providerId, hashed-key) 3-failure-in-5-min
+  → 30-min-open → HalfOpen-probe circuit breaker) can now be re-implemented on
+  top of `AuthFailureGateRegistry` + `SlidingWindowAuthFailureHandler` without
+  semantic loss. Closes the parity-matrix axis where brainarr was the only
+  plugin not on the shared Common gate. Convergence happens in a follow-up
+  brainarr commit that ripples this Common bump.
+
+**Breaking changes:** None — purely additive (new public type + tests).
+**Deprecations:** None
+**Dependency changes:** None
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.15.0...v1.16.0)
+
 ## [1.15.0] - 2026-05-25
 **Upgrade note:** Minor bump — `BoundedConcurrentDictionary<TKey, TValue>` gains the
 `ConcurrentDictionary`-equivalent API surface needed by callers that currently
