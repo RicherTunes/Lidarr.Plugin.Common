@@ -47,6 +47,74 @@ public static class PathTraversalGuard
     /// Returns <c>"_"</c> for null / empty / whitespace input (never returns a value that
     /// <c>Path.Combine</c> would interpret as a no-op or up-reference).
     /// </summary>
+    /// <summary>
+    /// Predicate-only probe: returns true if <paramref name="input"/> contains a
+    /// path-traversal attempt (literal <c>..</c> segments, URL-encoded variants).
+    /// Use for input validation where you want to REJECT (or audit-log) traversal
+    /// attempts without normalizing or building a real path — e.g. URL validators,
+    /// text-field validators, log-redaction triggers.
+    ///
+    /// <para>This is the predicate sibling of <see cref="SanitizeSegment"/>. Use
+    /// <see cref="SanitizeSegment"/> when you want to neutralize the traversal and
+    /// keep going. Use <c>ContainsTraversalAttempt</c> when you want to REJECT the
+    /// input entirely (return a 400, surface an error, log a suspicious-input
+    /// alert).</para>
+    ///
+    /// <para>Detection covers:
+    /// <list type="bullet">
+    ///   <item>Literal <c>..</c> followed by <c>/</c> or <c>\</c> (most common case)</item>
+    ///   <item><c>/..</c> or <c>\..</c> trailing or before another separator</item>
+    ///   <item>Exact <c>..</c> with no surrounding chars</item>
+    ///   <item>URL-encoded variants <c>%2e%2e</c> (any case combination)
+    ///         followed by <c>/</c>, <c>\</c>, <c>%2f</c>, or <c>%5c</c></item>
+    /// </list>
+    /// </para>
+    ///
+    /// <para>NOT flagged: dots inside a name (<c>foo..bar</c>, <c>artist.album.2024</c>) —
+    /// the predicate requires a separator-adjacency to count as traversal. This matches
+    /// the actual escape vector (separator-bounded <c>..</c> segments resolve via
+    /// <c>Path.GetFullPath</c>) without false-positiving common filename patterns.</para>
+    ///
+    /// Returns false for null / empty / whitespace input.
+    /// </summary>
+    public static bool ContainsTraversalAttempt(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input))
+        {
+            return false;
+        }
+
+        // Literal `..` adjacent to a separator on either side.
+        // The exact-`..` and trailing-`..` cases (no separator after) also count.
+        if (input.Contains("../", StringComparison.Ordinal) ||
+            input.Contains("..\\", StringComparison.Ordinal) ||
+            input.Contains("/..", StringComparison.Ordinal) ||
+            input.Contains("\\..", StringComparison.Ordinal))
+        {
+            return true;
+        }
+        // Exact `..` (no surrounding chars).
+        if (input.Trim() == "..")
+        {
+            return true;
+        }
+
+        // URL-encoded traversal: %2e%2e (with any case) followed by a separator
+        // (literal or URL-encoded). Use case-insensitive comparison for the hex.
+        if (ContainsCaseInsensitive(input, "%2e%2e/") ||
+            ContainsCaseInsensitive(input, "%2e%2e\\") ||
+            ContainsCaseInsensitive(input, "%2e%2e%2f") ||
+            ContainsCaseInsensitive(input, "%2e%2e%5c"))
+        {
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool ContainsCaseInsensitive(string haystack, string needle) =>
+        haystack.IndexOf(needle, StringComparison.OrdinalIgnoreCase) >= 0;
+
     public static string SanitizeSegment(string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
