@@ -157,4 +157,59 @@ public class PathTraversalGuardTests
         var descendant = Path.Combine(root, "Artist", "Album") + Path.DirectorySeparatorChar;
         Assert.True(PathTraversalGuard.IsPathWithinRoot(descendant, root));
     }
+
+    // ── Wave 17F adversarial-review findings ─────────────────────────────────────
+
+    [Fact]
+    public void IsPathWithinRoot_UnicodeNFCNFD_NormalizesBeforeCompare()
+    {
+        // Finding (MED): Path.GetFullPath does not normalize Unicode. If root contains the
+        // NFC form of "Café" (é = U+00E9) and the descendant contains the NFD form (e +
+        // U+0301), the canonical strings are byte-distinct and StartsWith would reject the
+        // descendant. This causes legitimate-path DoS when an admin pastes a path in one
+        // form while the OS produces the other when listing/combining. Normalize both sides
+        // to NFC before comparison.
+        var rootNfc = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "Café-" + Guid.NewGuid().ToString("N")));
+        // Same path but with é decomposed.
+        var rootNfd = rootNfc.Normalize(System.Text.NormalizationForm.FormD);
+        var descendant = Path.Combine(rootNfd, "Artist", "Album");
+
+        Assert.True(PathTraversalGuard.IsPathWithinRoot(descendant, rootNfc));
+    }
+
+    [Fact]
+    public void IsPathWithinRoot_RootNFD_DescendantNFC_StillAccepted()
+    {
+        // Symmetry: opposite normalization direction.
+        var rootNfc = Path.GetFullPath(Path.Combine(Path.GetTempPath(), "Café-" + Guid.NewGuid().ToString("N")));
+        var rootNfd = rootNfc.Normalize(System.Text.NormalizationForm.FormD);
+        // Build descendant under the NFC form, pass it against the NFD root.
+        var descendant = Path.Combine(rootNfc, "Artist", "Album");
+
+        Assert.True(PathTraversalGuard.IsPathWithinRoot(descendant, rootNfd));
+    }
+
+    [Fact]
+    public void IsPathWithinRoot_PathWithNullByte_ReturnsFalse_NotThrows()
+    {
+        // Finding (LOW): Path.GetFullPath throws ArgumentException on null bytes /
+        // control chars. The exception escaped IsPathWithinRoot and propagated up the
+        // call stack as a noisy error log. Should fail-closed: return false.
+        var root = RandomRoot();
+        var hostile = Path.Combine(root, "Artist\0", "Album");
+
+        Assert.False(PathTraversalGuard.IsPathWithinRoot(hostile, root));
+    }
+
+    [Fact]
+    public void IsPathWithinRoot_HostileRoot_DoesNotThrow()
+    {
+        // The root parameter typically comes from operator config so a malformed root is
+        // an operator error, not an attacker action — but fail-closed is still the right
+        // behavior so a bad config doesn't crash the download pipeline.
+        var hostileRoot = "C:\\some\0bad\0root";
+        var output = "C:\\downloads\\Artist\\Album";
+
+        Assert.False(PathTraversalGuard.IsPathWithinRoot(output, hostileRoot));
+    }
 }

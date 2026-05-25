@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Runtime.InteropServices;
+using System.Text;
 
 namespace Lidarr.Plugin.Common.HostBridge;
 
@@ -105,19 +106,48 @@ public static class PathTraversalGuard
             return false;
         }
 
-        var outputCanonical = Path.GetFullPath(outputPath);
+        // Fail-closed on inputs that Path.GetFullPath rejects (null bytes, control chars,
+        // paths exceeding the platform's effective MAX_PATH without long-path opt-in,
+        // platform-specific quirks). The exception used to escape this method and surface
+        // as an uncaught ArgumentException in the call site's catch — return false instead
+        // so a hostile metadata segment can DoS one download but not the rest of the run.
+        string outputCanonical;
+        try
+        {
+            outputCanonical = Normalize(Path.GetFullPath(outputPath));
+        }
+        catch (ArgumentException) { return false; }
+        catch (PathTooLongException) { return false; }
+        catch (NotSupportedException) { return false; }
+        catch (System.Security.SecurityException) { return false; }
 
-        if (!string.IsNullOrWhiteSpace(root) && IsDescendant(outputCanonical, root))
+        if (!string.IsNullOrWhiteSpace(root) && TryIsDescendant(outputCanonical, root, out var underRoot) && underRoot)
         {
             return true;
         }
 
-        if (!string.IsNullOrWhiteSpace(alternateRoot) && IsDescendant(outputCanonical, alternateRoot))
+        if (!string.IsNullOrWhiteSpace(alternateRoot) && TryIsDescendant(outputCanonical, alternateRoot, out var underAlt) && underAlt)
         {
             return true;
         }
 
         return false;
+    }
+
+    private static bool TryIsDescendant(string canonical, string root, out bool isDescendant)
+    {
+        // Wraps IsDescendant in the same fail-closed envelope as the entry point so a
+        // malformed root (operator config error or attacker-controlled in some flows)
+        // doesn't propagate Path.GetFullPath's exceptions up the stack.
+        try
+        {
+            isDescendant = IsDescendant(canonical, root);
+            return true;
+        }
+        catch (ArgumentException) { isDescendant = false; return false; }
+        catch (PathTooLongException) { isDescendant = false; return false; }
+        catch (NotSupportedException) { isDescendant = false; return false; }
+        catch (System.Security.SecurityException) { isDescendant = false; return false; }
     }
 
     private static bool IsDescendant(string canonical, string root)
@@ -127,7 +157,7 @@ public static class PathTraversalGuard
         // append a SECOND separator below and look for "//" which never matches
         // a valid canonical descendant path. Strip trailing separators FIRST,
         // then append exactly one for the prefix comparison.
-        var rootCanonical = Path.GetFullPath(root)
+        var rootCanonical = Normalize(Path.GetFullPath(root))
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         var canonicalTrimmed = canonical
             .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
@@ -141,6 +171,37 @@ public static class PathTraversalGuard
         // Appending the directory separator guarantees we only match true descendants.
         return canonicalTrimmed.StartsWith(rootCanonical + Path.DirectorySeparatorChar, OsAwareComparison)
             || canonicalTrimmed.StartsWith(rootCanonical + Path.AltDirectorySeparatorChar, OsAwareComparison);
+    }
+
+    /// <summary>
+    /// Unicode + path-prefix normalization applied before any string comparison.
+    ///
+    /// <para><b>Unicode NFC:</b> Path.GetFullPath does not normalize Unicode. If the root
+    /// contains "Café" in NFC form (é = U+00E9) and the descendant the same character in
+    /// NFD form (e + U+0301), the byte sequences differ and the descendant would be
+    /// rejected. Forcing both sides to NFC removes the form-mismatch DoS without affecting
+    /// the security boundary (NFC and NFD always represent the same logical path).</para>
+    ///
+    /// <para><b>Windows DOS-device prefixes (<c>\\?\</c>, <c>\\.\</c>, <c>\\?\UNC\</c>):</b>
+    /// Path.GetFullPath preserves these prefixes when present and does not add them when
+    /// absent. A descendant built without the prefix would be rejected from a root that has
+    /// one (or vice-versa). Strip leading device prefixes so the prefix comparison sees the
+    /// same underlying path. The strip is lexical only (drops the marker, leaves the path);
+    /// it does not change the resolved target.</para>
+    /// </summary>
+    private static string Normalize(string path)
+    {
+        // Drop Windows DOS-device / long-path prefixes before comparison. Order matters:
+        // check the longer "\\?\UNC\" prefix first so we don't half-strip and leave "UNC\".
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
+        {
+            if (path.StartsWith(@"\\?\UNC\", StringComparison.Ordinal))
+                path = @"\\" + path.Substring(8);
+            else if (path.StartsWith(@"\\?\", StringComparison.Ordinal) || path.StartsWith(@"\\.\", StringComparison.Ordinal))
+                path = path.Substring(4);
+        }
+
+        return path.Normalize(NormalizationForm.FormC);
     }
 
     private static bool AllDots(string s)
