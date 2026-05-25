@@ -310,29 +310,5 @@ public sealed class CachePolicy
                 hotHitMode ?? HotHitMode);
         }
 
-        /// <summary>
-        /// Deprecated. The executor knobs (<paramref name="softRevalidateWindow"/>,
-        /// <paramref name="staleIfErrorTtl"/>, <paramref name="evictOnTerminalStatus"/>,
-        /// <paramref name="hotHitMode"/>) have been merged into <see cref="With"/> for
-        /// fluent-API discoverability. Call <c>policy.With(hotHitMode: ..., ...)</c> directly.
-        /// </summary>
-        /// <remarks>
-        /// Preserved bit-for-bit so existing call sites continue to compile. Marked
-        /// <see cref="ObsoleteAttribute"/> (warning, not error) so plugin migrations can
-        /// be done at the consumer's pace.
-        /// </remarks>
-        [Obsolete("Merged into With(...) — call CachePolicy.Default.With(hotHitMode: ..., softRevalidateWindow: ..., staleIfErrorTtl: ..., evictOnTerminalStatus: ...) directly. WithExecutor will be removed in a future major release.")]
-        public CachePolicy WithExecutor(
-            TimeSpan? softRevalidateWindow = null,
-            TimeSpan? staleIfErrorTtl = null,
-            bool? evictOnTerminalStatus = null,
-            HotCacheHitMode? hotHitMode = null)
-        {
-            return With(
-                softRevalidateWindow: softRevalidateWindow,
-                staleIfErrorTtl: staleIfErrorTtl,
-                evictOnTerminalStatus: evictOnTerminalStatus,
-                hotHitMode: hotHitMode);
-        }
     }
 }
