@@ -168,6 +168,16 @@ Lidarr.Plugin.Common.Services.Bridge.AuthFailureDelegatingHandler.AuthFailureDel
 Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.LastFailure.get -> Lidarr.Plugin.Abstractions.Contracts.AuthFailure?
 Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.ConsecutiveFailureCount.get -> int
 Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.ResetToUnknown() -> void
+Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler
+Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler.SlidingWindowAuthFailureHandler(Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler!>! logger, int failureThreshold = 3, System.TimeSpan? failureWindow = null, System.TimeProvider? clock = null) -> void
+Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler.Status.get -> Lidarr.Plugin.Abstractions.Contracts.AuthStatus
+Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler.LastFailure.get -> Lidarr.Plugin.Abstractions.Contracts.AuthFailure?
+Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler.ConsecutiveFailureCount.get -> int
+Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler.FirstFailureInWindow.get -> System.DateTimeOffset?
+Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler.HandleFailureAsync(Lidarr.Plugin.Abstractions.Contracts.AuthFailure! failure, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler.HandleSuccessAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler.ResetToUnknown() -> void
+Lidarr.Plugin.Common.Services.Bridge.SlidingWindowAuthFailureHandler.RequestReauthenticationAsync(string! reason, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
 Lidarr.Plugin.Common.Diagnostics.WarnOnce
 Lidarr.Plugin.Common.Diagnostics.WarnOnce.WarnOnce() -> void
 Lidarr.Plugin.Common.Diagnostics.WarnOnce.WarnOnce(System.Collections.Generic.IEqualityComparer<string!>! keyComparer) -> void
