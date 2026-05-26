@@ -1735,3 +1735,172 @@ T:Lidarr.Plugin.Common.Interfaces.IAudioPostProcessor
 M:Lidarr.Plugin.Common.Interfaces.IAudioPostProcessor.PostProcessAsync(System.String,Lidarr.Plugin.Abstractions.Models.StreamingTrack,Lidarr.Plugin.Abstractions.Models.StreamingQuality,System.Threading.CancellationToken)~System.Threading.Tasks.Task{System.String}
 M:Lidarr.Plugin.Common.Services.Download.SimpleDownloadOrchestrator.#ctor(System.String,System.Net.Http.HttpClient,System.Func{System.String,System.Threading.Tasks.Task{Lidarr.Plugin.Abstractions.Models.StreamingAlbum}},System.Func{System.String,System.Threading.Tasks.Task{Lidarr.Plugin.Abstractions.Models.StreamingTrack}},System.Func{System.String,System.Threading.Tasks.Task{System.Collections.Generic.IReadOnlyList{System.String}}},System.Func{System.String,Lidarr.Plugin.Abstractions.Models.StreamingQuality,System.Threading.Tasks.Task{System.ValueTuple{System.String,System.String}}},System.Int32,Lidarr.Plugin.Common.Interfaces.IAudioStreamProvider,Lidarr.Plugin.Common.Interfaces.IAudioMetadataApplier,Microsoft.Extensions.Logging.ILogger,Lidarr.Plugin.Common.Interfaces.IAudioPostProcessor)
 
+Lidarr.Plugin.Common.Services.Caching.CachePolicy.CachePolicy(string! name, bool shouldCache, System.TimeSpan duration, System.TimeSpan? slidingExpiration, System.TimeSpan? absoluteExpiration, bool varyByScope, System.TimeSpan? slidingRefreshWindow, bool enableConditionalRevalidation, System.TimeSpan? softRevalidateWindow, System.TimeSpan? staleIfErrorTtl, bool evictOnTerminalStatus) -> void
+Lidarr.Plugin.Common.Services.Caching.CachePolicy.EvictOnTerminalStatus.get -> bool
+Lidarr.Plugin.Common.Services.Caching.CachePolicy.SoftRevalidateWindow.get -> System.TimeSpan?
+Lidarr.Plugin.Common.Services.Caching.CachePolicy.StaleIfErrorTtl.get -> System.TimeSpan?
+Lidarr.Plugin.Common.Services.Http.CacheHitKind
+Lidarr.Plugin.Common.Services.Http.CacheHitKind.EvictOnTerminal = 4 -> Lidarr.Plugin.Common.Services.Http.CacheHitKind
+Lidarr.Plugin.Common.Services.Http.CacheHitKind.Hit = 0 -> Lidarr.Plugin.Common.Services.Http.CacheHitKind
+Lidarr.Plugin.Common.Services.Http.CacheHitKind.Miss = 5 -> Lidarr.Plugin.Common.Services.Http.CacheHitKind
+Lidarr.Plugin.Common.Services.Http.CacheHitKind.NotModifiedFold = 2 -> Lidarr.Plugin.Common.Services.Http.CacheHitKind
+Lidarr.Plugin.Common.Services.Http.CacheHitKind.Passthrough = 6 -> Lidarr.Plugin.Common.Services.Http.CacheHitKind
+Lidarr.Plugin.Common.Services.Http.CacheHitKind.SoftRevalidate = 1 -> Lidarr.Plugin.Common.Services.Http.CacheHitKind
+Lidarr.Plugin.Common.Services.Http.CacheHitKind.StaleIfError = 3 -> Lidarr.Plugin.Common.Services.Http.CacheHitKind
+Lidarr.Plugin.Common.Services.Http.CacheKey
+Lidarr.Plugin.Common.Services.Http.CacheKey.CacheKey(string? endpoint, System.Collections.Generic.Dictionary<string!, string!>? parameters) -> void
+Lidarr.Plugin.Common.Services.Http.CacheKey.CacheKey(string? endpoint, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? parameters = null) -> void
+Lidarr.Plugin.Common.Services.Http.CacheKey.Endpoint.get -> string!
+Lidarr.Plugin.Common.Services.Http.CacheKey.Equals(Lidarr.Plugin.Common.Services.Http.CacheKey? other) -> bool
+Lidarr.Plugin.Common.Services.Http.CacheKey.Parameters.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.Body.get -> byte[]!
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.Body.init -> void
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.CachedHttpResponse() -> void
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.ContentType.get -> string?
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.ContentType.init -> void
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.ETag.get -> string?
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.ETag.init -> void
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.HitKind.get -> Lidarr.Plugin.Common.Services.Http.CacheHitKind
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.HitKind.init -> void
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.LastModified.get -> System.DateTimeOffset?
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.LastModified.init -> void
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.Payload.get -> TPayload?
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.Payload.init -> void
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.StatusCode.get -> System.Net.HttpStatusCode
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.StatusCode.init -> void
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.StoredAt.get -> System.DateTimeOffset
+Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>.StoredAt.init -> void
+Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor
+Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor.CachingHttpExecutor(System.Net.Http.HttpMessageInvoker! invoker, Lidarr.Plugin.Common.Interfaces.IStreamingResponseCache! cache, Lidarr.Plugin.Common.Utilities.ResiliencePolicy? resiliencePolicy = null, Lidarr.Plugin.Common.Interfaces.ICachePolicyProvider? policyProvider = null, Lidarr.Plugin.Common.Interfaces.IConditionalRequestState? conditionalState = null, System.TimeProvider? timeProvider = null, Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor!>? logger = null) -> void
+Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor.SendAsync(Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder! builder, Lidarr.Plugin.Common.Services.Http.CacheKey! key, Lidarr.Plugin.Common.Services.Caching.CachePolicy! policy, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<object?>!>!
+Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor.SendAsync<TPayload>(Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder! builder, Lidarr.Plugin.Common.Services.Http.CacheKey! key, Lidarr.Plugin.Common.Services.Caching.CachePolicy! policy, Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>? hooks = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>!>!
+Lidarr.Plugin.Common.Services.Http.CachingHttpExecutor.SendAsync<TPayload>(Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder! builder, Lidarr.Plugin.Common.Services.Http.CacheKey! key, Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>? hooks = null, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Http.CachedHttpResponse<TPayload>!>!
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.CachingHttpHooks(System.Func<System.Net.Http.HttpResponseMessage!, System.Threading.CancellationToken, System.Threading.Tasks.Task<TPayload>!>? ParseAsync = null, System.Action<System.Net.Http.HttpRequestMessage!>? MutateRequest = null, System.Action<System.Net.HttpStatusCode, Lidarr.Plugin.Common.Services.Http.CacheKey!>? OnEvict = null, System.Action<Lidarr.Plugin.Common.Services.Http.CacheHitKind, Lidarr.Plugin.Common.Services.Http.CacheKey!>? OnHit = null) -> void
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.MutateRequest.get -> System.Action<System.Net.Http.HttpRequestMessage!>?
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.MutateRequest.init -> void
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.OnEvict.get -> System.Action<System.Net.HttpStatusCode, Lidarr.Plugin.Common.Services.Http.CacheKey!>?
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.OnEvict.init -> void
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.OnHit.get -> System.Action<Lidarr.Plugin.Common.Services.Http.CacheHitKind, Lidarr.Plugin.Common.Services.Http.CacheKey!>?
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.OnHit.init -> void
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.ParseAsync.get -> System.Func<System.Net.Http.HttpResponseMessage!, System.Threading.CancellationToken, System.Threading.Tasks.Task<TPayload>!>?
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.ParseAsync.init -> void
+static Lidarr.Plugin.Common.Services.Http.CacheKey.ForEndpoint(string! endpoint) -> Lidarr.Plugin.Common.Services.Http.CacheKey!
+Lidarr.Plugin.Common.Services.Caching.CachePolicy.CachePolicy(string! name, bool shouldCache, System.TimeSpan duration, System.TimeSpan? slidingExpiration, System.TimeSpan? absoluteExpiration, bool varyByScope, System.TimeSpan? slidingRefreshWindow, bool enableConditionalRevalidation, System.TimeSpan? softRevalidateWindow, System.TimeSpan? staleIfErrorTtl, bool evictOnTerminalStatus, Lidarr.Plugin.Common.Services.Caching.HotCacheHitMode hotHitMode) -> void
+Lidarr.Plugin.Common.Services.Caching.CachePolicy.HotHitMode.get -> Lidarr.Plugin.Common.Services.Caching.HotCacheHitMode
+Lidarr.Plugin.Common.Services.Caching.HotCacheHitMode
+Lidarr.Plugin.Common.Services.Caching.HotCacheHitMode.Disabled = 0 -> Lidarr.Plugin.Common.Services.Caching.HotCacheHitMode
+Lidarr.Plugin.Common.Services.Caching.HotCacheHitMode.EnabledForFreshEntries = 1 -> Lidarr.Plugin.Common.Services.Caching.HotCacheHitMode
+Lidarr.Plugin.Common.Services.Caching.HotCacheHitMode.EnabledIgnoringValidators = 2 -> Lidarr.Plugin.Common.Services.Caching.HotCacheHitMode
+Lidarr.Plugin.Common.Services.Caching.SmartCache<TKey, TValue>.SmartCache(System.Func<TKey, string!>! keySerializer, Lidarr.Plugin.Common.Services.Caching.SmartCacheOptions? options, Microsoft.Extensions.Logging.ILogger? logger, System.Func<TValue, TValue>? valueClone) -> void
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.PropagateParseExceptions.get -> bool
+Lidarr.Plugin.Common.Services.Http.CachingHttpHooks<TPayload>.PropagateParseExceptions.init -> void
+static Lidarr.Plugin.Common.Utilities.ResiliencePolicy.Passthrough.get -> Lidarr.Plugin.Common.Utilities.ResiliencePolicy!
+Lidarr.Plugin.Common.Observability.LoggerExtensions
+static Lidarr.Plugin.Common.Observability.LoggerExtensions.LogWarningOnce(this Microsoft.Extensions.Logging.ILogger! logger, string! key, Microsoft.Extensions.Logging.EventId eventId, string! message, params object?[]! args) -> bool
+static Lidarr.Plugin.Common.Observability.LoggerExtensions.LogWarningOnce(this Microsoft.Extensions.Logging.ILogger! logger, string! key, string! message, params object?[]! args) -> bool
+static Lidarr.Plugin.Common.Observability.LoggerExtensions.LogInformationOnce(this Microsoft.Extensions.Logging.ILogger! logger, string! key, Microsoft.Extensions.Logging.EventId eventId, string! message, params object?[]! args) -> bool
+static Lidarr.Plugin.Common.Observability.LoggerExtensions.LogErrorOnce(this Microsoft.Extensions.Logging.ILogger! logger, string! key, Microsoft.Extensions.Logging.EventId eventId, System.Exception? exception, string! message, params object?[]! args) -> bool
+static Lidarr.Plugin.Common.Observability.LoggerExtensions.ResetOnceKeys() -> void
+Lidarr.Plugin.Common.Observability.IMetricsRecorder
+Lidarr.Plugin.Common.Observability.IMetricsRecorder.Increment(string! name, double value = 1, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? tags = null) -> void
+Lidarr.Plugin.Common.Observability.IMetricsRecorder.Gauge(string! name, double value, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? tags = null) -> void
+Lidarr.Plugin.Common.Observability.IMetricsRecorder.Histogram(string! name, double value, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? tags = null) -> void
+Lidarr.Plugin.Common.Observability.MetricEvent
+Lidarr.Plugin.Common.Observability.MetricEvent.MetricEvent(string! Name, double Value, Lidarr.Plugin.Common.Observability.MetricKind Kind, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? Tags, System.DateTimeOffset Timestamp) -> void
+Lidarr.Plugin.Common.Observability.MetricEvent.Name.get -> string!
+Lidarr.Plugin.Common.Observability.MetricEvent.Name.init -> void
+Lidarr.Plugin.Common.Observability.MetricEvent.Value.get -> double
+Lidarr.Plugin.Common.Observability.MetricEvent.Value.init -> void
+Lidarr.Plugin.Common.Observability.MetricEvent.Kind.get -> Lidarr.Plugin.Common.Observability.MetricKind
+Lidarr.Plugin.Common.Observability.MetricEvent.Kind.init -> void
+Lidarr.Plugin.Common.Observability.MetricEvent.Tags.get -> System.Collections.Generic.IReadOnlyDictionary<string!, string!>?
+Lidarr.Plugin.Common.Observability.MetricEvent.Tags.init -> void
+Lidarr.Plugin.Common.Observability.MetricEvent.Timestamp.get -> System.DateTimeOffset
+Lidarr.Plugin.Common.Observability.MetricEvent.Timestamp.init -> void
+Lidarr.Plugin.Common.Observability.MetricKind
+Lidarr.Plugin.Common.Observability.MetricKind.Counter = 0 -> Lidarr.Plugin.Common.Observability.MetricKind
+Lidarr.Plugin.Common.Observability.MetricKind.Gauge = 1 -> Lidarr.Plugin.Common.Observability.MetricKind
+Lidarr.Plugin.Common.Observability.MetricKind.Histogram = 2 -> Lidarr.Plugin.Common.Observability.MetricKind
+Lidarr.Plugin.Common.Observability.NullMetricsRecorder
+Lidarr.Plugin.Common.Observability.NullMetricsRecorder.Increment(string! name, double value = 1, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? tags = null) -> void
+Lidarr.Plugin.Common.Observability.NullMetricsRecorder.Gauge(string! name, double value, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? tags = null) -> void
+Lidarr.Plugin.Common.Observability.NullMetricsRecorder.Histogram(string! name, double value, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? tags = null) -> void
+Lidarr.Plugin.Common.Observability.NullMetricsRecorder.Instance -> Lidarr.Plugin.Common.Observability.NullMetricsRecorder!
+Lidarr.Plugin.Common.Observability.ObservableMetricsRecorder
+Lidarr.Plugin.Common.Observability.ObservableMetricsRecorder.ObservableMetricsRecorder() -> void
+Lidarr.Plugin.Common.Observability.ObservableMetricsRecorder.Subscribe(System.IObserver<Lidarr.Plugin.Common.Observability.MetricEvent!>! observer) -> System.IDisposable!
+Lidarr.Plugin.Common.Observability.ObservableMetricsRecorder.Increment(string! name, double value = 1, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? tags = null) -> void
+Lidarr.Plugin.Common.Observability.ObservableMetricsRecorder.Gauge(string! name, double value, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? tags = null) -> void
+Lidarr.Plugin.Common.Observability.ObservableMetricsRecorder.Histogram(string! name, double value, System.Collections.Generic.IReadOnlyDictionary<string!, string!>? tags = null) -> void
+Lidarr.Plugin.Common.Services.Caching.CachePolicy.WithExecutor(System.TimeSpan? softRevalidateWindow = null, System.TimeSpan? staleIfErrorTtl = null, bool? evictOnTerminalStatus = null, Lidarr.Plugin.Common.Services.Caching.HotCacheHitMode? hotHitMode = null) -> Lidarr.Plugin.Common.Services.Caching.CachePolicy!
+static Lidarr.Plugin.Common.Errors.LlmErrorMapper.MapHttpError(string! providerId, int statusCode, string? responseBody, System.TimeSpan? retryAfter, System.Exception? inner) -> Lidarr.Plugin.Common.Errors.LlmProviderException!
+static Lidarr.Plugin.Common.Errors.LlmErrorMapper.MapHttpError(string! providerId, System.Net.Http.HttpResponseMessage! response, string? responseBody = null, System.Exception? inner = null) -> Lidarr.Plugin.Common.Errors.LlmProviderException!
+static Lidarr.Plugin.Common.Errors.LlmErrorMapper.ParseRetryAfterHeader(System.Net.Http.Headers.RetryConditionHeaderValue? header) -> System.TimeSpan?
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.ActualBytes.get -> long
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.ExpectedBytes.get -> long
+Lidarr.Plugin.Common.Errors.DownloadIntegrityException.DownloadIntegrityException(long actualBytes, long expectedBytes, string? filePath = null, System.Exception? inner = null) -> void
+Lidarr.Plugin.Common.Security.SecureMemory
+static Lidarr.Plugin.Common.Security.SecureMemory.ZeroBytes(System.Span<byte> buffer) -> void
+static Lidarr.Plugin.Common.Security.SecureMemory.ZeroPemKey(ref string? pem) -> void
+Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException
+Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException.ReceivedItemCount.get -> int
+Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException.DeclaredTotalCount.get -> int
+Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException.ContextName.get -> string!
+Lidarr.Plugin.Common.Errors.PagedResponseIntegrityException.PagedResponseIntegrityException(int receivedItemCount, int declaredTotalCount, string! contextName) -> void
+Lidarr.Plugin.Common.Services.Http.PagedResponseValidator
+static Lidarr.Plugin.Common.Services.Http.PagedResponseValidator.Validate(int receivedItemCount, int? declaredTotalCount, string! contextName) -> void
+static Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter.WithConservativeDefaults() -> Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter!
+Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter.RecordAuthFailure(string! service, string! endpoint) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.AuthFailureGate(Lidarr.Plugin.Abstractions.Contracts.IAuthFailureHandler! handler, System.TimeProvider? clock = null, System.TimeSpan? probeInterval = null, Microsoft.Extensions.Logging.ILogger<Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate!>? logger = null) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.Handler.get -> Lidarr.Plugin.Abstractions.Contracts.IAuthFailureHandler!
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.IsHealthy.get -> bool
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.Metrics.get -> Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.EnsureCanProceed() -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.TryAcquireProbeSlot() -> bool
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.ForceReset() -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.HandleFailureAsync(Lidarr.Plugin.Abstractions.Contracts.AuthFailure! failure, System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.HandleSuccessAsync(System.Threading.CancellationToken cancellationToken = default(System.Threading.CancellationToken)) -> System.Threading.Tasks.ValueTask
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.AuthFailureGateMetrics() -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.AuthFailureGateMetrics(long LatchTransitions, long RecoveryTransitions, long ProbeAcquired, long ProbeRejected, long ProbeRefunded, System.DateTimeOffset? LastLatchAt, System.DateTimeOffset? LastRecoveryAt) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LatchTransitions.get -> long
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LatchTransitions.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.RecoveryTransitions.get -> long
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.RecoveryTransitions.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeAcquired.get -> long
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeAcquired.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeRejected.get -> long
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeRejected.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeRefunded.get -> long
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.ProbeRefunded.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LastLatchAt.get -> System.DateTimeOffset?
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LastLatchAt.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LastRecoveryAt.get -> System.DateTimeOffset?
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateMetrics.LastRecoveryAt.init -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthGatedException
+Lidarr.Plugin.Common.Services.Bridge.AuthGatedException.AuthGatedException(Lidarr.Plugin.Abstractions.Contracts.AuthStatus status, string! message, string? errorCode = null, System.TimeSpan? retryAfter = null) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthGatedException.Status.get -> Lidarr.Plugin.Abstractions.Contracts.AuthStatus
+Lidarr.Plugin.Common.Services.Bridge.AuthGatedException.ErrorCode.get -> string?
+Lidarr.Plugin.Common.Services.Bridge.AuthGatedException.RetryAfter.get -> System.TimeSpan?
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry.Get(string! key) -> Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate!
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry.Reset(string! key) -> void
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry.Remove(string! key) -> bool
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry.Keys.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Lidarr.Plugin.Common.Services.Bridge.IAuthFailureGateRegistry.Count.get -> int
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.AuthFailureGateRegistry(System.TimeProvider? clock = null, System.TimeSpan? probeInterval = null, Microsoft.Extensions.Logging.ILoggerFactory? loggerFactory = null, int maxKeys = 256) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.Get(string! key) -> Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate!
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.Reset(string! key) -> void
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.Remove(string! key) -> bool
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.Keys.get -> System.Collections.Generic.IReadOnlyCollection<string!>!
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGateRegistry.Count.get -> int
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureDelegatingHandler
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureDelegatingHandler.AuthFailureDelegatingHandler(Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate! gate) -> void
+Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.LastFailure.get -> Lidarr.Plugin.Abstractions.Contracts.AuthFailure?
+Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.ConsecutiveFailureCount.get -> int
+Lidarr.Plugin.Common.Services.Bridge.DefaultAuthFailureHandler.ResetToUnknown() -> void

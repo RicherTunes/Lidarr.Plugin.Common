@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Microsoft.Extensions.Logging;
+using Lidarr.Plugin.Common.Security;
 using Lidarr.Plugin.Common.Utilities;
 
 namespace Lidarr.Plugin.Common.Services.Validation
@@ -70,7 +71,7 @@ namespace Lidarr.Plugin.Common.Services.Validation
         {
             try
             {
-                var sanitized = FileNameSanitizer.SanitizeFileName(fileName);
+                var sanitized = Sanitize.FileNameSegment(fileName);
 
                 // Ensure not too long
                 if (sanitized.Length > MAX_FILENAME_LENGTH)

@@ -8,10 +8,18 @@ namespace Lidarr.Plugin.Common.Utilities
     /// <summary>
     /// Utility for sanitizing file and path names to be safe for various file systems.
     /// </summary>
+    /// <remarks>
+    /// Prefer <c>Sanitize.PathSegment</c> in <c>Lidarr.Plugin.Common.Security</c> for new code:
+    /// it uses <c>Path.GetInvalidFileNameChars()</c> directly, performs NFKC Unicode
+    /// normalization, and rejects unsafe segments via <c>Sanitize.IsSafePath</c> instead of
+    /// mutating them in-place. FileNameSanitizer is retained for in-flight internal call sites
+    /// because its replace-with-space behavior for path separators (e.g. <c>"AC/DC"</c> → <c>"AC DC"</c>)
+    /// and <c>"Unknown"</c>-on-empty fallback differ from Sanitize's delete-and-empty semantics.
+    /// </remarks>
+    [Obsolete("Prefer Sanitize.PathSegment for new code; FileNameSanitizer retained for in-flight internal callers with different fallback semantics. See class-level <remarks/> for migration guidance.")]
     public static class FileNameSanitizer
     {
         private static readonly char[] InvalidFileNameChars = Path.GetInvalidFileNameChars();
-        private static readonly char[] InvalidPathChars = Path.GetInvalidPathChars();
 
         // Additional characters that can cause issues
         private static readonly char[] ProblematicChars = { ':', '*', '?', '"', '<', '>', '|' };
@@ -52,8 +60,13 @@ namespace Lidarr.Plugin.Common.Utilities
                 sanitized = sanitized.Replace(invalidChar, replacement);
             }
 
-            // Handle special cases
-            sanitized = sanitized.Replace("..", " "); // Parent directory traversal
+            // Handle special cases. Note: the prior implementation also replaced ANY ".."
+            // substring with a space, which corrupted legitimate filenames like
+            // "re..master.flac" or "track..remix.mp3". Path-traversal protection lives in
+            // PathTraversalGuard (lexical containment check on the full path) and Sanitize.IsSafePath
+            // (segment-level ".." rejection); SanitizeFileName operates on a SINGLE filename
+            // segment so embedded dots are valid and must be preserved. The pure-dot-only
+            // case is handled below after all other transforms.
             sanitized = sanitized.Replace("/", " "); // Forward slash
             sanitized = sanitized.Replace("\\", " "); // Backslash
             sanitized = sanitized.Replace("\n", " "); // Newlines
@@ -78,6 +91,15 @@ namespace Lidarr.Plugin.Common.Utilities
             if (string.IsNullOrWhiteSpace(sanitized))
                 return "Unknown";
 
+            // Pure-dot-only segment ("..", "...", etc.) is path-traversal-adjacent — would
+            // resolve as parent/grandparent reference if Path.GetFullPath ever sees it.
+            // Neutralize by prefixing with underscore so the segment retains a stable
+            // identity (debugging) while not being a traversal target.
+            if (sanitized.Length > 0 && sanitized.All(static c => c == '.'))
+            {
+                sanitized = "_" + sanitized;
+            }
+
             return sanitized;
         }
 
@@ -93,8 +115,12 @@ namespace Lidarr.Plugin.Common.Utilities
 
             var sanitized = path;
 
-            // Remove path traversal attempts
-            sanitized = sanitized.Replace("..", "");
+            // Drop home-dir shortcut (would resolve to a different filesystem root). The
+            // historical "..-replace" pass was removed here for the same reason as in
+            // SanitizeFileName above (it corrupted filenames like "track..remix"); each
+            // segment-level ".." is neutralised by SanitizeFileName's pure-dot guard below,
+            // and full-path containment is enforced by PathTraversalGuard.IsPathWithinRoot
+            // at the call site.
             sanitized = sanitized.Replace("~", "");
 
             // Remove leading path separators to prevent absolute path issues

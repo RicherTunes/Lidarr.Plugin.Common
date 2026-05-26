@@ -13,9 +13,12 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <!-- Version is inherited from Directory.Build.props (single source of truth shared with Abstractions).
-         Do NOT hardcode <Version> here — it would override Directory.Build.props and the two
-         packages would drift silently. -->
+    <!-- Aligned with Directory.Build.props (1.18.0-dev) — both Common AND Abstractions
+         must ship the same version to avoid NU5104 ("stable package can't depend on
+         prerelease"). When tagging the next stable release, bump both Directory.Build.props
+         and this override to the same X.Y.Z (no -dev suffix) so the pre-tag prerelease
+         period stays NU5104-clean. -->
+    <Version>1.18.0-dev</Version>
     <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
@@ -28,7 +31,7 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common.git</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <PackageTags>lidarr;plugin;streaming;music;utilities;qobuz;tidal;spotify</PackageTags>
-    <PackageReleaseNotes>v1.9.5: New host-bridge primitives (PathTraversalGuard, HostBridgeDownloadTracker, PrefixedReleaseGuidParser, PlaceholderSearchUri), WarnOnce log-gating helper, TestValidationBuilder for Test() pipelines, JsonFileStore key-value store, NullUniversalAdaptiveRateLimiter testkit stub, and FileStreamingResponseCache/FileConditionalRequestState PluginConfigRoots fix. All additive. See CHANGELOG.md.</PackageReleaseNotes>
+    <PackageReleaseNotes>v1.9.0: AuthFailureGate surface (fail-fast latch + delegating handler + per-key registry), SecureMemory + Conservative rate-limit + PagedResponseValidator, testkit-lifted plugin contracts, Lidarr.Plugin.*.dll naming enforcement. See CHANGELOG.md.</PackageReleaseNotes>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <!-- Build Configuration -->

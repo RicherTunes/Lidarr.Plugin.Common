@@ -444,7 +444,7 @@ public class ProviderHealthResultTests
         System.Threading.Thread.Sleep(2);
         sw.Stop();
 
-        var result = ProviderHealthResult.Healthy(sw, provider: "openai");
+        var result = ProviderHealthResult.HealthyFromStopwatch(sw, provider: "openai");
 
         Assert.True(result.IsHealthy);
         Assert.NotNull(result.ResponseTime);
@@ -458,7 +458,7 @@ public class ProviderHealthResultTests
         // The whole point of the Stopwatch overload: if the stopwatch was never started,
         // Elapsed is Zero — but we should report null to avoid claiming "0 ms latency".
         var sw = new System.Diagnostics.Stopwatch();
-        var result = ProviderHealthResult.Healthy(sw, provider: "claude-code");
+        var result = ProviderHealthResult.HealthyFromStopwatch(sw, provider: "claude-code");
 
         Assert.True(result.IsHealthy);
         Assert.Null(result.ResponseTime);
@@ -467,7 +467,7 @@ public class ProviderHealthResultTests
     [Fact]
     public void Healthy_StopwatchOverload_NullStopwatch_NullsOutElapsed()
     {
-        var result = ProviderHealthResult.Healthy(stopwatch: null, provider: "ollama");
+        var result = ProviderHealthResult.HealthyFromStopwatch(stopwatch: null, provider: "ollama");
 
         Assert.True(result.IsHealthy);
         Assert.Null(result.ResponseTime);

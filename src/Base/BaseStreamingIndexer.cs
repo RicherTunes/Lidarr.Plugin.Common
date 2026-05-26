@@ -204,7 +204,7 @@ namespace Lidarr.Plugin.Common.Base
         protected virtual async Task HandleRateLimitAsync()
         {
             // Basic rate limiting - services can override with more sophisticated logic
-            await Task.Delay(100);
+            await Task.Delay(100).ConfigureAwait(false);
         }
 
         #endregion
@@ -239,7 +239,7 @@ namespace Lidarr.Plugin.Common.Base
                 }
 
                 // Authenticate with service
-                var authResult = await AuthenticateAsync();
+                var authResult = await AuthenticateAsync().ConfigureAwait(false);
                 if (!authResult)
                 {
                     // NOTE: Construct ValidationResult via the IEnumerable<ValidationFailure> ctor instead
@@ -295,10 +295,10 @@ namespace Lidarr.Plugin.Common.Base
                 Logger?.LogDebug($"Searching {ServiceName} for: {processedQuery}");
 
                 // Handle rate limiting
-                await HandleRateLimitAsync();
+                await HandleRateLimitAsync().ConfigureAwait(false);
 
                 // Perform search
-                var results = await SearchAlbumsAsync(processedQuery);
+                var results = await SearchAlbumsAsync(processedQuery).ConfigureAwait(false);
 
                 // Post-process results
                 var processedResults = PostprocessResults(results);
@@ -356,7 +356,7 @@ namespace Lidarr.Plugin.Common.Base
                 );
 
                 response.EnsureSuccessStatusCode();
-                return await response.Content.ReadAsStringAsync();
+                return await response.Content.ReadAsStringAsync().ConfigureAwait(false);
             }
             catch (TimeoutException ex)
             {

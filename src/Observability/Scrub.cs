@@ -104,6 +104,31 @@ public static class Scrub
         });
     }
 
+    /// <summary>
+    /// Defensive full-strip variant of <see cref="Url"/>: drops the entire query string
+    /// regardless of parameter name. Use when the URL may contain caller-controlled tokens
+    /// the selective <see cref="Url"/> regex doesn't recognize (e.g. third-party APIs that
+    /// use non-canonical token parameter names). Returns the scheme + host + path only.
+    ///
+    /// <para>Returns <see cref="string.Empty"/> for null/empty input; returns the original
+    /// string unchanged when <c>new Uri(url)</c> throws <see cref="UriFormatException"/> —
+    /// log redaction must not crash a log statement.</para>
+    /// </summary>
+    public static string UrlAndStripQuery(string url)
+    {
+        if (string.IsNullOrEmpty(url))
+            return string.Empty;
+
+        try
+        {
+            return new Uri(url).GetLeftPart(UriPartial.Path);
+        }
+        catch (UriFormatException)
+        {
+            return url;
+        }
+    }
+
     // ------------------------------------------------------------------ //
     // Private helpers
     // ------------------------------------------------------------------ //

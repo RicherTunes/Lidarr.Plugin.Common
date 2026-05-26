@@ -33,5 +33,7 @@
   // Ordered list prefix - disabled
   "MD029": false,
   // Emphasis as heading - allowed
-  "MD036": false
+  "MD036": false,
+  // Duplicate headings - allow siblings (matches .markdownlint.yaml)
+  "MD024": { "siblings_only": true }
 }

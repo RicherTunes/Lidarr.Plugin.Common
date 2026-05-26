@@ -7,6 +7,10 @@ using System.Runtime.Loader;
 using System.Text.Json;
 using Lidarr.Plugin.Abstractions.Hosting;
 using Xunit;
+// Xunit.SkippableFact provides [SkippableFact] + Skip.If(...) — required so the
+// "plugin DLLs not present" early-out flows through xUnit as Skipped rather than
+// Failed (the plain [Fact] attribute treats Xunit.SkipException as a regular
+// exception → test fails on CI runners that haven't pre-built sibling plugins).
 
 namespace Lidarr.Plugin.Common.Tests.MultiPluginAlc;
 

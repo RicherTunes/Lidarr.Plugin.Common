@@ -282,6 +282,16 @@ namespace Lidarr.Plugin.Common.Services.Download
                             result = new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = fileSize, ActualQuality = quality };
                         }
                     }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        // Wave 17M fix: when the caller's cancellation token requested cancellation,
+                        // the IAudioStreamProvider path must REthrow OCE so it reaches the outer
+                        // catch (line ~300) — matches DownloadViaUrlAsync's contract. Previously the
+                        // generic Exception catch below silently converted OCE into
+                        // TrackDownloadResult{Success=false}, breaking the documented "OCE on
+                        // cancel" contract and rendering the outer telemetry catch unreachable.
+                        throw;
+                    }
                     catch (Exception ex)
                     {
                         result = new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };

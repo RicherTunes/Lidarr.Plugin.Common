@@ -175,128 +175,15 @@ namespace Lidarr.Plugin.Common.Utilities
             }, maxRetries, 1000, operationName, onRetry);
         }
 
-        /// <summary>
-        /// Implements circuit breaker pattern for repeated failures.
-        /// </summary>
-        public class CircuitBreaker
-        {
-            private readonly int _failureThreshold;
-            private readonly TimeSpan _resetTimeout;
-            private int _failureCount;
-            private DateTime _lastFailureTime;
-            private CircuitBreakerState _state;
-
-            public CircuitBreaker(int failureThreshold = 5, TimeSpan? resetTimeout = null)
-            {
-                _failureThreshold = failureThreshold;
-                _resetTimeout = resetTimeout ?? TimeSpan.FromMinutes(1);
-                _state = CircuitBreakerState.Closed;
-            }
-
-            public async Task<T> ExecuteAsync<T>(Func<Task<T>> action)
-            {
-                if (_state == CircuitBreakerState.Open)
-                {
-                    if (DateTime.UtcNow - _lastFailureTime > _resetTimeout)
-                    {
-                        _state = CircuitBreakerState.HalfOpen;
-                    }
-                    else
-                    {
-                        throw new CircuitBreakerOpenException("Circuit breaker is open");
-                    }
-                }
-
-                try
-                {
-                    var result = await action();
-
-                    if (_state == CircuitBreakerState.HalfOpen)
-                    {
-                        _state = CircuitBreakerState.Closed;
-                        _failureCount = 0;
-                    }
-
-                    return result;
-                }
-                catch (Exception)
-                {
-                    _failureCount++;
-                    _lastFailureTime = DateTime.UtcNow;
-
-                    if (_failureCount >= _failureThreshold)
-                    {
-                        _state = CircuitBreakerState.Open;
-                    }
-
-                    throw;
-                }
-            }
-
-            private enum CircuitBreakerState
-            {
-                Closed,
-                Open,
-                HalfOpen
-            }
-        }
-
-        public class CircuitBreakerOpenException : Exception
-        {
-            public CircuitBreakerOpenException(string message) : base(message) { }
-        }
-
-        /// <summary>
-        /// Rate limiter for API calls.
-        /// </summary>
-        public class RateLimiter
-        {
-            private readonly int _maxRequests;
-            private readonly TimeSpan _timeWindow;
-            private readonly Queue<DateTime> _requestTimes;
-            private readonly object _lock = new object();
-
-            public RateLimiter(int maxRequests, TimeSpan timeWindow)
-            {
-                _maxRequests = maxRequests;
-                _timeWindow = timeWindow;
-                _requestTimes = new Queue<DateTime>();
-            }
-
-            public async Task WaitIfNeededAsync()
-            {
-                TimeSpan waitTime = TimeSpan.Zero;
-
-                lock (_lock)
-                {
-                    var now = DateTime.UtcNow;
-                    var windowStart = now - _timeWindow;
-
-                    // Remove old requests outside the time window
-                    while (_requestTimes.Count > 0 && _requestTimes.Peek() < windowStart)
-                    {
-                        _requestTimes.Dequeue();
-                    }
-
-                    // If at limit, calculate wait time
-                    if (_requestTimes.Count >= _maxRequests)
-                    {
-                        var oldestRequest = _requestTimes.Peek();
-                        waitTime = oldestRequest + _timeWindow - now;
-                    }
-                }
-
-                // Wait outside the lock to avoid blocking
-                if (waitTime > TimeSpan.Zero)
-                {
-                    await Task.Delay(waitTime).ConfigureAwait(false);
-                }
-
-                lock (_lock)
-                {
-                    _requestTimes.Enqueue(DateTime.UtcNow);
-                }
-            }
-        }
+        // Three nested types — CircuitBreaker, CircuitBreakerOpenException, RateLimiter —
+        // were removed (~120 LOC). They had zero callers across Common and all 4 plugins;
+        // CircuitBreaker also had non-atomic `_failureCount++` and unlocked `_state` access
+        // which made it a correctness landmine if a plugin had ever picked it up. The
+        // canonical successors live in:
+        //   * `Lidarr.Plugin.Common.Services.Resilience.CircuitBreaker` + `ICircuitBreaker`
+        //   * `Lidarr.Plugin.Common.Services.Resilience.CircuitBreakerOpenException`
+        //   * `Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter`
+        // — all with thread-safe state, proper interfaces, options classes, and full
+        // test coverage.
     }
 }

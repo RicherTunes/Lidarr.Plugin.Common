@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Runtime.CompilerServices;
 using Lidarr.Plugin.Common.Services.Http;
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Common.Services.Deduplication;
@@ -22,6 +23,28 @@ namespace Lidarr.Plugin.Common.Utilities
     /// </summary>
     public static class HttpClientExtensions
     {
+        /// <summary>
+        /// Best-effort trace breadcrumb for swallowed exceptions.
+        /// Replaces silent <c>catch { }</c> blocks with a diagnostic breadcrumb that surfaces
+        /// during trace-level diagnostics without risking further exceptions.
+        /// Never throws.
+        /// </summary>
+        internal static void SwallowToTrace(
+            Exception ex,
+            [CallerMemberName] string? site = null,
+            [CallerFilePath] string? path = null,
+            [CallerLineNumber] int line = 0)
+        {
+            try
+            {
+                System.Diagnostics.Trace.WriteLine(
+                    $"[swallow] {site} @ {System.IO.Path.GetFileName(path)}:{line}: {ex.GetType().Name}: {ex.Message}");
+            }
+            catch
+            {
+                // Truly best-effort — never propagate from here.
+            }
+        }
 
         /// <summary>
         /// Executes an HTTP request with built-in retry logic and error handling.
@@ -184,7 +207,7 @@ namespace Lidarr.Plugin.Common.Utilities
                         Observability.Metrics.ResilienceNonDI.Add(1);
                     }
                 }
-                catch { }
+                catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
                 return await httpClient.ExecuteWithResilienceAsync(
                     request,
@@ -354,7 +377,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     profileTag = profile;
                 }
             }
-            catch { }
+            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
             var gate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
             var aggregateEffective = Math.Max(1, maxTotalConcurrencyPerHost);
@@ -373,7 +396,7 @@ namespace Lidarr.Plugin.Common.Utilities
 #if NET8_0_OR_GREATER
                 Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
 #endif
-            } catch { }
+            } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
             try
             {
                 while (true)
@@ -399,7 +422,7 @@ namespace Lidarr.Plugin.Common.Utilities
                             httpActivity.SetTag("retry.attempt", attempt);
                             httpActivity.SetTag("profile", profileTag);
                         }
-                        catch { }
+                        catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                     }
                     try
                     {
@@ -424,7 +447,7 @@ namespace Lidarr.Plugin.Common.Utilities
                         {
                             httpActivity?.SetTag("http.response.status_code", (int)response.StatusCode);
                         }
-                        catch { }
+                        catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                         return response;
                     }
 
@@ -438,7 +461,7 @@ namespace Lidarr.Plugin.Common.Utilities
                             httpActivity?.SetTag("http.response.status_code", status);
                             httpActivity?.SetTag("resilience.retryable", retryable);
                         }
-                        catch { }
+                        catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                         // Handle 307/308 redirects preserving method & body
                         if ((status == 307 || status == 308) && response.Headers.Location != null)
                         {
@@ -460,11 +483,11 @@ namespace Lidarr.Plugin.Common.Utilities
                                         Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
 #endif
                                     }
-                                    catch { }
+                                    catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
                                     // Release current gates before acquiring new ones
-                                    try { gate.Release(); } catch { }
-                                    try { aggregateGate.Release(); } catch { }
+                                    try { gate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                                    try { aggregateGate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
                                     host = newHost;
                                     hostKey = host ?? "__unknown__";
@@ -487,7 +510,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                         Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
 #endif
                                     }
-                                    catch { }
+                                    catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                                 }
 
                                 currentUri = targetUri;
@@ -495,7 +518,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                 // Continue immediately without backoff; do not count against retry budget
                                 continue;
                             }
-                            catch { /* fall through to return */ }
+                            catch (Exception swallowEx) { SwallowToTrace(swallowEx); /* fall through to return */ }
                         }
                         // Handle 301/302 redirects only when safe (GET/HEAD). Do not auto-follow for unsafe methods (e.g., POST)
                         else if ((status == 301 || status == 302) && response.Headers.Location != null &&
@@ -518,10 +541,10 @@ namespace Lidarr.Plugin.Common.Utilities
                                         Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
 #endif
                                     }
-                                    catch { }
+                                    catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
-                                    try { gate.Release(); } catch { }
-                                    try { aggregateGate.Release(); } catch { }
+                                    try { gate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                                    try { aggregateGate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
                                     host = newHost;
                                     hostKey = host ?? "__unknown__";
@@ -541,7 +564,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                         Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
 #endif
                                     }
-                                    catch { }
+                                    catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                                 }
 
                                 currentUri = targetUri;
@@ -549,7 +572,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                 // Continue without backoff; redirect handling should not consume retry budget
                                 continue;
                             }
-                            catch { /* fall through to return */ }
+                            catch (Exception swallowEx) { SwallowToTrace(swallowEx); /* fall through to return */ }
                         }
                         return response;
                     }
@@ -570,7 +593,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     var remaining = deadline - now;
                     if (remaining <= TimeSpan.Zero)
                     {
-                        try { httpActivity?.SetTag("resilience.deadline.exhausted", true); } catch { }
+                        try { httpActivity?.SetTag("resilience.deadline.exhausted", true); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                         return response;
                     }
                     if (delay > remaining)
@@ -589,7 +612,7 @@ namespace Lidarr.Plugin.Common.Utilities
                             { "retry.reason", status }
                         }));
                     }
-                    catch { }
+                    catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                     response.Dispose();
                     await Task.Delay(delay, effectiveToken).ConfigureAwait(false);
                 }
@@ -602,7 +625,7 @@ namespace Lidarr.Plugin.Common.Utilities
 #if NET8_0_OR_GREATER
                     Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
 #endif
-                } catch { }
+                } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
             }
         }
 
@@ -680,7 +703,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     profileTag = profile;
                 }
             }
-            catch { }
+            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
             var gate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
             var aggregateEffective = Math.Max(1, maxTotalConcurrencyPerHost);
@@ -694,7 +717,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
             }
 
-            try { Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch { }
+            try { Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
             try
             {
                 while (true)
@@ -720,7 +743,7 @@ namespace Lidarr.Plugin.Common.Utilities
                             httpActivity.SetTag("retry.attempt", attempt);
                             httpActivity.SetTag("profile", profileTag);
                         }
-                        catch { }
+                        catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                     }
                     try
                     {
@@ -764,7 +787,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     var remaining = deadline - now;
                     if (remaining <= TimeSpan.Zero)
                     {
-                        try { httpActivity?.SetTag("resilience.deadline.exhausted", true); } catch { }
+                        try { httpActivity?.SetTag("resilience.deadline.exhausted", true); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                         return response;
                     }
                     if (delay > remaining)
@@ -783,16 +806,16 @@ namespace Lidarr.Plugin.Common.Utilities
                             { "retry.reason", status }
                         }));
                     }
-                    catch { }
+                    catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                     response.Dispose();
                     await DelayAsync(delay, timeProvider, effectiveToken).ConfigureAwait(false);
                 }
             }
             finally
             {
-                try { gate.Release(); } catch { }
-                try { aggregateGate.Release(); } catch { }
-                try { Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch { }
+                try { gate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                try { aggregateGate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                try { Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
             }
         }
 
@@ -810,7 +833,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 }
                 if (ra.Delta.HasValue) return ra.Delta.Value;
             }
-            catch { }
+            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
             return null;
         }
 
@@ -1118,25 +1141,25 @@ namespace Lidarr.Plugin.Common.Utilities
                 if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.EndpointKey, out string? ep) && ep != null)
                     endpoint = ep;
             }
-            catch { }
+            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
             try
             {
                 if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.ProfileKey, out string? pr) && pr != null)
                     profile = pr;
             }
-            catch { }
+            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
             try
             {
                 if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.ParametersKey, out string? ca) && ca != null)
                     canonical = ca;
             }
-            catch { }
+            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
             try
             {
                 if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.AuthScopeKey, out string? sc) && sc != null)
                     scope = sc;
             }
-            catch { }
+            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
             var parts = new[] { method, authority, endpoint, canonical, scope, profile };
             return HashingUtility.ComputeSHA256(string.Join("\n", parts));
@@ -1221,7 +1244,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 }
                 if (ra.Delta.HasValue) return ra.Delta.Value;
             }
-            catch { /* ignore parse issues */ }
+            catch (Exception swallowEx) { SwallowToTrace(swallowEx); /* ignore parse issues */ }
             return null;
         }
 

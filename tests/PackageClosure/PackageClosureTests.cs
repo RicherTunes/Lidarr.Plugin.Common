@@ -90,7 +90,7 @@ public sealed class PackageClosureTests
     /// ships a host-provided assembly that will cause type-identity conflicts when two
     /// or more plugins are installed simultaneously (the COR_E_INVALIDOPERATION scenario).
     /// </summary>
-    [Theory]
+    [SkippableTheory]
     [InlineData("brainarr")]
     [InlineData("qobuzarr")]
     [InlineData("tidalarr")]
@@ -143,7 +143,7 @@ public sealed class PackageClosureTests
     /// Asserts that each plugin's canonical build output contains the main plugin DLL
     /// and a plugin.json manifest — the minimum set required by the Lidarr plugin loader.
     /// </summary>
-    [Theory]
+    [SkippableTheory]
     [InlineData("brainarr")]
     [InlineData("qobuzarr")]
     [InlineData("tidalarr")]
@@ -198,7 +198,7 @@ public sealed class PackageClosureTests
     /// classified as ALLOWED, FORBIDDEN, or REQUIRED. Useful for auditing package bloat.
     /// Always passes; intended as a diagnostic / CI log artefact.
     /// </summary>
-    [Theory]
+    [SkippableTheory]
     [InlineData("brainarr")]
     [InlineData("qobuzarr")]
     [InlineData("tidalarr")]

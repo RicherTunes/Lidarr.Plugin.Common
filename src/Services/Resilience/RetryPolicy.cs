@@ -109,6 +109,19 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             MaxDelay = TimeSpan.FromMinutes(1),
             UseJitter = true
         };
+
+        /// <summary>
+        /// Preset for local LLM providers (Ollama, LM Studio). Short fast retries —
+        /// when the local service is down a long backoff just delays the user-visible
+        /// failure; quick retries handle the transient socket-not-ready case.
+        /// </summary>
+        public static RetryPolicyOptions ForLocalProviders => new RetryPolicyOptions
+        {
+            MaxRetries = 3,
+            InitialDelay = TimeSpan.FromMilliseconds(100),
+            MaxDelay = TimeSpan.FromSeconds(2),
+            UseJitter = true
+        };
     }
 
     /// <summary>
@@ -338,6 +351,16 @@ namespace Lidarr.Plugin.Common.Services.Resilience
         public static IRetryPolicy CreateForRateLimitedApi(ILogger logger = null)
         {
             return new ExponentialBackoffRetryPolicy(logger, RetryPolicyOptions.ForRateLimitedApi);
+        }
+
+        /// <summary>
+        /// Factory for local LLM providers (Ollama, LM Studio). Pairs with
+        /// <see cref="RetryPolicyOptions.ForLocalProviders"/> — short, fast retries
+        /// suited to a local service rather than a rate-limited remote API.
+        /// </summary>
+        public static IRetryPolicy CreateForLocalProviders(ILogger logger = null)
+        {
+            return new ExponentialBackoffRetryPolicy(logger, RetryPolicyOptions.ForLocalProviders);
         }
     }
 }
