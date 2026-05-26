@@ -8,6 +8,8 @@ using System.Text.Json;
 using System.Threading;
 using Lidarr.Plugin.Common.Hosting;
 using Lidarr.Plugin.Common.Interfaces;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Lidarr.Plugin.Common.Services.Caching
 {
@@ -23,8 +25,9 @@ namespace Lidarr.Plugin.Common.Services.Caching
         private readonly SemaphoreSlim _gate = new(1, 1);
         private readonly int _maxEntries;
         private readonly long _maxBytes;
+        private readonly ILogger _logger;
 
-        public FileStreamingResponseCache(string? folder = null, TimeSpan? defaultDuration = null)
+        public FileStreamingResponseCache(string? folder = null, TimeSpan? defaultDuration = null, ILogger<FileStreamingResponseCache>? logger = null)
         {
             // When no explicit folder is supplied, resolve the canonical per-host config root
             // (Docker /config, %AppData%, XDG_CONFIG_HOME, $HOME/.config, ...) so empty $HOME
@@ -35,6 +38,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
             _defaultDuration = defaultDuration ?? TimeSpan.FromHours(6);
             _maxEntries = ReadIntEnv("ARR_RESP_CACHE_MAX_ENTRIES", 20000);
             _maxBytes = ReadLongEnv("ARR_RESP_CACHE_MAX_MB", 256) * 1024L * 1024L;
+            _logger = (ILogger?)logger ?? NullLogger.Instance;
             TryCleanupExpired();
         }
 
@@ -49,7 +53,9 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 if (entry is null) return null;
                 if (entry.ExpireAt <= DateTimeOffset.UtcNow)
                 {
-                    try { File.Delete(path); } catch { }
+                    try { File.Delete(path); }
+                    catch (IOException ex) { _logger.LogDebug(ex, "Expired cache entry could not be deleted at {Path}", path); }
+                    catch (UnauthorizedAccessException ex) { _logger.LogDebug(ex, "Permission denied deleting expired cache entry at {Path}", path); }
                     return null;
                 }
                 if (typeof(T) == typeof(CachedHttpResponse))
@@ -66,7 +72,21 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 }
                 return null;
             }
-            catch { return null; }
+            catch (IOException ex)
+            {
+                _logger.LogDebug(ex, "Cache read failed at {Path} (treating as miss)", path);
+                return null;
+            }
+            catch (JsonException ex)
+            {
+                _logger.LogDebug(ex, "Cache entry malformed at {Path} (treating as miss)", path);
+                return null;
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogDebug(ex, "Cache read denied at {Path} (treating as miss)", path);
+                return null;
+            }
         }
 
         public void Set<T>(string endpoint, Dictionary<string, string> parameters, T value) where T : class
@@ -98,9 +118,15 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 File.Move(tmp, path);
                 EnforceLimits();
             }
-            catch
+            catch (IOException ex)
             {
-                try { if (File.Exists(tmp)) File.Delete(tmp); } catch { }
+                _logger.LogDebug(ex, "Cache write failed for {Path}", path);
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch (IOException) { /* cleanup best-effort */ }
+            }
+            catch (UnauthorizedAccessException ex)
+            {
+                _logger.LogDebug(ex, "Cache write denied for {Path}", path);
+                try { if (File.Exists(tmp)) File.Delete(tmp); } catch (IOException) { /* cleanup best-effort */ }
             }
         }
 
@@ -122,7 +148,9 @@ namespace Lidarr.Plugin.Common.Services.Caching
 
         public void Clear()
         {
-            try { Directory.Delete(_root, recursive: true); } catch { }
+            try { Directory.Delete(_root, recursive: true); }
+            catch (IOException ex) { _logger.LogDebug(ex, "Cache root delete failed at {Root}", _root); }
+            catch (UnauthorizedAccessException ex) { _logger.LogDebug(ex, "Cache root delete denied at {Root}", _root); }
             Directory.CreateDirectory(_root);
         }
 
