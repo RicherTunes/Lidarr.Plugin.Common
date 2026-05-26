@@ -48,7 +48,13 @@ namespace Lidarr.Plugin.Common.Utilities
         {
             // Normalize to NFC to avoid cross-OS inconsistencies
             var normalized = (fileName ?? string.Empty).Normalize(NormalizationForm.FormC);
-            var sanitized = Sanitize.FileNameSegment(normalized, fallback: "_");
+            // Use "Unknown" fallback to preserve the historical FileNameSanitizer.SanitizeFileName
+            // contract that the FileSystemUtilitiesSanitizeTests + FileNameContractTests pin
+            // (null / "" / "   " / all-invalid -> "Unknown"). The c07bc1f Phase 2 migration
+            // accidentally regressed this to "_" while migrating away from FileNameSanitizer;
+            // SanitizeDirectoryPath above already uses "Unknown", so this restores intra-class
+            // consistency too.
+            var sanitized = Sanitize.FileNameSegment(normalized, fallback: "Unknown");
 
             // Trim trailing chars that cause Windows issues BEFORE reserved-name check
             // This ensures "CON." becomes "_CON" not "CON"
@@ -56,7 +62,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
             if (string.IsNullOrWhiteSpace(sanitized))
             {
-                sanitized = "_";
+                sanitized = "Unknown";
             }
 
             // Reserved name guard AFTER trimming (defense in depth)
