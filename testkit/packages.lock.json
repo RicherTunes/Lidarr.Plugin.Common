@@ -57,9 +57,9 @@
       },
       "xunit.assert": {
         "type": "Direct",
-        "requested": "[2.9.2, )",
-        "resolved": "2.9.2",
-        "contentHash": "QkNBAQG4pa66cholm28AxijBjrmki98/vsEh4Sx5iplzotvPgpiotcxqJQMRC8d7RV7nIT8ozh97957hDnZwsQ=="
+        "requested": "[2.9.3, )",
+        "resolved": "2.9.3",
+        "contentHash": "/Kq28fCE7MjOV42YLVRAJzRF0WmEqsmflm0cfpMjGtzQ2lR5mYVj1/i0Y8uDAOLczkL3/jArrwehfMD0YogMAA=="
       },
       "xunit.extensibility.core": {
         "type": "Direct",
@@ -391,7 +391,7 @@
         "type": "Project",
         "dependencies": {
           "CliWrap": "[3.10.1, )",
-          "Lidarr.Plugin.Abstractions": "[1.9.5, )",
+          "Lidarr.Plugin.Abstractions": "[1.18.0-dev, )",
           "Microsoft.AspNetCore.DataProtection": "[8.0.25, )",
           "Microsoft.AspNetCore.DataProtection.Extensions": "[8.0.25, )",
           "Microsoft.Extensions.Caching.Memory": "[8.0.1, )",
