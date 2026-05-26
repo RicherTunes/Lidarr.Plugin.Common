@@ -488,6 +488,7 @@ if ($SkipTests) {
 
             # Restore test project with build flags (separate from plugin csproj restore)
             $testRestoreArgs = @($testProj)
+            $resolvedFlags = @()
             if ($buildFlags) {
                 $resolvedFlags = $buildFlags | ForEach-Object {
                     $_ -replace '\{HOST_PATH\}', $hostPathAbsolute
