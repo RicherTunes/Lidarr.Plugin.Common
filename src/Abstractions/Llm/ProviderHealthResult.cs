@@ -121,13 +121,19 @@ public record ProviderHealthResult
     /// <see cref="Stopwatch.Elapsed"/> is <see cref="TimeSpan.Zero"/> and it is
     /// not running), the response time is reported as <c>null</c> rather than
     /// <see cref="TimeSpan.Zero"/> to avoid signalling a misleading "0 ms" latency.
+    ///
+    /// <para>Distinct name (not an overload of <see cref="Healthy(TimeSpan?, string?, string?, string?)"/>)
+    /// to satisfy the Roslyn PublicAPI rule "Do not add multiple overloads with optional
+    /// parameters" — both this method and the TimeSpan-based variant have optional
+    /// provider/authMethod/model tail params, which would otherwise make
+    /// <c>Healthy(provider: "...")</c> calls ambiguous.</para>
     /// </summary>
     /// <param name="stopwatch">Stopwatch capturing the health-check duration. Null treated as no measurement.</param>
     /// <param name="provider">Optional provider identifier.</param>
     /// <param name="authMethod">Optional authentication method.</param>
     /// <param name="model">Optional model identifier.</param>
     /// <returns>A healthy <see cref="ProviderHealthResult"/>.</returns>
-    public static ProviderHealthResult Healthy(
+    public static ProviderHealthResult HealthyFromStopwatch(
         Stopwatch? stopwatch,
         string? provider = null,
         string? authMethod = null,
