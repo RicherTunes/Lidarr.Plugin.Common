@@ -66,9 +66,14 @@ namespace Lidarr.Plugin.Common.Security
         // they make filenames visually identical to a benign one while comparing unequal.
         private static readonly char[] ZeroWidthChars = { '​', '‌', '‍', '﻿' };
 
-        // Whitespace/separator chars that callers prefer replaced with a space (vs deleted)
-        // for readability — "AC/DC" should stay "AC DC", not collapse to "ACDC".
-        private static readonly char[] CharsReplacedWithSpace = { '/', '\\', '\n', '\r', '\t' };
+        // Whitespace/separator chars + invalid-filename chars that callers prefer replaced
+        // with a space (vs deleted via PathSegment's Path.GetInvalidFileNameChars filter).
+        // Replacement-with-space preserves readability for streaming-service metadata:
+        // "AC/DC" stays "AC DC" (not "ACDC"), and "Song: Title" stays "Song  Title"
+        // (not "SongTitle"). Mirrors the historical FileNameSanitizer.SanitizeFileName
+        // contract that downstream filename-building tests pin.
+        private static readonly char[] CharsReplacedWithSpace =
+            { '/', '\\', '\n', '\r', '\t', ':', '*', '?', '"', '<', '>', '|' };
 
         private static readonly Regex MultiSpacePattern = new(@"\s+", RegexOptions.Compiled);
 
