@@ -6,3 +6,19 @@ Lidarr.Plugin.Common.Services.Http.BackendHealthDelegatingHandler
 Lidarr.Plugin.Common.Services.Http.BackendHealthDelegatingHandler.BackendHealthDelegatingHandler(Lidarr.Plugin.Common.Resilience.BackendHealthCache! cache, System.Func<string!, string!>? classifyProvider = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
 Lidarr.Plugin.Common.Services.Http.BackendHealthDelegatingHandler.BackendHealthDelegatingHandler(Lidarr.Plugin.Common.Resilience.BackendHealthCache! cache, string! fixedProvider, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
 static Lidarr.Plugin.Common.Diagnostics.HealthCheckHelper.CheckAuthAsync(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>>! probe, string! provider, string! authMethod, string? diagnosticType = null, string? capability = null, string! unhealthyMessage = "Authentication failed", string? authFailedErrorCode = null, string? connectionFailedErrorCode = null, System.Func<System.Exception!, string!>? exceptionMessageTransform = null, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Abstractions.Diagnostics.DiagnosticHealthResult!>!
+Lidarr.Plugin.Common.Services.Http.HttpResponseHelpers
+static Lidarr.Plugin.Common.Services.Http.HttpResponseHelpers.ParseRetryAfter(System.Collections.Generic.IEnumerable<System.Collections.Generic.KeyValuePair<string!, string!>>? headers) -> System.TimeSpan?
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.NamedServiceRateLimiter(string! serviceName, Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter? inner = null) -> void
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.Inner.get -> Lidarr.Plugin.Common.Services.Performance.UniversalAdaptiveRateLimiter!
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.ServiceName.get -> string!
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.Dispose() -> void
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.GetCurrentLimit(string! service, string! endpoint) -> int
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.GetGlobalStats() -> Lidarr.Plugin.Common.Services.Performance.GlobalRateLimitStats!
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.GetNamedServiceStats() -> Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats!
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.GetServiceStats(string! service) -> Lidarr.Plugin.Common.Services.Performance.ServiceRateLimitStats!
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.RecordAuthFailure(string! service, string! endpoint) -> void
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.RecordResponse(string! endpoint, System.Net.Http.HttpResponseMessage! response) -> void
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.RecordResponse(string! service, string! endpoint, System.Net.Http.HttpResponseMessage! response) -> void
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.WaitIfNeededAsync(string! endpoint, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.WaitIfNeededAsync(string! service, string! endpoint, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task<bool>!

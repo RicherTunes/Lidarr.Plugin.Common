@@ -65,4 +65,24 @@
     <EmbeddedResource Include="Data\**\*.json" />
     <None Include="README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
+
+  <!-- HttpResponseFactory depends on NzbDrone.Common.Http (lives in Lidarr.Common.dll).
+       Resolve LidarrPath in the same priority order used by plugin test projects so
+       the TestKit compiles when built inside a plugin repo. When standalone (no DLLs),
+       HttpResponseFactory is excluded from compilation. -->
+  <PropertyGroup>
+    <LidarrPath Condition="'$(LidarrPath)' == ''">$(LIDARR_PATH)</LidarrPath>
+    <!-- Walk up from this file to find the nearest ext/Lidarr/_output/net8.0 in a plugin repo. -->
+    <LidarrPath Condition="'$(LidarrPath)' == '' AND Exists('$(MSBuildThisFileDirectory)..\ext\Lidarr\_output\net8.0')">$(MSBuildThisFileDirectory)..\ext\Lidarr\_output\net8.0</LidarrPath>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(LidarrPath)' != '' AND Exists('$(LidarrPath)\Lidarr.Common.dll')">
+    <Reference Include="Lidarr.Common">
+      <HintPath>$(LidarrPath)\Lidarr.Common.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <!-- Exclude HttpResponseFactory when Lidarr.Common.dll is unavailable (standalone Common build). -->
+  <ItemGroup Condition="'$(LidarrPath)' == '' OR !Exists('$(LidarrPath)\Lidarr.Common.dll')">
+    <Compile Remove="Http\HttpResponseFactory.cs" />
+  </ItemGroup>
 </Project>
