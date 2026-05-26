@@ -72,6 +72,15 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         protected readonly IPKCEGenerator _pkceGenerator;
         private readonly Dictionary<string, OAuthFlowState> _activeFlows;
         private readonly object _flowsLock = new();
+
+        // Single-flight gate for RefreshTokensAsync — concurrent callers coalesce onto
+        // the same in-flight Task instead of each hitting RefreshTokensInternalAsync.
+        // Critical for providers that single-use refresh tokens (most OAuth servers
+        // rotate refresh tokens on use — the second concurrent caller would otherwise
+        // present an already-consumed token and get 401'd, taking down everyone).
+        // Wave 17M (lifted from release/v1.9.0 at v1.17.0 tag).
+        private readonly object _refreshLock = new();
+        private Task<TSession>? _pendingRefresh;
         private readonly TimeSpan _flowExpirationTime = TimeSpan.FromMinutes(10);
 
         protected OAuthStreamingAuthenticationService(IPKCEGenerator pkceGenerator = null)
@@ -191,19 +200,59 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             if (string.IsNullOrEmpty(refreshToken))
                 throw new InvalidOperationException("Session does not contain a valid refresh token");
 
+            // Promise-sharing single-flight. Concurrent callers coalesce onto the same
+            // in-flight refresh Task; only the first caller hits RefreshTokensInternalAsync.
+            // Slot clears after the Task completes (success or failure) so a subsequent
+            // expiry can refresh again. Critical for OAuth servers that rotate refresh
+            // tokens on use — a second concurrent caller would otherwise present an
+            // already-consumed token and get 401'd, breaking every caller.
+            Task<TSession> inFlight;
+            bool initiator;
+            lock (_refreshLock)
+            {
+                if (_pendingRefresh != null)
+                {
+                    inFlight = _pendingRefresh;
+                    initiator = false;
+                }
+                else
+                {
+                    _pendingRefresh = DoRefreshAsync(refreshToken);
+                    inFlight = _pendingRefresh;
+                    initiator = true;
+                }
+            }
+
             try
             {
-                var refreshedSession = await RefreshTokensInternalAsync(refreshToken);
+                return await inFlight.ConfigureAwait(false);
+            }
+            finally
+            {
+                if (initiator)
+                {
+                    lock (_refreshLock)
+                    {
+                        if (ReferenceEquals(_pendingRefresh, inFlight))
+                        {
+                            _pendingRefresh = null;
+                        }
+                    }
+                }
+            }
+        }
 
-                // Update cached session
-                await CacheSessionAsync(refreshedSession);
-
+        private async Task<TSession> DoRefreshAsync(string refreshToken)
+        {
+            try
+            {
+                var refreshedSession = await RefreshTokensInternalAsync(refreshToken).ConfigureAwait(false);
+                await CacheSessionAsync(refreshedSession).ConfigureAwait(false);
                 return refreshedSession;
             }
             catch (Exception ex)
             {
-                // If refresh fails, clear cached session
-                await ClearCachedSessionAsync();
+                await ClearCachedSessionAsync().ConfigureAwait(false);
                 throw new InvalidOperationException("Failed to refresh access token", ex);
             }
         }
