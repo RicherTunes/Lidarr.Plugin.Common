@@ -128,7 +128,17 @@
     "papercut",
     "Groq",
     "footgun",
-    "unpushed"
+    "unpushed",
+    "behavioural",
+    "centralise",
+    "fullwidth",
+    "FULLWIDTH",
+    "initialises",
+    "NFKC",
+    "normalisation",
+    "normalises",
+    "recognise",
+    "syscall"
   ],
   "ignorePaths": [
     "**/bin",
