@@ -50,12 +50,12 @@ on:
         default: ''
 ```
 
-### Benefits
+### Benefits (Candidate 1)
 - Single place to bump `actions/setup-dotnet` and `actions/cache` versions
 - Enforces consistent NuGet cache key hash pattern
 - Eliminates the `8.0.x` vs `8.0.404` inconsistency (brainarr vs qobuzarr)
 
-### Risks / blockers
+### Risks / blockers (Candidate 1)
 - Composite actions cannot currently set env vars visible to subsequent steps in the caller;
   a reusable workflow (separate job) solves this but adds job-level overhead and requires
   artifact handoff for build outputs.
@@ -99,12 +99,12 @@ action). This pattern should be **promoted to Common** so all repos share it.
   `uses: RicherTunes/Lidarr.Plugin.Common/.github/actions/init-common-submodule@<SHA>`
 - Inputs: `token` (optional, for private submodules)
 
-### Benefits
+### Benefits (Candidate 2)
 - Eliminates 40+ copies of identical submodule init + assert logic
 - SHA drift assertion is centralised (update once when assertion logic improves)
 - Consistent depth (`--depth=1`) and URL rewrite across all repos
 
-### Risks / blockers
+### Risks / blockers (Candidate 2)
 - Composite actions from external repos require a checkout step; the action must be
   accessible before the submodule it initialises is available. Use
   `actions/checkout@<SHA> + uses:` referencing the action from the remote ref directly.
@@ -151,13 +151,13 @@ on:
         default: 'VersionContract'
 ```
 
-### Benefits
+### Benefits (Candidate 3)
 - Single PR to update both lint scripts for all 5 repos
 - Guarantees all repos run identical lint logic (no subset drift)
 - Phase 1.5's `ecosystem-parity-lint -Check VersionContract` step needs to be
   maintained in 4 separate files today; one reusable workflow fixes this
 
-### Risks / blockers
+### Risks / blockers (Candidate 3)
 - The `parity-lint` job has repo-specific submodule token secret names
   (`SUBMODULES_TOKEN` in brainarr/applemusicarr, `CI_PAT` in qobuzarr, no token
   in tidalarr). A `secrets: inherit` approach or explicit secret mapping is needed.
@@ -190,13 +190,13 @@ on:
         default: 'lidarr-assemblies'
 ```
 
-### Benefits
+### Benefits (Candidate 4)
 - Docker version bumps happen in one place (currently requires 20+ file edits)
 - Assembly extraction script variations (brainarr vs applemusicarr) consolidated
 - `scripts/extract-lidarr-assemblies.sh` already exists in applemusicarr and brainarr;
   the reusable workflow would call Common's canonical version
 
-### Risks / blockers
+### Risks / blockers (Candidate 4)
 - `prepare-lidarr` in brainarr is a distinct upstream job with concurrency control;
   the artifact handoff pattern must be preserved
 - Assembly output path varies (`ext/Lidarr-docker/_output/net8.0` vs `ext/Lidarr/_output/net8.0`)

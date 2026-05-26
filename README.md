@@ -10,16 +10,19 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.9.5 — May 23, 2026
+Latest: v1.17.0 — May 25, 2026
 
-- `PathTraversalGuard`, `HostBridgeDownloadTracker`, `PrefixedReleaseGuidParser`, `PlaceholderSearchUri` — new host-bridge primitives (lift wave A).
-- `WarnOnce` log-gating helper eliminates hand-rolled static `HashSet` guards across plugins.
-- `TestValidationBuilder` for accumulate-then-build `Test()` pipelines.
-- `JsonFileStore<TKey,TValue>` type-safe JSON-backed key-value store.
-- `NullUniversalAdaptiveRateLimiter` testkit stub — single source of truth for plugin test fakes.
-- `FileStreamingResponseCache` + `FileConditionalRequestState` now use `PluginConfigRoots` (fixes Docker/hotio storage paths).
+- **v1.17.0** — Wave-21 parity helpers (PathTraversalGuard.ContainsTraversalAttempt probe, AlbumDownloadUri parser, AlbumReleaseInfoBuilder Edition/Explicit/Live slots, unified plugin version-bump helper).
+- **v1.16.0** — `SlidingWindowAuthFailureHandler` (K-of-N-in-W sliding-window circuit semantics, sibling of `DefaultAuthFailureHandler`); unblocks brainarr's `LlmAuthCircuit` convergence onto the shared Common stack.
+- **v1.15.0** — `BoundedConcurrentDictionary` richer API surface (indexer setter, `ContainsKey`, `Values`, `IEnumerable<KeyValuePair>`); SecureMemory + Conservative rate-limit profile + PagedResponseValidator.
+- **v1.14.x** — AuthFailureGate surface (registry, delegating handler, gated exception) + multi-plugin ALC coexistence proof + ecosystem version contract enforcement.
+- **v1.13.x** — Plugin packaging contract + plugin version contract + published-release installability checks (test kit).
+- **v1.12.0** — `AlbumReleaseInfoBuilder` (lift wave A item 8); `HostBridgeDownloadOrchestrator` (lift wave A item 2); `RetryPolicyOptions.ForLocalProviders` preset.
+- **v1.8.0** — ecosystem version contract via `versionContract` section in `scripts/parity-spec.json`; `forbiddenFields` enforcement wired into parity-lint; ALC multi-plugin co-existence fix.
 
-Release notes: [v1.9.5](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.9.5)
+Release notes: [v1.17.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.17.0) · [v1.16.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.16.0)
+
+Ecosystem-wide parity (every plugin × every cross-cutting concern): see [docs/ECOSYSTEM_PARITY_MATRIX.md](docs/ECOSYSTEM_PARITY_MATRIX.md).
 
 ## Choose your adventure
 

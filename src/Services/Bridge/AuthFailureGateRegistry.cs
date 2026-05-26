@@ -24,6 +24,22 @@ namespace Lidarr.Plugin.Common.Services.Bridge;
 /// The registry is bounded by <c>maxKeys</c> (default 256) to defend against
 /// misconfigured callers passing dynamic keys (e.g. request ids by mistake).
 /// </remarks>
+/// <remarks>
+/// <b>Deprecation (v1.18.0):</b> A Wave-26 adversarial audit found zero non-test
+/// plugin consumers across all four ecosystem repos. Every real call-site uses
+/// <see cref="AuthFailureGate"/> directly (typically via a hand-rolled
+/// <see cref="System.Collections.Concurrent.ConcurrentDictionary{TKey,TValue}"/>
+/// keyed per provider, which allows pairing a custom <see cref="IAuthFailureHandler"/>
+/// with each gate — something this registry cannot do because it wires
+/// <see cref="DefaultAuthFailureHandler"/> internally). This interface and its
+/// implementation will be removed in v2.0.0.
+/// </remarks>
+[Obsolete(
+    "AuthFailureGateRegistry has no plugin consumers (Wave-26 audit). " +
+    "Manage per-key AuthFailureGate instances directly via ConcurrentDictionary<string, AuthFailureGate> " +
+    "so you can pair each gate with a custom IAuthFailureHandler. " +
+    "This type will be removed in v2.0.0.",
+    error: false)]
 public interface IAuthFailureGateRegistry
 {
     /// <summary>Get or create the gate for a provider key.</summary>
@@ -52,6 +68,12 @@ public interface IAuthFailureGateRegistry
     int Count { get; }
 }
 
+[Obsolete(
+    "AuthFailureGateRegistry has no plugin consumers (Wave-26 audit). " +
+    "Manage per-key AuthFailureGate instances directly via ConcurrentDictionary<string, AuthFailureGate> " +
+    "so you can pair each gate with a custom IAuthFailureHandler. " +
+    "This type will be removed in v2.0.0.",
+    error: false)]
 public sealed class AuthFailureGateRegistry : IAuthFailureGateRegistry
 {
     private readonly TimeProvider _clock;

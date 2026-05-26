@@ -51,12 +51,13 @@ namespace Lidarr.Plugin.Common.Utilities
         private static readonly ConcurrentDictionary<string, GateState> AggregateGates = new();
         private static readonly TimeSpan IdleTtl = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(5);
-        private static readonly Timer Sweeper;
+        // Nullable so Shutdown() can null it via Interlocked.Exchange (readonly would prevent that).
+        private static Timer? _sweeper;
 
         static HostGateRegistry()
         {
             // Background sweeper to dispose idle gates and avoid unbounded growth in long-lived processes.
-            Sweeper = new Timer(_ => Sweep(), null, SweepInterval, SweepInterval);
+            _sweeper = new Timer(_ => Sweep(), null, SweepInterval, SweepInterval);
         }
 
         public static SemaphoreSlim Get(string? host, int requestedLimit)
@@ -119,8 +120,49 @@ namespace Lidarr.Plugin.Common.Utilities
             }
         }
 
+        /// <summary>
+        /// Disposes the background sweeper Timer, clears all gate entries, and resets internal
+        /// state so the registry is safe to use again after the next call to <see cref="Get"/>
+        /// or <see cref="GetAggregate"/> (the timer is re-created lazily on first access).
+        /// <para>
+        /// Call this during plugin unload / Dispose to prevent the static Timer from continuing
+        /// to fire against an already-unloaded AssemblyLoadContext.  Safe to call multiple times
+        /// (idempotent) and safe to call even if the registry has never been accessed.
+        /// </para>
+        /// </summary>
+        public static void Shutdown()
+        {
+            // Swap the sweeper with a sentinel null so concurrent Sweep() calls are no-ops.
+            var sweeper = Interlocked.Exchange(ref _sweeper, null);
+            sweeper?.Dispose();
+
+            // Drain Gates
+            foreach (var kv in Gates)
+            {
+                if (Gates.TryRemove(kv.Key, out var removed))
+                {
+                    try { removed.Semaphore.Dispose(); } catch { /* best-effort */ }
+                }
+            }
+
+            // Drain AggregateGates
+            foreach (var kv in AggregateGates)
+            {
+                if (AggregateGates.TryRemove(kv.Key, out var removed))
+                {
+                    try { removed.Semaphore.Dispose(); } catch { /* best-effort */ }
+                }
+            }
+        }
+
         private static void Sweep()
         {
+            // Guard: Shutdown() may have nulled out the sweeper reference.
+            if (_sweeper is null)
+            {
+                return;
+            }
+
             try
             {
                 var now = DateTime.UtcNow;

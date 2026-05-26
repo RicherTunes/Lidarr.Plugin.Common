@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using File = System.IO.File;
 using Lidarr.Plugin.Common.Base;
 using Lidarr.Plugin.Abstractions.Models;
+using Lidarr.Plugin.Common.Security;
 using Lidarr.Plugin.Common.Services.Performance;
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Common.Interfaces;
@@ -128,8 +129,8 @@ namespace Lidarr.Plugin.Common.Base
         protected virtual string GenerateFileName(StreamingTrack track, StreamingAlbum album)
         {
             var trackNumber = track.TrackNumber?.ToString("00") ?? "00";
-            var title = FileNameSanitizer.SanitizeFileName(track.Title ?? "Unknown");
-            var artist = FileNameSanitizer.SanitizeFileName(track.Artist?.Name ?? album?.Artist?.Name ?? "Unknown");
+            var title = Sanitize.FileNameSegment(track.Title);
+            var artist = Sanitize.FileNameSegment(track.Artist?.Name ?? album?.Artist?.Name);
 
             return $"{trackNumber} - {artist} - {title}.flac";
         }
@@ -143,8 +144,8 @@ namespace Lidarr.Plugin.Common.Base
 
             if (Settings.OrganizeByArtist && album?.Artist?.Name != null)
             {
-                var artistFolder = FileNameSanitizer.SanitizeFileName(album.Artist.Name);
-                var albumFolder = FileNameSanitizer.SanitizeFileName(album.Title ?? "Unknown Album");
+                var artistFolder = Sanitize.FileNameSegment(album.Artist.Name, "Unknown Artist");
+                var albumFolder = Sanitize.FileNameSegment(album.Title, "Unknown Album");
                 return Path.Combine(basePath, artistFolder, albumFolder, fileName);
             }
 
@@ -214,7 +215,7 @@ namespace Lidarr.Plugin.Common.Base
                 }
 
                 // Authenticate with service
-                var authResult = await AuthenticateAsync();
+                var authResult = await AuthenticateAsync().ConfigureAwait(false);
                 if (!authResult)
                 {
                     // NOTE: Use IEnumerable<ValidationFailure> ctor instead of Errors.Add to avoid
@@ -261,7 +262,7 @@ namespace Lidarr.Plugin.Common.Base
                 Logger?.LogDebug($"Adding {ServiceName} album download: {albumId}");
 
                 // Get album details
-                var album = await GetAlbumAsync(albumId);
+                var album = await GetAlbumAsync(albumId).ConfigureAwait(false);
                 if (album == null)
                 {
                     throw new InvalidOperationException($"Album {albumId} not found on {ServiceName}");
@@ -355,7 +356,7 @@ namespace Lidarr.Plugin.Common.Base
 
             try
             {
-                await _concurrencyLimiter.WaitAsync(cancellationTokenSource.Token);
+                await _concurrencyLimiter.WaitAsync(cancellationTokenSource.Token).ConfigureAwait(false);
 
                 var album = downloadItem.Album;
                 var totalTracks = album.TrackCount;
@@ -385,10 +386,10 @@ namespace Lidarr.Plugin.Common.Base
                     OnDownloadProgress(downloadItem.Id, progress, $"Track {i}");
 
                     // Rate limiting
-                    await RateLimiter.WaitIfNeededAsync(ServiceName, "download", cancellationTokenSource.Token);
+                    await RateLimiter.WaitIfNeededAsync(ServiceName, "download", cancellationTokenSource.Token).ConfigureAwait(false);
                 }
 
-                await Task.WhenAll(downloadTasks);
+                await Task.WhenAll(downloadTasks).ConfigureAwait(false);
                 OnDownloadCompleted(downloadItem.Id, success: true);
             }
             catch (OperationCanceledException)
@@ -421,7 +422,7 @@ namespace Lidarr.Plugin.Common.Base
                 // 3. Download using DownloadTrackAsync
 
                 // For now, skip the placeholder implementation
-                await Task.Delay(100, cancellationToken);
+                await Task.Delay(100, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -439,14 +440,14 @@ namespace Lidarr.Plugin.Common.Base
                 Logger?.LogInformation("Downloading track: {Artist} - {Title}", track.Artist, track.Title);
 
                 // Service-specific: Get download URL
-                var streamUrl = await GetStreamUrlAsync(track.Id, GetDefaultQuality());
+                var streamUrl = await GetStreamUrlAsync(track.Id, GetDefaultQuality()).ConfigureAwait(false);
                 if (string.IsNullOrEmpty(streamUrl))
                 {
                     return new StreamingDownloadResult { Success = false, ErrorMessage = "Could not obtain stream URL" };
                 }
 
                 // Framework provides: Complete file download
-                return await DownloadAudioFileAsync(streamUrl, outputFilePath, track, null, cancellationToken);
+                return await DownloadAudioFileAsync(streamUrl, outputFilePath, track, null, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception ex)
             {
@@ -503,7 +504,7 @@ namespace Lidarr.Plugin.Common.Base
                         req.Headers.Range = new RangeHeaderValue(existingBytes, null);
                     }
 
-                    using var response = await httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+                    using var response = await httpClient.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
 
                     // Handle non-success with retry awareness (429/5xx/408)
                     if (!response.IsSuccessStatusCode)
@@ -512,7 +513,7 @@ namespace Lidarr.Plugin.Common.Base
                         {
                             var delay = GetDownloadRetryDelay(attempt, response);
                             Logger?.LogWarning("Retrying download after {DelayMs}ms due to HTTP {StatusCode}", delay.TotalMilliseconds, (int)response.StatusCode);
-                            await Task.Delay(delay, cancellationToken);
+                            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
                             continue;
                         }
                         response.EnsureSuccessStatusCode(); // throws
@@ -550,7 +551,7 @@ namespace Lidarr.Plugin.Common.Base
                     }
 
                     // Apply metadata to the temp file before moving
-                    await ApplyMetadataTagsAsync(tempFilePath, metadata);
+                    await ApplyMetadataTagsAsync(tempFilePath, metadata).ConfigureAwait(false);
 
                     // Atomic move to final location (overwrite if exists)
                     try
@@ -585,7 +586,7 @@ namespace Lidarr.Plugin.Common.Base
                     if (attempt < maxRetries)
                     {
                         var delay = GetDownloadRetryDelay(attempt, null);
-                        await Task.Delay(delay, cancellationToken);
+                        await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
                     }
                 }
             }
@@ -708,12 +709,12 @@ namespace Lidarr.Plugin.Common.Base
         {
             if (Settings.OrganizeByArtist && album.Artist?.Name != null)
             {
-                var artistFolder = FileNameSanitizer.SanitizeFileName(album.Artist.Name);
-                var albumFolder = FileNameSanitizer.SanitizeFileName(album.Title ?? "Unknown Album");
+                var artistFolder = Sanitize.FileNameSegment(album.Artist.Name, "Unknown Artist");
+                var albumFolder = Sanitize.FileNameSegment(album.Title, "Unknown Album");
                 return Path.Combine(basePath, artistFolder, albumFolder);
             }
 
-            return Path.Combine(basePath, FileNameSanitizer.SanitizeFileName(album.Title ?? "Unknown Album"));
+            return Path.Combine(basePath, Sanitize.FileNameSegment(album.Title, "Unknown Album"));
         }
 
         private int GetMaxConcurrency(TSettings settings)

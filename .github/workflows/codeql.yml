@@ -23,7 +23,10 @@ jobs:
       - uses: github/codeql-action/init@v4
         with:
           languages: csharp
-      # Explicit build instead of autobuild to avoid race conditions with GeneratePackageOnBuild
+      # Explicit build instead of autobuild to avoid race conditions with GeneratePackageOnBuild.
+      # -m:1 forces single-threaded MSBuild — parallel builds race on the same .deps.json
+      # file (System.IO.IOException "being used by another process" — affects both Windows
+      # and ubuntu runners under load). Same root cause that PR #509 addresses for nightly.
       - name: Build
-        run: dotnet build --configuration Release -p:GeneratePackageOnBuild=false
+        run: dotnet build --configuration Release -p:GeneratePackageOnBuild=false -m:1
       - uses: github/codeql-action/analyze@v4
