@@ -7,6 +7,10 @@ using System.Runtime.Loader;
 using System.Text.Json;
 using Lidarr.Plugin.Abstractions.Hosting;
 using Xunit;
+// Xunit.SkippableFact provides [SkippableFact] + Skip.If(...) — required so the
+// "plugin DLLs not present" early-out flows through xUnit as Skipped rather than
+// Failed (the plain [Fact] attribute treats Xunit.SkipException as a regular
+// exception → test fails on CI runners that haven't pre-built sibling plugins).
 
 namespace Lidarr.Plugin.Common.Tests.MultiPluginAlc;
 
@@ -118,7 +122,7 @@ public sealed class MultiPluginAlcTests
     /// Post-ALC-fix: Abstractions is internalised into each merged plugin DLL, so
     /// each ALC resolves its own private copy — different Type instances, no collision.
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public void LoadAllPluginsInIsolatedAlcs_NoTypeIdentityCollisions()
     {
         var loaded = new List<(string RepoName, Assembly Assembly, AssemblyLoadContext Alc)>();
@@ -206,7 +210,7 @@ public sealed class MultiPluginAlcTests
     /// ship its own copy (internalised or alongside) rather than delegate
     /// resolution to the host, which does not ship Common.
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public void LoadAllPluginsInIsolatedAlcs_NoSharedDependencyConflict()
     {
         var violations = new List<string>();
@@ -299,7 +303,7 @@ public sealed class MultiPluginAlcTests
     /// Uses name-based discovery (type.GetInterfaces().Any(i => i.FullName == ...))
     /// to handle both sidecar and ILRepack-merged shapes (per C2 in ALC_MULTIPLUGIN_FIX.md).
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public void LoadAllPluginsInIsolatedAlcs_AllPluginMetadataExposed()
     {
         const string IPluginFullName = "Lidarr.Plugin.Abstractions.Contracts.IPlugin";
@@ -399,7 +403,7 @@ public sealed class MultiPluginAlcTests
     /// Common than the ecosystem canonical — a potential source of subtle runtime
     /// failures when the host resolves Common types.
     /// </summary>
-    [Fact]
+    [SkippableFact]
     public void LoadAllPluginsInIsolatedAlcs_NoAssemblyVersionDrift()
     {
         var violations = new List<string>();
