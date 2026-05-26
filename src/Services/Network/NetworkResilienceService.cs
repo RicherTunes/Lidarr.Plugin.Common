@@ -26,7 +26,10 @@ namespace Lidarr.Plugin.Common.Services.Network
     /// This service provides:
     /// 1. Atomic batch operations with all-or-nothing semantics
     /// 2. Automatic retry with exponential backoff for transient failures
-    /// 3. Checkpoint-based recovery for large operations
+    /// 3. <em>In-process</em> checkpoint tracking — the batch state survives within a
+    ///    single process lifetime (concurrent batches can find each other by id), but
+    ///    NOT across process restarts. Wiring to durable storage (e.g. JsonFileStore)
+    ///    is a documented future enhancement, not a currently shipped feature.
     /// 4. Network health monitoring and circuit breaker pattern
     /// 5. Graceful degradation during extended outages
     /// </remarks>
@@ -474,16 +477,18 @@ namespace Lidarr.Plugin.Common.Services.Network
         #region Checkpoint Management
 
         /// <summary>
-        /// Saves operation checkpoint for recovery.
-        /// Currently persists to in-memory state only; a future implementation should
-        /// flush to durable storage (e.g. JsonFileStore) to survive process restarts.
+        /// Records a checkpoint timestamp on the in-process batch state so resumed
+        /// operations can report progress accurately and the periodic save schedule
+        /// (every <c>_checkpointInterval</c> items) emits a debug line. The state
+        /// itself lives in <see cref="_activeBatchOperations"/> for the process
+        /// lifetime — durable storage (e.g. JsonFileStore) is a future enhancement
+        /// when cross-restart recovery becomes a requirement; until then the class
+        /// summary above documents this as in-process only.
         /// </summary>
         private Task SaveCheckpointAsync(BatchOperationState batchState)
         {
             try
             {
-                // TODO: wire to durable storage when persistent recovery is needed.
-                // For now the checkpoint is kept in the in-memory _activeBatchOperations dictionary.
                 batchState.LastCheckpointTime = DateTime.UtcNow;
 
                 _logger.LogDebug("CHECKPOINT SAVED: Operation '{0}' at {1}/{2} items",
@@ -498,18 +503,20 @@ namespace Lidarr.Plugin.Common.Services.Network
         }
 
         /// <summary>
-        /// Loads existing operation from checkpoint
+        /// Looks up an existing operation in the in-process batch state. Returns null
+        /// if no matching id is tracked. (The method is Task-returning to preserve the
+        /// async-friendly call site; the lookup itself is synchronous because
+        /// <see cref="_activeBatchOperations"/> is an in-memory dictionary.)
         /// </summary>
-        private async Task<BatchOperationState> LoadExistingOperationAsync(string operationId)
+        private Task<BatchOperationState> LoadExistingOperationAsync(string operationId)
         {
             try
             {
-                // In a real implementation, this would load from persistent storage
                 if (_activeBatchOperations.TryGetValue(operationId, out var existingState))
                 {
                     _logger.LogInformation("🔄 RESUMING: Found existing operation '{0}' at {1}/{2} items",
                                 operationId, existingState.CompletedItems, existingState.TotalItems);
-                    return existingState;
+                    return Task.FromResult(existingState);
                 }
             }
             catch (Exception ex)
@@ -517,13 +524,15 @@ namespace Lidarr.Plugin.Common.Services.Network
                 _logger.LogError(ex, "Failed to load existing operation: {0}", operationId);
             }
 
-            return null;
+            return Task.FromResult<BatchOperationState>(null);
         }
 
         /// <summary>
-        /// Cleans up completed operation
+        /// Removes a completed operation from the in-process batch state. Task-returning
+        /// for call-site parity with the other checkpoint helpers; the underlying
+        /// dictionary remove is synchronous.
         /// </summary>
-        private async Task CleanupOperationAsync(string operationId)
+        private Task CleanupOperationAsync(string operationId)
         {
             try
             {
@@ -534,6 +543,7 @@ namespace Lidarr.Plugin.Common.Services.Network
             {
                 _logger.LogError(ex, "Failed to cleanup operation: {0}", operationId);
             }
+            return Task.CompletedTask;
         }
 
         #endregion
