@@ -8,10 +8,18 @@ namespace Lidarr.Plugin.Common.Utilities
     /// <summary>
     /// Utility for sanitizing file and path names to be safe for various file systems.
     /// </summary>
+    /// <remarks>
+    /// Prefer <c>Sanitize.PathSegment</c> in <c>Lidarr.Plugin.Common.Security</c> for new code:
+    /// it uses <c>Path.GetInvalidFileNameChars()</c> directly, performs NFKC Unicode
+    /// normalization, and rejects unsafe segments via <c>Sanitize.IsSafePath</c> instead of
+    /// mutating them in-place. FileNameSanitizer is retained for in-flight internal call sites
+    /// because its replace-with-space behavior for path separators (e.g. <c>"AC/DC"</c> → <c>"AC DC"</c>)
+    /// and <c>"Unknown"</c>-on-empty fallback differ from Sanitize's delete-and-empty semantics.
+    /// </remarks>
+    [Obsolete("Prefer Sanitize.PathSegment for new code; FileNameSanitizer retained for in-flight internal callers with different fallback semantics. See class-level <remarks/> for migration guidance.")]
     public static class FileNameSanitizer
     {
         private static readonly char[] InvalidFileNameChars = Path.GetInvalidFileNameChars();
-        private static readonly char[] InvalidPathChars = Path.GetInvalidPathChars();
 
         // Additional characters that can cause issues
         private static readonly char[] ProblematicChars = { ':', '*', '?', '"', '<', '>', '|' };

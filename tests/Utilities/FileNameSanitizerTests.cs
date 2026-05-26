@@ -1,5 +1,12 @@
+using System;
+using System.Reflection;
 using Lidarr.Plugin.Common.Utilities;
 using Xunit;
+
+// FileNameSanitizer is intentionally marked [Obsolete] — these tests pin the contract for
+// the in-flight internal callers that remain. Suppress the obsolete-usage warning for the
+// entire file rather than scattering pragmas.
+#pragma warning disable CS0618
 
 namespace Lidarr.Plugin.Common.Tests.Utilities;
 
@@ -73,5 +80,38 @@ public class FileNameSanitizerTests
         var result = FileNameSanitizer.SanitizePath("Artist/Album/re..master.flac");
 
         Assert.Contains("re..master.flac", result);
+    }
+
+    [Fact]
+    public void Class_IsMarkedObsolete_WithMigrationGuidance()
+    {
+        // Per the Common audit, new code should prefer Sanitize.PathSegment (uses
+        // Path.GetInvalidFileNameChars for invalid-char rejection, NFKC normalization,
+        // and a segment-rejection model rather than mutate-in-place). FileNameSanitizer
+        // is preserved for the 11 in-flight internal call sites because of subtle
+        // fallback differences ("Unknown" vs empty, replace-with-space vs delete) but
+        // is marked obsolete so the deprecation is visible to plugin authors.
+        var obsolete = typeof(FileNameSanitizer)
+            .GetCustomAttribute<ObsoleteAttribute>(inherit: false);
+
+        Assert.NotNull(obsolete);
+        Assert.False(obsolete!.IsError,
+            "FileNameSanitizer still has in-flight internal callers — keep as warning, not error");
+        Assert.Contains("Sanitize.PathSegment", obsolete.Message ?? "",
+            StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void NoDeadFields_RemainInTypeSurface()
+    {
+        // FileNameSanitizer historically declared `InvalidPathChars` (line 14) but never
+        // read it — dead code. Removing it is a small but visible cleanup; this test
+        // pins the absence so a future regression (someone adds a path-chars field for
+        // a different use) is caught instead of silently accumulating debt.
+        var deadField = typeof(FileNameSanitizer).GetField(
+            "InvalidPathChars",
+            BindingFlags.NonPublic | BindingFlags.Static);
+
+        Assert.Null(deadField);
     }
 }
