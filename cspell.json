@@ -120,7 +120,15 @@
     "backoffs",
     "IHTTPCLIENT",
     "MULTIPLUGIN",
-    "INVALIDOPERATION"
+    "INVALIDOPERATION",
+    "throughs",
+    "impls",
+    "ETIMEDOUT",
+    "checkpointing",
+    "papercut",
+    "Groq",
+    "footgun",
+    "unpushed"
   ],
   "ignorePaths": [
     "**/bin",
