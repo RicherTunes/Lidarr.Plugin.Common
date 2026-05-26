@@ -135,14 +135,29 @@ public sealed class JsonFileStoreEdgeCaseTests : IDisposable
         Assert.Equal(0, store.Count);
     }
 
+    // Generous timing margin for both TTL tests below:
+    // - TTL = 300ms (was 75ms)
+    // - Wait = 600ms (was 150ms)
+    //
+    // The previous values intermittently failed on shared CI runners under load
+    // — the second SetAsync would occasionally land within the 75ms TTL window
+    // because Task.Delay isn't a hard floor (it's a "wait AT LEAST this long"
+    // contract, and the scheduler can return early under specific conditions).
+    // Doubling the margin gives ample buffer without making the test wall-clock
+    // expensive (~600ms each, ~1.2s total). A proper fix would inject a clock
+    // abstraction into JsonFileStore so tests advance time deterministically,
+    // but that's a bigger refactor than warranted for two tests.
+    private static readonly TimeSpan TtlTestWindow = TimeSpan.FromMilliseconds(300);
+    private static readonly TimeSpan TtlTestWait = TimeSpan.FromMilliseconds(600);
+
     [Fact]
     public async Task EnumerateAsync_ExpiredEntries_AreOmitted()
     {
-        var options = new JsonFileStoreOptions<string> { Ttl = TimeSpan.FromMilliseconds(75) };
+        var options = new JsonFileStoreOptions<string> { Ttl = TtlTestWindow };
         var store = new JsonFileStore<string, Entry>(PathFor(), options);
 
         await store.SetAsync("ephemeral", new Entry("e1"));
-        await Task.Delay(150);
+        await Task.Delay(TtlTestWait);
         await store.SetAsync("fresh", new Entry("f1"));
 
         // EnumerateAsync filters expired entries even before they're purged on save.
@@ -159,12 +174,12 @@ public sealed class JsonFileStoreEdgeCaseTests : IDisposable
     [Fact]
     public async Task SetAsync_PurgesExpiredEntriesOnSave()
     {
-        var options = new JsonFileStoreOptions<string> { Ttl = TimeSpan.FromMilliseconds(75) };
+        var options = new JsonFileStoreOptions<string> { Ttl = TtlTestWindow };
         var path = PathFor();
         var store = new JsonFileStore<string, Entry>(path, options);
 
         await store.SetAsync("expires", new Entry("e"));
-        await Task.Delay(150);
+        await Task.Delay(TtlTestWait);
         await store.SetAsync("survivor", new Entry("s"));
 
         // Re-load: only "survivor" should persist (expired purged on save).
