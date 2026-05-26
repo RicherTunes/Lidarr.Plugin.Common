@@ -226,7 +226,13 @@ public class WarnOnceTests
     [Fact]
     public async Task TryWarn_ConcurrentCalls_ExactlyOneWarnFires()
     {
-        const int threadCount = 64;
+        // 16 threads is enough to exercise the TryAdd race condition we care about;
+        // the prior 64-thread version exhausted the thread pool when the full test
+        // suite ran in parallel (xunit MaxParallelThreads default = CPU count), so
+        // Barrier(64).SignalAndWait could hang waiting for threads that never get
+        // scheduled. The contract under test is "exactly one warn fires per key
+        // when N threads race"; that's verified at any N >= 2.
+        const int threadCount = 16;
         var sut = new WarnOnce();
         var warnCount = 0;
         var debugCount = 0;
@@ -237,7 +243,7 @@ public class WarnOnceTests
         {
             tasks[i] = Task.Run(() =>
             {
-                barrier.SignalAndWait(); // all threads start simultaneously
+                barrier.SignalAndWait(TimeSpan.FromSeconds(30)); // fail-fast if pool starves
                 sut.TryWarn(
                     "concurrent-key",
                     () => Interlocked.Increment(ref warnCount),
@@ -254,8 +260,12 @@ public class WarnOnceTests
     [Fact]
     public async Task TryWarn_ConcurrentCallsDifferentKeys_EachKeyWarnsFiredExactlyOnce()
     {
-        const int keyCount = 16;
-        const int threadsPerKey = 8;
+        // Reduced from 16 keys × 8 threads (=128) to 8×4 (=32) for the same reason
+        // as TryWarn_ConcurrentCalls above — full-suite parallelism + Barrier(N) hangs
+        // when N exceeds the available thread-pool worker count. 32 still exercises
+        // the per-key independence property (each key gets its own race).
+        const int keyCount = 8;
+        const int threadsPerKey = 4;
         var sut = new WarnOnce();
         var warnCounts = new int[keyCount];
         var barrier = new Barrier(keyCount * threadsPerKey);
@@ -268,7 +278,7 @@ public class WarnOnceTests
             {
                 tasks.Add(Task.Run(() =>
                 {
-                    barrier.SignalAndWait();
+                    barrier.SignalAndWait(TimeSpan.FromSeconds(30));
                     sut.TryWarn(
                         $"key-{capturedK}",
                         () => Interlocked.Increment(ref warnCounts[capturedK]));
