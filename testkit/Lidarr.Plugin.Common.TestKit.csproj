@@ -54,6 +54,11 @@
          Forcing execution to the matching 2.9.2 silences NU1608 and keeps the xunit family in sync. -->
     <PackageReference Include="xunit.extensibility.execution" Version="2.9.2" />
     <PackageReference Include="Xunit.SkippableFact" Version="1.5.23" />
+    <!-- NLog MUST stay at 5.4.0 to match the Lidarr host assembly version.
+         Bumping to 6.x would embed AssemblyRef=6.0.0.0 in merged plugin DLLs,
+         causing FileNotFoundException when the host tries to resolve NLog at runtime.
+         See docs/dev-guide/ALC_MULTIPLUGIN_FIX.md host-version table. -->
+    <PackageReference Include="NLog" Version="5.4.0" />
   </ItemGroup>
 
   <ItemGroup>

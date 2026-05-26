@@ -35,6 +35,9 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Deprecations
+- **`IAuthFailureGateRegistry` / `AuthFailureGateRegistry`** — deprecated in favour of a direct `ConcurrentDictionary<string, AuthFailureGate>` per-plugin. A Wave-26 adversarial audit found zero non-test plugin consumers across all four ecosystem repos; every real call-site builds its own gate map so it can pair a custom `IAuthFailureHandler` (e.g. `SlidingWindowAuthFailureHandler`) with each gate — something the registry cannot do because it hard-wires `DefaultAuthFailureHandler` internally. Both the interface and the concrete class are marked `[Obsolete(error: false)]`. They will be removed in v2.0.0.
+
 ## [1.9.0] - 2026-05-23
 **Upgrade note:** Adds the AuthFailureGate surface (fail-fast latch + delegating handler + per-key registry) plus SecureMemory, Conservative rate-limit profile, PagedResponseValidator, testkit-lifted plugin contracts, and `Lidarr.Plugin.*.dll` naming enforcement. The new surface is additive — `IUniversalAdaptiveRateLimiter.RecordAuthFailure` is a default interface method so existing alternate implementations continue to compile without changes.
 

@@ -1,2 +1,8 @@
 #nullable enable
 static Lidarr.Plugin.Common.HostBridge.PathTraversalGuard.ContainsTraversalAttempt(string? input) -> bool
+Lidarr.Plugin.Common.Services.Http.AdaptiveRateLimitingHandler
+Lidarr.Plugin.Common.Services.Http.AdaptiveRateLimitingHandler.AdaptiveRateLimitingHandler(Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter! limiter, string! serviceName, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Lidarr.Plugin.Common.Services.Http.BackendHealthDelegatingHandler
+Lidarr.Plugin.Common.Services.Http.BackendHealthDelegatingHandler.BackendHealthDelegatingHandler(Lidarr.Plugin.Common.Resilience.BackendHealthCache! cache, System.Func<string!, string!>? classifyProvider = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Lidarr.Plugin.Common.Services.Http.BackendHealthDelegatingHandler.BackendHealthDelegatingHandler(Lidarr.Plugin.Common.Resilience.BackendHealthCache! cache, string! fixedProvider, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+static Lidarr.Plugin.Common.Diagnostics.HealthCheckHelper.CheckAuthAsync(System.Func<System.Threading.CancellationToken, System.Threading.Tasks.Task<bool>>! probe, string! provider, string! authMethod, string? diagnosticType = null, string? capability = null, string! unhealthyMessage = "Authentication failed", string? authFailedErrorCode = null, string? connectionFailedErrorCode = null, System.Func<System.Exception!, string!>? exceptionMessageTransform = null, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Abstractions.Diagnostics.DiagnosticHealthResult!>!

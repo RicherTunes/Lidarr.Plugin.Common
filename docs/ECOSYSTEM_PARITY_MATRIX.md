@@ -1,6 +1,6 @@
 # RicherTunes Lidarr Plugin Ecosystem — Parity Matrix
 
-**Generated**: 2026-05-25 (Wave 21 parity-mission session). **Refreshed**: 2026-05-25 (Wave-22 adversarial-review pass). **Refreshed again**: 2026-05-25 (Wave-23 adversarial-review pass — apple-drift correction + security hardening + parity convergence).
+**Generated**: 2026-05-25 (Wave 21 parity-mission session). **Refreshed**: 2026-05-25 (Wave-22 adversarial-review pass). **Refreshed again**: 2026-05-25 (Wave-23 adversarial-review pass — apple-drift correction + security hardening + parity convergence). **Refreshed again**: 2026-05-26 (Mission #52 stale-cell pass + Mission #53 rows 31-35 cross-cutting concerns).
 **Common pin**: `v1.17.0` (639d573 — restored lockstep Wave-23 after applemusicarr was discovered ahead by one tag; siblings brainarr/tidalarr/qobuzarr bumped to match).
 **Plugins covered**: `applemusicarr`, `tidalarr`, `qobuzarr`, `brainarr` + the shared `lidarr.plugin.common`
 
@@ -31,9 +31,7 @@ This document is the single source of truth for "does every plugin follow the sa
 
 | # | Axis | applemusicarr | tidalarr | qobuzarr | brainarr |
 |---|------|:-:|:-:|:-:|:-:|
-| 5 | Constants file w/ `PluginName` + `ServiceName` + `PluginVendor` | ✓ `AppleMusicarrConstants.cs:13-35` | ⚠ `TidalConstants.cs:5-39` uses API constants instead of `PluginName/ServiceName/PluginVendor` block | ✓ `QobuzarrConstants.cs:10-15` | ✓ **Wave-23**: `BrainarrConstants.cs:7-13` adds the triple (commit `88ad013`). InstalledPlugin still uses literals (load-bearing host registration) but the named-block source of truth now exists. |
-
-**Tidal / brainarr divergence (#5)**: both expose their plugin/service/vendor strings via different mechanisms (Tidal — API constants; Brainarr — hardcoded plugin registration). Convergence is cosmetic; the canonical fields are reachable, just not in one named block. Deferred low-impact tech debt.
+| 5 | Constants file w/ `PluginName` + `ServiceName` + `PluginVendor` | ✓ `AppleMusicarrConstants.cs:13-35` | ✓ **Wave-22**: `TidalConstants.cs` gains canonical `PluginName`/`ServiceName`/`PluginVendor` const block (commit `6542287`) | ✓ `QobuzarrConstants.cs:10-15` | ✓ **Wave-23**: `BrainarrConstants.cs:7-13` adds the triple (commit `88ad013`). InstalledPlugin still uses literals (load-bearing host registration) but the named-block source of truth now exists. |
 
 ---
 
@@ -54,7 +52,7 @@ This document is the single source of truth for "does every plugin follow the sa
 | 9 | Test csproj NLog/FluentValidation as direct PackageReference (not HintPath) | ✓ `tests/AppleMusicarr.Plugin.Tests/...csproj:46` | ✓ `Tidalarr.Tests.csproj:26` (NLog) + FluentValidation hint | ✓ `tests/Qobuzarr.Tests/...csproj:37` | ✓ `Brainarr.Plugin.csproj:70,74` |
 | 10 | Lidarr host assemblies pinned + extraction documented | ✓ | ✓ | ✓ | ✓ |
 | 11 | Docker E2E harness w/ per-plugin port | ✓ port `8691` (`AppleMusicarrLidarrContainerFixture.cs`) | ✓ port `8690` | ✓ port `8692` | ✓ port `8693` |
-| 12 | `bin-tests/` split for cross-ALC type-identity testing | unknown — apple builds may use the merged DLL directly | **Wave-22**: ✓ configured (`OutputPath=bin-tests\;EnablePluginDeployment=false` in `Tidalarr.Tests.csproj`; `PluginSandboxRuntimeTests` + `PluginSmokeTests` prefer `bin-tests/`, fallback `bin/`). Fixed the 6 cross-ALC `BackendHealthCacheAdoptionTests` failures. | ✓ split present (`PluginPackagingDisable=true;OutputPath=bin-tests/` per qobuz CLAUDE.md) | unknown — brainarr tests pass against the merged DLL via reflection where needed |
+| 12 | `bin-tests/` split for cross-ALC type-identity testing | N/A — `AppleMusicarr.Plugin.Tests.csproj` does not set `OutputPath=bin-tests/` or `PluginPackagingDisable`. It takes `PluginPackagingDisable` via `<ProjectReference>` only transitively; no cross-ALC sandbox tests exist in the apple suite (verified: csproj has no `bin-tests` property group). Apple's SDK ALC conflict is a separate tracked item; no ILRepack cross-ALC failures identified in apple's test suite. | **Wave-22**: ✓ configured (`OutputPath=bin-tests\;EnablePluginDeployment=false` in `Tidalarr.Tests.csproj`; `PluginSandboxRuntimeTests` + `PluginSmokeTests` prefer `bin-tests/`, fallback `bin/`). Fixed the 6 cross-ALC `BackendHealthCacheAdoptionTests` failures. | ✓ split present (`PluginPackagingDisable=true;OutputPath=bin-tests/` per qobuz CLAUDE.md) | N/A — `Brainarr.Tests.csproj` passes `PluginPackagingDisable=true` via `<AdditionalProperties>` on the `<ProjectReference>` (csproj:43), deliberately consuming the un-merged DLL for type-identity stability. No separate `bin-tests/` output path needed because brainarr has no cross-ALC sandbox runtime tests (import-list only; no streaming bridge). |
 
 ---
 
@@ -77,7 +75,7 @@ This document is the single source of truth for "does every plugin follow the sa
 |---|------|:-:|:-:|:-:|:-:|
 | 19 | `BackendHealthCache` (DelegatingHandler wrapping `BackendHealthCache.Shared`) | ✓ `AppleBackendHealthHandler.cs:46` | ✓ `TidalBackendHealthHandler.cs:33` (wraps all 4 HTTP pipelines per Wave 13C) | ✓ `QobuzHttpClient.cs:31,40,104` | ⚠ partial — ✓ for local providers (`BrainarrOllamaProvider.cs:60`, `BrainarrLmStudioProvider.cs:64`, `ModelDetectionService.cs:41`); **N/A for the 12 cloud/subscription providers** — they have their own latency budgets and LLM-specific retry policies (per-provider timeouts + LlmAuthCircuit pre-flight), and BackendHealthCache.Shared's connection-refused fail-fast semantics target local-host-down detection that doesn't apply to cloud REST endpoints with their own circuit breakers. |
 | 20 | `AuthFailureGate` (Common singleton, mirrors apple/qobuz wiring) | ✓ `AppleMusicarrStreamingPlugin.cs:130-134` + indexer adapter helpers | **Wave 21**: ✓ `TidalModule.cs` registration (commit `41f2ac4`) + indexer/download-client per-entry-point wiring (commit `30a6bfd`). Closes the long-standing `// independent of AuthFailureGate` comment-only reference. | ✓ `QobuzarrStreamingPlugin.cs:36` + `BridgeQobuzApiClient.cs:35` | **Wave 22**: ✓ **via Common facade**. `LlmAuthCircuit` (`Brainarr.Plugin/Services/Resilience/LlmAuthCircuit.cs`) was refactored to a thin wrapper over Common v1.16.0's `AuthFailureGate` + `SlidingWindowAuthFailureHandler`. Same public API (`IsOpen` / `RecordAuthFailure` / `RecordSuccess` / `MakeKey`); the per-key state machine is now the shared ecosystem implementation. SHA-256-hashed key derivation + sliding-window + 30-min open-duration semantics live in (or layer on) the shared stack. Wired in all 11 cloud/subscription providers (Wave-22 Phase D); `BrainarrOpenAiCompatibleProvider` adoption tracked separately (apiKey is optional for self-hosted backends). |
-| 21 | `JsonFileStore<TKey, TValue>` | ✓ `FileUnresolvedQueueStore.cs:27`, `FileMusicBrainzMappingCache.cs:28`, `FileApplePinnedMappingStore.cs:23` | ⚠ `FileTokenStore<TidalTokens>` adopted at `TidalModule.cs:112-143`; no other JSON stores | ✗ custom `SessionManager` JSON I/O (~80 LOC, stable) — low-priority tech debt | ✓ `ReviewQueueService.cs:21`, `ReviewActionAuditService.cs:36` |
+| 21 | `JsonFileStore<TKey, TValue>` | ✓ `FileUnresolvedQueueStore.cs:27`, `FileMusicBrainzMappingCache.cs:28`, `FileApplePinnedMappingStore.cs:23` | ⚠ `FileTokenStore<TidalTokens>` adopted at `TidalModule.cs:112-143`; no other JSON stores | ✓ **stale finding resolved** — `SessionManager.cs:86-90` uses `new FileTokenStore<QobuzSession>(effectivePath)` inside `StreamingTokenManager<QobuzSession, QobuzCredentials>`. Wave-8B `SecureSessionManager` rip-out pre-dated the original audit snapshot. Custom JSON I/O no longer exists. | ✓ `ReviewQueueService.cs:21`, `ReviewActionAuditService.cs:36` |
 | 22 | `BoundedConcurrentDictionary` (v1.15.0+ API) | ✓ `MusicBrainzReleaseMatcher.cs:40-43` (4 caches @ 10000 cap) + `ImportListService` | N/A — `PKCEStateStore.InMemoryCache` is domain-bounded by config-path count | N/A — `_hostGates` domain-bounded by user-host count (1-2 in practice) | ✓ `LimiterRegistry.cs:41-45` (5 dicts @ 5120 cap), `MetricsCollector.cs:25` (Metrics @ 1024 cap) |
 | 23 | `TestValidationBuilder` in `Test()` overrides | ✓ `AppleMusicLidarrIndexer.cs:162-169`, `AppleMusicLidarrDownloadClient.cs:199-206` | ✓ `TidalLidarrDownloadClient.cs:281-285` | N/A — qobuz uses FluentValidation pre-`Test()` (architectural choice) | **Wave 21**: ✓ `ConfigurationValidator.cs:Validate` (commit `c34d014`) — per-provider credential field requirements gate the behavioral connection probe. Closes the audit `MISSING` axis. |
 | 24 | `HttpExceptionClassifier` in `Test()` failure paths | ✓ implicit via bridge adapters | **Wave 21**: ✓ `TidalLidarrIndexer.cs:326` + `TidalLidarrDownloadClient.cs:387` (commit `102939b`) — Auth-class failures route to `Authentication` validation field, other categories get tailored hints. Closes the audit `MISSING` axis. | ✓ `AuthTokenManager.cs:376`, `AdaptiveQobuzApiClient.cs:54` | ✓ providers delegate to `LlmErrorMapper` (Common) |
@@ -102,7 +100,29 @@ This document is the single source of truth for "does every plugin follow the sa
 | # | Axis | applemusicarr | tidalarr | qobuzarr | brainarr |
 |---|------|:-:|:-:|:-:|:-:|
 | 29 | CLAUDE.md `## Common helpers in use` section | ✓ 11 entries | ✓ updated Wave 21 (PluginLogContext, AuthFailureGate, HttpExceptionClassifier, WarnOnce N/A) | ✓ 9 entries | ✓ updated Wave 21 (TestValidationBuilder, LlmAuthCircuit divergence subsection) |
-| 30 | File ↔ class name parity | ✓ | ⚠ 2 outliers: `TidalStreamManifest.cs/StreamManifest`, `TidalAudioFormatHandler.cs/AudioFormatHandler` — internal types missing the `Tidal*` peer-file prefix. Other 5 audit-flagged files are intentional groupings (`TidalExceptions.cs`, `TidalDtos.cs`, `TidalChunkDownloader.cs`, `IAudioProcessor.cs`, `HostlessAnnotations.cs`). Class-rename touches ~10 files — deferred cleanup commit. | ✓ | ✓ |
+| 30 | File ↔ class name parity | ✓ | ✓ **Wave-22**: `StreamManifest` → `TidalStreamManifest`, `AudioFormatHandler` → `TidalAudioFormatHandler` renamed (commit `3fdee87`). All tidalarr file↔class outliers resolved. | ✓ | ✓ |
+
+---
+
+## 9. Cross-cutting concerns (post-Wave-25)
+
+| # | Axis | applemusicarr | tidalarr | qobuzarr | brainarr |
+|---|------|:-:|:-:|:-:|:-:|
+| 31 | Retry policy preset usage | ✓ uses Common's `ResiliencePolicy` (`MusicBrainzReleaseMatcher.cs:759`) | ⚠ has own HTTP pipeline; may not route through Common's policy engine | ⚠ has own HTTP pipeline; same exposure as tidal | N/A — uses `GenericResilienceExecutor` locally (LLM-specific retry logic) |
+| 32 | `FieldDefinition` order discipline | ⚠ indexer puts `MusicUserToken` at field 3 `Advanced=true`; DC puts it at field 3 `Advanced=false` — inconsistent within the same plugin | ✓ constants-file approach (`SettingsDisplay.Indexer.ConfigPathOrder`) | ✓ fields 1-11 with named sections | N/A — import-list, different field shape |
+| 33 | Cookie persistence / cookie-jar TTL | N/A — developer-token auth, no cookies | ⚠ OAuth session cookies inherited via host `CookieContainer`; no TTL eviction logic | ⚠ same exposure as tidal — session cookies can accumulate across restarts | N/A — stateless API key auth |
+| 34 | TLS certificate pinning / custom validation | N/A — deliberate; no plugin pins certs | N/A — deliberate | N/A — deliberate | N/A — deliberate |
+| 35 | Plugin-state recovery on restart (download-queue checkpointing) | ✓ `FileUnresolvedQueueStore` persists unresolved queue items across restarts | ⚠ relies on host's `DownloadItemStatus`; no crash-recovery checkpoint for in-flight downloads | ✗ no queue persistence — restart loses in-flight downloads (active gap) | N/A — import-list, no download queue |
+
+**Row 31 — Retry policy (#31)**: Tidal and Qobuz each maintain their own HTTP retry/backoff logic (Polly policies or manual catch-retry loops) that predate Common's `ResiliencePolicy`. Convergence would require threading a Common executor through each HTTP pipeline. Non-blocking but creates duplicated exponential-backoff tuning surface. Brainarr's LLM-specific retry has distinct concerns (per-model timeout budgets, provider failover, `LlmAuthCircuit` coordination) that don't map cleanly to streaming-service resilience — N/A is correct.
+
+**Row 32 — FieldDefinition order (#32)**: Apple's inconsistency (same field index, different `Advanced` value between indexer and DC) is a UX papercut that could confuse users who configure one and expect the other to behave identically. Tidal and Qobuz both used structured ordering from the start; apple's DC was added later without auditing the indexer's field order.
+
+**Row 33 — Cookie-jar TTL (#33)**: The `CookieContainer` inherited from Lidarr's host `HttpClientFactory` accumulates Set-Cookie headers from OAuth provider redirects. Neither Tidal nor Qobuz prunes stale cookies, so long-running Lidarr instances gradually accumulate entries. The practical impact is limited (OAuth flows are infrequent and providers don't set many cookies), but it's an undocumented state-accumulation behavior. Apple is unaffected (developer-token JWTs, no cookie exchange). Brainarr is unaffected (stateless API key auth for all cloud providers; Ollama/LM Studio HTTP calls don't set cookies).
+
+**Row 34 — TLS cert pinning (#34)**: Recorded explicitly so future security audits don't re-raise this as a missing item. All four plugins intentionally rely on Lidarr host's default TLS validation (OS trust store + .NET's `HttpClient` defaults). Pinning would create operational burden for certificate rotations without meaningful security benefit for this threat model (streaming API calls over HTTPS to well-known providers).
+
+**Row 35 — Restart checkpointing (#35)**: Qobuz has the most critical gap — no queue persistence means a Lidarr restart during active downloads silently loses all in-flight state. Tidal's reliance on host `DownloadItemStatus` provides soft recovery (host re-queues stalled items) but no plugin-side crash checkpoint. Apple's `FileUnresolvedQueueStore` is the canonical pattern.
 
 ---
 
@@ -172,7 +192,7 @@ Per the user's mission contract:
 
 > Every parity axis is adopted by all applicable plugins, or documented N/A with architectural reason.
 
-✓ 30 axes covered above. Every cell is ✓ / ⚠-with-rationale / ✗-with-tech-debt-note / N/A-with-reason.
+✓ 35 axes covered above. Every cell is ✓ / ⚠-with-rationale / ✗-with-tech-debt-note / N/A-with-reason.
 
 > Common extensions are tested, versioned, and pinned consistently.
 
