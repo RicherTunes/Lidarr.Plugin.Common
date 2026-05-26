@@ -27,3 +27,21 @@ Lidarr.Plugin.Common.Services.Lyrics.LrclibClient.LrclibClient() -> void
 Lidarr.Plugin.Common.Services.Lyrics.LrclibClient.LrclibClient(System.Net.Http.HttpClient! httpClient) -> void
 Lidarr.Plugin.Common.Services.Lyrics.LrclibClient.TryFetchSyncedLyricsAsync(string! artistName, string! trackName, string! albumName, int durationSeconds, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task<string?>!
 Lidarr.Plugin.Common.Services.Lyrics.LrclibClient.Dispose() -> void
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason.None = 0 -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason.Empty = 1 -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason.ContainsTraversal = 2 -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason.NotAbsolute = 3 -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason.InvalidSyntax = 4 -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.Result(bool IsValid, Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason FailureReason, string! Message) -> void
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.IsValid.get -> bool
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.IsValid.init -> void
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.FailureReason.get -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.FailureReason.init -> void
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.Message.get -> string!
+Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.Message.init -> void
+static Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.Ok() -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result
+static Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.Fail(Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason reason, string! message) -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result
+static Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Validate(string? path) -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result
