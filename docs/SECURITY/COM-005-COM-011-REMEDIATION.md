@@ -9,7 +9,7 @@
 
 ## COM-005: `Sanitize.IsSafePath` path-traversal bypass
 
-### Threat model
+### Threat model (COM-005)
 
 The original implementation was a single `Contains("..")` check:
 
@@ -31,7 +31,7 @@ the naive check did not recognise:
 All five plugin consumers (Common, brainarr, qobuzarr, tidalarr, applemusicarr)
 use `Sanitize.IsSafePath` as their traversal guard.
 
-### Fix
+### Fix (COM-005)
 
 `src/Security/Sanitize.cs` — `IsSafePath` now applies a normalisation pipeline
 before checking for traversal segments:
@@ -72,7 +72,7 @@ segment but the segment is not exactly `..`) is now **accepted** where the old
 implementation rejected it (because the old code did `Contains("..")`). This
 aligns with correct behaviour: `..album` is not a traversal.
 
-### Tests added
+### Tests added (COM-005)
 
 `tests/Security/SanitizePathBypassTests.cs`
 
@@ -93,7 +93,7 @@ aligns with correct behaviour: `..album` is not a traversal.
 
 **Total: 12 tests — 12 PASS**
 
-### Limitations / follow-ups
+### Limitations / follow-ups (COM-005)
 
 - **Symbolic link traversal** — COM-005 explicitly mentions symlink traversal as
   a bypass vector. `IsSafePath` cannot detect this; it is a string-level guard
@@ -113,7 +113,7 @@ aligns with correct behaviour: `..album` is not a traversal.
 
 ## COM-011: `HttpFileDownloadService` partial-download corruption
 
-### Threat model
+### Threat model (COM-011)
 
 The download service supports HTTP range resumption (RFC 7233). Before this fix:
 
@@ -128,7 +128,7 @@ The download service supports HTTP range resumption (RFC 7233). Before this fix:
 
 This affected all audio download plugins: qobuzarr, tidalarr, applemusicarr.
 
-### Fix
+### Fix (COM-011)
 
 `src/Services/Download/HttpFileDownloadService.cs`
 
@@ -166,7 +166,7 @@ public sealed class DownloadIntegrityException : Exception
 
 Registered in `PublicAPI.Unshipped.txt` (both `net8.0` and `net6.0` baselines).
 
-### Tests added
+### Tests added (COM-011)
 
 `tests/Services/Http/HttpFileDownloadIntegrityTests.cs`
 
@@ -180,7 +180,7 @@ Registered in `PublicAPI.Unshipped.txt` (both `net8.0` and `net6.0` baselines).
 
 **Total: 5 tests — 5 PASS**
 
-### Limitations / follow-ups
+### Limitations / follow-ups (COM-011)
 
 - **Chunked transfer encoding (no Content-Length)**: when the server does not
   send a `Content-Length` or `Content-Range` header, the downloaded byte count
