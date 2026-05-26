@@ -45,3 +45,8 @@ Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.Message.in
 static Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.Ok() -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result
 static Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result.Fail(Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Reason reason, string! message) -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result
 static Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Validate(string? path) -> Lidarr.Plugin.Common.Services.Validation.DownloadPathValidator.Result
+Lidarr.Plugin.Common.Services.Http.RateLimitHeaderUtilities
+static Lidarr.Plugin.Common.Services.Http.RateLimitHeaderUtilities.ResolveRetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue? retryAfter) -> System.TimeSpan
+static Lidarr.Plugin.Common.Services.Http.RateLimitHeaderUtilities.ResolveRetryAfter(System.Net.Http.HttpResponseMessage? response) -> System.TimeSpan
+static Lidarr.Plugin.Common.Services.Http.RateLimitHeaderUtilities.BuildHostFirstSegmentKey(System.Net.Http.HttpRequestMessage! request, string! unknownKey = "unknown") -> string!
+static Lidarr.Plugin.Common.Services.Http.RateLimitHeaderUtilities.BuildHostFirstSegmentKey(System.Uri? uri, string! unknownKey = "unknown") -> string!
