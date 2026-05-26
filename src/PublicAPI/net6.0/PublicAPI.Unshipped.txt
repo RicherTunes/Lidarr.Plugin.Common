@@ -1,1 +1,2 @@
 #nullable enable
+static Lidarr.Plugin.Common.HostBridge.PathTraversalGuard.ContainsTraversalAttempt(string? input) -> bool
