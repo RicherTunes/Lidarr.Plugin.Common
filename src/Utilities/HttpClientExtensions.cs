@@ -1136,30 +1136,14 @@ namespace Lidarr.Plugin.Common.Utilities
             string canonical = string.Empty;
             string scope = string.Empty;
 
-            try
-            {
-                if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.EndpointKey, out string? ep) && ep != null)
-                    endpoint = ep;
-            }
-            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
-            try
-            {
-                if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.ProfileKey, out string? pr) && pr != null)
-                    profile = pr;
-            }
-            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
-            try
-            {
-                if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.ParametersKey, out string? ca) && ca != null)
-                    canonical = ca;
-            }
-            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
-            try
-            {
-                if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.AuthScopeKey, out string? sc) && sc != null)
-                    scope = sc;
-            }
-            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+            if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.EndpointKey, out string? ep) && ep != null)
+                endpoint = ep;
+            if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.ProfileKey, out string? pr) && pr != null)
+                profile = pr;
+            if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.ParametersKey, out string? ca) && ca != null)
+                canonical = ca;
+            if (request.Options.TryGetValue(Services.Http.PluginHttpOptions.AuthScopeKey, out string? sc) && sc != null)
+                scope = sc;
 
             var parts = new[] { method, authority, endpoint, canonical, scope, profile };
             return HashingUtility.ComputeSHA256(string.Join("\n", parts));
