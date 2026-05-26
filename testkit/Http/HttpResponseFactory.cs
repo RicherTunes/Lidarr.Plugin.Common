@@ -58,7 +58,7 @@ public static class HttpResponseFactory
     /// Creates an error response using the given request context.
     /// </summary>
     public static HttpResponse Error(HttpRequest req, HttpStatusCode status, string body = "")
-        => new(req, new HttpHeader(), Encoding.UTF8.GetBytes(body), status);
+        => new(req, new HttpHeader(), Encoding.UTF8.GetBytes(body ?? string.Empty), status);
 
     /// <summary>
     /// Creates an error response with raw byte body using the given request context.
