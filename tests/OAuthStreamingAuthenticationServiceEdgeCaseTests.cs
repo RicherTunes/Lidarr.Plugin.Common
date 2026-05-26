@@ -327,6 +327,85 @@ namespace Lidarr.Plugin.Common.Tests
             }
         }
 
+        [Fact]
+        public async Task RefreshTokensAsync_SingleFlight_LateArrivalsAfterCompletionStillDedup()
+        {
+            // Deterministic regression test for the Windows-CI race that caused PR #514
+            // to fail: when ThreadPool dispatch is so staggered that some concurrent
+            // callers reach the single-flight gate AFTER the leader has finished and
+            // cleared _pendingRefresh, those laggards must STILL dedup against the just-
+            // completed refresh. Otherwise each laggard kicks off its own refresh,
+            // consuming the (already-rotated) refresh token and 401'ing.
+            //
+            // We simulate the worst-case ordering by running the leader to completion
+            // FIRST, then dispatching follow-up callers with the same refresh token.
+            // With the late-arrival cache they short-circuit to the cached session;
+            // without it, each follow-up calls RefreshTokensInternalAsync again.
+            var svc = new ProbeOAuthService
+            {
+                RefreshResult = new EdgeSession
+                {
+                    AccessToken = "leader-acc",
+                    RefreshToken = "rotated-ref",
+                    ExpiresAt = DateTime.UtcNow.AddHours(1)
+                }
+            };
+            var session = new EdgeSession { AccessToken = "a", RefreshToken = "same-ref" };
+
+            // Leader: completes synchronously (no RefreshGate set).
+            var leaderResult = await svc.RefreshTokensAsync(session);
+            Assert.Equal(1, svc.RefreshInternalCallCount);
+            Assert.Equal("leader-acc", leaderResult.AccessToken);
+
+            // Follow-up callers arrive AFTER the leader cleared _pendingRefresh. With
+            // the same refresh-token input, they must hit the late-arrival cache.
+            const int Laggards = 4;
+            var laggards = await Task.WhenAll(
+                Enumerable.Range(0, Laggards)
+                    .Select(_ => Task.Run(() => svc.RefreshTokensAsync(session))));
+
+            Assert.Equal(1, svc.RefreshInternalCallCount); // STILL one — laggards deduped
+            foreach (var result in laggards)
+            {
+                Assert.Equal("leader-acc", result.AccessToken);
+                Assert.Equal("rotated-ref", result.RefreshToken);
+            }
+        }
+
+        [Fact]
+        public async Task RefreshTokensAsync_SingleFlight_DifferentTokenAfterCompletionRefreshesAgain()
+        {
+            // Counterpart to the late-arrival cache test: when the caller presents a
+            // DIFFERENT input refresh token (e.g. the previous result rotated and a new
+            // expiry cycle starts), the cache must not be served — we must hit the
+            // refresh path again. This pins the cache eviction semantics.
+            var svc = new ProbeOAuthService
+            {
+                RefreshResult = new EdgeSession
+                {
+                    AccessToken = "first-acc",
+                    RefreshToken = "rotated-1",
+                    ExpiresAt = DateTime.UtcNow.AddHours(1)
+                }
+            };
+            var first = new EdgeSession { AccessToken = "a", RefreshToken = "token-1" };
+            await svc.RefreshTokensAsync(first);
+            Assert.Equal(1, svc.RefreshInternalCallCount);
+
+            // Different refresh token => fresh refresh required.
+            svc.RefreshResult = new EdgeSession
+            {
+                AccessToken = "second-acc",
+                RefreshToken = "rotated-2",
+                ExpiresAt = DateTime.UtcNow.AddHours(1)
+            };
+            var second = new EdgeSession { AccessToken = "b", RefreshToken = "token-2" };
+            var secondResult = await svc.RefreshTokensAsync(second);
+
+            Assert.Equal(2, svc.RefreshInternalCallCount);
+            Assert.Equal("second-acc", secondResult.AccessToken);
+        }
+
         private static async Task WaitFor(Func<bool> condition, int timeoutMs)
         {
             // Tight loop with Task.Yield — keeps the test deterministic without
