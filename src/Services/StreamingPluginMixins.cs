@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Abstractions.Models;
+using Lidarr.Plugin.Common.Security;
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Common.Base;
 
@@ -220,9 +221,9 @@ namespace Lidarr.Plugin.Common.Services
         /// </summary>
         public string CreateSafeFilePath(StreamingTrack track, string baseDirectory)
         {
-            var artistName = FileNameSanitizer.SanitizeFileName(track.Artist?.Name ?? "Unknown Artist");
-            var albumTitle = FileNameSanitizer.SanitizeFileName(track.Album?.Title ?? "Unknown Album");
-            var trackTitle = FileNameSanitizer.SanitizeFileName(track.Title ?? "Unknown Track");
+            var artistName = Sanitize.FileNameSegment(track.Artist?.Name, "Unknown Artist");
+            var albumTitle = Sanitize.FileNameSegment(track.Album?.Title, "Unknown Album");
+            var trackTitle = Sanitize.FileNameSegment(track.Title, "Unknown Track");
 
             var fileName = $"{track.TrackNumber:D2} - {trackTitle}";
             return System.IO.Path.Combine(baseDirectory, artistName, albumTitle, fileName);

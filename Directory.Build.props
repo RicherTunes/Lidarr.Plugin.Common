@@ -7,7 +7,14 @@
     To bump: change the value here only.
   -->
   <PropertyGroup>
-    <Version>1.9.5</Version>
+    <!-- Next-release marker for the chore/wave-23-parity-refresh-and-pin-fixes branch.
+         Chore branch is a v1.17.0 superset (15+ lifted files + targeted fixes:
+         FileNameSanitizer dot-preservation, ConfigureAwait(false) base-class hardening,
+         HostGateRegistry.Shutdown, Sanitize.FileNameSegment, dead-code removal, etc.).
+         Plugins pinning to chore branch tip are claiming 1.18.0 in their plugin.json /
+         manifest.json so the cross-plugin VersionContract test stays in lockstep.
+         Drop the "-dev" suffix and tag as v1.18.0 when the next release is cut. -->
+    <Version>1.18.0-dev</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(UseHostVersioning)' == 'true'">

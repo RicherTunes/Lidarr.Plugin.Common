@@ -72,6 +72,27 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         protected readonly IPKCEGenerator _pkceGenerator;
         private readonly Dictionary<string, OAuthFlowState> _activeFlows;
         private readonly object _flowsLock = new();
+
+        // Single-flight gate for RefreshTokensAsync — concurrent callers coalesce onto
+        // the same in-flight Task instead of each hitting RefreshTokensInternalAsync.
+        // Critical for providers that single-use refresh tokens (most OAuth servers
+        // rotate refresh tokens on use — the second concurrent caller would otherwise
+        // present an already-consumed token and get 401'd, taking down everyone).
+        // Wave 17M (lifted from release/v1.9.0 at v1.17.0 tag).
+        //
+        // Two-tier dedup under _refreshLock:
+        //  1) _pendingRefresh — in-flight Task; concurrent callers that arrive while the
+        //     leader is still in RefreshTokensInternalAsync join the same Task.
+        //  2) _lastRefresh — most-recent completed (token-in, session-out) pair; serves
+        //     callers that arrive AFTER the leader finished. This is the durable mechanism
+        //     for the Windows ThreadPool race where Task.Run dispatch is so staggered that
+        //     laggards reach the lock only after the leader has cleared _pendingRefresh.
+        //     The entry is overwritten on the next refresh with a DIFFERENT input token
+        //     (e.g. after rotation), so it never serves a stale rotated token forever.
+        private readonly object _refreshLock = new();
+        private Task<TSession>? _pendingRefresh;
+        private string? _lastRefreshTokenIn;
+        private TSession? _lastRefreshSessionOut;
         private readonly TimeSpan _flowExpirationTime = TimeSpan.FromMinutes(10);
 
         protected OAuthStreamingAuthenticationService(IPKCEGenerator pkceGenerator = null)
@@ -191,19 +212,86 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             if (string.IsNullOrEmpty(refreshToken))
                 throw new InvalidOperationException("Session does not contain a valid refresh token");
 
+            // Two-tier single-flight dedup. Concurrent callers must coalesce onto a single
+            // RefreshTokensInternalAsync call regardless of how staggered ThreadPool dispatch
+            // is. Critical for OAuth servers that rotate refresh tokens on use — a second
+            // concurrent caller would otherwise present an already-consumed token and get
+            // 401'd, breaking every caller.
+            //
+            //   Tier 1: _lastRefresh cache — caller arrived AFTER the leader finished. The
+            //           input refresh-token still matches the last completed refresh, so
+            //           we return the cached result without hitting the auth server.
+            //   Tier 2: _pendingRefresh promise — caller arrived WHILE the leader is in
+            //           flight; both await the same Task. (The leader is the one caller
+            //           that observed both fields empty/non-matching and started the work.)
+            Task<TSession> inFlight;
+            bool initiator;
+            lock (_refreshLock)
+            {
+                // Tier 1: late-arrival cache hit (the Windows-CI hot path).
+                if (_lastRefreshSessionOut != null && _lastRefreshTokenIn == refreshToken)
+                {
+                    return _lastRefreshSessionOut;
+                }
+
+                // Tier 2: join in-flight promise.
+                if (_pendingRefresh != null)
+                {
+                    inFlight = _pendingRefresh;
+                    initiator = false;
+                }
+                else
+                {
+                    _pendingRefresh = DoRefreshAsync(refreshToken);
+                    inFlight = _pendingRefresh;
+                    initiator = true;
+                }
+            }
+
             try
             {
-                var refreshedSession = await RefreshTokensInternalAsync(refreshToken);
+                return await inFlight.ConfigureAwait(false);
+            }
+            finally
+            {
+                if (initiator)
+                {
+                    lock (_refreshLock)
+                    {
+                        if (ReferenceEquals(_pendingRefresh, inFlight))
+                        {
+                            _pendingRefresh = null;
+                        }
+                    }
+                }
+            }
+        }
 
-                // Update cached session
-                await CacheSessionAsync(refreshedSession);
-
+        private async Task<TSession> DoRefreshAsync(string refreshToken)
+        {
+            try
+            {
+                var refreshedSession = await RefreshTokensInternalAsync(refreshToken).ConfigureAwait(false);
+                await CacheSessionAsync(refreshedSession).ConfigureAwait(false);
+                // Publish to the late-arrival cache so callers that reach the gate AFTER
+                // _pendingRefresh clears still dedup against this completed refresh.
+                lock (_refreshLock)
+                {
+                    _lastRefreshTokenIn = refreshToken;
+                    _lastRefreshSessionOut = refreshedSession;
+                }
                 return refreshedSession;
             }
             catch (Exception ex)
             {
-                // If refresh fails, clear cached session
-                await ClearCachedSessionAsync();
+                await ClearCachedSessionAsync().ConfigureAwait(false);
+                // On failure, evict the late-arrival cache so subsequent callers retry
+                // (don't serve a stale or partial result).
+                lock (_refreshLock)
+                {
+                    _lastRefreshTokenIn = null;
+                    _lastRefreshSessionOut = null;
+                }
                 throw new InvalidOperationException("Failed to refresh access token", ex);
             }
         }

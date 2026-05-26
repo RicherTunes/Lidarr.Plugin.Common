@@ -115,10 +115,21 @@ if [[ "$VERIFY_ONLY" == true ]]; then
         exit 1
     fi
 
-    # Validate file format: exactly 40 lowercase hex + LF (41 bytes, no BOM, no CRLF)
+    # Validate file format: exactly 40 lowercase hex + LF (41 bytes, no BOM, no CRLF, no bare CR).
+    # Byte-count alone is insufficient — a 41-byte file ending in a BARE CR (0x0D) instead
+    # of LF (0x0A) would pass `wc -c -eq 41` but fail the parallel .ps1 verifier (which
+    # explicitly checks for 0x0A at byte 41). Without an explicit last-byte check, CI on
+    # Linux accepts a file that a developer's local PowerShell rerun rejects. Bring the .sh
+    # check into parity with .ps1 by asserting the terminator is LF.
     BYTE_LEN=$(wc -c < "$SHA_FILE")
     if [[ "$BYTE_LEN" -ne 41 ]]; then
         echo -e "${RED}ERROR: $SHA_FILE must be exactly 41 bytes (40 hex + LF), got $BYTE_LEN${NC}"
+        echo -e "${YELLOW}Fix: Run ./scripts/repin-common-submodule.sh --sha-from-submodule --stage${NC}"
+        exit 1
+    fi
+    LAST_BYTE_HEX=$(tail -c 1 "$SHA_FILE" | od -An -tx1 | tr -d ' \n')
+    if [[ "$LAST_BYTE_HEX" != "0a" ]]; then
+        echo -e "${RED}ERROR: $SHA_FILE must end with LF (0x0a), got 0x$LAST_BYTE_HEX (e.g. bare CR from a CRLF editor)${NC}"
         echo -e "${YELLOW}Fix: Run ./scripts/repin-common-submodule.sh --sha-from-submodule --stage${NC}"
         exit 1
     fi

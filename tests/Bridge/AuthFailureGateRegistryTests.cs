@@ -9,6 +9,11 @@ using Microsoft.Extensions.Logging.Abstractions;
 
 using Xunit;
 
+// AuthFailureGateRegistry is deprecated (Wave-26 audit — zero non-test consumers).
+// The tests are retained to document the contract for future reference and to
+// guard against accidental silent removal before the v2.0.0 scheduled deletion.
+#pragma warning disable CS0618
+
 namespace Lidarr.Plugin.Common.Tests.Bridge;
 
 /// <summary>

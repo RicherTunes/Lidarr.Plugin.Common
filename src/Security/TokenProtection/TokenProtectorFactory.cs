@@ -325,11 +325,21 @@ namespace Lidarr.Plugin.Common.Security.TokenProtection
         /// </summary>
         private static bool IsExpectedBackendInitFailure(Exception ex)
         {
-            return ex is IOException
+            if (ex is IOException
                 or UnauthorizedAccessException
                 or PlatformNotSupportedException
                 or DllNotFoundException
-                or EntryPointNotFoundException;
+                or EntryPointNotFoundException
+                or System.ComponentModel.Win32Exception)
+            {
+                return true;
+            }
+            // SecretServiceTokenProtector wraps Win32Exception ("process not found"
+            // when /usr/bin/secret-tool is absent from the host, e.g. on a stock
+            // ubuntu-latest GitHub Actions runner) in an InvalidOperationException.
+            // Walk the inner-exception chain so the factory falls back to
+            // DataProtection instead of leaking the wrapper exception to callers.
+            return ex.InnerException is not null && IsExpectedBackendInitFailure(ex.InnerException);
         }
 
         /// <summary>
