@@ -12,6 +12,7 @@ using Microsoft.Extensions.Logging;
 using File = System.IO.File;
 using Lidarr.Plugin.Common.Base;
 using Lidarr.Plugin.Abstractions.Models;
+using Lidarr.Plugin.Common.Security;
 using Lidarr.Plugin.Common.Services.Performance;
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Common.Interfaces;
@@ -128,8 +129,8 @@ namespace Lidarr.Plugin.Common.Base
         protected virtual string GenerateFileName(StreamingTrack track, StreamingAlbum album)
         {
             var trackNumber = track.TrackNumber?.ToString("00") ?? "00";
-            var title = FileNameSanitizer.SanitizeFileName(track.Title ?? "Unknown");
-            var artist = FileNameSanitizer.SanitizeFileName(track.Artist?.Name ?? album?.Artist?.Name ?? "Unknown");
+            var title = Sanitize.FileNameSegment(track.Title);
+            var artist = Sanitize.FileNameSegment(track.Artist?.Name ?? album?.Artist?.Name);
 
             return $"{trackNumber} - {artist} - {title}.flac";
         }
@@ -143,8 +144,8 @@ namespace Lidarr.Plugin.Common.Base
 
             if (Settings.OrganizeByArtist && album?.Artist?.Name != null)
             {
-                var artistFolder = FileNameSanitizer.SanitizeFileName(album.Artist.Name);
-                var albumFolder = FileNameSanitizer.SanitizeFileName(album.Title ?? "Unknown Album");
+                var artistFolder = Sanitize.FileNameSegment(album.Artist.Name, "Unknown Artist");
+                var albumFolder = Sanitize.FileNameSegment(album.Title, "Unknown Album");
                 return Path.Combine(basePath, artistFolder, albumFolder, fileName);
             }
 
@@ -708,12 +709,12 @@ namespace Lidarr.Plugin.Common.Base
         {
             if (Settings.OrganizeByArtist && album.Artist?.Name != null)
             {
-                var artistFolder = FileNameSanitizer.SanitizeFileName(album.Artist.Name);
-                var albumFolder = FileNameSanitizer.SanitizeFileName(album.Title ?? "Unknown Album");
+                var artistFolder = Sanitize.FileNameSegment(album.Artist.Name, "Unknown Artist");
+                var albumFolder = Sanitize.FileNameSegment(album.Title, "Unknown Album");
                 return Path.Combine(basePath, artistFolder, albumFolder);
             }
 
-            return Path.Combine(basePath, FileNameSanitizer.SanitizeFileName(album.Title ?? "Unknown Album"));
+            return Path.Combine(basePath, Sanitize.FileNameSegment(album.Title, "Unknown Album"));
         }
 
         private int GetMaxConcurrency(TSettings settings)

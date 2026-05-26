@@ -62,6 +62,110 @@ namespace Lidarr.Plugin.Common.Security
             return filtered;
         }
 
+        // Zero-width characters that streaming-service metadata occasionally smuggles in;
+        // they make filenames visually identical to a benign one while comparing unequal.
+        private static readonly char[] ZeroWidthChars = { '​', '‌', '‍', '﻿' };
+
+        // Whitespace/separator chars that callers prefer replaced with a space (vs deleted)
+        // for readability — "AC/DC" should stay "AC DC", not collapse to "ACDC".
+        private static readonly char[] CharsReplacedWithSpace = { '/', '\\', '\n', '\r', '\t' };
+
+        private static readonly Regex MultiSpacePattern = new(@"\s+", RegexOptions.Compiled);
+
+        /// <summary>
+        /// Produces a safe file/folder name segment that PRESERVES READABILITY for streaming
+        /// service metadata. Use when sanitizing artist/album/track names emitted by a
+        /// download client into a per-track output path.
+        ///
+        /// <para>Behavior vs the lower-level <see cref="PathSegment"/>:</para>
+        /// <list type="bullet">
+        ///   <item>Path separators (<c>/</c>, <c>\</c>) and whitespace chars (<c>\n</c>,
+        ///         <c>\r</c>, <c>\t</c>) are replaced with a single space, then runs of
+        ///         spaces are collapsed — <c>"AC/DC"</c> → <c>"AC DC"</c>, NOT
+        ///         <c>"ACDC"</c>.</item>
+        ///   <item>Zero-width characters (<c>​</c>, <c>‌</c>, <c>‍</c>,
+        ///         <c>﻿</c>) are stripped — defeats the visual-spoof vector where a
+        ///         streaming service emits two visually-identical names that compare
+        ///         unequal at the byte level.</item>
+        ///   <item>Empty / whitespace / null input returns <paramref name="fallback"/>
+        ///         (default <c>"Unknown"</c>) so the result is always a valid path segment
+        ///         — callers can pass e.g. <c>"Unknown Artist"</c> for a more descriptive
+        ///         placeholder.</item>
+        ///   <item>Pure-dot segments (<c>..</c>, <c>...</c>) are prefixed with <c>_</c> so
+        ///         they retain identity for debugging without resolving as a parent-
+        ///         directory reference.</item>
+        ///   <item>Windows reserved device names (CON / NUL / LPT1 / etc.) are prefixed
+        ///         with <c>_</c> for cross-platform portability (handled by
+        ///         <see cref="PathSegment"/> underneath).</item>
+        /// </list>
+        ///
+        /// <para>This is the security-correct successor to the obsolete
+        /// <c>FileNameSanitizer.SanitizeFileName</c>. Callers in
+        /// <c>BaseStreamingDownloadClient</c> + <c>StreamingPluginMixins</c> migrate to
+        /// this; <c>FileNameSanitizer</c> remains alive only for external plugin callers
+        /// pending their own Phase 2 cleanup.</para>
+        /// </summary>
+        public static string FileNameSegment(string? name, string fallback = "Unknown")
+        {
+            if (string.IsNullOrWhiteSpace(name)) return fallback;
+
+            // Strip zero-width chars first (defeat the visual-spoof vector before any other
+            // transform that would normalize them away or preserve them invisibly).
+            var sanitized = name;
+            foreach (var zw in ZeroWidthChars)
+            {
+                sanitized = sanitized.Replace(zw.ToString(), "");
+            }
+
+            // Replace readable-content separators with space (so "AC/DC" stays readable).
+            foreach (var ch in CharsReplacedWithSpace)
+            {
+                sanitized = sanitized.Replace(ch, ' ');
+            }
+
+            // Collapse multi-space runs (created by the replace-with-space passes above OR
+            // pre-existing in source metadata).
+            sanitized = MultiSpacePattern.Replace(sanitized, " ").Trim();
+
+            if (string.IsNullOrWhiteSpace(sanitized)) return fallback;
+
+            // Hand off to PathSegment for invalid-char deletion + Windows reserved-name
+            // guard. PathSegment itself uses Path.GetInvalidFileNameChars() (OS-aware).
+            var segment = PathSegment(sanitized);
+
+            // PathSegment's reserved-name guard matches the WHOLE segment ("NUL"), but the
+            // common case is a name with an extension ("NUL.txt") — the base part is the
+            // reserved name and the OS still refuses the file. Mirror FileNameSanitizer's
+            // base-part check (split on first dot) so "NUL.txt" → "_NUL.txt" portably.
+            var dotIdx = segment.IndexOf('.');
+            if (dotIdx > 0)
+            {
+                var basePart = segment.Substring(0, dotIdx);
+                if (WindowsReservedDeviceNames.Contains(basePart))
+                {
+                    segment = "_" + segment;
+                }
+            }
+
+            // PathSegment may TrimEnd('.') — neutralize any pure-dot segment that survived
+            // (or that the input itself was). "..", "...", etc. → "_..", "_..." so the
+            // segment retains a stable identity but can't resolve as a parent reference
+            // through Path.GetFullPath downstream.
+            if (segment.Length > 0 && segment.All(static c => c == '.'))
+            {
+                segment = "_" + segment;
+            }
+            // PathSegment trims trailing dots — so an input of "..." reduces to "" after
+            // PathSegment. Recover the trimmed-dot identity by re-checking the post-trim
+            // intermediate value.
+            else if (string.IsNullOrEmpty(segment) && sanitized.Length > 0 && sanitized.All(static c => c == '.'))
+            {
+                segment = "_" + sanitized;
+            }
+
+            return string.IsNullOrWhiteSpace(segment) ? fallback : segment;
+        }
+
         /// <summary>
         /// Path traversal guard with full normalisation.
         ///

@@ -2,6 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 using System.Linq;
+using Lidarr.Plugin.Common.Security;
 
 namespace Lidarr.Plugin.Common.Utilities
 {
@@ -47,7 +48,7 @@ namespace Lidarr.Plugin.Common.Utilities
         {
             // Normalize to NFC to avoid cross-OS inconsistencies
             var normalized = (fileName ?? string.Empty).Normalize(NormalizationForm.FormC);
-            var sanitized = FileNameSanitizer.SanitizeFileName(normalized);
+            var sanitized = Sanitize.FileNameSegment(normalized, fallback: "_");
 
             // Trim trailing chars that cause Windows issues BEFORE reserved-name check
             // This ensures "CON." becomes "_CON" not "CON"
