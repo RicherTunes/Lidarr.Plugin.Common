@@ -474,18 +474,19 @@ namespace Lidarr.Plugin.Common.Services.Network
         #region Checkpoint Management
 
         /// <summary>
-        /// Saves operation checkpoint for recovery
+        /// Saves operation checkpoint for recovery.
+        /// Currently persists to in-memory state only; a future implementation should
+        /// flush to durable storage (e.g. JsonFileStore) to survive process restarts.
         /// </summary>
-#pragma warning disable CS1998
-        private async Task SaveCheckpointAsync(BatchOperationState batchState)
+        private Task SaveCheckpointAsync(BatchOperationState batchState)
         {
             try
             {
-                // In a real implementation, this would save to persistent storage
-                // For now, we keep it in memory
+                // TODO: wire to durable storage when persistent recovery is needed.
+                // For now the checkpoint is kept in the in-memory _activeBatchOperations dictionary.
                 batchState.LastCheckpointTime = DateTime.UtcNow;
 
-                _logger.LogDebug("💾 CHECKPOINT SAVED: Operation '{0}' at {1}/{2} items",
+                _logger.LogDebug("CHECKPOINT SAVED: Operation '{0}' at {1}/{2} items",
                              batchState.OperationId, batchState.CompletedItems, batchState.TotalItems);
             }
             catch (Exception ex)
@@ -493,6 +494,7 @@ namespace Lidarr.Plugin.Common.Services.Network
                 _logger.LogError(ex, "Failed to save checkpoint for operation: {0}", batchState.OperationId);
                 // Don't fail the operation if checkpoint saving fails
             }
+            return Task.CompletedTask;
         }
 
         /// <summary>
@@ -533,7 +535,6 @@ namespace Lidarr.Plugin.Common.Services.Network
                 _logger.LogError(ex, "Failed to cleanup operation: {0}", operationId);
             }
         }
-#pragma warning restore CS1998
 
         #endregion
 
