@@ -26,6 +26,7 @@ namespace Lidarr.Plugin.Common.Collections
         private readonly ConcurrentDictionary<TKey, TValue> _inner;
         private readonly int _capacity;
         private readonly Action<int>? _onEvicted;
+        private readonly object _evictLock = new();
 
         /// <summary>
         /// Initialises a new instance with the given capacity.
@@ -186,10 +187,16 @@ namespace Lidarr.Plugin.Common.Collections
             if (_inner.Count < _capacity)
                 return;
 
-            var cleared = _inner.Count;
-            _inner.Clear();
+            lock (_evictLock)
+            {
+                if (_inner.Count < _capacity)
+                    return;
 
-            try { _onEvicted?.Invoke(cleared); } catch { /* never let a callback crash an insert */ }
+                var cleared = _inner.Count;
+                _inner.Clear();
+
+                try { _onEvicted?.Invoke(cleared); } catch { /* never let a callback crash an insert */ }
+            }
         }
     }
 }
