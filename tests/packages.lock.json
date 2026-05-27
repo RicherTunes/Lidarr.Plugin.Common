@@ -16,12 +16,12 @@
       },
       "FsCheck.Xunit": {
         "type": "Direct",
-        "requested": "[3.3.0, )",
-        "resolved": "3.3.0",
-        "contentHash": "4SpaSXqivrtNnHvlNlc3PaGnErenXnyjnSun7LLMCfy2qdL6hhR3qyjIjFMArJP2r6AIiju0sWByBSyhQZg+iw==",
+        "requested": "[3.3.3, )",
+        "resolved": "3.3.3",
+        "contentHash": "Z4EzUvtpoyGeC+8gTt8kGUFuFrda8sQ3cp8q8RAHTuwvDCUb/gpqqBkRMcumveLhBbDXaOjy17v5uHcypPCAig==",
         "dependencies": {
           "FSharp.Core": "5.0.2",
-          "FsCheck": "[3.3.0]",
+          "FsCheck": "[3.3.3]",
           "xunit.extensibility.execution": "[2.4.1, 3.0.0)"
         }
       },
@@ -116,8 +116,8 @@
       },
       "FsCheck": {
         "type": "Transitive",
-        "resolved": "3.3.0",
-        "contentHash": "CGUXGwql1Ot9B6hIlNFIa10Hi6SQsvQr5wUURRm7zGCBBO3f85YfVsOqD1NO1c5VYdfWY3+bd32V+Gaz7c7A9A==",
+        "resolved": "3.3.3",
+        "contentHash": "FtJSNzekCwoVTJPLZwK2In1cr9PhIo6WAX/RSM7BL/jQERgnO0111+hdcN14pcog9BByJmqehBrMbjjKpHZULg==",
         "dependencies": {
           "FSharp.Core": "5.0.2"
         }
@@ -572,7 +572,7 @@
         "type": "Project",
         "dependencies": {
           "CliWrap": "[3.10.1, )",
-          "Lidarr.Plugin.Abstractions": "[1.9.5, )",
+          "Lidarr.Plugin.Abstractions": "[1.18.0-dev, )",
           "Microsoft.AspNetCore.DataProtection": "[8.0.25, )",
           "Microsoft.AspNetCore.DataProtection.Extensions": "[8.0.25, )",
           "Microsoft.Extensions.Caching.Memory": "[8.0.1, )",
@@ -591,8 +591,8 @@
       "lidarr.plugin.common.testkit": {
         "type": "Project",
         "dependencies": {
-          "Lidarr.Plugin.Abstractions": "[1.9.5, )",
-          "Lidarr.Plugin.Common": "[1.9.0, )",
+          "Lidarr.Plugin.Abstractions": "[1.18.0-dev, )",
+          "Lidarr.Plugin.Common": "[1.18.0-dev, )",
           "Microsoft.Extensions.DependencyInjection": "[8.0.1, )",
           "Microsoft.Extensions.Logging": "[8.0.1, )",
           "Microsoft.Extensions.Logging.Abstractions": "[8.0.3, )",
