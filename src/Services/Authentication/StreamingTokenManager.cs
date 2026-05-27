@@ -332,7 +332,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error checking session expiry");
+                try { _logger.LogError(ex, "Error checking session expiry"); } catch { }
             }
         }
 
