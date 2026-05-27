@@ -244,7 +244,7 @@ public sealed class MarkerType { }
             var psi = new ProcessStartInfo
             {
                 FileName = "dotnet",
-                Arguments = $"build \"{projectPath}\" -c Release -nologo -o \"{outputPath}\"",
+                Arguments = $"build \"{projectPath}\" -c Release -nologo -o \"{outputPath}\" -m:1",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
@@ -260,7 +260,10 @@ public sealed class MarkerType { }
             p.Start();
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
-            await p.WaitForExitAsync();
+
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(120));
+            try { await p.WaitForExitAsync(cts.Token); }
+            catch (OperationCanceledException) { try { p.Kill(entireProcessTree: true); } catch { } throw new TimeoutException($"dotnet build timed out for '{projectPath}'"); }
 
             if (p.ExitCode != 0)
             {
@@ -289,7 +292,11 @@ public sealed class MarkerType { }
             p.Start();
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
-            await p.WaitForExitAsync();
+
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(60));
+            try { await p.WaitForExitAsync(cts.Token); }
+            catch (OperationCanceledException) { try { p.Kill(entireProcessTree: true); } catch { } return (-1, sbOut.ToString(), "Process timed out after 60s"); }
+
             return (p.ExitCode, sbOut.ToString(), sbErr.ToString());
         }
 
