@@ -186,6 +186,38 @@ These items are NOT blocking shipping any plugin; they are recorded for future c
 
 ---
 
+## Wave-30/31 closures + new findings (added 2026-05-27)
+
+### New Common features landed (Wave-30)
+
+| Feature | PR | brainarr | tidalarr | qobuzarr | apple |
+|---|---|---|---|---|---|
+| DownloadPathValidator | #519 | N/A (ImportList) | ✓ adopted | ✓ adopted | ✓ adopted |
+| LrclibClient (lyrics) | #521 | N/A | pending | ✓ LyricsEnricher | N/A |
+| RateLimitHeaderUtilities | #518 | N/A | available | available | available |
+| UniversalAdaptiveRateLimiterOptions | #524 | available | available | available | available |
+| FileStreamingResponseCache ILogger | #520 | available | available | available | available |
+| TestFailureFormatter | (v1.14+) | available | available | available | available |
+| enforcement scripts | #522 | — | — | — | — |
+
+### Closed in Wave-30/31
+
+28. ~~**22+ stale branches (item 15)**~~ — **Resolved Wave-28**. 26 branches deleted across 4 plugin repos. 14 deferred INVESTIGATE branches verified mostly-already-merged (bounded-dict 91 commits, tech-debt-arc 46 commits = 99% in main). 31 stale local Common branches cleaned.
+29. ~~**Apple `AppleMusicLidarrDownloadClient` entry-point gate helpers (item 23)**~~ — **Resolved Wave-28**. `IsAuthShortCircuited` + `RecordAuthOutcomeFromException` wired in download client Test() + Download(). Now matches tidal+qobuz pattern. Per-call `IServiceProvider` lookup.
+30. ~~**Qobuz entry-point gate helpers (item 24)**~~ — **Resolved Wave-28**. QobuzIndexer + QobuzDownloadClient Test() catch blocks now use `HttpExceptionClassifier` for categorized error messages + `RecordAuthOutcomeFromException` for gate recording.
+31. **qobuz IsInputSafe .com false positive** — `LidarrInputValidator.DangerousExtensions` included `.com` (legacy DOS executable), causing ALL `.com` email addresses to fail credential validation. Fixed with `@` guard: file-extension checks skipped for email-like inputs. Discovered via adversarial TDD.
+32. **qobuz BridgeQobuzApiClient timeout regression** — SharedSystemHttpClient adoption (commit b95391d) replaced a 30s per-client timeout with a 10-minute global timeout (designed for downloads). API calls that should fail-fast at 30s now hung for 10 minutes. Fixed with per-request `CancellationTokenSource(30s)` on GetAsync + PostAsync.
+33. **tidalarr empty-chunk-URL guard** — `TidalChunkDownloader.DownloadAndAssembleAsync` accepted manifests with zero chunk URLs, silently producing empty/corrupt output. Added `InvalidOperationException` guard + 2 TDD tests.
+34. **TestValidationBuilder parity** — qobuzarr was the last plugin without TestValidationBuilder. Adopted in QobuzDownloadClient.Test() for DownloadPath pre-check. All 4 plugins now use it.
+
+### Test coverage (Wave-31)
+
+83 new TDD tests across 7 previously-untested classes:
+- CredentialValidator (13), TokenRefresher (18), QobuzSubstringCache (14), QobuzSearchService (17), QobuzDownloadClient auth-gate (15), LyricsEnricher (4), TidalChunkDownloader (2)
+- Ecosystem total: 7,424 passing / 0 failures
+
+---
+
 ## Definition-of-done verification
 
 Per the user's mission contract:
