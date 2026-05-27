@@ -136,7 +136,7 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
             CancellationToken cancellationToken,
             DateTime startTime)
         {
-            var taskCompletionSource = new TaskCompletionSource<object>();
+            var taskCompletionSource = new TaskCompletionSource<object>(TaskCreationOptions.RunContinuationsAsynchronously);
             var taskInfo = new TaskInfo(taskCompletionSource, startTime);
 
             // Try to add this as the pending request

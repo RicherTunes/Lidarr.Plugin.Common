@@ -23,6 +23,11 @@ namespace Lidarr.Plugin.Common.Utilities
     /// </summary>
     public static class HttpClientExtensions
     {
+        private static readonly JsonSerializerOptions DefaultCaseInsensitiveJsonOptions = new()
+        {
+            PropertyNameCaseInsensitive = true
+        };
+
         /// <summary>
         /// Best-effort trace breadcrumb for swallowed exceptions.
         /// Replaces silent <c>catch { }</c> blocks with a diagnostic breadcrumb that surfaces
@@ -877,10 +882,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 throw new InvalidOperationException($"Expected JSON but got '{contentType ?? "none"}' from {response.RequestMessage?.RequestUri} (status {statusCode}) (first bytes: {previewHex}).");
             }
 
-            options ??= new JsonSerializerOptions
-            {
-                PropertyNameCaseInsensitive = true
-            };
+            options ??= DefaultCaseInsensitiveJsonOptions;
 
             var result = JsonSerializer.Deserialize<T>(payload, options);
             if (result == null)
