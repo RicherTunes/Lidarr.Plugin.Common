@@ -310,8 +310,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             }
             catch (Exception ex)
             {
-                // Log error but don't throw - revocation is best effort
-                Console.WriteLine($"Warning: Failed to revoke tokens: {ex.Message}");
+                System.Diagnostics.Trace.WriteLine($"[OAuthStreamingAuth] Failed to revoke tokens: {ex.GetType().Name}: {ex.Message}");
             }
             finally
             {
