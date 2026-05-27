@@ -142,6 +142,18 @@ namespace Lidarr.Plugin.Common.Security.Llm
                 RegexOptions.Compiled | RegexOptions.CultureInvariant,
                 TimeSpan.FromMilliseconds(RegexTimeoutMs)));
 
+        private static readonly Lazy<Regex[]> InjectionPatternRegexes = new(() =>
+        {
+            var regexes = new Regex[InjectionPatterns.Length];
+            for (int i = 0; i < InjectionPatterns.Length; i++)
+            {
+                regexes[i] = new Regex(Regex.Escape(InjectionPatterns[i]),
+                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled,
+                    TimeSpan.FromMilliseconds(RegexTimeoutMs));
+            }
+            return regexes;
+        });
+
         /// <summary>Creates a new sanitizer with optional logger.</summary>
         public LlmPromptSanitizer(ILogger<LlmPromptSanitizer>? logger = null)
         {
@@ -286,18 +298,16 @@ namespace Lidarr.Plugin.Common.Security.Llm
         {
             var result = chunk;
 
-            foreach (var pattern in InjectionPatterns)
+            var regexes = InjectionPatternRegexes.Value;
+            for (int i = 0; i < regexes.Length; i++)
             {
-                var regex = new Regex(Regex.Escape(pattern),
-                    RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
-                    TimeSpan.FromMilliseconds(RegexTimeoutMs));
-
                 try
                 {
-                    result = regex.Replace(result, " ");
+                    result = regexes[i].Replace(result, " ");
                 }
                 catch (RegexMatchTimeoutException)
                 {
+                    var pattern = InjectionPatterns[i];
                     _logger.LogDebug("Timeout processing pattern: {Pattern}",
                         pattern.Substring(0, Math.Min(pattern.Length, 20)));
                 }
