@@ -1,0 +1,187 @@
+name: Docker E2E (reusable)
+
+# Reusable Docker E2E harness for Lidarr plugins.
+#
+# Boots a real Lidarr container with the plugin's MERGED DLL mounted and runs the
+# Category=DockerE2E smoke matrix via the shared composite action at
+# ext/Lidarr.Plugin.Common/.github/actions/docker-e2e.
+#
+# Build model (mirrors qobuzarr/tidalarr/brainarr after the wave-parity convergence):
+#   1. Build the TEST project — its plugin ProjectReferences redirect the un-merged
+#      build to <plugin>/bin-tests\ (PluginPackagingDisable=true;OutputPath=bin-tests\),
+#      so it never pollutes the merged bin/ the harness mounts.
+#   2. Build the PLUGIN project — ILRepack produces ONLY the merged plugin DLL in bin/.
+#   3. Run the composite (dotnet test --no-build, Category=DockerE2E) which mounts bin/.
+#
+# A plugin adopts this by replacing its hand-rolled docker-e2e.yml with a thin caller:
+#
+#   jobs:
+#     e2e:
+#       uses: RicherTunes/Lidarr.Plugin.Common/.github/workflows/docker-e2e.yml@<sha>
+#       with:
+#         plugin-name: brainarr
+#         plugin-csproj: Brainarr.Plugin/Brainarr.Plugin.csproj
+#         test-project: Brainarr.Tests/Brainarr.Tests.csproj
+#       secrets:
+#         submodules-token: ${{ secrets.SUBMODULES_TOKEN }}
+
+on:
+  workflow_call:
+    inputs:
+      plugin-name:
+        description: 'Plugin slug (log/artifact naming + composite container guess).'
+        required: true
+        type: string
+      plugin-csproj:
+        description: 'Path to the main plugin .csproj (built merged into bin/).'
+        required: true
+        type: string
+      test-project:
+        description: 'Path to the test project containing the Category=DockerE2E facts.'
+        required: true
+        type: string
+      lidarr-docker-version:
+        description: 'Lidarr container tag (plugins branch, net8 capable).'
+        required: false
+        type: string
+        default: 'pr-plugins-3.1.2.4913'
+      extract-script:
+        description: 'Path to the host-assembly extraction script.'
+        required: false
+        type: string
+        default: 'scripts/extract-lidarr-assemblies.sh'
+      host-assemblies-path:
+        description: 'Output dir for extracted Lidarr host assemblies (becomes LIDARR_PATH).'
+        required: false
+        type: string
+        default: 'ext/Lidarr-docker/_output/net8.0'
+      runs-on:
+        description: 'Runner label (must be Linux — the Lidarr image is a Linux container).'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+      timeout-minutes:
+        description: 'Job timeout.'
+        required: false
+        type: number
+        default: 30
+    secrets:
+      submodules-token:
+        description: 'PAT with read access to the private Common submodule (omit for forks).'
+        required: false
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    name: Docker E2E (${{ inputs.plugin-name }})
+    runs-on: ${{ inputs.runs-on }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      LIDARR_DOCKER_VERSION: ${{ inputs.lidarr-docker-version }}
+      DOTNET_CLI_DISABLE_BUILD_SERVERS: '1'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          submodules: false
+          fetch-depth: 0
+
+      - name: Init Common submodule
+        shell: bash
+        env:
+          SUBMODULES_TOKEN: ${{ secrets.submodules-token }}
+        run: |
+          if [ -n "${SUBMODULES_TOKEN}" ]; then echo "::add-mask::${SUBMODULES_TOKEN}"; fi
+          git submodule sync -- ext/Lidarr.Plugin.Common
+          if [ -n "${SUBMODULES_TOKEN}" ]; then
+            GIT_CONFIG_PARAMETERS="'url.https://x-access-token:${SUBMODULES_TOKEN}@github.com/.insteadOf=https://github.com/'" \
+              git submodule update --init --depth=1 -- ext/Lidarr.Plugin.Common
+          else
+            echo "::warning::submodules-token not provided (fork PR?) — attempting unauthenticated fetch"
+            git submodule update --init --depth=1 -- ext/Lidarr.Plugin.Common || {
+              echo "::error::Submodule init failed — likely a private repo without auth token"; exit 1; }
+          fi
+          test -f ext/Lidarr.Plugin.Common/.github/actions/docker-e2e/action.yml || {
+            echo "::error::Common docker-e2e composite missing — bump the submodule pin."; exit 1; }
+          echo "Common submodule at $(git -C ext/Lidarr.Plugin.Common rev-parse --short HEAD)"
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Cache NuGet packages
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Packages.props', '**/NuGet.config') }}
+          restore-keys: |
+            ${{ runner.os }}-nuget-
+
+      - name: Read pinned plugins digest (if available)
+        shell: bash
+        run: |
+          if [ -f .github/lidarr_digest.txt ]; then
+            DIG=$(grep -v '^\s*#' .github/lidarr_digest.txt | head -1 | cut -d'#' -f1 | tr -d '[:space:]')
+            if [[ "$DIG" == sha256:* ]]; then
+              echo "LIDARR_DOCKER_DIGEST=$DIG" >> "$GITHUB_ENV"
+              echo "Using pinned digest: $DIG"
+            fi
+          fi
+
+      - name: Extract Lidarr assemblies (plugins Docker)
+        shell: bash
+        run: |
+          set -euo pipefail
+          timeout 12m bash "${{ inputs.extract-script }}" --mode full --no-tar-fallback --output-dir "${{ inputs.host-assemblies-path }}"
+
+      - name: Verify assemblies present
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f "${{ inputs.host-assemblies-path }}/Lidarr.Core.dll" || { echo "Missing Lidarr.Core.dll in assemblies"; exit 1; }
+          if ! compgen -G "${{ inputs.host-assemblies-path }}/Lidarr.*.dll" > /dev/null; then
+            echo "Missing Lidarr.*.dll assemblies; ensure full /app/bin is extracted from the plugins Docker image"
+            exit 1
+          fi
+          ls -la "${{ inputs.host-assemblies-path }}/"
+
+      - name: Set LIDARR_PATH
+        shell: bash
+        run: echo "LIDARR_PATH=${{ github.workspace }}/${{ inputs.host-assemblies-path }}" >> "$GITHUB_ENV"
+
+      - name: Build tests (un-merged plugin → bin-tests/)
+        shell: bash
+        run: |
+          # Plugin ProjectReferences redirect the un-merged build to <plugin>/bin-tests\,
+          # so this never writes the un-merged DLL into the merged bin/ the harness mounts.
+          dotnet build "${{ inputs.test-project }}" \
+            --configuration Release \
+            -p:PluginPackagingDisable=true \
+            -p:LidarrPath="${{ env.LIDARR_PATH }}" \
+            -p:GeneratePackageOnBuild=false \
+            -m:1 \
+            --disable-build-servers
+
+      - name: Build plugin (merged) for E2E mount
+        shell: bash
+        run: |
+          # Build the plugin project last so its bin/ holds ONLY the merged DLL (ILRepack
+          # internalizes Common/Abstractions/etc. and deletes sidecars) — the artifact the
+          # LidarrContainerFixture mounts into the container.
+          dotnet build "${{ inputs.plugin-csproj }}" \
+            --configuration Release \
+            -p:LidarrPath="${{ env.LIDARR_PATH }}" \
+            -p:GeneratePackageOnBuild=false \
+            -m:1 \
+            --disable-build-servers
+
+      - name: Docker E2E
+        uses: ./ext/Lidarr.Plugin.Common/.github/actions/docker-e2e
+        with:
+          plugin-name: ${{ inputs.plugin-name }}
+          test-project: ${{ inputs.test-project }}
+          lidarr-docker-version: ${{ inputs.lidarr-docker-version }}
+          configuration: Release
