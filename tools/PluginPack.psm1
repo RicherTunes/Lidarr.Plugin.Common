@@ -26,10 +26,14 @@ function Get-PluginOutput {
     $buildArgs = @($projectPath, '-c', $Configuration, '-f', $Framework, '-o', $publishDirectory,
         '/p:CopyLocalLockFileAssemblies=true', '/p:ContinuousIntegrationBuild=true')
     if ($ExtraBuildArgs) { $buildArgs += $ExtraBuildArgs }
-    dotnet build @buildArgs | Out-Null
+    # Capture build output so failures are diagnosable. Previously piped to Out-Null,
+    # which made CI packaging failures impossible to triage (generic "dotnet build failed"
+    # with no compiler/MSBuild error). On failure, replay the captured output to stderr.
+    $buildOutput = & dotnet build @buildArgs 2>&1
 
     if ($LASTEXITCODE -ne 0) {
-        throw "dotnet build failed for $Csproj ($Framework|$Configuration)."
+        $buildOutput | ForEach-Object { Write-Host $_ }
+        throw "dotnet build failed for $Csproj ($Framework|$Configuration). See build output above."
     }
 
     return $publishDirectory
