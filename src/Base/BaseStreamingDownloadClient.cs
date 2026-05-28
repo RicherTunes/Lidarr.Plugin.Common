@@ -282,8 +282,9 @@ namespace Lidarr.Plugin.Common.Base
 
                 _activeDownloads.TryAdd(downloadId, downloadItem);
 
-                // Start download task
-                _ = Task.Run(() => ProcessDownloadAsync(downloadItem));
+                _ = Task.Run(() => ProcessDownloadAsync(downloadItem))
+                    .ContinueWith(t => Logger?.LogError(t.Exception, "Unhandled error in download task"),
+                        TaskContinuationOptions.OnlyOnFaulted);
 
                 Logger?.LogInformation($"{ServiceName} album download queued: {album.Title} by {album.Artist?.Name}");
                 return downloadId;
