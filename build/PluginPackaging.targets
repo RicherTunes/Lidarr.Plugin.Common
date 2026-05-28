@@ -205,17 +205,21 @@
       <_PluginBuildTimestamp>$([System.DateTime]::UtcNow.ToString("o"))</_PluginBuildTimestamp>
     </PropertyGroup>
 
-    <!-- Inject gitSha and buildTimestamp into plugin.json using PowerShell (cross-platform) -->
-    <Exec Command="pwsh -NoProfile -NonInteractive -Command &quot;$manifest = Get-Content -LiteralPath '$(_PluginManifestPath)' -Raw | ConvertFrom-Json; $manifest | Add-Member -NotePropertyName 'gitSha' -NotePropertyValue '$(_PluginGitSha)' -Force; $manifest | Add-Member -NotePropertyName 'buildTimestamp' -NotePropertyValue '$(_PluginBuildTimestamp)' -Force; $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath '$(_PluginManifestPath)' -Encoding UTF8&quot;"
+    <!-- Inject gitSha and buildTimestamp into plugin.json via pwsh -File (cross-platform).
+         -File (not -Command) keeps the PowerShell $variables inside the .ps1 so /bin/sh on
+         Linux cannot expand them as empty shell variables — inline -Command corrupts to e.g.
+         " | Add-Member" ("empty pipe element") because $manifest is stripped before pwsh sees it. -->
+    <Exec Command="pwsh -NoProfile -NonInteractive -File &quot;$(MSBuildThisFileDirectory)Inject-PluginBuildMetadata.ps1&quot; -ManifestPath &quot;$(_PluginManifestPath)&quot; -GitSha &quot;$(_PluginGitSha)&quot; -BuildTimestamp &quot;$(_PluginBuildTimestamp)&quot;"
           Condition="Exists('$(_PluginManifestPath)')"
           StandardOutputImportance="low"
           IgnoreExitCode="true">
       <Output TaskParameter="ExitCode" PropertyName="_PwshExitCode" />
     </Exec>
 
-    <!-- Fallback to powershell.exe on Windows if pwsh is not available -->
-    <Exec Command="powershell -NoProfile -NonInteractive -Command &quot;$manifest = Get-Content -LiteralPath '$(_PluginManifestPath)' -Raw | ConvertFrom-Json; $manifest | Add-Member -NotePropertyName 'gitSha' -NotePropertyValue '$(_PluginGitSha)' -Force; $manifest | Add-Member -NotePropertyName 'buildTimestamp' -NotePropertyValue '$(_PluginBuildTimestamp)' -Force; $manifest | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath '$(_PluginManifestPath)' -Encoding UTF8&quot;"
-          Condition="Exists('$(_PluginManifestPath)') and '$(_PwshExitCode)' != '0'"
+    <!-- Fallback to Windows PowerShell, but ONLY on Windows — `powershell` does not exist on
+         Linux/macOS, so an unconditional fallback fails the build with "powershell: not found". -->
+    <Exec Command="powershell -NoProfile -NonInteractive -File &quot;$(MSBuildThisFileDirectory)Inject-PluginBuildMetadata.ps1&quot; -ManifestPath &quot;$(_PluginManifestPath)&quot; -GitSha &quot;$(_PluginGitSha)&quot; -BuildTimestamp &quot;$(_PluginBuildTimestamp)&quot;"
+          Condition="'$(OS)' == 'Windows_NT' and Exists('$(_PluginManifestPath)') and '$(_PwshExitCode)' != '0'"
           StandardOutputImportance="low"
           IgnoreExitCode="true" />
 
@@ -242,31 +246,44 @@
   <Target Name="ValidatePackageClosure" AfterTargets="InjectPluginBuildMetadata" Condition="'$(PluginPackagingDisable)' != 'true'">
     <PropertyGroup>
       <_VpcOutputDir>$(TargetDir)</_VpcOutputDir>
+      <!-- Trailing-separator-stripped form for use as a quoted command-line argument.
+           $(TargetDir) ends in a separator; on Windows a quoted "C:\dir\" makes the trailing
+           \" an ESCAPED quote, corrupting the path passed to pwsh (the closure check would
+           then find nothing and silently pass). Strip the trailing separator so the quoted
+           argument is well-formed. Join-Path in the script re-adds the separator. -->
+      <_VpcOutputDirArg>$(_VpcOutputDir.TrimEnd('\').TrimEnd('/'))</_VpcOutputDirArg>
       <!-- Path to parity-spec.json relative to this targets file -->
       <_VpcParitySpecPath>$(MSBuildThisFileDirectory)../scripts/parity-spec.json</_VpcParitySpecPath>
     </PropertyGroup>
 
     <!--
-      Use PowerShell to parse parity-spec.json and check for forbidden DLLs.
-      We use pwsh (cross-platform) with a fallback to powershell.exe on Windows.
-      The script exits 1 if any forbidden DLL is found, causing the build to fail.
+      Run the package-closure check via pwsh -File (cross-platform). -File keeps the script's
+      $variables inside the .ps1 so /bin/sh on Linux cannot expand them as empty shell variables
+      (inline -Command corrupted to e.g. " = .versionContract..." on Linux). IgnoreExitCode lets
+      us capture the exit code and emit a clean <Error> below instead of a raw MSB3073, and lets
+      the Windows-only powershell fallback run when pwsh is unavailable.
     -->
-    <Exec Command="pwsh -NoProfile -NonInteractive -Command &quot;$spec = Get-Content -LiteralPath '$(_VpcParitySpecPath)' -Raw | ConvertFrom-Json; $forbidden = $spec.versionContract.forbiddenPackageContents; $found = @(); foreach ($name in $forbidden) { $candidate = Join-Path '$(_VpcOutputDir)' $name; if (Test-Path -LiteralPath $candidate) { $found += $name } }; if ($found.Count -gt 0) { Write-Error ('FORBIDDEN DLLs in plugin output: ' + ($found -join ', ') + '. Add PrivateAssets=all ExcludeAssets=runtime to PackageReference or ILRepack-merge them. See docs/MULTI_PLUGIN_ALC_VALIDATION.md'); exit 1 } else { Write-Host ('[ValidatePackageClosure] OK - no forbidden DLLs found in ' + '$(_VpcOutputDir)') }&quot;"
+    <Exec Command="pwsh -NoProfile -NonInteractive -File &quot;$(MSBuildThisFileDirectory)Test-PackageClosure.ps1&quot; -ParitySpecPath &quot;$(_VpcParitySpecPath)&quot; -OutputDir &quot;$(_VpcOutputDirArg)&quot;"
           Condition="Exists('$(_VpcParitySpecPath)') and Exists('$(_VpcOutputDir)')"
           StandardOutputImportance="normal"
-          StandardErrorImportance="high">
+          StandardErrorImportance="high"
+          IgnoreExitCode="true">
       <Output TaskParameter="ExitCode" PropertyName="_VpcPwshExitCode" />
     </Exec>
 
-    <!-- Fallback to powershell.exe on Windows if pwsh is unavailable -->
-    <Exec Command="powershell -NoProfile -NonInteractive -Command &quot;$spec = Get-Content -LiteralPath '$(_VpcParitySpecPath)' -Raw | ConvertFrom-Json; $forbidden = $spec.versionContract.forbiddenPackageContents; $found = @(); foreach ($name in $forbidden) { $candidate = Join-Path '$(_VpcOutputDir)' $name; if (Test-Path -LiteralPath $candidate) { $found += $name } }; if ($found.Count -gt 0) { Write-Error ('FORBIDDEN DLLs in plugin output: ' + ($found -join ', ') + '. Add PrivateAssets=all ExcludeAssets=runtime to PackageReference or ILRepack-merge them. See docs/MULTI_PLUGIN_ALC_VALIDATION.md'); exit 1 } else { Write-Host ('[ValidatePackageClosure] OK - no forbidden DLLs found in ' + '$(_VpcOutputDir)') }&quot;"
-          Condition="Exists('$(_VpcParitySpecPath)') and Exists('$(_VpcOutputDir)') and '$(_VpcPwshExitCode)' != '0'"
+    <!-- Fallback to Windows PowerShell, but ONLY on Windows — `powershell` does not exist on
+         Linux/macOS, so an unconditional fallback fails the build with "powershell: not found". -->
+    <Exec Command="powershell -NoProfile -NonInteractive -File &quot;$(MSBuildThisFileDirectory)Test-PackageClosure.ps1&quot; -ParitySpecPath &quot;$(_VpcParitySpecPath)&quot; -OutputDir &quot;$(_VpcOutputDirArg)&quot;"
+          Condition="'$(OS)' == 'Windows_NT' and Exists('$(_VpcParitySpecPath)') and Exists('$(_VpcOutputDir)') and '$(_VpcPwshExitCode)' != '0'"
           StandardOutputImportance="normal"
-          StandardErrorImportance="high">
+          StandardErrorImportance="high"
+          IgnoreExitCode="true">
       <Output TaskParameter="ExitCode" PropertyName="_VpcPsExitCode" />
     </Exec>
 
-    <!-- Emit a hard MSBuild Error if forbidden DLLs were found (exit code != 0 from either shell) -->
+    <!-- Emit a hard MSBuild Error if forbidden DLLs were found (exit code != 0 from pwsh, and
+         the Windows-only fallback either didn't run or also failed). On Linux _VpcPsExitCode is
+         always empty (fallback is Windows-only), so the gate keys off _VpcPwshExitCode there. -->
     <Error
       Condition="'$(_VpcPwshExitCode)' != '' and '$(_VpcPwshExitCode)' != '0' and ('$(_VpcPsExitCode)' == '' or '$(_VpcPsExitCode)' != '0')"
       Text="[ValidatePackageClosure] FORBIDDEN assemblies found in plugin package output '$(_VpcOutputDir)'. These are host-provided DLLs that cause COR_E_INVALIDOPERATION type-identity conflicts when multiple plugins are installed. FIX: add PrivateAssets=&quot;all&quot; ExcludeAssets=&quot;runtime&quot; to the PackageReference for the offending package, or ILRepack-merge it. See docs/MULTI_PLUGIN_ALC_VALIDATION.md for the full explanation." />
