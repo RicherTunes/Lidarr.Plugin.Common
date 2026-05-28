@@ -138,7 +138,7 @@
   <ItemGroup Condition="'$(IncludeCLIFramework)' == 'true'">
     <PackageReference Include="System.CommandLine" Version="2.0.0-beta4.22272.1" PrivateAssets="All" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" PrivateAssets="All" />
-    <PackageReference Include="Spectre.Console" Version="0.50.0" PrivateAssets="All" />
+    <PackageReference Include="Spectre.Console" Version="0.55.2" PrivateAssets="All" />
   </ItemGroup>
   <!-- Audio Processing Dependency removed from core to avoid private feed.
        Plugin authors who need TagLib should reference a public package (e.g., TagLibSharp from nuget.org) directly in their plugin. -->

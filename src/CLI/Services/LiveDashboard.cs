@@ -180,9 +180,15 @@ namespace Lidarr.Plugin.Common.CLI.Services
                     .BorderColor(Color.Grey)
             );
 
-            // Render to console
-            AnsiConsole.Clear();
-            AnsiConsole.Write(layout);
+            // Render to console. Clear via the injected UI (testable + headless-safe). The rich
+            // Spectre layout is written to the real console only when attached to an interactive
+            // terminal — in redirected/headless environments (CI, `dotnet test`) the legacy
+            // console backend has no valid handle and AnsiConsole throws IOException.
+            _ui.Clear();
+            if (!System.Console.IsOutputRedirected)
+            {
+                AnsiConsole.Write(layout);
+            }
         }
     }
 }
