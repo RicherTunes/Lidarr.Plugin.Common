@@ -30,6 +30,7 @@ Set-StrictMode -Version Latest
 $script:IsCIMode = ($Mode -eq 'ci')
 $script:CommonRepoPattern = 'RicherTunes/Lidarr\.Plugin\.Common/'
 $script:ShaRegex = '^[0-9a-fA-F]{40}$'
+$script:AllowedTagPattern = '^workflows/v\d+$'
 
 # ─── Allowlist ───────────────────────────────────────────────────────────────
 
@@ -123,8 +124,8 @@ function Find-Violations {
                 # Only lint Common repo references
                 if ($fullRef -notmatch $script:CommonRepoPattern) { continue }
 
-                # Check if ref is a full 40-char SHA
-                if ($ref -notmatch $script:ShaRegex) {
+                # Check if ref is a full 40-char SHA or an approved tag pattern
+                if ($ref -notmatch $script:ShaRegex -and $ref -notmatch $script:AllowedTagPattern) {
                     $violations += [PSCustomObject]@{
                         File     = $file.Name
                         FilePath = $file.FullName
