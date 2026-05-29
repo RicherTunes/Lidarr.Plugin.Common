@@ -50,3 +50,5 @@ static Lidarr.Plugin.Common.Services.Http.RateLimitHeaderUtilities.ResolveRetryA
 static Lidarr.Plugin.Common.Services.Http.RateLimitHeaderUtilities.ResolveRetryAfter(System.Net.Http.HttpResponseMessage? response) -> System.TimeSpan
 static Lidarr.Plugin.Common.Services.Http.RateLimitHeaderUtilities.BuildHostFirstSegmentKey(System.Net.Http.HttpRequestMessage! request, string! unknownKey = "unknown") -> string!
 static Lidarr.Plugin.Common.Services.Http.RateLimitHeaderUtilities.BuildHostFirstSegmentKey(System.Uri? uri, string! unknownKey = "unknown") -> string!
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.ShouldShortCircuit() -> bool
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.RecordExceptionOutcome(System.Exception! ex, System.Func<System.Exception!, Lidarr.Plugin.Abstractions.Contracts.AuthFailure?>! classify) -> void
