@@ -226,6 +226,48 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task ExecuteWithResilienceAsync_CapsRedirectChain_DoesNotLoopForever()
+        {
+            // Regression: a redirect cycle previously looped forever — the redirect `continue`
+            // path never checked the retry-budget deadline and there was no hop cap.
+            var host = $"redir-{Guid.NewGuid():N}.example";
+            var calls = 0;
+            var handler = new StubHandler(req =>
+            {
+                var n = System.Threading.Interlocked.Increment(ref calls);
+                if (n > 50)
+                {
+                    // Safety valve so a regression fails fast instead of hanging the test host.
+                    return Task.FromResult(new HttpResponseMessage(HttpStatusCode.InternalServerError));
+                }
+                var resp = new HttpResponseMessage(HttpStatusCode.PermanentRedirect); // 308 preserves method
+                resp.Headers.Location = new Uri($"https://{host}/r{n}");
+                return Task.FromResult(resp);
+            });
+            using var client = new HttpClient(handler);
+
+            using var result = await client.ExecuteWithResilienceAsync(
+                new HttpRequestMessage(HttpMethod.Get, $"https://{host}/start"),
+                maxRetries: 0,
+                retryBudget: TimeSpan.FromSeconds(30),
+                maxConcurrencyPerHost: 1,
+                perRequestTimeout: null,
+                cancellationToken: CancellationToken.None);
+
+            try
+            {
+                // The chain must be bounded (~maxRedirects + 1), not run to the safety valve.
+                Assert.True(calls <= 12, $"redirect chain was not capped: {calls} requests were made");
+                // After the hop budget is exhausted, the last redirect response is returned (not the 500 valve).
+                Assert.Equal(HttpStatusCode.PermanentRedirect, result.StatusCode);
+            }
+            finally
+            {
+                ClearHostGate(host);
+            }
+        }
+
+        [Fact]
         public async Task ExecuteWithResilienceAsync_ThrowsTimeoutExceptionWhenPerRequestTimeoutExceeded()
         {
             var handler = new StubHandler(async (req, ct) =>

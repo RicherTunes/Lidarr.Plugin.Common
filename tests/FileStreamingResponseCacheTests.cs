@@ -117,6 +117,39 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task Set_ConcurrentWritesSameKey_ProduceValidEntry_NoCorruption()
+        {
+            // Regression: concurrent Set() for the same key collided on a shared "<path>.tmp"
+            // and a non-atomic delete-then-move, silently dropping/corrupting writes. With a
+            // unique temp name + atomic overwrite move, concurrent writers converge to one valid entry.
+            var endpoint = "/api/concurrent";
+            var parameters = new Dictionary<string, string> { { "k", "v" } };
+            const int writers = 40;
+
+            var tasks = Enumerable.Range(0, writers).Select(i => Task.Run(() =>
+            {
+                var resp = new CachedHttpResponse
+                {
+                    StatusCode = HttpStatusCode.OK,
+                    ContentType = "application/json",
+                    Body = Encoding.UTF8.GetBytes($"{{\"n\":{i}}}"),
+                    StoredAt = DateTimeOffset.UtcNow
+                };
+                _cache.Set(endpoint, parameters, resp);
+            })).ToArray();
+
+            await Task.WhenAll(tasks);
+
+            // Must hold exactly one valid, fully-deserialized entry (not corrupt or missing).
+            var result = _cache.Get<CachedHttpResponse>(endpoint, parameters);
+            Assert.NotNull(result);
+            Assert.Equal(HttpStatusCode.OK, result!.StatusCode);
+            Assert.NotNull(result.Body);
+            var body = Encoding.UTF8.GetString(result.Body);
+            Assert.Matches(@"^\{""n"":\d+\}$", body); // a complete, uncorrupted body from some writer
+        }
+
+        [Fact]
         public void Get_ReturnsNullForInvalidType()
         {
             // Arrange
