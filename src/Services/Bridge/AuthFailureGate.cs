@@ -115,6 +115,64 @@ public sealed class AuthFailureGate
         => Handler.HandleSuccessAsync(cancellationToken);
 
     /// <summary>
+    /// Consumer-side convenience for bridge entry points (indexer / download-client
+    /// <c>Search</c>, <c>Download</c>, <c>Test</c>). Returns true when auth is latched
+    /// bad AND no probe slot is currently available — i.e. the caller should
+    /// short-circuit (return empty / fail fast) without touching the network. This is
+    /// the qobuzarr-incident amplification fix: when Lidarr's search loop drives the
+    /// plugin at full rate, refuse to forward every call upstream until the user
+    /// re-credentials.
+    /// <para>
+    /// Equivalent to <c>!IsHealthy &amp;&amp; !TryAcquireProbeSlot()</c>. NOTE: like
+    /// <see cref="TryAcquireProbeSlot"/>, this CONSUMES the per-interval probe slot as a
+    /// side effect when latched, so call it at most once per entry-point invocation.
+    /// </para>
+    /// Lifted from the byte-identical <c>IsAuthShortCircuited</c> helpers that
+    /// applemusicarr / tidalarr / qobuzarr each re-implemented at their bridge entry
+    /// points.
+    /// </summary>
+    public bool ShouldShortCircuit()
+    {
+        if (IsHealthy) return false;
+        return !TryAcquireProbeSlot();
+    }
+
+    /// <summary>
+    /// Consumer-side convenience: classify <paramref name="ex"/> via the supplied
+    /// <paramref name="classify"/> delegate and, when it maps to an auth failure,
+    /// record it on the gate so the gate latches. <paramref name="classify"/> returns
+    /// <c>null</c> when the exception is NOT an auth failure (no latch) — this is the
+    /// only service-specific part each plugin supplies (401/403, plus e.g. apple's
+    /// "user token" <see cref="InvalidOperationException"/>).
+    /// <para>
+    /// <strong>Why this lives in Common:</strong> every bridge entry point was
+    /// duplicating the <c>Task.Run(() =&gt; Handler.HandleFailureAsync(failure).AsTask())
+    /// .GetAwaiter().GetResult()</c> hop. That sync-over-async pattern (Category A) is a
+    /// deadlock trap — a direct <c>.GetAwaiter().GetResult()</c> on the handler's
+    /// <see cref="ValueTask"/> can deadlock under Lidarr's single-threaded host
+    /// <see cref="SynchronizationContext"/> because the async continuation is posted
+    /// back to the blocked context. Encapsulating it once means the error-prone line
+    /// has a single tested home.
+    /// </para>
+    /// </summary>
+    /// <param name="ex">The exception observed at the bridge entry point.</param>
+    /// <param name="classify">
+    /// Maps an exception to an <see cref="AuthFailure"/> (latch) or <c>null</c> (ignore).
+    /// </param>
+    public void RecordExceptionOutcome(Exception ex, Func<Exception, AuthFailure?> classify)
+    {
+        if (ex is null) throw new ArgumentNullException(nameof(ex));
+        if (classify is null) throw new ArgumentNullException(nameof(classify));
+
+        AuthFailure? failure = classify(ex);
+        if (failure is null) return;
+
+        // SYNC-OVER-ASYNC (Category A): hop to the thread-pool before blocking on the
+        // ValueTask so we don't deadlock the host's single-threaded SynchronizationContext.
+        Task.Run(() => Handler.HandleFailureAsync(failure).AsTask()).GetAwaiter().GetResult();
+    }
+
+    /// <summary>
     /// True when the underlying handler is in a state that allows requests to
     /// proceed without restriction (Authenticated or Unknown AND no in-flight
     /// failure streak). With <c>failureThreshold &gt; 1</c>, the K-1 failures

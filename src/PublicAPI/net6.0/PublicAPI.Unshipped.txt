@@ -21,3 +21,5 @@ Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.RecordResponse
 Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.RecordResponse(string! service, string! endpoint, System.Net.Http.HttpResponseMessage! response) -> void
 Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.WaitIfNeededAsync(string! endpoint, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task<bool>!
 Lidarr.Plugin.Common.Services.Performance.NamedServiceRateLimiter.WaitIfNeededAsync(string! service, string! endpoint, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.ShouldShortCircuit() -> bool
+Lidarr.Plugin.Common.Services.Bridge.AuthFailureGate.RecordExceptionOutcome(System.Exception! ex, System.Func<System.Exception!, Lidarr.Plugin.Abstractions.Contracts.AuthFailure?>! classify) -> void
