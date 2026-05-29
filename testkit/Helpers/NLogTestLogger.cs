@@ -104,20 +104,49 @@ public static class NLogTestLogger
         }
 
         // Return a defensive COPY, not the live list. The shared target captures ALL loggers
-        // (AddRuleForAllLevels), so a logger on another thread may Add to Logs while a test
-        // enumerates the result — a live reference throws "Collection was modified during
-        // enumeration". Retry the snapshot to ride out a concurrent Add mid-copy.
-        for (var attempt = 0; ; attempt++)
+        // (AddRuleForAllLevels) and its Logs getter is unsynchronized w.r.t. Add, so a logger on
+        // another thread may Add while we snapshot.
+        var logs = memoryTarget.Logs;
+
+        // Fast path: bulk snapshot. `new List<string>(Logs)` reads Logs.Count, allocates, then
+        // CopyTo's — a concurrent Add that grows the source between those steps makes Array.Copy
+        // throw ArgumentException ("destination array not long enough") (or IndexOutOfRangeException
+        // on a torn read); a caller enumerating a live reference would throw InvalidOperationException.
+        // A few retries clear the common light-contention case.
+        for (var attempt = 0; attempt < 8; attempt++)
         {
             try
             {
-                return new List<string>(memoryTarget.Logs);
+                return new List<string>(logs);
             }
-            catch (System.InvalidOperationException) when (attempt < 32)
+            catch (System.Exception ex) when (
+                ex is System.ArgumentException or System.IndexOutOfRangeException or System.InvalidOperationException)
             {
                 System.Threading.Thread.Yield();
             }
         }
+
+        // Fallback (sustained contention): a tolerant element-wise copy that CANNOT throw. The list
+        // only grows during a test, so indexed reads yield a best-effort prefix; any boundary or
+        // torn-read race simply stops the copy. Sufficient for log assertions, which target lines
+        // emitted before the read.
+        var snapshot = new List<string>();
+        for (var i = 0; ; i++)
+        {
+            string line;
+            try
+            {
+                line = logs[i];
+            }
+            catch (System.Exception)
+            {
+                break;
+            }
+
+            snapshot.Add(line);
+        }
+
+        return snapshot;
     }
 
     /// <summary>
