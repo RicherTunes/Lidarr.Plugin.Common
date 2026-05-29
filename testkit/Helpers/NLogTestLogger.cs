@@ -71,18 +71,20 @@ public static class NLogTestLogger
     /// <returns>A <see cref="Logger"/> that silently drops all log events.</returns>
     public static Logger CreateNullLogger(string name = "NullLogger")
     {
-        var config = new LoggingConfiguration();
+        // Use an ISOLATED LogFactory so creating a null logger never mutates the process-global
+        // LogManager.Configuration. The previous implementation swapped LogManager.Configuration
+        // (save -> null-config -> restore); since many tests call this concurrently, that swap
+        // raced the shared "testMemory" config installed by Create() — transiently dropping or
+        // permanently clobbering captured log output and flaking log-assertion tests.
+        var factory = new LogFactory();
+        var config = new LoggingConfiguration(factory);
 
         var nullTarget = new NullTarget("testNull");
         config.AddTarget(nullTarget);
         config.AddRuleForAllLevels(nullTarget);
 
-        var savedConfig = LogManager.Configuration;
-        LogManager.Configuration = config;
-        var logger = LogManager.GetLogger(name);
-        LogManager.Configuration = savedConfig;
-
-        return logger;
+        factory.Configuration = config;
+        return factory.GetLogger(name);
     }
 
     /// <summary>
@@ -96,7 +98,26 @@ public static class NLogTestLogger
     public static IList<string> GetLoggedMessages()
     {
         var memoryTarget = LogManager.Configuration?.FindTargetByName<MemoryTarget>("testMemory");
-        return memoryTarget?.Logs ?? new List<string>();
+        if (memoryTarget is null)
+        {
+            return new List<string>();
+        }
+
+        // Return a defensive COPY, not the live list. The shared target captures ALL loggers
+        // (AddRuleForAllLevels), so a logger on another thread may Add to Logs while a test
+        // enumerates the result — a live reference throws "Collection was modified during
+        // enumeration". Retry the snapshot to ride out a concurrent Add mid-copy.
+        for (var attempt = 0; ; attempt++)
+        {
+            try
+            {
+                return new List<string>(memoryTarget.Logs);
+            }
+            catch (System.InvalidOperationException) when (attempt < 32)
+            {
+                System.Threading.Thread.Yield();
+            }
+        }
     }
 
     /// <summary>
