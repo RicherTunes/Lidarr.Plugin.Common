@@ -45,6 +45,11 @@ on:
         required: false
         type: boolean
         default: true
+      require-canonical-abstractions:
+        description: "Inject + SHA-verify the canonical Lidarr.Plugin.Abstractions.dll as a sidecar in the package. Set false for plugins that internalize Abstractions via ILRepack (their package ships no Abstractions sidecar, matching their expected-contents.txt)."
+        required: false
+        type: boolean
+        default: true
       plugin-load-gate:
         description: "Load plugin package via Abstractions PluginLoader and create components (Abstractions-based plugins only)"
         required: false
@@ -187,14 +192,22 @@ jobs:
 
           Import-Module (Resolve-Path -LiteralPath $pluginPack) -Force
 
-          $zipPath = (New-PluginPackage `
-            -Csproj $csproj `
-            -Manifest $manifest `
-            -Framework $framework `
-            -Configuration $configuration `
-            -RequireCanonicalAbstractions `
-            -ResolveEntryPoints `
-            -AdditionalKeepAssemblies $additionalKeep | Select-Object -Last 1)
+          # Canonical Abstractions sidecar is opt-in: plugins that internalize
+          # Abstractions via ILRepack (e.g. tidalarr/qobuzarr) pass
+          # require-canonical-abstractions=false so the package ships no sidecar,
+          # matching what their release.yml produces and their expected-contents.txt.
+          $packArgs = @{
+            Csproj = $csproj
+            Manifest = $manifest
+            Framework = $framework
+            Configuration = $configuration
+            ResolveEntryPoints = $true
+            AdditionalKeepAssemblies = $additionalKeep
+          }
+          if ('${{ inputs.require-canonical-abstractions }}' -eq 'true') {
+            $packArgs['RequireCanonicalAbstractions'] = $true
+          }
+          $zipPath = (New-PluginPackage @packArgs | Select-Object -Last 1)
 
           if (-not $zipPath) { throw "New-PluginPackage returned an empty path." }
           if (-not (Test-Path -LiteralPath $zipPath)) { throw "Package not found at: $zipPath" }
@@ -269,6 +282,7 @@ jobs:
           }
 
       - name: Canonical Abstractions gate
+        if: ${{ inputs.require-canonical-abstractions }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
