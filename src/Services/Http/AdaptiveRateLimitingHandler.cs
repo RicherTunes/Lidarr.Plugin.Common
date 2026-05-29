@@ -40,6 +40,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         private readonly IUniversalAdaptiveRateLimiter _limiter;
         private readonly string _serviceName;
         private readonly ILogger? _logger;
+        private readonly TimeSpan _maxRetryAfterDelay;
 
         /// <summary>
         /// Initialises the handler.
@@ -53,13 +54,17 @@ namespace Lidarr.Plugin.Common.Services.Http
         public AdaptiveRateLimitingHandler(
             IUniversalAdaptiveRateLimiter limiter,
             string serviceName,
-            ILogger? logger = null)
+            ILogger? logger = null,
+            TimeSpan? maxRetryAfterDelay = null)
         {
             _limiter = limiter ?? throw new ArgumentNullException(nameof(limiter));
             if (string.IsNullOrWhiteSpace(serviceName))
                 throw new ArgumentException("Service name must not be null or whitespace.", nameof(serviceName));
             _serviceName = serviceName;
             _logger = logger;
+            // Ceiling for honouring a 429 Retry-After. A far-future Retry-After Date (or huge Delta)
+            // would otherwise exceed Task.Delay's ~49.7-day limit and throw ArgumentOutOfRangeException.
+            _maxRetryAfterDelay = maxRetryAfterDelay is { } m && m >= TimeSpan.Zero ? m : TimeSpan.FromMinutes(5);
         }
 
         /// <inheritdoc />
@@ -93,6 +98,11 @@ namespace Lidarr.Plugin.Common.Services.Http
                 && response.Headers.RetryAfter is { } retryAfter)
             {
                 TimeSpan delay = ResolveRetryAfter(retryAfter);
+                // Clamp: a far-future Retry-After Date (or an enormous Delta) yields a delay beyond
+                // Task.Delay's ~49.7-day limit, which throws ArgumentOutOfRangeException — and that
+                // escapes the OperationCanceledException-only catch below, turning a 429 into a hard
+                // request failure. Cap at a sane ceiling; blocking the call longer is never useful.
+                if (delay > _maxRetryAfterDelay) delay = _maxRetryAfterDelay;
                 if (delay > TimeSpan.Zero)
                 {
                     _logger?.LogWarning(
