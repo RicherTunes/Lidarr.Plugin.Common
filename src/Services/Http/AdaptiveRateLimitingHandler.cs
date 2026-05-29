@@ -51,6 +51,11 @@ namespace Lidarr.Plugin.Common.Services.Http
         ///   (e.g. "Tidal", "Qobuz"). Must not be null or whitespace.
         /// </param>
         /// <param name="logger">Optional logger; when null, 429 warnings are silenced.</param>
+        /// <param name="maxRetryAfterDelay">
+        ///   Ceiling for honouring a 429 <c>Retry-After</c>. A far-future Retry-After Date (or huge
+        ///   Delta) would otherwise exceed <see cref="System.Threading.Tasks.Task.Delay(System.TimeSpan, System.Threading.CancellationToken)"/>'s
+        ///   ~49.7-day limit and throw. Defaults to 5 minutes when null or negative.
+        /// </param>
         public AdaptiveRateLimitingHandler(
             IUniversalAdaptiveRateLimiter limiter,
             string serviceName,
