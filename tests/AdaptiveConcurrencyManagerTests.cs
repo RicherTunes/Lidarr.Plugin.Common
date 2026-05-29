@@ -126,6 +126,40 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public void ApplyAdjustment_DoesNotDisposeInFlightSemaphore()
+        {
+            // Regression: a concurrency adjustment swapped _sharedSemaphore and disposed the old
+            // instance in a background task, so in-flight callers holding the old reference hit
+            // ObjectDisposedException on their Release()/WaitAsync(). The swapped-out semaphore
+            // must remain usable until its last in-flight holder is done.
+            var manager = CreateManager(
+                minConcurrency: 1, maxConcurrency: 8,
+                targetLatency: 100, maxLatency: 5000,
+                adjustmentInterval: TimeSpan.Zero);
+
+            // Grow concurrency so a subsequent decrease has room to actually swap the semaphore.
+            for (int i = 0; i < 30; i++) manager.RecordOperation(TimeSpan.FromMilliseconds(20), true);
+
+            var oldSem = manager.GetConcurrencySemaphore();
+
+            // Drive decreases until the shared semaphore is swapped (capped to avoid a hang).
+            var swapped = false;
+            for (int i = 0; i < 50 && !swapped; i++)
+            {
+                manager.RecordOperation(TimeSpan.FromMilliseconds(9000), true); // well above maxLatency
+                swapped = !ReferenceEquals(manager.GetConcurrencySemaphore(), oldSem);
+            }
+            Assert.True(swapped, "expected a concurrency adjustment to swap the shared semaphore");
+
+            // Give any background disposal a chance to run (pre-fix this disposed oldSem).
+            Thread.Sleep(250);
+
+            // The swapped-out semaphore must still be usable (no ObjectDisposedException).
+            var ex = Record.Exception(() => { if (oldSem.Wait(0)) oldSem.Release(); });
+            Assert.Null(ex);
+        }
+
+        [Fact]
         public void RecordOperation_DecreasesConcurrencyOnHighLatency()
         {
             // Arrange

@@ -51,6 +51,42 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task RapidSequentialSaves_ReleaseLockEachTime_NoStallOrThrow()
+        {
+            // Regression: the Windows cross-process lock was a thread-affine Mutex whose
+            // ReleaseMutex ran on an await-continuation / cancellation thread and failed
+            // (silently swallowed), leaving the lock held so later saves stalled (~120s) or
+            // relied on abandoned-mutex recovery. A thread-agnostic FileStream lock releases
+            // cleanly from any thread, so back-to-back saves stay fast.
+            var dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("n")));
+            try
+            {
+                var file = Path.Combine(dir.FullName, "tokens.json");
+                var store = CreateFileStore(file);
+
+                var sw = System.Diagnostics.Stopwatch.StartNew();
+                for (int i = 0; i < 25; i++)
+                {
+                    var env = new TokenEnvelope<SessionDto>(new SessionDto { AccessToken = $"tok{i}", RefreshToken = $"ref{i}" }, DateTime.UtcNow.AddMinutes(10));
+                    await store.SaveAsync(env);
+                }
+                sw.Stop();
+
+                // A release-on-wrong-thread failure would leave the lock held and stall the next
+                // acquire; 25 prompt saves must finish well under the lock's acquire timeout.
+                Assert.True(sw.Elapsed < TimeSpan.FromSeconds(30), $"25 sequential saves took {sw.Elapsed} — cross-process lock likely not released between saves");
+
+                var loaded = await store.LoadAsync();
+                Assert.NotNull(loaded);
+                Assert.Equal("tok24", loaded!.Session.AccessToken);
+            }
+            finally
+            {
+                try { Directory.Delete(dir.FullName, true); } catch { }
+            }
+        }
+
+        [Fact]
         public async Task Ignores_Stale_Temp_File()
         {
             var dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("n")));
