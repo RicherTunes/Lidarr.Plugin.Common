@@ -126,24 +126,23 @@ public static class NLogTestLogger
             }
         }
 
-        // Fallback (sustained contention): a tolerant element-wise copy that CANNOT throw. The list
-        // only grows during a test, so indexed reads yield a best-effort prefix; any boundary or
-        // torn-read race simply stops the copy. Sufficient for log assertions, which target lines
-        // emitted before the read.
+        // Fallback (sustained contention): a tolerant element-wise copy that CANNOT throw. Snapshot
+        // the count ONCE so the loop is strictly bounded and always terminates (without this, a
+        // never-pausing writer could grow the list faster than i advances and spin unbounded). The
+        // list only grows during a test, so the captured prefix is the correct snapshot; any
+        // boundary/torn-read race (e.g. a concurrent Clear) just stops the copy early.
         var snapshot = new List<string>();
-        for (var i = 0; ; i++)
+        var count = logs.Count;
+        for (var i = 0; i < count; i++)
         {
-            string line;
             try
             {
-                line = logs[i];
+                snapshot.Add(logs[i]);
             }
             catch (System.Exception)
             {
                 break;
             }
-
-            snapshot.Add(line);
         }
 
         return snapshot;
