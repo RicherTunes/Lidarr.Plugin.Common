@@ -288,27 +288,42 @@ namespace Lidarr.Plugin.Common.Services.Performance
                 ConsecutiveErrors = 0
             });
 
+            TimeSpan delay;
             await _semaphore.WaitAsync(cancellationToken);
             try
             {
                 var now = DateTime.UtcNow;
-                var timeSinceLastRequest = now - limit.LastRequest;
                 var minInterval = TimeSpan.FromMilliseconds(60000.0 / limit.RequestsPerMinute);
 
-                if (timeSinceLastRequest < minInterval)
-                {
-                    var delay = minInterval - timeSinceLastRequest;
-                    await Task.Delay(delay, cancellationToken);
-                }
+                // Reserve the next pacing slot under the lock, then wait for it OUTSIDE the lock.
+                // Previously the per-SERVICE semaphore was held across `await Task.Delay`, which
+                // serialized every endpoint's requests into a single lane and paid each pacing
+                // delay sequentially (a 1000-item burst degraded to one-at-a-time across the whole
+                // service). By claiming LastRequest = the reserved slot here, concurrent callers —
+                // same or different endpoint — each get a monotonically-spaced slot and wait in
+                // parallel: per-endpoint pacing is preserved, cross-endpoint throughput is not
+                // throttled to one request at a time. The only work under the lock is the O(1) slot
+                // computation; no I/O. (LastRequest is read/written only here, so retargeting it
+                // to "next reserved slot" has no other observers.)
+                var nextSlot = (limit.LastRequest == DateTime.MinValue || (now - limit.LastRequest) >= minInterval)
+                    ? now
+                    : limit.LastRequest + minInterval;
+                delay = nextSlot - now;
+                if (delay < TimeSpan.Zero)
+                    delay = TimeSpan.Zero;
 
-                limit.LastRequest = DateTime.UtcNow;
+                limit.LastRequest = nextSlot;
                 limit.TotalRequests++;
-                return true;
             }
             finally
             {
                 _semaphore.Release();
             }
+
+            if (delay > TimeSpan.Zero)
+                await Task.Delay(delay, cancellationToken);
+
+            return true;
         }
 
         public void RecordResponse(string endpoint, HttpResponseMessage response)
