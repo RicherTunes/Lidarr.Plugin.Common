@@ -123,6 +123,14 @@ public static class PathTraversalGuard
     private static bool IsDescendant(string canonical, string root)
     {
         var rootCanonical = Path.GetFullPath(root);
+        // Path.GetFullPath PRESERVES a trailing separator, so a user-configured root like
+        // "/downloads/qobuz/" stays "/downloads/qobuz/". Without trimming it, the
+        // "rootCanonical + separator" prefix below becomes a DOUBLE separator
+        // ("/downloads/qobuz//") that no legitimate child starts with — which previously
+        // rejected every download path ("refusing to build output path ... resolves outside
+        // the configured DownloadPath"). Trim trailing separators so the descendant check is
+        // exact regardless of whether the configured root ends with a slash.
+        rootCanonical = rootCanonical.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
         if (canonical.Equals(rootCanonical, OsAwareComparison))
         {
             return true;

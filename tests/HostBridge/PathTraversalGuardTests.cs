@@ -106,6 +106,31 @@ public class PathTraversalGuardTests
         Assert.True(PathTraversalGuard.IsPathWithinRoot(root, root));
     }
 
+    [Theory]
+    [InlineData("Radiohead", "A Moon Shaped Pool")]
+    [InlineData("Pink Floyd", "The Dark Side of the Moon")]
+    public void IsPathWithinRoot_RootHasTrailingSeparator_ChildStillWithin(string artist, string album)
+    {
+        // Regression: users routinely configure a DownloadPath WITH a trailing separator
+        // (e.g. "/downloads/qobuz/"). Path.GetFullPath PRESERVES the trailing separator, so the
+        // naive "rootCanonical + separator" StartsWith check produced a DOUBLE separator
+        // ("/downloads/qobuz//") and rejected every legitimate child — which blocked ALL
+        // tidalarr/qobuzarr downloads ("refusing to build output path ... resolves outside the
+        // configured DownloadPath"). The guard must normalize trailing separators on the root.
+        var root = RandomRoot() + Path.DirectorySeparatorChar; // trailing separator (user-configured)
+        var output = Path.Combine(root, artist, album);
+        Assert.True(PathTraversalGuard.IsPathWithinRoot(output, root));
+    }
+
+    [Fact]
+    public void IsPathWithinRoot_RootHasTrailingSeparator_EqualsRoot_ReturnsTrue()
+    {
+        // The bare root must still count as within a trailing-separator-configured root.
+        var bare = RandomRoot();
+        var rootWithSeparator = bare + Path.DirectorySeparatorChar;
+        Assert.True(PathTraversalGuard.IsPathWithinRoot(bare, rootWithSeparator));
+    }
+
     [Fact]
     public void IsPathWithinRoot_AlternateRoot_AcceptsBothPaths()
     {
