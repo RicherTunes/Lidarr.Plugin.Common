@@ -304,6 +304,12 @@ if ($SkipExtract) {
         if (-not $runtimeVersion -and $rtOpts -and $rtOpts.PSObject.Properties['frameworks']) {
             $runtimeVersion = ($rtOpts.frameworks | Where-Object { $_.name -eq 'Microsoft.NETCore.App' }).version
         }
+        # Self-contained Lidarr images (e.g. ghcr.io/hotio/lidarr:pr-plugins-*) ship the
+        # runtime inside the app, so runtimeconfig carries `includedFrameworks` instead of
+        # a framework reference. Probe it last so framework-dependent layouts still win.
+        if (-not $runtimeVersion -and $rtOpts -and $rtOpts.PSObject.Properties['includedFrameworks']) {
+            $runtimeVersion = ($rtOpts.includedFrameworks | Where-Object { $_.name -eq 'Microsoft.NETCore.App' }).version
+        }
         if (-not $runtimeVersion -or -not $runtimeVersion.StartsWith('8.')) {
             throw ".NET 8 guardrail FAILED: runtime version is '$runtimeVersion' (expected 8.x)"
         }
