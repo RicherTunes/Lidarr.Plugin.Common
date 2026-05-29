@@ -811,6 +811,38 @@ namespace Lidarr.Plugin.Common.Tests
             }
         }
 
+        [Fact]
+        public void EnforceLimits_EntryCountOverflow_TrimsToCap_DoesNotWipeAll()
+        {
+            // Regression (harden campaign): the entry-count overflow path tested files.Count — a
+            // snapshot whose value never changes — in its break condition, so once entry-count was
+            // the active constraint it deleted EVERY entry (wiping the whole cache) instead of
+            // trimming to the cap. With max=5, writing 6 entries previously left 0; expect 5.
+            var folder = Path.Combine(Path.GetTempPath(), "cache-limits-wipe-" + Guid.NewGuid().ToString("N"));
+            Environment.SetEnvironmentVariable("ARR_RESP_CACHE_MAX_ENTRIES", "5");
+            try
+            {
+                var cache = new FileStreamingResponseCache(folder, TimeSpan.FromHours(1));
+                for (int i = 0; i < 6; i++)
+                {
+                    cache.Set($"/api/item-{i}", new Dictionary<string, string>(),
+                        new CachedHttpResponse { Body = Encoding.UTF8.GetBytes($"data-{i}") });
+                }
+
+                // Count is the robust proof: bug wiped everything (0 remain), fix trims to the cap.
+                // (Which specific entries survive isn't asserted — in a sub-millisecond write loop
+                // all files share a LastWriteTimeUtc, so the oldest-first ordering among ties is
+                // arbitrary; eviction order is exercised separately by EnforceLimits_RemovesOldestEntries.)
+                var jsonCount = Directory.GetFiles(folder, "*.json", SearchOption.AllDirectories).Length;
+                Assert.Equal(5, jsonCount);
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("ARR_RESP_CACHE_MAX_ENTRIES", null);
+                try { Directory.Delete(folder, recursive: true); } catch { }
+            }
+        }
+
         #endregion
 
         #region Parameter Ordering Tests

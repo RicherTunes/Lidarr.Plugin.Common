@@ -229,7 +229,13 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             lock (_refreshLock)
             {
                 // Tier 1: late-arrival cache hit (the Windows-CI hot path).
-                if (_lastRefreshSessionOut != null && _lastRefreshTokenIn == refreshToken)
+                // Guard on !IsExpired: this cache is keyed only on the input refresh token, which
+                // for providers that do NOT rotate refresh tokens never changes — so without the
+                // expiry check it would serve the first refresh's (eventually-expired) session
+                // forever, permanently wedging auth. Serving only a still-valid session preserves
+                // the rotation-dedup (concurrent callers hit it while it's fresh) while forcing a
+                // real refresh once the access token expires.
+                if (_lastRefreshSessionOut != null && !_lastRefreshSessionOut.IsExpired && _lastRefreshTokenIn == refreshToken)
                 {
                     return _lastRefreshSessionOut;
                 }

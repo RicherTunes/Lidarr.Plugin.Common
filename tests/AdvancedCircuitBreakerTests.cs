@@ -48,6 +48,41 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         /// <summary>
+        /// Regression (harden campaign): the failure-rate window (_operationResults) was cleared
+        /// only in Reset(), never on the Closed transition. After half-open recovery the stale
+        /// pre-open failures lingered, keeping FailureRate elevated so a single new failure could
+        /// immediately re-trip the breaker (flapping). Closing must start the window fresh.
+        /// </summary>
+        [Fact]
+        public void Closing_After_Recovery_Clears_FailureRate_Window()
+        {
+            var fakeTime = new FakeTimeProvider();
+            var options = new AdvancedCircuitBreakerOptions
+            {
+                ConsecutiveFailureThreshold = 3,
+                BreakDuration = TimeSpan.FromSeconds(30),
+                HalfOpenSuccessThreshold = 2
+            };
+            var cb = new AdvancedCircuitBreaker("test-window-clear", options, fakeTime);
+
+            cb.RecordFailure();
+            cb.RecordFailure();
+            cb.RecordFailure();
+            Assert.Equal(CircuitState.Open, cb.State);
+            Assert.True(cb.FailureRate > 0); // window holds the pre-open failures
+
+            fakeTime.Advance(TimeSpan.FromSeconds(31));
+            Assert.Equal(CircuitState.HalfOpen, cb.State);
+
+            cb.RecordSuccess();
+            cb.RecordSuccess();
+            Assert.Equal(CircuitState.Closed, cb.State);
+
+            // Window must be cleared on recovery — stale pre-open failures must not persist.
+            Assert.Equal(0.0, cb.FailureRate);
+        }
+
+        /// <summary>
         /// Test 2: Success resets consecutive failure count.
         /// After recording failures, a success should reset the counter.       
         /// </summary>
