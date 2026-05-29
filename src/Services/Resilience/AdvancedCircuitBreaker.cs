@@ -375,6 +375,10 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             {
                 _consecutiveFailures = 0;
                 _halfOpenSuccessCount = 0;
+                // Start the failure-rate window fresh after recovery. Without this, stale failures
+                // recorded before the breaker opened remain in _operationResults and can immediately
+                // re-trip the breaker the moment it closes (flapping).
+                _operationResults.Clear();
             }
 
             return new CircuitBreakerEventArgs(Name, previousState, newState, reason);

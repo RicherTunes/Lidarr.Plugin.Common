@@ -159,6 +159,34 @@ namespace Lidarr.Plugin.Common.Tests
 
         #endregion
 
+        #region RefreshTokensAsync Late-Arrival Cache Regression
+
+        [Fact]
+        public async Task RefreshTokensAsync_NonRotatingToken_DoesNotServeExpiredCachedSession()
+        {
+            // Regression (harden campaign): the Tier-1 late-arrival cache is keyed only on the
+            // refresh-token value. For providers that do NOT rotate refresh tokens that key never
+            // changes, so without an expiry guard it served the first (eventually-expired) session
+            // forever — permanently wedging auth. A refresh after the cached session expires must
+            // hit the provider again.
+            var service = new TestOAuthService();
+            var input = new TestAuthSession { RefreshToken = "rt", AccessToken = "input", ExpiresAt = DateTime.UtcNow.AddHours(-1) };
+
+            // First refresh returns an already-expired session (cached as the late-arrival result).
+            service.SetRefreshResult("rt", new TestAuthSession { AccessToken = "v1", RefreshToken = "rt", ExpiresAt = DateTime.UtcNow.AddHours(-1) });
+            var first = await service.RefreshTokensAsync(input);
+            Assert.Equal("v1", first.AccessToken);
+
+            // The provider would now return a fresh token; the (non-rotating) refresh token is unchanged.
+            service.SetRefreshResult("rt", new TestAuthSession { AccessToken = "v2", RefreshToken = "rt", ExpiresAt = DateTime.UtcNow.AddHours(1) });
+            var second = await service.RefreshTokensAsync(input);
+
+            // Pre-fix the Tier-1 cache served the stale expired "v1"; post-fix a real refresh yields "v2".
+            Assert.Equal("v2", second.AccessToken);
+        }
+
+        #endregion
+
         #region InitiateOAuthFlowAsync Tests
 
         [Fact]

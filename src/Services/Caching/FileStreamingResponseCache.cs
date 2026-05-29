@@ -204,10 +204,15 @@ namespace Lidarr.Plugin.Common.Services.Caching
                     try { var fi = new FileInfo(file); files.Add(fi); total += fi.Length; } catch { }
                 }
                 if ((files.Count <= _maxEntries || _maxEntries <= 0) && (total <= _maxBytes || _maxBytes <= 0)) return;
+                // Track a DECREMENTING remaining count: `files` is a snapshot whose Count never
+                // changes, so testing files.Count in the break condition kept the entry-count
+                // conjunct permanently false whenever entries were the active constraint — deleting
+                // EVERY entry (wiping the whole cache) instead of trimming to the cap.
+                var remaining = files.Count;
                 foreach (var fi in files.OrderBy(f => f.LastWriteTimeUtc))
                 {
-                    try { total -= fi.Length; File.Delete(fi.FullName); } catch { }
-                    if ((files.Count <= _maxEntries || _maxEntries <= 0) && (total <= _maxBytes || _maxBytes <= 0)) break;
+                    try { File.Delete(fi.FullName); total -= fi.Length; remaining--; } catch { }
+                    if ((remaining <= _maxEntries || _maxEntries <= 0) && (total <= _maxBytes || _maxBytes <= 0)) break;
                 }
             }
             catch { }
