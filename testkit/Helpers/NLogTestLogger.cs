@@ -71,18 +71,20 @@ public static class NLogTestLogger
     /// <returns>A <see cref="Logger"/> that silently drops all log events.</returns>
     public static Logger CreateNullLogger(string name = "NullLogger")
     {
-        var config = new LoggingConfiguration();
+        // Use an ISOLATED LogFactory so creating a null logger never mutates the process-global
+        // LogManager.Configuration. The previous implementation swapped LogManager.Configuration
+        // (save -> null-config -> restore); since many tests call this concurrently, that swap
+        // raced the shared "testMemory" config installed by Create() — transiently dropping or
+        // permanently clobbering captured log output and flaking log-assertion tests.
+        var factory = new LogFactory();
+        var config = new LoggingConfiguration(factory);
 
         var nullTarget = new NullTarget("testNull");
         config.AddTarget(nullTarget);
         config.AddRuleForAllLevels(nullTarget);
 
-        var savedConfig = LogManager.Configuration;
-        LogManager.Configuration = config;
-        var logger = LogManager.GetLogger(name);
-        LogManager.Configuration = savedConfig;
-
-        return logger;
+        factory.Configuration = config;
+        return factory.GetLogger(name);
     }
 
     /// <summary>
@@ -96,7 +98,54 @@ public static class NLogTestLogger
     public static IList<string> GetLoggedMessages()
     {
         var memoryTarget = LogManager.Configuration?.FindTargetByName<MemoryTarget>("testMemory");
-        return memoryTarget?.Logs ?? new List<string>();
+        if (memoryTarget is null)
+        {
+            return new List<string>();
+        }
+
+        // Return a defensive COPY, not the live list. The shared target captures ALL loggers
+        // (AddRuleForAllLevels) and its Logs getter is unsynchronized w.r.t. Add, so a logger on
+        // another thread may Add while we snapshot.
+        var logs = memoryTarget.Logs;
+
+        // Fast path: bulk snapshot. `new List<string>(Logs)` reads Logs.Count, allocates, then
+        // CopyTo's — a concurrent Add that grows the source between those steps makes Array.Copy
+        // throw ArgumentException ("destination array not long enough") (or IndexOutOfRangeException
+        // on a torn read); a caller enumerating a live reference would throw InvalidOperationException.
+        // A few retries clear the common light-contention case.
+        for (var attempt = 0; attempt < 8; attempt++)
+        {
+            try
+            {
+                return new List<string>(logs);
+            }
+            catch (System.Exception ex) when (
+                ex is System.ArgumentException or System.IndexOutOfRangeException or System.InvalidOperationException)
+            {
+                System.Threading.Thread.Yield();
+            }
+        }
+
+        // Fallback (sustained contention): a tolerant element-wise copy that CANNOT throw. Snapshot
+        // the count ONCE so the loop is strictly bounded and always terminates (without this, a
+        // never-pausing writer could grow the list faster than i advances and spin unbounded). The
+        // list only grows during a test, so the captured prefix is the correct snapshot; any
+        // boundary/torn-read race (e.g. a concurrent Clear) just stops the copy early.
+        var snapshot = new List<string>();
+        var count = logs.Count;
+        for (var i = 0; i < count; i++)
+        {
+            try
+            {
+                snapshot.Add(logs[i]);
+            }
+            catch (System.Exception)
+            {
+                break;
+            }
+        }
+
+        return snapshot;
     }
 
     /// <summary>
