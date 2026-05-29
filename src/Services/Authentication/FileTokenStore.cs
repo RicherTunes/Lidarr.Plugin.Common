@@ -237,50 +237,14 @@ namespace Lidarr.Plugin.Common.Services.Authentication
 
         private static IDisposable AcquireCrossProcessLock(string name, CancellationToken cancellationToken)
         {
-            if (OperatingSystem.IsWindows())
-            {
-                return new NamedMutexScope(name, cancellationToken);
-            }
-            else
-            {
-                return new FileLockScope(name, cancellationToken);
-            }
-        }
-
-        private sealed class NamedMutexScope : IDisposable
-        {
-            private readonly Mutex _mutex;
-            public NamedMutexScope(string name, CancellationToken cancellationToken)
-            {
-                _mutex = new Mutex(false, name);
-                bool acquired = false;
-                try
-                {
-                    // Allow a more generous cross-process wait to reduce
-                    // rare false negatives on busy Windows CI runners.
-                    acquired = _mutex.WaitOne(TimeSpan.FromSeconds(120));
-                }
-                catch (AbandonedMutexException)
-                {
-                    acquired = true; // Consider abandoned as acquired to proceed
-                }
-                if (!acquired)
-                {
-                    throw new TimeoutException($"Failed to acquire cross-process token store mutex '{name}'.");
-                }
-                if (cancellationToken.CanBeCanceled)
-                {
-                    cancellationToken.Register(() =>
-                    {
-                        try { _mutex.ReleaseMutex(); } catch { }
-                    });
-                }
-            }
-            public void Dispose()
-            {
-                try { _mutex.ReleaseMutex(); } catch { }
-                _mutex.Dispose();
-            }
+            // Use a FileStream-based lock on ALL platforms. A named Win32 Mutex has thread
+            // affinity (ReleaseMutex must run on the acquiring thread), but this lock is held
+            // across `await`s whose continuations may resume on a different thread — and the
+            // cancellation callback always runs off-thread — so the Mutex release would fail
+            // (it was silently swallowed), leaving the lock held until a 120s timeout/abandon.
+            // FileLockScope (exclusive FileStream, FileShare.None) has no thread affinity and is
+            // safe to release from any thread, while still coordinating across processes.
+            return new FileLockScope(name, cancellationToken);
         }
 
         private sealed class FileLockScope : IDisposable

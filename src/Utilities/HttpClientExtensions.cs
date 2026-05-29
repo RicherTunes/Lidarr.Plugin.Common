@@ -360,6 +360,8 @@ namespace Lidarr.Plugin.Common.Utilities
             var effectiveToken = timeoutCts?.Token ?? cancellationToken;
             var deadline = DateTime.UtcNow + retryBudget.Value;
             var attempt = 0;
+            var redirectCount = 0;
+            const int maxRedirects = 10;
             // Resolve relative URIs against HttpClient.BaseAddress when present
             Uri? currentUri = request.RequestUri;
             if (currentUri != null && !currentUri.IsAbsoluteUri)
@@ -475,6 +477,17 @@ namespace Lidarr.Plugin.Common.Utilities
                                 var loc = response.Headers.Location;
                                 var targetUri = loc.IsAbsoluteUri ? loc : new Uri(attemptRequest.RequestUri!, loc);
 
+                                // Bound redirect-following: cap the hop count and honor the retry-budget deadline
+                                // so a redirect cycle (A->B->A, or a self-redirect) cannot loop forever. The
+                                // deadline check below the retryable path is skipped by the redirect `continue`,
+                                // so it must also be enforced here.
+                                redirectCount++;
+                                if (redirectCount > maxRedirects || DateTime.UtcNow >= deadline)
+                                {
+                                    try { httpActivity?.SetTag("resilience.redirects.exhausted", redirectCount); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                                    return response;
+                                }
+
                                 // If the redirect crosses hosts, release current gates and reacquire for the new host
                                 var newHost = targetUri.Host;
                                 var crossingHosts = !string.Equals(newHost, host, StringComparison.OrdinalIgnoreCase);
@@ -533,6 +546,17 @@ namespace Lidarr.Plugin.Common.Utilities
                             {
                                 var loc = response.Headers.Location;
                                 var targetUri = loc.IsAbsoluteUri ? loc : new Uri(attemptRequest.RequestUri!, loc);
+
+                                // Bound redirect-following: cap the hop count and honor the retry-budget deadline
+                                // so a redirect cycle (A->B->A, or a self-redirect) cannot loop forever. The
+                                // deadline check below the retryable path is skipped by the redirect `continue`,
+                                // so it must also be enforced here.
+                                redirectCount++;
+                                if (redirectCount > maxRedirects || DateTime.UtcNow >= deadline)
+                                {
+                                    try { httpActivity?.SetTag("resilience.redirects.exhausted", redirectCount); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                                    return response;
+                                }
 
                                 // If the redirect crosses hosts, release current gates and reacquire for the new host
                                 var newHost = targetUri.Host;

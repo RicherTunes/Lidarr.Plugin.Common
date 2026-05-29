@@ -317,22 +317,18 @@ namespace Lidarr.Plugin.Common.Services.Performance
                 _consecutiveSuccesses = 0;
                 _consecutiveFailures = 0;
 
-                // Update the shared semaphore with new limit
-                var oldSemaphore = _sharedSemaphore;
+                // Update the shared semaphore with the new limit. New callers pick up the new
+                // semaphore; callers already in-flight keep using the previous one and drain
+                // against the limit they were admitted under.
+                //
+                // The previous semaphore is intentionally NOT disposed here. In-flight callers
+                // still hold a reference to it (e.g. ExecuteWithConcurrencyAsync's finally
+                // Release(), or anything from GetConcurrencySemaphore()), and disposing it out
+                // from under them threw ObjectDisposedException on their Release()/WaitAsync().
+                // A SemaphoreSlim whose AvailableWaitHandle is never accessed (the case here)
+                // holds no unmanaged resource, so the GC reclaims it once the last in-flight
+                // caller releases it — no handle leak, no cross-epoch disposal race.
                 _sharedSemaphore = new SemaphoreSlim(newConcurrency, newConcurrency);
-
-                // Dispose old semaphore in a background task to avoid blocking
-                Task.Run(() =>
-                {
-                    try
-                    {
-                        oldSemaphore?.Dispose();
-                    }
-                    catch (Exception ex)
-                    {
-                        _logger.LogDebug("Error disposing old semaphore during concurrency adjustment: {0}", ex.Message);
-                    }
-                });
 
                 _logger.LogInformation("Concurrency adjusted: {0} → {1} (decision: {2}, avg latency: {3:F1}ms, success rate: {4:P1})",
                     oldConcurrency, newConcurrency, decision, AverageLatency, SuccessRate);

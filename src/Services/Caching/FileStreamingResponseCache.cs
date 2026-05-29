@@ -22,7 +22,6 @@ namespace Lidarr.Plugin.Common.Services.Caching
         private readonly string _root;
         private readonly TimeSpan _defaultDuration;
         private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { WriteIndented = false };
-        private readonly SemaphoreSlim _gate = new(1, 1);
         private readonly int _maxEntries;
         private readonly long _maxBytes;
         private readonly ILogger _logger;
@@ -107,15 +106,16 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 ExpireAt = DateTimeOffset.UtcNow.Add(duration)
             };
             Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-            var tmp = path + ".tmp";
+            // Unique temp name per write so concurrent Set() calls for the same key don't collide on a
+            // shared "<path>.tmp", then atomically replace the destination (no delete-then-move race).
+            var tmp = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
             try
             {
                 using (var fs = File.Create(tmp))
                 {
                     JsonSerializer.Serialize(fs, entry, _json);
                 }
-                if (File.Exists(path)) File.Delete(path);
-                File.Move(tmp, path);
+                File.Move(tmp, path, overwrite: true);
                 EnforceLimits();
             }
             catch (IOException ex)
