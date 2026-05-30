@@ -185,6 +185,15 @@ public abstract partial class EcosystemParityTestBase : IDisposable
     /// class of bug behind the historical "ALC lifecycle" red herring. This is the deterministic,
     /// host-DLL-free counterpart to plugin-local HostVersionCouplingTests (which reads ext/Lidarr DLLs
     /// and is Docker-flaky). A package is only checked when the plugin references it (absence is fine).
+    ///
+    /// Two complementary layers, not duplicates: this is the DECLARED-PINS layer (what
+    /// Directory.Packages.props says), HostVersionCouplingTests is the RESOLVED-VERSION layer (what the
+    /// merged DLL actually binds, vs the real host DLL). They intentionally differ on FluentValidation:
+    /// Common internalizes FV (PrivateAssets=all) so its identity need not cross the host ALC boundary
+    /// (only NLog does — that's all HostVersionCouplingTests asserts against the host DLL). FV is pinned
+    /// here purely for cross-plugin PARITY (every plugin on the identical 9.5.4, whose AssemblyVersion
+    /// 9.0.0.0 also happens to match the host). So a present-but-non-canonical pin is a parity defect
+    /// even where it isn't strictly an ALC hazard.
     /// </summary>
     public virtual ComplianceResult DirectoryPackagesProps_HostVersionsMatchCanonical()
     {
@@ -207,7 +216,15 @@ public abstract partial class EcosystemParityTestBase : IDisposable
         {
             var id = (string?)pv.Attribute("Include");
             if (id == null || !canonical.TryGetValue(id, out var expected)) continue;
-            var actual = (string?)pv.Attribute("Version");
+            var actual = ((string?)pv.Attribute("Version"))?.Trim();
+            if (actual != null && actual.Contains("$("))
+            {
+                // An MSBuild expression (e.g. Version="$(NLogVersion)") can't be statically
+                // verified and defeats the greppable-literal-pin philosophy. Fail loud rather
+                // than silently miscompare the raw "$(...)" string.
+                offenders.Add($"{id} = {actual} (host-coupled; must be the literal {expected} — MSBuild expressions can't be statically verified for parity)");
+                continue;
+            }
             if (!string.Equals(actual, expected, StringComparison.Ordinal))
                 offenders.Add($"{id} = {actual ?? "<none>"} (host-coupled; must be {expected})");
         }
