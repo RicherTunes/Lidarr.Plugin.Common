@@ -18,7 +18,7 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
 
     /// <summary>
     /// Shared synced-lyrics enrichment used by every plugin. Tries the optional native source first,
-    /// then — when <paramref name="allowLrclibFallback"/> is set — the LRCLIB public API, and writes
+    /// then — when <c>allowLrclibFallback</c> is set — the LRCLIB public API, and writes
     /// the resulting <c>.lrc</c> next to the audio file. Best-effort: it never throws (other than
     /// cancellation) and never writes a file when no lyrics are found, so a lyrics miss can never
     /// fail a download.
