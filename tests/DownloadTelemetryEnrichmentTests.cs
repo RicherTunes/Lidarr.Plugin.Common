@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using Lidarr.Plugin.Abstractions.Models;
+using Lidarr.Plugin.Common.Extensions;
 using Lidarr.Plugin.Common.Services.Download;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Xunit;
 
@@ -118,6 +120,48 @@ namespace Lidarr.Plugin.Common.Tests
             svc.LogDownloadTelemetry(rec);
 
             Assert.Contains(logger.Messages, m => m.Contains("trk1"));
+        }
+
+        private sealed class CapturingService : IDownloadTelemetryService
+        {
+            public List<DownloadTelemetry> Items { get; } = new();
+            public void LogDownloadTelemetry(DownloadTelemetry telemetry) => Items.Add(telemetry);
+        }
+
+        [Fact]
+        public void LoggingSink_delegates_to_telemetry_service()
+        {
+            // The canonical sink renders via the shared service rather than hand-rolling a format,
+            // so a plugin that registers it gets identical logging with zero per-plugin code.
+            var service = new CapturingService();
+            var sink = new LoggingDownloadTelemetrySink(service);
+
+            var rec = DownloadTelemetry.From("Qobuz", true, SampleTrack(), SampleTrack().Album, SampleQuality(), 1000, TimeSpan.FromSeconds(1));
+            sink.OnTrackCompleted(rec);
+
+            Assert.Same(rec, Assert.Single(service.Items));
+        }
+
+        [Fact]
+        public void LoggingSink_logger_ctor_renders_rich_line()
+        {
+            var logger = new CapturingLogger<DownloadTelemetryService>();
+            var sink = new LoggingDownloadTelemetrySink(logger);
+
+            sink.OnTrackCompleted(DownloadTelemetry.From("Qobuz", true, SampleTrack(), SampleTrack().Album, SampleQuality(), 1000, TimeSpan.FromSeconds(1), "/x.flac"));
+
+            Assert.Contains(logger.Messages, m => m.Contains("Miles Davis") && m.Contains("So What"));
+        }
+
+        [Fact]
+        public void AddDownloadTelemetry_registers_service_and_logging_sink()
+        {
+            var services = new ServiceCollection();
+            services.AddDownloadTelemetry();
+            using var provider = services.BuildServiceProvider();
+
+            Assert.IsType<DownloadTelemetryService>(provider.GetRequiredService<IDownloadTelemetryService>());
+            Assert.IsType<LoggingDownloadTelemetrySink>(provider.GetRequiredService<IDownloadTelemetrySink>());
         }
     }
 }
