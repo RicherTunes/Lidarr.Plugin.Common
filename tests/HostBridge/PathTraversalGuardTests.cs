@@ -106,6 +106,53 @@ public class PathTraversalGuardTests
         Assert.True(PathTraversalGuard.IsPathWithinRoot(root, root));
     }
 
+    [Theory]
+    [InlineData("Radiohead", "A Moon Shaped Pool")]
+    [InlineData("Pink Floyd", "The Dark Side of the Moon")]
+    public void IsPathWithinRoot_RootHasTrailingSeparator_ChildStillWithin(string artist, string album)
+    {
+        // Regression: users routinely configure a DownloadPath WITH a trailing separator
+        // (e.g. "/downloads/qobuz/"). Path.GetFullPath PRESERVES the trailing separator, so the
+        // naive "rootCanonical + separator" StartsWith check produced a DOUBLE separator
+        // ("/downloads/qobuz//") and rejected every legitimate child — which blocked ALL
+        // tidalarr/qobuzarr downloads ("refusing to build output path ... resolves outside the
+        // configured DownloadPath"). The guard must normalize trailing separators on the root.
+        var root = RandomRoot() + Path.DirectorySeparatorChar; // trailing separator (user-configured)
+        var output = Path.Combine(root, artist, album);
+        Assert.True(PathTraversalGuard.IsPathWithinRoot(output, root));
+    }
+
+    [Fact]
+    public void IsPathWithinRoot_RootHasTrailingSeparator_EqualsRoot_ReturnsTrue()
+    {
+        // The bare root must still count as within a trailing-separator-configured root.
+        var bare = RandomRoot();
+        var rootWithSeparator = bare + Path.DirectorySeparatorChar;
+        Assert.True(PathTraversalGuard.IsPathWithinRoot(bare, rootWithSeparator));
+    }
+
+    [Fact]
+    public void IsPathWithinRoot_RootHasMultipleTrailingSeparators_ChildStillWithin()
+    {
+        // Defensive: a doubled trailing separator must also normalize (TrimEnd removes all).
+        var bare = RandomRoot();
+        var root = bare + Path.DirectorySeparatorChar + Path.DirectorySeparatorChar;
+        var output = Path.Combine(bare, "Artist", "Album");
+        Assert.True(PathTraversalGuard.IsPathWithinRoot(output, root));
+    }
+
+    [Fact]
+    public void IsPathWithinRoot_FilesystemRoot_ContainsAbsoluteChildren_AndDoesNotThrow()
+    {
+        // Edge case the trim makes load-bearing (reviewer F1.2): a root that is the filesystem
+        // root canonicalizes to a separator (e.g. "/" or "C:\"), which TrimEnd reduces to "" / "C:".
+        // Absolute children must still be considered within-root and the guard must not throw.
+        // Use the temp dir's own root so the drive matches on Windows.
+        var fsRoot = Path.GetPathRoot(Path.GetFullPath(Path.GetTempPath()))!; // "/" on Unix, "C:\" on Windows
+        var child = Path.Combine(Path.GetTempPath(), "ptg-bareroot-" + Guid.NewGuid().ToString("N"));
+        Assert.True(PathTraversalGuard.IsPathWithinRoot(child, fsRoot));
+    }
+
     [Fact]
     public void IsPathWithinRoot_AlternateRoot_AcceptsBothPaths()
     {
