@@ -9,6 +9,7 @@ using Lidarr.Plugin.Abstractions.Results;
 using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Common.Services.Authentication;
 using Lidarr.Plugin.Common.Services.Caching;
+using Lidarr.Plugin.Common.Services.Download;
 using Lidarr.Plugin.Common.Services.Registration;
 using Lidarr.Plugin.Common.TestKit.Compliance;
 using Xunit;
@@ -66,6 +67,7 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         public ComplianceResult RunConfigRoots() => Check_UsesCommonPluginConfigRoots();
         public ComplianceResult RunLyricsEnricher() => Check_UsesCommonLyricsEnricher();
         public ComplianceResult RunDiagnosticTypes() => Check_UsesCommonDiagnosticTypes();
+        public ComplianceResult RunDownloadTelemetrySink() => Check_UsesCommonDownloadTelemetrySink();
     }
 
     /// <summary>A plugin-local re-declaration of the lyrics enricher (forbidden — must use common's).</summary>
@@ -105,6 +107,12 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
 
     /// <summary>Plugin-local config-path helper (forbidden).</summary>
     private sealed class MyServiceConfigPathDefaults { }
+
+    /// <summary>A fake plugin-local IDownloadTelemetrySink (forbidden — hand-rolls the log format).</summary>
+    private sealed class RogueTelemetrySink : IDownloadTelemetrySink
+    {
+        public void OnTrackCompleted(DownloadTelemetry telemetry) { }
+    }
 
     /// <summary>Subclass of StreamingPluginModule for bridge-defaults check.</summary>
     private abstract class FakeModule : StreamingPluginModule { }
@@ -491,6 +499,41 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.True(h.RunDiagnosticTypes().Passed);
     }
 
+    // --- Check_UsesCommonDownloadTelemetrySink ---
+
+    [Fact]
+    public void TelemetrySink_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunDownloadTelemetrySink().Passed);
+    }
+
+    [Fact]
+    public void TelemetrySink_PluginLocalImpl_Fails()
+    {
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(RogueTelemetrySink) },
+        };
+        var r = h.RunDownloadTelemetrySink();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("RogueTelemetrySink"));
+    }
+
+    [Fact]
+    public void TelemetrySink_CommonSink_Passes()
+    {
+        // common's own LoggingDownloadTelemetrySink lives under Lidarr.Plugin.Common.* so it is
+        // accepted (this also covers the ILRepack-internalized case).
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(LoggingDownloadTelemetrySink) },
+        };
+        Assert.True(h.RunDownloadTelemetrySink().Passed);
+    }
+
     // --- Aggregator ---
 
     [Fact]
@@ -498,8 +541,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(8, report.TotalCount);
-        // No assembly => all 8 skipped (Pass).
+        Assert.Equal(9, report.TotalCount);
+        // No assembly => all 9 skipped (Pass).
         Assert.True(report.AllPassed);
     }
 }

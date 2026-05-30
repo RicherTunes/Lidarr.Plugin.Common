@@ -126,6 +126,19 @@ This document is the single source of truth for "does every plugin follow the sa
 
 ---
 
+## 10. Download telemetry logging (telemetry-consolidation session, 2026-05-29)
+
+| # | Axis | applemusicarr | tidalarr | qobuzarr | brainarr |
+|---|------|:-:|:-:|:-:|:-:|
+| 36 | Canonical `IDownloadTelemetrySink` (Common `LoggingDownloadTelemetrySink` via `AddDownloadTelemetry`) | N/A — no Common download-telemetry path (developer-token flow; not on `SimpleDownloadOrchestrator`) | ✗ → **pending #556**: registers a bespoke `TidalDownloadTelemetrySink` that hand-rolls an IDs-only NLog format duplicating `DownloadTelemetryService`. Migrates to `AddDownloadTelemetry()` + deletes the sink after Common PR #556 lands + re-pin | ✗ → **pending #556**: logs ad-hoc (`Downloaded: {title} ({MB})`), no Common telemetry. Adopts the orchestrator sink after #556 + re-pin | N/A — import-list plugin, no download client |
+| 37 | Rich per-track log fields (artist/album/track/format/quality/size/path) | N/A | ✗ → **pending #556** | ✗ → **pending #556** | N/A |
+
+**Executable guard**: `EcosystemParityTestBase.Check_UsesCommonDownloadTelemetrySink` (behavior contract #7) fails any plugin assembly that declares a local `IDownloadTelemetrySink` instead of registering Common's `LoggingDownloadTelemetrySink`. Auto-enforces for tidal/qobuz once they re-pin and opt into `RunBehaviorContractChecks` via `PluginAssembly`. A genuinely custom telemetry backend opts out by overriding the check with a rationale.
+
+**Common foundation (PR #556)**: `DownloadTelemetry` enriched with nullable identity/quality fields + `From(StreamingTrack, StreamingAlbum, StreamingQuality, …)` factory; `DownloadTelemetryService` renders the rich human line + adds `artist`/`track_title`/`album_title`/`format` to the `[LPC_TELEMETRY]` marker (additive; `success` stays last); `SimpleDownloadOrchestrator` (the single producer) enriches centrally; `LoggingDownloadTelemetrySink` + `AddDownloadTelemetry()` give one-line opt-in so the log format lives in exactly one file.
+
+---
+
 ## Wave 21 (this session) commits
 
 | Repo | Commit | What it does |

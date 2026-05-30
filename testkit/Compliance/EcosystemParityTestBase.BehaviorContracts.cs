@@ -539,6 +539,59 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_UsesCommonDownloadTelemetrySink
+
+    /// <summary>
+    /// Plugins must consume common's canonical download-telemetry sink
+    /// (<c>LoggingDownloadTelemetrySink</c>, registered via <c>AddDownloadTelemetry()</c>) instead
+    /// of hand-rolling an <c>IDownloadTelemetrySink</c>. A plugin-local implementation re-creates
+    /// the per-track log format that lives in <c>DownloadTelemetryService</c>, re-introducing the
+    /// cross-plugin logging divergence this contract exists to prevent. A genuinely custom sink
+    /// (e.g. one that forwards telemetry to an external metrics backend instead of logging) is a
+    /// legitimate divergence — document it by overriding this check to return
+    /// <see cref="ComplianceResult.Success"/> with a rationale.
+    /// </summary>
+    public virtual ComplianceResult Check_UsesCommonDownloadTelemetrySink()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+
+        const string ifaceFullName = "Lidarr.Plugin.Common.Services.Download.IDownloadTelemetrySink";
+        const string commonSinkFullName = "Lidarr.Plugin.Common.Services.Download.LoggingDownloadTelemetrySink";
+
+        var offenders = new List<string>();
+        foreach (var type in SafeGetTypes(assembly))
+        {
+            if (type == null) continue;
+            try { if (type.IsInterface || type.IsAbstract) continue; }
+            catch { continue; }
+
+            Type[] ifaces;
+            try { ifaces = type.GetInterfaces(); }
+            catch { continue; }
+            if (!ifaces.Any(i => i.FullName == ifaceFullName)) continue;
+
+            // common's own types (incl. ILRepack-internalized LoggingDownloadTelemetrySink) are fine.
+            string ns;
+            try { ns = type.Namespace ?? string.Empty; }
+            catch { continue; }
+            if (IsCommonProductionNamespace(ns)) continue;
+
+            // Belt-and-suspenders: allow the canonical sink by full name even if its namespace
+            // classification ever changes.
+            var fullName = type.FullName ?? type.Name;
+            if (fullName == commonSinkFullName) continue;
+
+            offenders.Add(fullName);
+        }
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Plugin-local IDownloadTelemetrySink implementations are forbidden — register common's via AddDownloadTelemetry() / LoggingDownloadTelemetrySink (or override this check to document a custom telemetry backend): {string.Join(", ", offenders)}");
+    }
+
+    #endregion
+
     #region Aggregator
 
     /// <summary>
@@ -557,6 +610,7 @@ public abstract partial class EcosystemParityTestBase
             [nameof(Check_UsesCommonPluginConfigRoots)] = Check_UsesCommonPluginConfigRoots(),
             [nameof(Check_UsesCommonLyricsEnricher)] = Check_UsesCommonLyricsEnricher(),
             [nameof(Check_UsesCommonDiagnosticTypes)] = Check_UsesCommonDiagnosticTypes(),
+            [nameof(Check_UsesCommonDownloadTelemetrySink)] = Check_UsesCommonDownloadTelemetrySink(),
         };
 
         var passed = results.Values.Count(r => r.Passed);
