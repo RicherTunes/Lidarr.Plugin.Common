@@ -138,7 +138,9 @@
     "normalisation",
     "normalises",
     "recognise",
-    "syscall"
+    "syscall",
+    "Lrclib",
+    "LRCLIB"
   ],
   "ignorePaths": [
     "**/bin",
