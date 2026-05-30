@@ -640,6 +640,85 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_FileClassNameParity
+
+    /// <summary>
+    /// Single-type C# files should be named after the public type they declare (parity-matrix
+    /// row 30: file ↔ class name parity). Flags a <c>.cs</c> file under <see cref="PluginSourceRoot"/>
+    /// that declares EXACTLY ONE public top-level type whose name (generic arity stripped) differs
+    /// from the file name. Conservative to avoid false positives: multi-type grouping files (DTO
+    /// bundles, exception families, interface+impl pairs) declare more than one public type and are
+    /// skipped; partial types and dotted/generated file names (<c>X.Designer.cs</c>, <c>X.g.cs</c>,
+    /// partial-split files) are skipped. All four plugins are currently clean (row 30 ✓); this guard
+    /// turns that into drift-prevention so a future copy-pasted mis-named file fails CI.
+    /// </summary>
+    public virtual ComplianceResult Check_FileClassNameParity()
+    {
+        if (!Directory.Exists(PluginSourceRoot)) return Skipped();
+
+        var excluded = new[]
+        {
+            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
+        };
+        // Public top-level (or nested — counted, which makes multi-type files exceed 1 and skip) type.
+        var typeDecl = new System.Text.RegularExpressions.Regex(
+            @"(?m)^\s*(?:\[[^\]]*\]\s*)*public\s+(?:sealed\s+|abstract\s+|static\s+|partial\s+|readonly\s+|unsafe\s+)*(?:class|interface|record|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        var partialDecl = new System.Text.RegularExpressions.Regex(
+            @"(?m)^\s*(?:\[[^\]]*\]\s*)*public\s+(?:sealed\s+|abstract\s+|static\s+|readonly\s+|unsafe\s+)*partial\s+(?:class|interface|record|struct)\s+",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
+            var fileName = Path.GetFileNameWithoutExtension(file);
+            if (fileName.Contains('.')) continue; // dotted (partial splits / *.Designer / *.g) — skip
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch { continue; }
+            if (partialDecl.IsMatch(text)) continue; // partial type spans files — name needn't match
+            var matches = typeDecl.Matches(text);
+            if (matches.Count != 1) continue; // 0 = no public type; >1 = grouping file (allowed)
+            var typeName = matches[0].Groups[1].Value;
+            if (!string.Equals(typeName, fileName, StringComparison.Ordinal))
+                offenders.Add($"{Path.GetRelativePath(RepoRootPath, file)} (file '{fileName}' != type '{typeName}')");
+        }
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Single-type files must be named after their public type (file↔class parity): {string.Join("; ", offenders)}");
+    }
+
+    #endregion
+
+    #region Check_ClaudeMdDocumentsCommonHelpers
+
+    /// <summary>
+    /// Each plugin's <c>CLAUDE.md</c> must carry a "Common helpers in use" section (parity-matrix
+    /// row 29) — the human-readable index of which shared Common helpers the plugin adopts, kept
+    /// next to the code so reviewers can spot a plugin that quietly hand-rolls instead of adopting.
+    /// Presence-only check (the content is reviewed by humans); repos without a CLAUDE.md are skipped.
+    /// </summary>
+    public virtual ComplianceResult Check_ClaudeMdDocumentsCommonHelpers()
+    {
+        var path = Path.Combine(RepoRootPath, "CLAUDE.md");
+        if (!File.Exists(path)) return Skipped();
+        string text;
+        try { text = File.ReadAllText(path); }
+        catch { return Skipped(); }
+        return text.Contains("Common helpers in use", StringComparison.OrdinalIgnoreCase)
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                "CLAUDE.md is missing the 'Common helpers in use' section — document which Lidarr.Plugin.Common helpers the plugin adopts so reviewers can catch hand-rolled drift.");
+    }
+
+    #endregion
+
     #region Aggregator
 
     /// <summary>
@@ -660,6 +739,8 @@ public abstract partial class EcosystemParityTestBase
             [nameof(Check_UsesCommonDiagnosticTypes)] = Check_UsesCommonDiagnosticTypes(),
             [nameof(Check_UsesCommonDownloadTelemetrySink)] = Check_UsesCommonDownloadTelemetrySink(),
             [nameof(Check_DownloadClientUsesPathTraversalGuard)] = Check_DownloadClientUsesPathTraversalGuard(),
+            [nameof(Check_FileClassNameParity)] = Check_FileClassNameParity(),
+            [nameof(Check_ClaudeMdDocumentsCommonHelpers)] = Check_ClaudeMdDocumentsCommonHelpers(),
         };
 
         var passed = results.Values.Count(r => r.Passed);

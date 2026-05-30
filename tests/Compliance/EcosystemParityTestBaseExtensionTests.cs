@@ -69,6 +69,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         public ComplianceResult RunDiagnosticTypes() => Check_UsesCommonDiagnosticTypes();
         public ComplianceResult RunDownloadTelemetrySink() => Check_UsesCommonDownloadTelemetrySink();
         public ComplianceResult RunPathTraversalGuard() => Check_DownloadClientUsesPathTraversalGuard();
+        public ComplianceResult RunFileClassNameParity() => Check_FileClassNameParity();
+        public ComplianceResult RunClaudeMdHelpers() => Check_ClaudeMdDocumentsCommonHelpers();
     }
 
     /// <summary>A plugin-local re-declaration of the lyrics enricher (forbidden — must use common's).</summary>
@@ -582,6 +584,120 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.True(h.RunPathTraversalGuard().Passed);
     }
 
+    // --- Check_FileClassNameParity ---
+
+    private string WriteSrcFile(string srcDir, string fileName, string content)
+    {
+        Directory.CreateDirectory(srcDir);
+        var path = Path.Combine(srcDir, fileName);
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    [Fact]
+    public void FileClassParity_NoSourceRoot_Passes()
+    {
+        var h = new Harness(_tempRepo) { SourceRootValue = Path.Combine(_tempRepo, "missing-src") };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_MatchingName_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Foo.cs", "namespace N;\npublic sealed class Foo { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_SingleTypeMismatch_Fails()
+    {
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Bar.cs", "namespace N;\npublic class Different { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        var r = h.RunFileClassNameParity();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("Bar") && e.Contains("Different"));
+    }
+
+    [Fact]
+    public void FileClassParity_MultiTypeGroupingFile_Passes()
+    {
+        // DTO/exception-family grouping files declare >1 public type — allowed, not flagged.
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Dtos.cs", "namespace N;\npublic record A();\npublic record B();");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_PartialType_Passes()
+    {
+        // Partial types legitimately span multiple files with different names.
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Split.cs", "namespace N;\npublic partial class Engine { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_DottedAndGeneratedFileNames_Skipped()
+    {
+        // Dotted file names (X.Designer.cs / X.g.cs / partial splits) are skipped.
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Widget.Designer.cs", "namespace N;\npublic class Generated { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_GenericType_MatchesOnBareName_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Cache.cs", "namespace N;\npublic class Cache<TKey, TValue> { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_NoPublicTopLevelType_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Internals.cs", "namespace N;\ninternal class Helper { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    // --- Check_ClaudeMdDocumentsCommonHelpers ---
+
+    [Fact]
+    public void ClaudeMd_MissingFile_Skipped()
+    {
+        var h = new Harness(_tempRepo); // _tempRepo has no CLAUDE.md
+        Assert.True(h.RunClaudeMdHelpers().Passed);
+    }
+
+    [Fact]
+    public void ClaudeMd_WithHelpersSection_Passes()
+    {
+        File.WriteAllText(Path.Combine(_tempRepo, "CLAUDE.md"),
+            "# CLAUDE.md\n\n## Common helpers in use\n- PluginConfigRoots\n");
+        var h = new Harness(_tempRepo);
+        Assert.True(h.RunClaudeMdHelpers().Passed);
+    }
+
+    [Fact]
+    public void ClaudeMd_WithoutHelpersSection_Fails()
+    {
+        File.WriteAllText(Path.Combine(_tempRepo, "CLAUDE.md"),
+            "# CLAUDE.md\n\n## Build Commands\ndotnet build\n");
+        var h = new Harness(_tempRepo);
+        var r = h.RunClaudeMdHelpers();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("Common helpers in use"));
+    }
+
     // --- Aggregator ---
 
     [Fact]
@@ -589,8 +705,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(10, report.TotalCount);
-        // No assembly => all 10 skipped (Pass).
+        Assert.Equal(12, report.TotalCount);
+        // No assembly + no CLAUDE.md => all 12 skipped (Pass).
         Assert.True(report.AllPassed);
     }
 }
