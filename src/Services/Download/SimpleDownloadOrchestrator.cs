@@ -304,18 +304,18 @@ namespace Lidarr.Plugin.Common.Services.Download
                 }
 
                 stopwatch.Stop();
-                EmitTrackTelemetry(albumId, trackId, result, stopwatch.Elapsed, counters);
+                EmitTrackTelemetry(albumId, track, quality, trackId, result, stopwatch.Elapsed, counters);
                 return result;
             }
             catch (OperationCanceledException)
             {
                 stopwatch.Stop();
-                EmitTrackTelemetry(albumId, trackId, new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Canceled" }, stopwatch.Elapsed, counters);
+                EmitTrackTelemetry(albumId, track, quality, trackId, new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Canceled" }, stopwatch.Elapsed, counters);
                 throw;
             }
         }
 
-        private void EmitTrackTelemetry(string? albumId, string trackId, TrackDownloadResult result, TimeSpan elapsed, DownloadTelemetryCounters counters)
+        private void EmitTrackTelemetry(string? albumId, StreamingTrack? track, StreamingQuality? quality, string trackId, TrackDownloadResult result, TimeSpan elapsed, DownloadTelemetryCounters counters)
         {
             if (_telemetrySink == null)
             {
@@ -323,23 +323,27 @@ namespace Lidarr.Plugin.Common.Services.Download
             }
 
             var bytesWritten = Math.Max(0, result.FileSize);
-            var bytesPerSecond = elapsed.TotalSeconds > 0
-                ? bytesWritten / elapsed.TotalSeconds
-                : 0.0;
 
             try
             {
-                _telemetrySink.OnTrackCompleted(new DownloadTelemetry(
-                    ServiceName,
-                    albumId,
-                    trackId,
-                    result.Success,
-                    bytesWritten,
-                    elapsed,
-                    bytesPerSecond,
-                    counters.RetryCount,
-                    counters.TooManyRequestsCount,
-                    result.ErrorMessage));
+                // Enrich centrally from the track/quality the orchestrator already holds, so every
+                // plugin's sink receives artist/album/track/format/quality identically. The explicit
+                // albumId/trackId arguments stay authoritative (the model's Id may be unset or differ
+                // from the requested id), so they are re-applied over From()'s derived values.
+                var telemetry = DownloadTelemetry.From(
+                    serviceName: ServiceName,
+                    success: result.Success,
+                    track: track,
+                    album: track?.Album,
+                    quality: result.ActualQuality ?? quality,
+                    bytesWritten: bytesWritten,
+                    elapsed: elapsed,
+                    outputPath: result.FilePath,
+                    retryCount: counters.RetryCount,
+                    tooManyRequestsCount: counters.TooManyRequestsCount,
+                    errorMessage: result.ErrorMessage) with { AlbumId = albumId, TrackId = trackId };
+
+                _telemetrySink.OnTrackCompleted(telemetry);
             }
             catch (Exception ex)
             {

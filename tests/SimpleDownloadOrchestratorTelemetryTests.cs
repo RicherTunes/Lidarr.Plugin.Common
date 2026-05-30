@@ -103,6 +103,64 @@ namespace Lidarr.Plugin.Common.Tests
             }
         }
 
+        [Fact]
+        public async Task Should_emit_enriched_track_telemetry_with_identity_and_quality()
+        {
+            // The orchestrator is the single producer of download telemetry. It must enrich the
+            // emitted record from the StreamingTrack/StreamingQuality it already has in scope, so
+            // every plugin's sink receives artist/album/track/format/quality without re-deriving them.
+            var sink = new CapturingTelemetrySink();
+            using var httpClient = new HttpClient(new OkBytesHandler(bytes: 4096));
+
+            var outputDir = Path.Combine(Path.GetTempPath(), $"orch_telemetry_rich_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(outputDir);
+            var outputPath = Path.Combine(outputDir, "track");
+
+            try
+            {
+                var orchestrator = new SimpleDownloadOrchestrator(
+                    serviceName: "Test",
+                    httpClient: httpClient,
+                    getAlbumAsync: _ => Task.FromResult(new StreamingAlbum { Id = "alb1", Title = "Kind of Blue" }),
+                    getTrackAsync: id => Task.FromResult(new StreamingTrack
+                    {
+                        Id = id,
+                        Title = "So What",
+                        TrackNumber = 1,
+                        Artist = new StreamingArtist { Name = "Miles Davis" },
+                        Album = new StreamingAlbum { Id = "alb1", Title = "Kind of Blue" },
+                        Duration = TimeSpan.FromSeconds(545),
+                    }),
+                    getAlbumTrackIdsAsync: _ => Task.FromResult<IReadOnlyList<string>>(Array.Empty<string>()),
+                    getStreamAsync: (_, _) => Task.FromResult<(string Url, string Extension)>(("https://unit.test/stream", "flac")),
+                    maxConcurrentTracks: 1,
+                    streamProvider: null,
+                    metadataApplier: new NoopMetadataApplier(),
+                    logger: null,
+                    postProcessor: null,
+                    telemetrySink: sink);
+
+                var quality = new StreamingQuality { Format = "FLAC", Bitrate = 1411, SampleRate = 96000, BitDepth = 24 };
+                var result = await orchestrator.DownloadTrackAsync("track1", outputPath, quality, CancellationToken.None);
+
+                Assert.True(result.Success);
+
+                var telemetry = Assert.Single(sink.Items);
+                Assert.Equal("track1", telemetry.TrackId);     // authoritative id preserved (not track.Id from model)
+                Assert.Equal("Miles Davis", telemetry.Artist);
+                Assert.Equal("So What", telemetry.TrackTitle);
+                Assert.Equal("Kind of Blue", telemetry.AlbumTitle);
+                Assert.Equal("FLAC", telemetry.Format);
+                Assert.Equal(StreamingQualityTier.HiRes.ToString(), telemetry.QualityTier);
+                Assert.Equal(96000, telemetry.SampleRateHz);
+                Assert.False(string.IsNullOrEmpty(telemetry.OutputPath));
+            }
+            finally
+            {
+                try { Directory.Delete(outputDir, recursive: true); } catch { }
+            }
+        }
+
         internal sealed class CapturingTelemetrySink : IDownloadTelemetrySink
         {
             private readonly object _lock = new();
