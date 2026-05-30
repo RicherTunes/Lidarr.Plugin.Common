@@ -35,6 +35,13 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed
+- **`PathTraversalGuard.IsDescendant` — accept children when the configured root has a trailing separator (#552).** `Path.GetFullPath(root)` preserves a trailing directory separator, so the subsequent prefix check compared the child against `"<root>/"` and a doubled separator made *every* legitimate descendant fail. The guard now trims trailing `Path.DirectorySeparatorChar` / `AltDirectorySeparatorChar` off the canonical root before comparing. **Downstream impact**: this was the root cause of tidalarr/qobuzarr rejecting *all* downloads with "resolves outside the download directory" whenever the user's download path ended in a slash. Regression tests cover trailing-separator and bare-root cases (`tests/HostBridge/PathTraversalGuardTests.cs`).
+
+### Changed
+- **packaging-gates: canonical-abstractions sidecar is now opt-in (#549).** The packaging closure no longer forces the canonical `Lidarr.Plugin.Abstractions.dll` sidecar by default; plugins opt in explicitly. Removes a packaging-gate conflict for plugins that internalize abstractions via ILRepack.
+- **local-ci: accept `includedFrameworks` in the .NET 8 runtime guardrail (#548).** The host-assembly extraction guardrail now tolerates the `includedFrameworks` shape so the .NET 8 / FluentValidation 9.5.4 check passes on current plugins-branch images.
+
 ### Deprecations
 - **`IAuthFailureGateRegistry` / `AuthFailureGateRegistry`** — deprecated in favour of a direct `ConcurrentDictionary<string, AuthFailureGate>` per-plugin. A Wave-26 adversarial audit found zero non-test plugin consumers across all four ecosystem repos; every real call-site builds its own gate map so it can pair a custom `IAuthFailureHandler` (e.g. `SlidingWindowAuthFailureHandler`) with each gate — something the registry cannot do because it hard-wires `DefaultAuthFailureHandler` internally. Both the interface and the concrete class are marked `[Obsolete(error: false)]`. They will be removed in v2.0.0.
 
