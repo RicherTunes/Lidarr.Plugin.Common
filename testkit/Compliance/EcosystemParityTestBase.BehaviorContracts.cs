@@ -696,6 +696,29 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_ClaudeMdDocumentsCommonHelpers
+
+    /// <summary>
+    /// Each plugin's <c>CLAUDE.md</c> must carry a "Common helpers in use" section (parity-matrix
+    /// row 29) — the human-readable index of which shared Common helpers the plugin adopts, kept
+    /// next to the code so reviewers can spot a plugin that quietly hand-rolls instead of adopting.
+    /// Presence-only check (the content is reviewed by humans); repos without a CLAUDE.md are skipped.
+    /// </summary>
+    public virtual ComplianceResult Check_ClaudeMdDocumentsCommonHelpers()
+    {
+        var path = Path.Combine(RepoRootPath, "CLAUDE.md");
+        if (!File.Exists(path)) return Skipped();
+        string text;
+        try { text = File.ReadAllText(path); }
+        catch { return Skipped(); }
+        return text.Contains("Common helpers in use", StringComparison.OrdinalIgnoreCase)
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                "CLAUDE.md is missing the 'Common helpers in use' section — document which Lidarr.Plugin.Common helpers the plugin adopts so reviewers can catch hand-rolled drift.");
+    }
+
+    #endregion
+
     #region Aggregator
 
     /// <summary>
@@ -717,6 +740,7 @@ public abstract partial class EcosystemParityTestBase
             [nameof(Check_UsesCommonDownloadTelemetrySink)] = Check_UsesCommonDownloadTelemetrySink(),
             [nameof(Check_DownloadClientUsesPathTraversalGuard)] = Check_DownloadClientUsesPathTraversalGuard(),
             [nameof(Check_FileClassNameParity)] = Check_FileClassNameParity(),
+            [nameof(Check_ClaudeMdDocumentsCommonHelpers)] = Check_ClaudeMdDocumentsCommonHelpers(),
         };
 
         var passed = results.Values.Count(r => r.Passed);

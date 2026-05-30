@@ -70,6 +70,7 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         public ComplianceResult RunDownloadTelemetrySink() => Check_UsesCommonDownloadTelemetrySink();
         public ComplianceResult RunPathTraversalGuard() => Check_DownloadClientUsesPathTraversalGuard();
         public ComplianceResult RunFileClassNameParity() => Check_FileClassNameParity();
+        public ComplianceResult RunClaudeMdHelpers() => Check_ClaudeMdDocumentsCommonHelpers();
     }
 
     /// <summary>A plugin-local re-declaration of the lyrics enricher (forbidden — must use common's).</summary>
@@ -668,6 +669,35 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.True(h.RunFileClassNameParity().Passed);
     }
 
+    // --- Check_ClaudeMdDocumentsCommonHelpers ---
+
+    [Fact]
+    public void ClaudeMd_MissingFile_Skipped()
+    {
+        var h = new Harness(_tempRepo); // _tempRepo has no CLAUDE.md
+        Assert.True(h.RunClaudeMdHelpers().Passed);
+    }
+
+    [Fact]
+    public void ClaudeMd_WithHelpersSection_Passes()
+    {
+        File.WriteAllText(Path.Combine(_tempRepo, "CLAUDE.md"),
+            "# CLAUDE.md\n\n## Common helpers in use\n- PluginConfigRoots\n");
+        var h = new Harness(_tempRepo);
+        Assert.True(h.RunClaudeMdHelpers().Passed);
+    }
+
+    [Fact]
+    public void ClaudeMd_WithoutHelpersSection_Fails()
+    {
+        File.WriteAllText(Path.Combine(_tempRepo, "CLAUDE.md"),
+            "# CLAUDE.md\n\n## Build Commands\ndotnet build\n");
+        var h = new Harness(_tempRepo);
+        var r = h.RunClaudeMdHelpers();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("Common helpers in use"));
+    }
+
     // --- Aggregator ---
 
     [Fact]
@@ -675,8 +705,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(11, report.TotalCount);
-        // No assembly => all 11 skipped (Pass).
+        Assert.Equal(12, report.TotalCount);
+        // No assembly + no CLAUDE.md => all 12 skipped (Pass).
         Assert.True(report.AllPassed);
     }
 }
