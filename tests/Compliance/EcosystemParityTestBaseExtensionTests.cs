@@ -68,6 +68,7 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         public ComplianceResult RunLyricsEnricher() => Check_UsesCommonLyricsEnricher();
         public ComplianceResult RunDiagnosticTypes() => Check_UsesCommonDiagnosticTypes();
         public ComplianceResult RunDownloadTelemetrySink() => Check_UsesCommonDownloadTelemetrySink();
+        public ComplianceResult RunPathTraversalGuard() => Check_DownloadClientUsesPathTraversalGuard();
     }
 
     /// <summary>A plugin-local re-declaration of the lyrics enricher (forbidden — must use common's).</summary>
@@ -80,6 +81,17 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     private static class FakeHealthDiagnostics
     {
         public static class DiagnosticTypes { public const string AuthValidate = "auth_validate"; }
+    }
+
+    /// <summary>A fake plugin-local download client (implements the host-bridge IDownloadClient contract).</summary>
+    private sealed class FakeDownloadClient : IDownloadClient
+    {
+        public System.Threading.Tasks.ValueTask<PluginValidationResult> InitializeAsync(System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public System.Threading.Tasks.ValueTask<string> EnqueueAlbumDownloadAsync(string albumId, string outputPath, System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public System.Threading.Tasks.ValueTask<bool> RemoveDownloadAsync(string downloadId, bool deleteData = false, System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public System.Threading.Tasks.ValueTask<IReadOnlyList<StreamingDownloadItem>> GetActiveDownloadsAsync(System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public System.Threading.Tasks.ValueTask<StreamingDownloadItem?> GetDownloadAsync(string downloadId, System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public System.Threading.Tasks.ValueTask DisposeAsync() => default;
     }
 
     // --- Fixture types ---
@@ -534,6 +546,42 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.True(h.RunDownloadTelemetrySink().Passed);
     }
 
+    // --- Check_DownloadClientUsesPathTraversalGuard ---
+
+    [Fact]
+    public void PathTraversalGuard_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunPathTraversalGuard().Passed);
+    }
+
+    [Fact]
+    public void PathTraversalGuard_NoDownloadClient_NotApplicable_Passes()
+    {
+        // A plugin with no IDownloadClient (e.g. an import-list plugin) is not applicable.
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FileTokenStore<string>) },
+        };
+        Assert.True(h.RunPathTraversalGuard().Passed);
+    }
+
+    [Fact]
+    public void PathTraversalGuard_HasDownloadClient_AndAssemblyReferencesGuard_Passes()
+    {
+        // The tests assembly references PathTraversalGuard (PathTraversalGuardTests), so a plugin
+        // that ships a download client AND references the guard passes. (Mirrors the
+        // Check_RegistersBridgeDefaults assembly-metadata-scan approach; a true-negative cannot be
+        // synthesized within a single assembly that already contains the string.)
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+        };
+        Assert.True(h.RunPathTraversalGuard().Passed);
+    }
+
     // --- Aggregator ---
 
     [Fact]
@@ -541,8 +589,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(9, report.TotalCount);
-        // No assembly => all 9 skipped (Pass).
+        Assert.Equal(10, report.TotalCount);
+        // No assembly => all 10 skipped (Pass).
         Assert.True(report.AllPassed);
     }
 }
