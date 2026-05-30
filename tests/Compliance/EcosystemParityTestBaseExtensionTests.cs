@@ -64,6 +64,13 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         public ComplianceResult RunCapabilities() => Check_PluginManifest_Capabilities_HaveBackingTypes();
         public ComplianceResult RunValidationDrift() => Check_NoFluentValidation_ErrorsApi_Drift();
         public ComplianceResult RunConfigRoots() => Check_UsesCommonPluginConfigRoots();
+        public ComplianceResult RunLyricsEnricher() => Check_UsesCommonLyricsEnricher();
+    }
+
+    /// <summary>A plugin-local re-declaration of the lyrics enricher (forbidden — must use common's).</summary>
+    private static class RogueLyrics
+    {
+        public interface ILyricsEnricher { }
     }
 
     // --- Fixture types ---
@@ -405,6 +412,43 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.True(h.RunConfigRoots().Passed);
     }
 
+    // --- Check_UsesCommonLyricsEnricher ---
+
+    [Fact]
+    public void LyricsEnricher_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunLyricsEnricher().Passed);
+    }
+
+    [Fact]
+    public void LyricsEnricher_PluginLocalRedeclaration_Fails()
+    {
+        // A plugin-local type named ILyricsEnricher/LyricsEnricher (the historical qobuz/tidal
+        // duplication) must be flagged — lyrics is consolidated in common.
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(RogueLyrics.ILyricsEnricher) },
+        };
+        var r = h.RunLyricsEnricher();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("ILyricsEnricher"));
+    }
+
+    [Fact]
+    public void LyricsEnricher_CommonType_Passes()
+    {
+        // Common's own enricher (here referenced directly; in production it's ILRepack-internalized
+        // but keeps its Lidarr.Plugin.Common.* namespace) is the canonical implementation.
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(Lidarr.Plugin.Common.Services.Lyrics.LyricsEnricher) },
+        };
+        Assert.True(h.RunLyricsEnricher().Passed);
+    }
+
     // --- Aggregator ---
 
     [Fact]
@@ -412,8 +456,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(6, report.TotalCount);
-        // No assembly => all 6 skipped (Pass).
+        Assert.Equal(7, report.TotalCount);
+        // No assembly => all 7 skipped (Pass).
         Assert.True(report.AllPassed);
     }
 }

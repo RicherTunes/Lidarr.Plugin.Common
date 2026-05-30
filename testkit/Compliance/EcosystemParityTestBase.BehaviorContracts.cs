@@ -437,6 +437,60 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_UsesCommonLyricsEnricher
+
+    /// <summary>
+    /// Synced-lyrics enrichment is consolidated in common
+    /// (<c>Lidarr.Plugin.Common.Services.Lyrics.ILyricsEnricher</c> / <c>LyricsEnricher</c>).
+    /// A plugin must not define its own <c>ILyricsEnricher</c>/<c>LyricsEnricher</c> (the
+    /// historical qobuz/tidal duplication) nor fork the orchestration by implementing common's
+    /// interface in plugin-local code — it consumes common's type directly. Service-specific
+    /// fetches belong behind common's <c>INativeLyricsSource</c>, not a re-declared enricher.
+    /// </summary>
+    public virtual ComplianceResult Check_UsesCommonLyricsEnricher()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+
+        const string commonInterfaceFullName = "Lidarr.Plugin.Common.Services.Lyrics.ILyricsEnricher";
+        var offenders = new List<string>();
+        foreach (var type in SafeGetTypes(assembly))
+        {
+            if (type == null) continue;
+            string ns, name;
+            try { ns = type.Namespace ?? string.Empty; name = type.Name ?? string.Empty; }
+            catch { continue; }
+
+            // Common's own types (incl. ILRepack-internalized) are the canonical implementation.
+            if (IsCommonProductionNamespace(ns)) continue;
+
+            // (a) A plugin-local re-declaration of the lyrics-enricher shape (the historical fork).
+            if (name == "ILyricsEnricher" || name == "LyricsEnricher")
+            {
+                offenders.Add(type.FullName ?? name);
+                continue;
+            }
+
+            // (b) A plugin-local fork that implements common's shared interface directly.
+            try
+            {
+                if (type.IsInterface || type.IsAbstract) continue;
+                if (type.GetInterfaces().Any(i => i.FullName == commonInterfaceFullName))
+                {
+                    offenders.Add(type.FullName ?? name);
+                }
+            }
+            catch { /* unresolved interfaces — skip safely */ }
+        }
+
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Plugin defines its own lyrics enricher — consolidate on Lidarr.Plugin.Common.Services.Lyrics.ILyricsEnricher/LyricsEnricher (put service-specific fetches behind INativeLyricsSource): {string.Join(", ", offenders)}");
+    }
+
+    #endregion
+
     #region Aggregator
 
     /// <summary>
@@ -453,6 +507,7 @@ public abstract partial class EcosystemParityTestBase
             [nameof(Check_PluginManifest_Capabilities_HaveBackingTypes)] = Check_PluginManifest_Capabilities_HaveBackingTypes(),
             [nameof(Check_NoFluentValidation_ErrorsApi_Drift)] = Check_NoFluentValidation_ErrorsApi_Drift(),
             [nameof(Check_UsesCommonPluginConfigRoots)] = Check_UsesCommonPluginConfigRoots(),
+            [nameof(Check_UsesCommonLyricsEnricher)] = Check_UsesCommonLyricsEnricher(),
         };
 
         var passed = results.Values.Count(r => r.Passed);
