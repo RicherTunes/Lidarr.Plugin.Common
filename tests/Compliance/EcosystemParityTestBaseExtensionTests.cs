@@ -622,6 +622,19 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     }
 
     [Fact]
+    public void FileClassParity_InternalPrimaryWithPublicNestedHelper_Passes()
+    {
+        // A file whose TOP-LEVEL type matches the file name (here `internal`) is correctly named even
+        // if its only PUBLIC type is a nested helper — the *HealthDiagnostics pattern (internal
+        // HealthDiagnostics + public nested Capabilities). Must NOT be flagged on the nested type.
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "QobuzHealthDiagnostics.cs",
+            "namespace N;\ninternal static class QobuzHealthDiagnostics\n{\n    public static class Capabilities { }\n}");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
     public void FileClassParity_MultiTypeGroupingFile_Passes()
     {
         // DTO/exception-family grouping files declare >1 public type — allowed, not flagged.
