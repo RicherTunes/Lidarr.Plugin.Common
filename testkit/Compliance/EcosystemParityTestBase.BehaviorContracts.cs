@@ -592,6 +592,54 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_DownloadClientUsesPathTraversalGuard
+
+    /// <summary>
+    /// Plugins that ship a download client must sanitize user-supplied path segments through common's
+    /// <c>PathTraversalGuard</c> (<c>SanitizeSegment</c> / <c>IsPathWithinRoot</c>) before writing to
+    /// disk — otherwise a crafted artist/album/track name can escape the download root. This guard is
+    /// applicable only when the plugin declares a download client (import-list plugins such as brainarr
+    /// have no download path → N/A). Detection mirrors <see cref="Check_RegistersBridgeDefaults"/>: a
+    /// reference to <c>PathTraversalGuard</c> in the (un-merged, in test context) plugin assembly.
+    /// </summary>
+    public virtual ComplianceResult Check_DownloadClientUsesPathTraversalGuard()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+
+        const string dcIface = "Lidarr.Plugin.Abstractions.Contracts.IDownloadClient";
+        var hasDownloadClient = SafeGetTypes(assembly).Any(t =>
+        {
+            if (t == null) return false;
+            try
+            {
+                if (t.IsInterface || t.IsAbstract) return false;
+                if (t.GetInterfaces().Any(i => i.FullName == dcIface)) return true;
+                // Host-contract download clients subclass DownloadClientBase<T>.
+                var b = t.BaseType;
+                while (b != null)
+                {
+                    if ((b.Name ?? string.Empty).StartsWith("DownloadClientBase", StringComparison.Ordinal)) return true;
+                    b = b.BaseType;
+                }
+                return false;
+            }
+            catch { return false; }
+        });
+        if (!hasDownloadClient) return ComplianceResult.Success; // not applicable
+
+        string text;
+        try { text = System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(assembly.Location)); }
+        catch { return ComplianceResult.Success; } // unreadable — don't false-fail
+        if (text.Contains("PathTraversalGuard", StringComparison.Ordinal))
+            return ComplianceResult.Success;
+
+        return ComplianceResult.Failure(
+            "Plugin ships a download client but its assembly does not reference Lidarr.Plugin.Common.HostBridge.PathTraversalGuard — user-supplied path segments must be sanitized via PathTraversalGuard (SanitizeSegment / IsPathWithinRoot) to prevent path-traversal writes outside the download root.");
+    }
+
+    #endregion
+
     #region Aggregator
 
     /// <summary>
@@ -611,6 +659,7 @@ public abstract partial class EcosystemParityTestBase
             [nameof(Check_UsesCommonLyricsEnricher)] = Check_UsesCommonLyricsEnricher(),
             [nameof(Check_UsesCommonDiagnosticTypes)] = Check_UsesCommonDiagnosticTypes(),
             [nameof(Check_UsesCommonDownloadTelemetrySink)] = Check_UsesCommonDownloadTelemetrySink(),
+            [nameof(Check_DownloadClientUsesPathTraversalGuard)] = Check_DownloadClientUsesPathTraversalGuard(),
         };
 
         var passed = results.Values.Count(r => r.Passed);
