@@ -685,8 +685,19 @@ public abstract partial class EcosystemParityTestBase
             var matches = typeDecl.Matches(text);
             if (matches.Count != 1) continue; // 0 = no public type; >1 = grouping file (allowed)
             var typeName = matches[0].Groups[1].Value;
-            if (!string.Equals(typeName, fileName, StringComparison.Ordinal))
-                offenders.Add($"{Path.GetRelativePath(RepoRootPath, file)} (file '{fileName}' != type '{typeName}')");
+            if (string.Equals(typeName, fileName, StringComparison.Ordinal)) continue;
+
+            // The single PUBLIC type's name differs from the file name — but if the file's TOP-LEVEL
+            // type (any accessibility) is itself named after the file, the file IS correctly named and
+            // the public type is a nested helper (e.g. an `internal *HealthDiagnostics` whose only
+            // public member is a nested `Capabilities`). Only flag when no top-level type matches the
+            // file name. (^-anchored = top-level in the file-scoped-namespace style these repos use.)
+            var declaresFileNameTopLevelType = System.Text.RegularExpressions.Regex.IsMatch(
+                text,
+                $@"(?m)^(?:\[[^\]]*\]\s*)*(?:(?:public|internal|private|protected|file|sealed|abstract|static|partial|readonly|unsafe)\s+)*(?:class|interface|record|struct|enum)\s+{System.Text.RegularExpressions.Regex.Escape(fileName)}\b");
+            if (declaresFileNameTopLevelType) continue;
+
+            offenders.Add($"{Path.GetRelativePath(RepoRootPath, file)} (file '{fileName}' != type '{typeName}')");
         }
         return offenders.Count == 0
             ? ComplianceResult.Success
