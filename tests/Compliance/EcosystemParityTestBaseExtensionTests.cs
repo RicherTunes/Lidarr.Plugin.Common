@@ -65,12 +65,19 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         public ComplianceResult RunValidationDrift() => Check_NoFluentValidation_ErrorsApi_Drift();
         public ComplianceResult RunConfigRoots() => Check_UsesCommonPluginConfigRoots();
         public ComplianceResult RunLyricsEnricher() => Check_UsesCommonLyricsEnricher();
+        public ComplianceResult RunDiagnosticTypes() => Check_UsesCommonDiagnosticTypes();
     }
 
     /// <summary>A plugin-local re-declaration of the lyrics enricher (forbidden — must use common's).</summary>
     private static class RogueLyrics
     {
         public interface ILyricsEnricher { }
+    }
+
+    /// <summary>A fake plugin *HealthDiagnostics with a nested DiagnosticTypes (forbidden duplicate).</summary>
+    private static class FakeHealthDiagnostics
+    {
+        public static class DiagnosticTypes { public const string AuthValidate = "auth_validate"; }
     }
 
     // --- Fixture types ---
@@ -449,6 +456,41 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.True(h.RunLyricsEnricher().Passed);
     }
 
+    // --- Check_UsesCommonDiagnosticTypes ---
+
+    [Fact]
+    public void DiagnosticTypes_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunDiagnosticTypes().Passed);
+    }
+
+    [Fact]
+    public void DiagnosticTypes_PluginLocalNestedInHealthDiagnostics_Fails()
+    {
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeHealthDiagnostics.DiagnosticTypes) },
+        };
+        var r = h.RunDiagnosticTypes();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("DiagnosticTypes"));
+    }
+
+    [Fact]
+    public void DiagnosticTypes_CommonType_Passes()
+    {
+        // common's canonical DiagnosticTypes is top-level in Abstractions.Diagnostics (no
+        // *HealthDiagnostics declaring type) so it is not flagged.
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(Lidarr.Plugin.Common.Abstractions.Diagnostics.DiagnosticTypes) },
+        };
+        Assert.True(h.RunDiagnosticTypes().Passed);
+    }
+
     // --- Aggregator ---
 
     [Fact]
@@ -456,8 +498,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(7, report.TotalCount);
-        // No assembly => all 7 skipped (Pass).
+        Assert.Equal(8, report.TotalCount);
+        // No assembly => all 8 skipped (Pass).
         Assert.True(report.AllPassed);
     }
 }

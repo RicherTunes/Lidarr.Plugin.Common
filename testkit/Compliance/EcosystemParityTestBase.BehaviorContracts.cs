@@ -491,6 +491,54 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_UsesCommonDiagnosticTypes
+
+    /// <summary>
+    /// Plugins must reference common's canonical
+    /// <c>Lidarr.Plugin.Common.Abstractions.Diagnostics.DiagnosticTypes</c> +
+    /// <c>DiagnosticErrorCodes</c> rather than re-declaring identical <c>DiagnosticTypes</c> /
+    /// <c>ErrorCodes</c> nested classes inside their <c>*HealthDiagnostics</c> type. Those per-plugin
+    /// copies (qobuz/tidal/apple all had them) drift independently — collapsing them to Common makes
+    /// a rename land in one place. This flags a class named <c>DiagnosticTypes</c> or <c>ErrorCodes</c>
+    /// nested in a <c>*HealthDiagnostics</c> type, outside common's own namespace.
+    /// </summary>
+    public virtual ComplianceResult Check_UsesCommonDiagnosticTypes()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+
+        var offenders = new List<string>();
+        foreach (var type in SafeGetTypes(assembly))
+        {
+            if (type == null) continue;
+            string name;
+            try { name = type.Name ?? string.Empty; }
+            catch { continue; }
+            if (name != "DiagnosticTypes" && name != "ErrorCodes") continue;
+
+            // Only the *HealthDiagnostics-nested copies are the consolidation target; an unrelated
+            // top-level type that happens to share the name is out of scope.
+            Type? declaring;
+            try { declaring = type.DeclaringType; }
+            catch { continue; }
+            if (declaring == null || !(declaring.Name ?? string.Empty).EndsWith("HealthDiagnostics", StringComparison.Ordinal)) continue;
+
+            // common's own types (incl. ILRepack-internalized) are fine.
+            string ns;
+            try { ns = type.Namespace ?? string.Empty; }
+            catch { continue; }
+            if (IsCommonProductionNamespace(ns)) continue;
+
+            offenders.Add(type.FullName ?? name);
+        }
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Plugin-local DiagnosticTypes/ErrorCodes nested in *HealthDiagnostics are forbidden — reference Lidarr.Plugin.Common.Abstractions.Diagnostics.DiagnosticTypes + DiagnosticErrorCodes: {string.Join(", ", offenders)}");
+    }
+
+    #endregion
+
     #region Aggregator
 
     /// <summary>
@@ -508,6 +556,7 @@ public abstract partial class EcosystemParityTestBase
             [nameof(Check_NoFluentValidation_ErrorsApi_Drift)] = Check_NoFluentValidation_ErrorsApi_Drift(),
             [nameof(Check_UsesCommonPluginConfigRoots)] = Check_UsesCommonPluginConfigRoots(),
             [nameof(Check_UsesCommonLyricsEnricher)] = Check_UsesCommonLyricsEnricher(),
+            [nameof(Check_UsesCommonDiagnosticTypes)] = Check_UsesCommonDiagnosticTypes(),
         };
 
         var passed = results.Values.Count(r => r.Passed);
