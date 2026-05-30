@@ -711,6 +711,35 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.Contains(r.Errors, e => e.Contains("Common helpers in use"));
     }
 
+    // --- DirectoryPackagesProps_HostVersionsMatchCanonical ---
+
+    [Fact]
+    public void HostVersions_MatchingCanonical_Passes()
+    {
+        File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
+            "<Project><ItemGroup>"
+            + "<PackageVersion Include=\"NLog\" Version=\"5.4.0\" />"
+            + "<PackageVersion Include=\"FluentValidation\" Version=\"9.5.4\" />"
+            + "<PackageVersion Include=\"Microsoft.Extensions.Http\" Version=\"8.0.1\" />"
+            + "<PackageVersion Include=\"Newtonsoft.Json\" Version=\"13.0.3\" />" // not host-coupled — ignored
+            + "</ItemGroup></Project>");
+        var h = new Harness(_tempRepo);
+        Assert.True(h.DirectoryPackagesProps_HostVersionsMatchCanonical().Passed);
+    }
+
+    [Fact]
+    public void HostVersions_MismatchedHostCoupled_Fails()
+    {
+        File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
+            "<Project><ItemGroup>"
+            + "<PackageVersion Include=\"NLog\" Version=\"6.0.3\" />" // host-coupled drift (host ships 5.x)
+            + "</ItemGroup></Project>");
+        var h = new Harness(_tempRepo);
+        var r = h.DirectoryPackagesProps_HostVersionsMatchCanonical();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("NLog") && e.Contains("5.4.0"));
+    }
+
     // --- Aggregator ---
 
     [Fact]

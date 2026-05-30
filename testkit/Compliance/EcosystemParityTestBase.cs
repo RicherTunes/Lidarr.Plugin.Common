@@ -178,6 +178,46 @@ public abstract partial class EcosystemParityTestBase : IDisposable
         return ComplianceResult.Success;
     }
 
+    /// <summary>
+    /// Host-coupled dependency versions must match the Lidarr host's shipped assemblies (the version
+    /// table in each plugin's CLAUDE.md). A merged plugin DLL that references a version the host
+    /// doesn't ship causes AssemblyLoadContext / load failures in multi-plugin co-existence — the
+    /// class of bug behind the historical "ALC lifecycle" red herring. This is the deterministic,
+    /// host-DLL-free counterpart to plugin-local HostVersionCouplingTests (which reads ext/Lidarr DLLs
+    /// and is Docker-flaky). A package is only checked when the plugin references it (absence is fine).
+    /// </summary>
+    public virtual ComplianceResult DirectoryPackagesProps_HostVersionsMatchCanonical()
+    {
+        if (!FileExists("Directory.Packages.props"))
+            return ComplianceResult.Failure("Directory.Packages.props not found");
+
+        var canonical = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Microsoft.Extensions.DependencyInjection"] = "8.0.1",
+            ["Microsoft.Extensions.Logging"] = "8.0.1",
+            ["Microsoft.Extensions.Logging.Abstractions"] = "8.0.3",
+            ["Microsoft.Extensions.Http"] = "8.0.1",
+            ["FluentValidation"] = "9.5.4",
+            ["NLog"] = "5.4.0",
+        };
+
+        var doc = LoadXml("Directory.Packages.props");
+        var offenders = new List<string>();
+        foreach (var pv in doc.Descendants().Where(e => e.Name.LocalName == "PackageVersion"))
+        {
+            var id = (string?)pv.Attribute("Include");
+            if (id == null || !canonical.TryGetValue(id, out var expected)) continue;
+            var actual = (string?)pv.Attribute("Version");
+            if (!string.Equals(actual, expected, StringComparison.Ordinal))
+                offenders.Add($"{id} = {actual ?? "<none>"} (host-coupled; must be {expected})");
+        }
+
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Host-coupled dependency versions must match the Lidarr host (multi-plugin ALC safety): {string.Join("; ", offenders)}");
+    }
+
     #endregion
 
     #region plugin.json Tests
