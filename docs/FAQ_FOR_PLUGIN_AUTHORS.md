@@ -22,7 +22,7 @@ Use the public API baselining scripts:
 ./tools/Update-PublicApiBaselines.ps1 -Project src/Abstractions/Lidarr.Plugin.Abstractions.csproj
 ```
 
-Run this under both `net6.0` and `net8.0` when you add or remove public surface area.
+Run this under `net8.0` when you add or remove public surface area.
 
 ## Packaging script is noisy (warnings or unexpected DLLs). How do I diagnose it?
 Run `New-PluginPackage` with `-Verbose` to inspect each step. Verify the publish directory contains only plugin-owned assemblies before packaging, and confirm `ManifestCheck.ps1` passes to catch mismatched versions early.

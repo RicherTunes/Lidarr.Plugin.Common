@@ -11,7 +11,7 @@ inputs:
     required: false
     default: 'Release'
   target-framework:
-    description: 'Target framework (net6.0 or net8.0)'
+    description: 'Target framework (net8.0)'
     required: false
     default: 'net8.0'
   lidarr-docker-version:

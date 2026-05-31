@@ -30,7 +30,7 @@ Run this checklist before promoting a new Common release to all plugin repos.
 
 ## CI Rules (future — requires billing unblock)
 - [ ] Exactly one concrete IPlugin per plugin assembly
-- [ ] No new net6.0 references in build files
+- [ ] No net6.0 references in build files (net6 retired)
 - [ ] All shipped bridge contracts have: default impl + compliance test + consumer test
 - [ ] `.bridge-exempt` repos excluded from bridge parity checks
 
