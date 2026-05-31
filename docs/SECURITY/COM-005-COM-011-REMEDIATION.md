@@ -164,7 +164,7 @@ public sealed class DownloadIntegrityException : Exception
 }
 ```
 
-Registered in `PublicAPI.Unshipped.txt` (both `net8.0` and `net6.0` baselines).
+Registered in `PublicAPI.Shipped.txt` (both `net8.0` and `net6.0` baselines).
 
 ### Tests added (COM-011)
 

@@ -46,7 +46,7 @@ Secrets can use either `QOBUZARR_*` or `QOBUZ_*` prefix (and similarly `TIDALARR
 
 | Input | Type | Default | Description |
 |-------|------|---------|-------------|
-| `lidarr_tag` | string | `pr-plugins-3.1.1.4884` | Lidarr Docker image tag (plugins branch; must support net8 plugins) |
+| `lidarr_tag` | string | `pr-plugins-3.1.2.4913` | Lidarr Docker image tag (plugins branch; must support net8 plugins) |
 | `qobuzarr_ref` | string | `main` | Qobuzarr branch/tag/SHA to test |
 | `tidalarr_ref` | string | `main` | Tidalarr branch/tag/SHA to test |
 | `run_medium_gate` | boolean | `false` | Configure and test indexers (requires credentials) |
@@ -318,7 +318,7 @@ dotnet build D:\Alex\github\_upstream\Lidarr\src\NzbDrone.Common\Lidarr.Common.c
 
 # Run schema gate with host override
 pwsh D:\Alex\github\lidarr.plugin.common\scripts\multi-plugin-docker-smoke-test.ps1 `
-  -LidarrTag pr-plugins-3.1.1.4884 `
+  -LidarrTag pr-plugins-3.1.2.4913 `
   -PluginZip @(
     "qobuzarr=D:\Alex\github\qobuzarr\artifacts\packages\qobuzarr-0.1.0-dev-net8.0.zip",
     "tidalarr=D:\Alex\github\tidalarr\src\Tidalarr\artifacts\packages\tidalarr-1.0.1-net8.0.zip"

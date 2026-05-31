@@ -14,7 +14,7 @@ Each plugin ships a `plugin.json` that describes identity, compatibility expecta
 | `targets` | array | ➖ | `["net8.0"]` | Optional diagnostics for supported TFMs. |
 | `commonVersion` | SemVer | ➖ | `1.1.4` | Informational only (per-plugin Common build). |
 
-`additionalProperties` are not permitted; keep the manifest concise and explicit.
+Additional properties beyond the schema are permitted by the JSON schema but ignored by the loader. Keep the manifest concise and explicit.
 
 ## Minimal manifest
 

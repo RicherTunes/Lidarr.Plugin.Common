@@ -82,10 +82,10 @@ Line counts updated 2026-03-10 from `main` branch.
 
 | Type | Replacement | Expiry | Disposition |
 |------|-------------|--------|-------------|
-| `AdaptiveRateLimiter` | `UniversalAdaptiveRateLimiter` | v2.0.0 or 2026-12-31 | Remove in next major version (v2.0.0) or by 2026-12-31, whichever comes first |
-| `InputSanitizer` | `Sanitize.*` context-specific methods | v2.0.0 or 2026-12-31 | Remove in next major version (v2.0.0) or by 2026-12-31, whichever comes first |
+| `AdaptiveRateLimiter` | `UniversalAdaptiveRateLimiter` | v2.0.0 or 2026-12-31 | <!-- TODO(docval): AdaptiveRateLimiter class not found in code as of 2026-05-31 - verify if already removed or if name is incorrect --> |
+| `InputSanitizer` | `Sanitize.*` context-specific methods | v2.0.0 or 2026-12-31 | <!-- TODO(docval): InputSanitizer class not found in code as of 2026-05-31 - verify if already removed or if name is incorrect --> |
 
-Both types are marked `[Obsolete]` in source. They remain for backward compatibility with plugins that may still reference them. At expiry, remove the types and bump the major version.
+<!-- TODO(docval): The above types claim to be marked `[Obsolete]` but were not found in the codebase as of 2026-05-31. Verify if they were already removed or if the class names are incorrect. -->
 
 ## Cross-Plugin
 

@@ -21,7 +21,7 @@ The zip contains a folder (unique per run) with some/all of these files:
   - This is the primary “entry point” for triage.
 - `container-logs.txt`
   - `docker logs --tail 500` output for the Lidarr container used in the run.
-- `inspect.json`
+- `inspect.json`<!-- TODO(docval): inspect.json not found in diagnostics bundle generation code as of 2026-05-31 -->
   - `docker inspect` output for the container (when available).
 - `system-status.json`
   - `GET /api/v1/system/status` (Lidarr status snapshot).

@@ -16,13 +16,13 @@ Note: Versions reflect the current repository state and may change over time. So
   - Microsoft.Extensions.Logging 8.0.1
   - Microsoft.Extensions.Logging.Console 8.0.1
   - Microsoft.Extensions.Configuration 8.0.0
-  - Microsoft.Extensions.Configuration.Json 8.0.0
+  - Microsoft.Extensions.Configuration.Json 8.0.1
   - Microsoft.Extensions.Configuration.EnvironmentVariables 8.0.0
   - System.Security.Cryptography.ProtectedData 8.0.0
-  - Microsoft.AspNetCore.DataProtection 8.0.16
-  - Microsoft.AspNetCore.DataProtection.Extensions 8.0.16
+  - Microsoft.AspNetCore.DataProtection 8.0.25
+  - Microsoft.AspNetCore.DataProtection.Extensions 8.0.25
   - Azure.Extensions.AspNetCore.DataProtection.Keys 1.6.1
-  - Azure.Identity 1.12.0
+  - Azure.Identity 1.17.2
 
 - Build/Tooling (PrivateAssets or development only)
   - FluentValidation 9.5.4
@@ -31,7 +31,8 @@ Note: Versions reflect the current repository state and may change over time. So
   - Microsoft.DotNet.PackageValidation 1.0.0-preview.7.21379.12 (PrivateAssets)
   - System.CommandLine 2.0.0-beta4.22272.1 (optional CLI dev/testing)
   - Newtonsoft.Json 13.0.4 (optional CLI dev/testing)
-  - Spectre.Console 0.50.0 (optional CLI dev/testing)
+  - Spectre.Console 0.55.2 (optional CLI dev/testing)
+  - CliWrap 3.10.1
 
 - Audio metadata
   - TagLibSharp 2.3.0 (default, public)

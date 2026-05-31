@@ -12,7 +12,7 @@ Shape
 - data: arbitrary payload on success
 
 Example (conceptual)
-- Success: {"success":true,"data":{"items":42}}
+- Success: {"success":true,"value":{"items":42}}
 - Failure: {"success":false,"error":{"code":"AuthFailed","message":"invalid credentials"}}
 
 Guidance

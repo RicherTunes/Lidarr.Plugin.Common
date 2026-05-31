@@ -70,8 +70,8 @@ This is a hard API limitation, not an implementation gap. Tidalarr correctly def
 
 The `TagLibAudioMetadataApplier` in Common writes these fields:
 
-| StreamingTrack Field | Audio Tag | Written | Gap |
-|---------------------|-----------|---------|-----|
+| StreamingTrack Field | Audio Tag | Written | Notes |
+|---------------------|-----------|---------|-------|
 | Title | ID3: TIT2 / Vorbis: TITLE | Yes | |
 | Artist.Name | ID3: TPE1 / Vorbis: ARTIST | Yes | |
 | Album.Artist.Name | ID3: TPE2 / Vorbis: ALBUMARTIST | Yes | |
@@ -79,9 +79,10 @@ The `TagLibAudioMetadataApplier` in Common writes these fields:
 | TrackNumber | ID3: TRCK / Vorbis: TRACKNUMBER | Yes | |
 | DiscNumber | ID3: TPOS / Vorbis: DISCNUMBER | Yes | |
 | Album.ReleaseDate.Year | ID3: TDRC / Vorbis: DATE | Yes | |
-| Album.Genres[0] | ID3: TCON / Vorbis: GENRE | Yes | |
-| **Isrc** | ID3: TSRC / Vorbis: ISRC | **No** | Implementation gap |
-| **MusicBrainzId** | ID3: TXXX:MUSICBRAINZ_TRACKID | **No** | Implementation gap |
+| Album.Genres[0] | ID3: TCON / Vorbis: GENRE | Yes | First genre only |
+| **Isrc** | ID3: TSRC / Vorbis: ISRC | **Yes** | Normalized to uppercase |
+| **MusicBrainzId** | ID3: MusicBrainzTrackId / Vorbis: MUSICBRAINZ_TRACKID | **Yes** | Validated UUID format |
+| **Album.MusicBrainzId** | ID3: MusicBrainzReleaseId / Vorbis: MUSICBRAINZ_RELEASEID | **Yes** | Validated UUID format |
 
 ## Characterization Test Requirements
 
@@ -128,8 +129,8 @@ public void StreamingTrack_Isrc_DocumentCurrentBehavior()
 
 ## Parity Gaps to Address
 
-1. **TagLib applier**: Extend to write ISRC and MusicBrainz IDs when present
-2. **ReleaseDate normalization**: Tidalarr should populate `Album.ReleaseDate` not Metadata dict
+1. **ReleaseDate normalization**: Tidalarr should populate `Album.ReleaseDate` not Metadata dict
+2. **Isrc/FeaturedArtists/Composers**: Tidalarr should populate these fields when available from the API
 3. **E2E gates**: Validate Tier 1 fields in metadata; warn on Tier 2/3 gaps
 
 ## Related Documents

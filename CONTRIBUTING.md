@@ -153,6 +153,7 @@ dotnet test --configuration Release --verbosity normal
 
 # Run local validation
 ./scripts/validate-contribution.sh  # If available
+<!-- TODO(docval): scripts/validate-contribution.sh not found in codebase as of 2026-05-31 -->
 
 # Check code formatting
 dotnet format --verify-no-changes
