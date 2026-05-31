@@ -64,3 +64,7 @@ Lidarr.Plugin.Common.Services.Drm.DrmTrack.IsDrmProtected.get -> bool
 Lidarr.Plugin.Common.Services.Drm.DrmTrack.Clone() -> object!
 Lidarr.Plugin.Common.Services.Drm.ExternalDownloadHandlerLoader
 static Lidarr.Plugin.Common.Services.Drm.ExternalDownloadHandlerLoader.TryLoad(string? assemblyPath = null, string? typeName = null, Microsoft.Extensions.Logging.ILogger? logger = null, string? assemblyPathEnvVar = null, string? typeNameEnvVar = null) -> Lidarr.Plugin.Common.Services.Drm.IExternalDownloadHandler?
+Lidarr.Plugin.Common.Services.Http.IHttpRequestSigner
+Lidarr.Plugin.Common.Services.Http.IHttpRequestSigner.RequiresSigning(string! endpoint) -> bool
+Lidarr.Plugin.Common.Services.Http.IHttpRequestSigner.Sign(System.Net.Http.HttpRequestMessage! request) -> void
+Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.WithSigner(Lidarr.Plugin.Common.Services.Http.IHttpRequestSigner! signer) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
