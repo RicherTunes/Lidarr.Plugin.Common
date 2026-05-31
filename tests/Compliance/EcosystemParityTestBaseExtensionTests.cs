@@ -797,8 +797,9 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(12, report.TotalCount);
-        // No assembly + no CLAUDE.md => all 12 skipped (Pass).
+        Assert.Equal(13, report.TotalCount);
+        // No assembly + no CLAUDE.md => the other 12 skip (Pass); Check_EnforcesAlbumCompletionPolicy
+        // runs unconditionally (it asserts the shared rule directly, no assembly needed) and passes.
         Assert.True(report.AllPassed);
     }
 }
