@@ -32,3 +32,35 @@ Lidarr.Plugin.Common.Services.Lyrics.LyricsEnricher.Dispose() -> void
 Lidarr.Plugin.Common.Services.Lyrics.LyricsEnricher.LyricsEnricher(Lidarr.Plugin.Common.Services.Lyrics.INativeLyricsSource? nativeSource = null, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
 Lidarr.Plugin.Common.Services.Lyrics.LyricsEnricher.LyricsEnricher(Lidarr.Plugin.Common.Services.Lyrics.INativeLyricsSource? nativeSource, Lidarr.Plugin.Common.Services.Lyrics.LrclibClient! lrclibClient, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
 Lidarr.Plugin.Common.Services.Lyrics.LyricsEnricher.TryEnrichAsync(string! audioFilePath, string! artistName, string! trackName, string! albumName, int durationSeconds, bool allowLrclibFallback, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.Drm.IExternalDownloadHandler
+Lidarr.Plugin.Common.Services.Drm.IExternalDownloadHandler.DownloadAsync(Lidarr.Plugin.Common.Services.Drm.DrmTrack! track, string! outputPath, System.IProgress<Lidarr.Plugin.Common.Services.Drm.ExternalDownloadProgress!>? progress = null, System.Threading.CancellationToken ct = default) -> System.Threading.Tasks.Task<bool>!
+Lidarr.Plugin.Common.Services.Drm.ExternalDownloadProgress
+Lidarr.Plugin.Common.Services.Drm.ExternalDownloadProgress.ExternalDownloadProgress(double? Percent, string? Message) -> void
+Lidarr.Plugin.Common.Services.Drm.ExternalDownloadProgress.Percent.get -> double?
+Lidarr.Plugin.Common.Services.Drm.ExternalDownloadProgress.Percent.init -> void
+Lidarr.Plugin.Common.Services.Drm.ExternalDownloadProgress.Message.get -> string?
+Lidarr.Plugin.Common.Services.Drm.ExternalDownloadProgress.Message.init -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.DrmTrack() -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.Id.get -> string!
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.Id.set -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.Title.get -> string!
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.Title.set -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.Artists.get -> System.Collections.Generic.List<string!>!
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.Artists.set -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.ManifestUrl.get -> string!
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.ManifestUrl.set -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.Pssh.get -> string!
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.Pssh.set -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.KeyId.get -> string!
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.KeyId.set -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.BitrateKbps.get -> int
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.BitrateKbps.set -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.SourceUrl.get -> string?
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.SourceUrl.set -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.ServiceHints.get -> System.Collections.Generic.Dictionary<string!, string!>!
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.ServiceHints.set -> void
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.IsDrmProtected.get -> bool
+Lidarr.Plugin.Common.Services.Drm.DrmTrack.Clone() -> object!
+Lidarr.Plugin.Common.Services.Drm.ExternalDownloadHandlerLoader
+static Lidarr.Plugin.Common.Services.Drm.ExternalDownloadHandlerLoader.TryLoad(string? assemblyPath = null, string? typeName = null, Microsoft.Extensions.Logging.ILogger? logger = null, string? assemblyPathEnvVar = null, string? typeNameEnvVar = null) -> Lidarr.Plugin.Common.Services.Drm.IExternalDownloadHandler?
