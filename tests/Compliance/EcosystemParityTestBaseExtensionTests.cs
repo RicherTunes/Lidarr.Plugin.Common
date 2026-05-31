@@ -740,6 +740,56 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.Contains(r.Errors, e => e.Contains("NLog") && e.Contains("5.4.0"));
     }
 
+    [Fact]
+    public void HostVersions_AllSixCanonicalPackagesPresent_Passes()
+    {
+        // Characterization: proves all six canonical keys are wired correctly (a typo in any
+        // dictionary key would let a wrong version slip through for that package).
+        File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
+            "<Project><ItemGroup>"
+            + "<PackageVersion Include=\"Microsoft.Extensions.DependencyInjection\" Version=\"8.0.1\" />"
+            + "<PackageVersion Include=\"Microsoft.Extensions.Logging\" Version=\"8.0.1\" />"
+            + "<PackageVersion Include=\"Microsoft.Extensions.Logging.Abstractions\" Version=\"8.0.3\" />"
+            + "<PackageVersion Include=\"Microsoft.Extensions.Http\" Version=\"8.0.1\" />"
+            + "<PackageVersion Include=\"FluentValidation\" Version=\"9.5.4\" />"
+            + "<PackageVersion Include=\"NLog\" Version=\"5.4.0\" />"
+            + "</ItemGroup></Project>");
+        var h = new Harness(_tempRepo);
+        var r = h.DirectoryPackagesProps_HostVersionsMatchCanonical();
+        Assert.True(r.Passed, string.Join("; ", r.Errors));
+    }
+
+    [Fact]
+    public void HostVersions_NoHostCoupledPackagesDeclared_Passes()
+    {
+        // "Absence is OK" is intentional: this guard is the DECLARED-PINS layer. A plugin that
+        // doesn't declare a host-coupled package (e.g. applemusicarr omits
+        // Microsoft.Extensions.DependencyInjection, which resolves transitively) is validated at
+        // the RESOLVED-VERSION layer by the per-plugin host-DLL-grounded HostVersionCouplingTests.
+        File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
+            "<Project><ItemGroup>"
+            + "<PackageVersion Include=\"Newtonsoft.Json\" Version=\"13.0.3\" />"
+            + "</ItemGroup></Project>");
+        var h = new Harness(_tempRepo);
+        Assert.True(h.DirectoryPackagesProps_HostVersionsMatchCanonical().Passed);
+    }
+
+    [Fact]
+    public void HostVersions_NonLiteralVersionExpression_FailsLoud()
+    {
+        // A host-coupled package pinned to an MSBuild expression can't be statically verified for
+        // parity (and defeats the greppability the literal-pin philosophy depends on). The guard
+        // must fail with an actionable message, not silently miscompare the raw "$(...)" string.
+        File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
+            "<Project><ItemGroup>"
+            + "<PackageVersion Include=\"NLog\" Version=\"$(NLogVersion)\" />"
+            + "</ItemGroup></Project>");
+        var h = new Harness(_tempRepo);
+        var r = h.DirectoryPackagesProps_HostVersionsMatchCanonical();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("NLog") && e.Contains("literal"));
+    }
+
     // --- Aggregator ---
 
     [Fact]
