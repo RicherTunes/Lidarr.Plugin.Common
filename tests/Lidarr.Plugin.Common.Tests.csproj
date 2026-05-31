@@ -30,6 +30,8 @@
   <!-- Include golden fixture files as embedded resources -->
   <ItemGroup>
     <None Include="fixtures\**\*.json" CopyToOutputDirectory="PreserveNewest" />
+    <!-- DASH manifest golden fixtures for DashManifestParser tests -->
+    <None Include="fixtures\**\*.mpd" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
