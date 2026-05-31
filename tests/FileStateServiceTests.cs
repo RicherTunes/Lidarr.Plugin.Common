@@ -260,7 +260,6 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
-        [Trait("State", "Quarantined")]  // Quarantined 2026-02-05: Pre-existing Int32 type coercion failure on all platforms - Issue #318
         public async Task LoadAsync_MultipleTypes_RestoresAll()
         {
             var data = new Dictionary<string, object>
@@ -636,7 +635,6 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
-        [Trait("State", "Quarantined")]  // Quarantined 2026-02-05: Pre-existing Int32 type coercion failure on all platforms - Issue #318
         public async Task SaveLoad_RoundTrip_Integer_PreservesValue()
         {
             var service = CreateService();
