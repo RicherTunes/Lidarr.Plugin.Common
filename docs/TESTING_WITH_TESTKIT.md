@@ -116,7 +116,7 @@ This prevents false positives when testing against local or mock services. Pass 
 
 All plugins should use the shared test runner module from Common to ensure consistent behavior:
 
-**Location**: `ext/Lidarr.Plugin.Common/scripts/lib/test-runner.psm1`
+**Location**: `scripts/lib/test-runner.psm1`
 
 ### Available Functions
 
@@ -136,7 +136,7 @@ All plugins should use the shared test runner module from Common to ensure consi
 
 ```powershell
 # In your plugin's scripts/test.ps1
-$CommonScripts = Join-Path $PSScriptRoot "../../ext/Lidarr.Plugin.Common/scripts/lib"
+$CommonScripts = Join-Path $PSScriptRoot "../../scripts/lib"
 Import-Module (Join-Path $CommonScripts "test-runner.psm1") -Force
 
 # Use shared functions
@@ -153,7 +153,7 @@ if ($summary) { Write-TestSummary -Summary $summary }
 ### Migration Path
 
 Existing plugin scripts can gradually adopt the module:
-1. Import the module at script start
+1. Import the module at script start from `scripts/lib/test-runner.psm1`
 2. Replace TRX parsing with `Get-TrxTestSummary`
 3. Replace freshness checks with `Test-ArtifactFreshness`
 4. Replace assembly discovery with `Find-PluginAssembly`
