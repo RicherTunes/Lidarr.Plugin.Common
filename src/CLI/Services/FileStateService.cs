@@ -75,7 +75,7 @@ namespace Lidarr.Plugin.Common.CLI.Services
 
         public Task<T> GetAsync<T>(string key)
         {
-            if (_state.TryGetValue(key, out var value) && value is T typedValue)
+            if (_state.TryGetValue(key, out var value) && TryCoerce<T>(value, out var typedValue))
             {
                 return Task.FromResult(typedValue);
             }
@@ -86,11 +86,55 @@ namespace Lidarr.Plugin.Common.CLI.Services
 
         public Task<T?> TryGetAsync<T>(string key)
         {
-            if (_state.TryGetValue(key, out var value) && value is T typedValue)
+            if (_state.TryGetValue(key, out var value) && TryCoerce<T>(value, out var typedValue))
             {
                 return Task.FromResult<T?>(typedValue);
             }
             return Task.FromResult<T?>(default);
+        }
+
+        /// <summary>
+        /// Coerces a stored value to the requested target type <typeparamref name="T"/>.
+        /// JSON deserialization boxes numbers as Int64/Double, so a value originally stored as
+        /// (e.g.) Int32 returns as a boxed Int64 after a save/load round-trip. This honors the
+        /// caller's requested type by converting compatible primitives, preserving type fidelity
+        /// for plugin settings (quality level, limits, etc.).
+        /// </summary>
+        private static bool TryCoerce<T>(object? value, out T result)
+        {
+            if (value is T typedValue)
+            {
+                result = typedValue;
+                return true;
+            }
+
+            if (value == null)
+            {
+                result = default!;
+                return false;
+            }
+
+            try
+            {
+                var targetType = typeof(T);
+                var underlyingType = Nullable.GetUnderlyingType(targetType) ?? targetType;
+
+                // Only attempt conversion between convertible (primitive/IConvertible) types.
+                // This restores Int32/Int64/Double/Decimal/etc. faithfully without forcing
+                // unrelated reference-type mismatches to succeed.
+                if (value is IConvertible && typeof(IConvertible).IsAssignableFrom(underlyingType))
+                {
+                    result = (T)Convert.ChangeType(value, underlyingType);
+                    return true;
+                }
+            }
+            catch (Exception ex) when (ex is InvalidCastException or FormatException or OverflowException)
+            {
+                // Not convertible to the requested type; fall through to failure.
+            }
+
+            result = default!;
+            return false;
         }
 
         public Task<bool> ExistsAsync(string key)
