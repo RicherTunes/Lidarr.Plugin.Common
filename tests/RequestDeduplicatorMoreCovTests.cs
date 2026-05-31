@@ -53,6 +53,49 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal("discography_empty", key);
         }
 
+        [Theory]
+        // Names whose length shrinks once non-word chars are stripped (or which become empty)
+        // crashed the old Substring(0, original.Length) bound with ArgumentOutOfRangeException.
+        [InlineData("AC/DC")]              // -> "acdc" (4) but bounded by original length 5
+        [InlineData("P!nk")]              // -> "pnk" (3) bounded by 4
+        [InlineData("Panic! at the Disco")]
+        [InlineData("***")]               // -> "" (0) bounded by 3 — non-whitespace so not short-circuited
+        [InlineData("!!!")]               // "Chk Chk Chk"
+        public void CreateSearchKey_DoesNotThrow_ForNamesShortenedByNormalization(string artist)
+        {
+            using var deduper = new RequestDeduplicator(NullLogger<RequestDeduplicator>.Instance);
+
+            var ex = Record.Exception(() => deduper.CreateSearchKey(artist, "Some Album!!"));
+
+            Assert.Null(ex);
+        }
+
+        [Theory]
+        [InlineData("AC/DC")]
+        [InlineData("***")]
+        public void CreateDiscographyKey_DoesNotThrow_ForNamesShortenedByNormalization(string artist)
+        {
+            using var deduper = new RequestDeduplicator(NullLogger<RequestDeduplicator>.Instance);
+
+            var ex = Record.Exception(() => deduper.CreateDiscographyKey(artist));
+
+            Assert.Null(ex);
+        }
+
+        [Fact]
+        public void CreateSearchKey_TruncatesLongComponents_To50Chars()
+        {
+            using var deduper = new RequestDeduplicator(NullLogger<RequestDeduplicator>.Instance);
+
+            // 80 word chars -> after normalization should be capped at 50 in the component.
+            var longName = new string('a', 80);
+            var key = deduper.CreateSearchKey(longName);
+
+            // Key shape is "search_artist_<normalized>"; the normalized component must be <= 50.
+            var component = key.Substring("search_artist_".Length);
+            Assert.True(component.Length <= 50, $"component length {component.Length} should be <= 50");
+        }
+
         [Fact]
         public async Task GetOrCreateAsync_PropagatesFactoryException_WhenFactoryThrows()
         {
