@@ -68,3 +68,44 @@ Lidarr.Plugin.Common.Services.Http.IHttpRequestSigner
 Lidarr.Plugin.Common.Services.Http.IHttpRequestSigner.RequiresSigning(string! endpoint) -> bool
 Lidarr.Plugin.Common.Services.Http.IHttpRequestSigner.Sign(System.Net.Http.HttpRequestMessage! request) -> void
 Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder.WithSigner(Lidarr.Plugin.Common.Services.Http.IHttpRequestSigner! signer) -> Lidarr.Plugin.Common.Services.Http.StreamingApiRequestBuilder!
+Lidarr.Plugin.Common.Services.Streaming.Manifests.IStreamManifestParser
+Lidarr.Plugin.Common.Services.Streaming.Manifests.IStreamManifestParser.CanParse(string! mimeTypeOrContent) -> bool
+Lidarr.Plugin.Common.Services.Streaming.Manifests.IStreamManifestParser.Parse(string! manifestContent, string! baseUrl) -> Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest!
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.StreamManifest(System.Collections.Generic.IReadOnlyList<Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant!>! Variants, System.Collections.Generic.IReadOnlyList<Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamSegment!>! Segments, string! Codec, string! FileExtension, bool IsEncrypted, string? KeyId, string? Pssh) -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.Variants.get -> System.Collections.Generic.IReadOnlyList<Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant!>!
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.Variants.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.Segments.get -> System.Collections.Generic.IReadOnlyList<Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamSegment!>!
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.Segments.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.Codec.get -> string!
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.Codec.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.FileExtension.get -> string!
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.FileExtension.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.IsEncrypted.get -> bool
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.IsEncrypted.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.KeyId.get -> string?
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.KeyId.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.Pssh.get -> string?
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest.Pssh.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant.StreamVariant(int BandwidthBps, string! Url, string? Codec) -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant.BandwidthBps.get -> int
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant.BandwidthBps.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant.Url.get -> string!
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant.Url.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant.Codec.get -> string?
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant.Codec.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamSegment
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamSegment.StreamSegment(int Index, string! Url, double? DurationSeconds) -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamSegment.Index.get -> int
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamSegment.Index.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamSegment.Url.get -> string!
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamSegment.Url.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamSegment.DurationSeconds.get -> double?
+Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamSegment.DurationSeconds.init -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.DashManifestParser
+Lidarr.Plugin.Common.Services.Streaming.Manifests.DashManifestParser.DashManifestParser() -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.DashManifestParser.CanParse(string! mimeTypeOrContent) -> bool
+Lidarr.Plugin.Common.Services.Streaming.Manifests.DashManifestParser.Parse(string! manifestContent, string! baseUrl) -> Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest!
+Lidarr.Plugin.Common.Services.Streaming.Manifests.QualitySelector
+static Lidarr.Plugin.Common.Services.Streaming.Manifests.QualitySelector.SelectByBandwidthCeiling(System.Collections.Generic.IReadOnlyList<Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant!>! variants, int ceilingBps) -> Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant?

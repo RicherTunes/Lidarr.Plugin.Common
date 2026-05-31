@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Golden fixture: multi-Representation DASH audio manifest using a duration-based
+  SegmentTemplate (no SegmentTimeline). Shape mirrors Amazon Music's getDashManifestsV2.
+  Pins:
+    1. Variant list = one StreamVariant per Representation (3 here), with bandwidth + codec.
+    2. Duration-based segment count = ceil(mediaPresentationDuration / (duration/timescale)).
+       mediaPresentationDuration=PT20S, duration=48000, timescale=48000 => 1.0s per segment
+       => ceil(20/1) = 20 media segments + 1 init = 21 total, numbered from startNumber=1.
+    3. $Number$ (unpadded) and $Bandwidth$ substitution; relative URLs resolved against the
+       fetch base URL (no <BaseURL> element present).
+    4. No ContentProtection => IsEncrypted=false, Pssh/KeyId null.
+  Segments are generated from the HIGHEST-bandwidth Representation (hi -> bandwidth 256000).
+-->
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011"
+     profiles="urn:mpeg:dash:profile:isoff-live:2011"
+     type="static"
+     mediaPresentationDuration="PT20S"
+     minBufferTime="PT2S">
+  <Period>
+    <AdaptationSet contentType="audio" mimeType="audio/mp4" segmentAlignment="true">
+      <Representation id="lo" codecs="mp4a.40.2" bandwidth="64000" audioSamplingRate="44100">
+        <SegmentTemplate initialization="$RepresentationID$/init.mp4"
+                         media="$RepresentationID$/seg-$Number$-$Bandwidth$.m4s"
+                         timescale="48000"
+                         duration="48000"
+                         startNumber="1"/>
+      </Representation>
+      <Representation id="mid" codecs="mp4a.40.2" bandwidth="128000" audioSamplingRate="44100">
+        <SegmentTemplate initialization="$RepresentationID$/init.mp4"
+                         media="$RepresentationID$/seg-$Number$-$Bandwidth$.m4s"
+                         timescale="48000"
+                         duration="48000"
+                         startNumber="1"/>
+      </Representation>
+      <Representation id="hi" codecs="mp4a.40.2" bandwidth="256000" audioSamplingRate="48000">
+        <SegmentTemplate initialization="$RepresentationID$/init.mp4"
+                         media="$RepresentationID$/seg-$Number$-$Bandwidth$.m4s"
+                         timescale="48000"
+                         duration="48000"
+                         startNumber="1"/>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
