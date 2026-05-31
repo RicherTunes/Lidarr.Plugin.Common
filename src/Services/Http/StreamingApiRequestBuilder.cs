@@ -24,6 +24,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         private TimeSpan? _timeout;
         private ResiliencePolicy _policy;
         private string _authScopeToken;
+        private IHttpRequestSigner _signer;
 
         public StreamingApiRequestBuilder(string baseUrl)
         {
@@ -237,6 +238,19 @@ namespace Lidarr.Plugin.Common.Services.Http
         }
 
         /// <summary>
+        /// Attaches a request-level signer invoked by <see cref="Build"/> as the last mutation of the
+        /// constructed request (after URL, headers, and content are final). When set and
+        /// <see cref="IHttpRequestSigner.RequiresSigning"/> returns <c>true</c> for this request's
+        /// endpoint, the signer mutates the request in place (e.g. adds canonical/signature headers).
+        /// All signing math lives in the signer; the builder only invokes the seam.
+        /// </summary>
+        public StreamingApiRequestBuilder WithSigner(IHttpRequestSigner signer)
+        {
+            _signer = signer ?? throw new ArgumentNullException(nameof(signer));
+            return this;
+        }
+
+        /// <summary>
         /// Adds cache control headers to prevent caching.
         /// </summary>
         public StreamingApiRequestBuilder NoCache()
@@ -305,6 +319,19 @@ namespace Lidarr.Plugin.Common.Services.Http
             catch
             {
                 // Options are best-effort; avoid throwing from builder
+            }
+
+            // Request-level signing is the LAST mutation: the URL, headers, and content are now all
+            // final, so a signer may canonicalize over the complete request. Unlike the best-effort
+            // Options block above, signing failures are NOT swallowed — a missing/invalid signature
+            // would otherwise surface only as an opaque downstream 401/403.
+            if (_signer != null)
+            {
+                var endpointForSigning = string.IsNullOrWhiteSpace(_endpoint) ? string.Empty : "/" + _endpoint;
+                if (_signer.RequiresSigning(endpointForSigning))
+                {
+                    _signer.Sign(request);
+                }
             }
 
             return request;

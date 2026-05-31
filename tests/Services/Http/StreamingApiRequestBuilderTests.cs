@@ -581,6 +581,127 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
 
         #endregion
 
+        #region WithSigner
+
+        /// <summary>
+        /// Records each <see cref="IHttpRequestSigner.Sign"/> invocation and a snapshot of the request
+        /// state at signing time, so tests can assert the signer ran exactly once and saw the FINAL
+        /// request (URL + headers + body all present).
+        /// </summary>
+        private sealed class RecordingSigner : IHttpRequestSigner
+        {
+            private readonly bool _requiresSigning;
+
+            public RecordingSigner(bool requiresSigning) => _requiresSigning = requiresSigning;
+
+            public int RequiresSigningCalls { get; private set; }
+            public int SignCalls { get; private set; }
+            public string? SeenEndpoint { get; private set; }
+
+            // Snapshot of the request as it was when Sign() ran.
+            public bool SawAuthorizationHeader { get; private set; }
+            public bool SawContent { get; private set; }
+
+            public bool RequiresSigning(string endpoint)
+            {
+                RequiresSigningCalls++;
+                SeenEndpoint = endpoint;
+                return _requiresSigning;
+            }
+
+            public void Sign(HttpRequestMessage request)
+            {
+                SignCalls++;
+                SawAuthorizationHeader = request.Headers.Contains("Authorization");
+                SawContent = request.Content != null;
+                // A real signer would add canonical/signature headers here; we just mark that it ran.
+                request.Headers.TryAddWithoutValidation("X-Signature", "signed");
+            }
+        }
+
+        [Fact]
+        public void WithSigner_Null_ThrowsArgumentNullException()
+        {
+            Assert.Throws<ArgumentNullException>(() =>
+                new StreamingApiRequestBuilder(BaseUrl).WithSigner(null!));
+        }
+
+        [Fact]
+        public void Build_NoSigner_DoesNotSign()
+        {
+            // No signer attached: build must not add any signature.
+            var request = new StreamingApiRequestBuilder(BaseUrl)
+                .Endpoint("search")
+                .Build();
+
+            Assert.False(request.Headers.Contains("X-Signature"));
+        }
+
+        [Fact]
+        public void Build_SignerRequiresSigningFalse_DoesNotSign()
+        {
+            var signer = new RecordingSigner(requiresSigning: false);
+
+            var request = new StreamingApiRequestBuilder(BaseUrl)
+                .Endpoint("search")
+                .WithSigner(signer)
+                .Build();
+
+            Assert.Equal(1, signer.RequiresSigningCalls);
+            Assert.Equal(0, signer.SignCalls);
+            Assert.False(request.Headers.Contains("X-Signature"));
+        }
+
+        [Fact]
+        public void Build_SignerRequiresSigningTrue_SignsExactlyOnce()
+        {
+            var signer = new RecordingSigner(requiresSigning: true);
+
+            var request = new StreamingApiRequestBuilder(BaseUrl)
+                .Endpoint("orders")
+                .WithSigner(signer)
+                .Build();
+
+            Assert.Equal(1, signer.SignCalls);
+            Assert.True(request.Headers.Contains("X-Signature"));
+        }
+
+        [Fact]
+        public void Build_Signer_ReceivesLeadingSlashEndpoint()
+        {
+            var signer = new RecordingSigner(requiresSigning: true);
+
+            new StreamingApiRequestBuilder(BaseUrl)
+                .Endpoint("/v2/orders")
+                .WithSigner(signer)
+                .Build();
+
+            // Matches the canonical endpoint form the builder uses for request Options.
+            Assert.Equal("/v2/orders", signer.SeenEndpoint);
+        }
+
+        [Fact]
+        public void Build_Signer_RunsLast_SeesFinalHeadersAndBody()
+        {
+            // The signer must observe the request AFTER URL, headers, and content are all set,
+            // so a real implementation can canonicalize over the complete request.
+            var signer = new RecordingSigner(requiresSigning: true);
+
+            new StreamingApiRequestBuilder(BaseUrl)
+                .Endpoint("orders")
+                .Post()
+                .BearerToken("tok123")
+                .JsonBody(new { item = "abc" })
+                .WithSigner(signer)
+                .Build();
+
+            Assert.Equal(1, signer.SignCalls);
+            Assert.True(signer.SawAuthorizationHeader); // header was applied before signing
+            Assert.True(signer.SawContent);             // body was applied before signing
+        }
+
+        #endregion
+
         #region Fluent Chaining
 
         [Fact]
