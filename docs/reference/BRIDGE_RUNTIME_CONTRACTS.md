@@ -52,7 +52,7 @@ latch built on top of a registered `IAuthFailureHandler`.
 | `IsHealthy` | `true` when status is `Authenticated` or `Unknown` (initial). |
 | `EnsureCanProceed()` | Throws `AuthGatedException` (carrying `RetryAfter`) when status is `Failed`/`Expired`. |
 | `TryAcquireProbeSlot()` | When healthy, always `true`. When latched bad, returns `true` at most once per `probeInterval` (default 60s) so the plugin can attempt a single network call to detect that re-auth succeeded. |
-| `ForceReset()` | Clear latch + probe budget; used by `IAuthFailureGateRegistry.Reset(key)` for settings-UI "Test Connection" flows. |
+| `ForceReset()` | Clear latch + probe budget; used by `IAuthFailureGateRegistry.Reset(key)` for settings-UI "Test Connection" flows. (Note: `IAuthFailureGateRegistry` is Obsolete v1.18.0+; use `ConcurrentDictionary<string, AuthFailureGate>` directly.) |
 | `Metrics` | `AuthFailureGateMetrics` snapshot — counters for `LatchTransitions`, `RecoveryTransitions`, `ProbeAcquired`, `ProbeRejected`, `ProbeRefunded`, plus `LastLatchAt`/`LastRecoveryAt` timestamps. |
 
 #### K-of-N failure threshold
@@ -79,6 +79,8 @@ failures (cancellation, DNS, TLS) so the budget isn't burned on calls that
 never reached the upstream.
 
 #### Multi-provider plugins: IAuthFailureGateRegistry
+
+> ⚠️ **Obsolete (v1.18.0+):** `IAuthFailureGateRegistry` has no non-test plugin consumers per a Wave-26 audit and will be removed in v2.0.0. Manage per-provider `AuthFailureGate` instances directly via `ConcurrentDictionary<string, AuthFailureGate>` instead.
 
 For plugins with N independent credentials (brainarr's 11 LLM providers),
 register the registry instead of a single gate:
@@ -138,7 +140,7 @@ catch (Exception ex) when (LooksLikeAuthFailure(ex))
 - `applemusicarr` — wired into `AppleMusicIndexerAdapter` (cycle 39, prior arc) AND `HttpClientFactory` (wave 6, 50-wave plan) — every catalog + playback HttpClient is gated.
 - `qobuzarr` — wired into `QobuzIndexerAdapter` (cycle 40, closes the original IP-ban incident) AND the bridge `HttpClient` pipeline via `AuthFailureDelegatingHandler` (wave 3).
 - `tidalarr` — wired into `TidalIndexer` (cycle 41) AND 3 of 4 bridge `HttpClient` pipelines (`TidalApiClient`, `TidalOrchestrator`, `TidalChunkDownloader`); `TidalOAuthService` intentionally exempt (wave 4).
-- `brainarr` — wired via `IAuthFailureGateRegistry` per-provider (wave 5). Each LLM provider gets its own gate so a bad OpenAI key doesn't block Anthropic / Ollama / local providers.
+- `brainarr` — wired via `IAuthFailureGateRegistry` per-provider (wave 5). Each LLM provider gets its own gate so a bad OpenAI key doesn't block Anthropic / Ollama / local providers. <!-- TODO(docval): brainarr is test/example-only; no production consumers of `IAuthFailureGateRegistry` were found in Wave-26 audit, and the interface is now Obsolete. -->
 
 ## IIndexerStatusReporter
 
