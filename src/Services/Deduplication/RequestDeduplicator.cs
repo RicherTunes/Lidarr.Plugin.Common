@@ -255,12 +255,15 @@ namespace Lidarr.Plugin.Common.Services.Deduplication
             if (string.IsNullOrWhiteSpace(component))
                 return "empty";
 
-            // Remove special characters and normalize case
-            return System.Text.RegularExpressions.Regex.Replace(
+            // Remove special characters and normalize case. Stripping non-word chars can shorten
+            // the string (e.g. "AC/DC" -> "acdc"), so the length cap must use the transformed
+            // string's length — bounding by the original component.Length threw
+            // ArgumentOutOfRangeException for punctuated names.
+            var normalized = System.Text.RegularExpressions.Regex.Replace(
                 component.ToLowerInvariant().Trim(),
                 @"[^\w\s]", "")
-                .Replace(" ", "_")
-                .Substring(0, Math.Min(component.Length, 50)); // Limit length
+                .Replace(" ", "_");
+            return normalized.Substring(0, Math.Min(normalized.Length, 50)); // Limit length
         }
 
         /// <summary>
