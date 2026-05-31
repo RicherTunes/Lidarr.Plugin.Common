@@ -1,5 +1,7 @@
 param(
-  [string[]] $Tfms = @("net8.0","net6.0"),
+  # net8.0 only — .NET 6 support was retired 2026-03-31 (the compat build was dropped).
+  # Passing a retired TFM now throws (its src/PublicAPI baseline is gone), which is intentional.
+  [string[]] $Tfms = @("net8.0"),
   [switch] $SkipPack
 )
 
