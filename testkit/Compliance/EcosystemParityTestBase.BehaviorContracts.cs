@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using Lidarr.Plugin.Common.Services.Download;
 
 namespace Lidarr.Plugin.Common.TestKit.Compliance;
 
@@ -732,6 +733,37 @@ public abstract partial class EcosystemParityTestBase
 
     #region Aggregator
 
+    #region Check_EnforcesAlbumCompletionPolicy
+
+    /// <summary>
+    /// Every streaming plugin must share one album-completion rule: an incomplete album (any
+    /// track missing) is NOT a successful download, so it is reported Failed (Lidarr blocklists
+    /// + re-searches / falls back) rather than Completed (which Lidarr permanently rejects as
+    /// "Has missing tracks", silently wasting the downloaded files). The rule lives in
+    /// <see cref="AlbumCompletionPolicy"/>; this guard pins it in every plugin's pinned Common,
+    /// so a plugin that delegates to it provably inherits the fix and cannot regress to
+    /// "partial album == success". (Was a live qobuz regression: Aphex Twin – Drukqs, 29/30.)
+    /// Unlike the other behavior checks this needs no <see cref="PluginAssembly"/> — it asserts
+    /// the shared rule directly, so it runs for every plugin regardless of opt-in.
+    /// </summary>
+    public virtual ComplianceResult Check_EnforcesAlbumCompletionPolicy()
+    {
+        var errors = new List<string>();
+
+        // Incomplete must never be successful — not even above the success-rate threshold.
+        if (AlbumCompletionPolicy.IsAlbumDownloadSuccessful(totalTracks: 30, successfulTracks: 29))
+            errors.Add("AlbumCompletionPolicy treats 29/30 as successful; an incomplete album must report Failed.");
+        if (AlbumCompletionPolicy.IsAlbumDownloadSuccessful(totalTracks: 10, successfulTracks: 8))
+            errors.Add("AlbumCompletionPolicy treats 8/10 as successful; an incomplete album must report Failed.");
+        // A complete album must be successful.
+        if (!AlbumCompletionPolicy.IsAlbumDownloadSuccessful(totalTracks: 10, successfulTracks: 10))
+            errors.Add("AlbumCompletionPolicy treats a complete 10/10 album as unsuccessful.");
+
+        return errors.Count == 0 ? ComplianceResult.Success : new ComplianceResult(false, errors);
+    }
+
+    #endregion
+
     /// <summary>
     /// Runs the behavior-contract checks. Returns a separate report so callers can decide
     /// whether to combine with structural results.
@@ -740,6 +772,7 @@ public abstract partial class EcosystemParityTestBase
     {
         var results = new Dictionary<string, ComplianceResult>
         {
+            [nameof(Check_EnforcesAlbumCompletionPolicy)] = Check_EnforcesAlbumCompletionPolicy(),
             [nameof(Check_UsesCommonFileTokenStore)] = Check_UsesCommonFileTokenStore(),
             [nameof(Check_UsesCommonHttpResponseCache)] = Check_UsesCommonHttpResponseCache(),
             [nameof(Check_RegistersBridgeDefaults)] = Check_RegistersBridgeDefaults(),
