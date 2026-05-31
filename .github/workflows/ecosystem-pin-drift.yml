@@ -1,0 +1,36 @@
+name: Ecosystem Pin Drift
+
+# Asserts the streaming plugins all pin the SAME Lidarr.Plugin.Common SHA, so a shared-behavior fix
+# in Common reaches every plugin. Complements the per-plugin verify-common-pins.yml (within-plugin
+# gitlink<->sentinel consistency) with the cross-repo agreement layer.
+#
+# Scheduled (drift alarm) + on-demand. Reads each plugin's ext-common-sha.txt via the GitHub API.
+# Uses ECOSYSTEM_PAT if present (can read private applemusicarr); otherwise falls back to the default
+# token, under which private repos are reported "unreadable" and excluded rather than failing — matching
+# how ecosystem-notify.yml already handles the private repo.
+
+on:
+  schedule:
+    - cron: '17 6 * * *'   # daily 06:17 UTC
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ecosystem-pin-drift
+  cancel-in-progress: false
+
+jobs:
+  check-pins:
+    name: Check cross-repo Common pin agreement
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check ecosystem Common-pin agreement
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.ECOSYSTEM_PAT || github.token }}
+        run: ./scripts/check-ecosystem-pins.ps1
