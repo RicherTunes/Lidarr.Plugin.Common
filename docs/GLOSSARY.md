@@ -63,6 +63,44 @@ Secret key paired with App ID. Should be kept confidential.
 
 ## Plugin Architecture Terms
 
+### HostBridge
+Subsystem of helpers lifted from identical implementations across streaming plugins. Provides download orchestration, runtime caching, size estimation, path safety, and placeholder URI round-tripping. → [HOSTBRIDGE.md](HOSTBRIDGE.md)
+
+### StreamingPlugin
+Base class (`StreamingPlugin<TModule, TSettings>`) that wires DI, settings lifecycle, manifest loading, and the host bridge for a streaming-service plugin. → [Plugin Bridge](PLUGIN_BRIDGE.md)
+
+### StreamingPluginModule
+Base class for streaming-service plugin modules. Handles DI registration and service wiring.
+
+### PluginPack
+PowerShell module (`tools/PluginPack.psm1`) that standardizes build, manifest validation, and ZIP packaging for Lidarr plugins. → [PACKAGING.md](PACKAGING.md)
+
+### AuthFailureGate
+A per-endpoint circuit that tracks authentication failures and trips when a threshold is reached. Used with `IAuthFailureHandler` implementations (e.g., `SlidingWindowAuthFailureHandler`).
+
+### PluginCapability
+Attribute/tag system that declares which capabilities a plugin provides (Indexer, DownloadClient, ImportList).
+
+### TestKit
+Reusable test infrastructure for Lidarr plugins: HTTP handler fakes, ALC harnesses, fixture caching, and ecosystem-parity guard tests. → [Testing with the TestKit](TESTING_WITH_TESTKIT.md)
+
+### Parity Lint
+Automated lint that enforces API and behavioural consistency across the streaming-plugin family (Tidalarr, Qobuzarr, AppleMusicarr, Brainarr).
+
+### Runtime Cache
+`HostBridgeRuntimeCache<TRuntime, TSettings>` — per-plugin singleton cache keyed on settings instance, for storing runtime state that survives client re-instantiation.
+
+### PluginManifest
+`plugin.json` metadata file describing the plugin: name, version, capabilities, and assembly references. → [MANIFEST.md](reference/MANIFEST.md)
+
+### Bridge Defaults
+Convention-based default settings and service registrations that the streaming plugin bridge applies automatically when no override is provided.
+
+### SettingDefinition
+Describes a single plugin setting: key, display name, type, required/sensitive flags, and default value. Used by `ISettingsProvider.Describe()`.
+
+## Plugin Architecture Terms (legacy)
+
 ### Indexer
 Component that searches the streaming service for content. Returns search results to Lidarr.
 

@@ -6,6 +6,8 @@ Each entry is a one-line purpose and a link to its source; full details live in 
 For architecture context, see [Architecture Overview](Architecture-Overview.md) and the
 [doc hub](../docs/README.md).
 
+**See also:** [Key Services Reference](../docs/reference/KEY_SERVICES.md) — code-example–rich canonical page covering overlapping services.
+
 ---
 
 ## Security
