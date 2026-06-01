@@ -64,6 +64,31 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal(pt[16..32], segment.AsSpan(dataOffset + 16, 16).ToArray());
         }
 
+        // A valid segment whose trun omits per-sample sizes (uses tfhd default_sample_size) must decrypt,
+        // not throw. tfhd: default-base-is-moof (0x20000) + default-sample-size (0x10) = flags 0x020010.
+        [Fact]
+        public void DecryptSegmentInPlace_TrunOmitsSizes_UsesTfhdDefaultSampleSize()
+        {
+            var key = Convert.FromHexString("2b7e151628aed2a6abf7158809cf4f3c");
+            var iv = Convert.FromHexString("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
+            var ct = Convert.FromHexString("874d6191b620e3261bef6864990db6ce");
+            var pt = Convert.FromHexString("6bc1bee22e409f96e93d7e117393172a");
+
+            var tfhd = Box("tfhd", Concat(new byte[] { 0x00, 0x02, 0x00, 0x10 }, Be32(1), Be32(16))); // default_sample_size=16
+            var senc = Box("senc", Concat(new byte[] { 0, 0, 0, 0 }, Be32(1), iv));
+            var trun = Box("trun", Concat(new byte[] { 0x00, 0x00, 0x00, 0x01 }, Be32(1), Be32(96))); // data-offset only, count 1
+            var moof = Box("moof", Box("traf", Concat(tfhd, trun, senc)));
+            var segment = Concat(moof, Box("mdat", ct));
+
+            Assert.Equal(96, moof.Length + 8); // data_offset sanity
+
+            var tenc = new TencDefaults(true, 16, new byte[16], 0, 0, null);
+            var n = CencSegmentDecryptor.DecryptSegmentInPlace(segment, key, CencProtectionScheme.Cenc, tenc);
+
+            Assert.Equal(1, n);
+            Assert.Equal(pt, segment.AsSpan(96, 16).ToArray());
+        }
+
         [Fact]
         public void DecryptSegmentInPlace_NoMoof_Throws()
         {

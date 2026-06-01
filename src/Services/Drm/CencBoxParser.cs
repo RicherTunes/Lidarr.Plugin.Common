@@ -12,7 +12,7 @@ namespace Lidarr.Plugin.Common.Services.Drm
     /// Track-run info from a 'trun' box: the byte offset of the run's first sample (relative to the moof,
     /// when present) and the per-sample sizes used to slice each sample out of 'mdat'.
     /// </summary>
-    public sealed record TrunInfo(int? DataOffset, IReadOnlyList<long> SampleSizes);
+    public sealed record TrunInfo(int? DataOffset, long SampleCount, IReadOnlyList<long> SampleSizes);
 
     /// <summary>
     /// Track-fragment header info from a 'tfhd' box: the track ID, the explicit base_data_offset (when
@@ -240,7 +240,7 @@ namespace Lidarr.Plugin.Common.Services.Drm
 
             // perSample == 0: the run carries no per-sample records, so there is nothing to read per sample
             // and no loop runs (a huge sample_count can't burn CPU here).
-            return new TrunInfo(dataOffset, sizes);
+            return new TrunInfo(dataOffset, sampleCount, sizes);
         }
 
         /// <summary>

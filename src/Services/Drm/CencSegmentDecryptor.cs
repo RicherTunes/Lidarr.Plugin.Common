@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Lidarr.Plugin.Common.Services.Drm
 {
@@ -38,24 +39,47 @@ namespace Lidarr.Plugin.Common.Services.Drm
             var senc = CencBoxParser.ParseSenc(ro.Slice(sencBox.PayloadOffset, sencBox.PayloadLength), tenc.PerSampleIvSize);
             var trun = CencBoxParser.ParseTrun(ro.Slice(trunBox.PayloadOffset, trunBox.PayloadLength));
 
-            if (trun.DataOffset is null)
-            {
-                throw new ArgumentException("trun has no data_offset; cannot locate samples in mdat.", nameof(segment));
-            }
+            // tfhd (optional) supplies the sample-data anchor and the default sample size when trun omits sizes.
+            var tfhdBox = Mp4BoxWalker.FindFirst(ro, "tfhd");
+            var tfhd = tfhdBox is null ? null : CencBoxParser.ParseTfhd(ro.Slice(tfhdBox.PayloadOffset, tfhdBox.PayloadLength));
 
-            if (trun.SampleSizes.Count != senc.Count)
+            // senc.Count is bounded by the senc box capacity guard — use it as the authoritative sample count
+            // (a huge trun sample_count is rejected here rather than driving an allocation).
+            if (trun.SampleCount != senc.Count)
             {
                 throw new ArgumentException(
-                    $"sample-count mismatch: senc has {senc.Count}, trun has {trun.SampleSizes.Count}.", nameof(segment));
+                    $"sample-count mismatch: senc has {senc.Count}, trun declares {trun.SampleCount}.", nameof(segment));
             }
 
-            // data_offset is relative to the moof box start (the DASH/CMAF default-base-is-moof convention).
-            int sampleStart = moof.Offset + trun.DataOffset.Value;
+            // Per-sample sizes: explicit trun sizes, else the tfhd default_sample_size for every sample.
+            IReadOnlyList<long> sizes;
+            if (trun.SampleSizes.Count == senc.Count)
+            {
+                sizes = trun.SampleSizes;
+            }
+            else if (trun.SampleSizes.Count == 0 && tfhd?.DefaultSampleSize is uint defaultSize)
+            {
+                var filled = new long[senc.Count];
+                Array.Fill(filled, defaultSize);
+                sizes = filled;
+            }
+            else
+            {
+                throw new ArgumentException(
+                    "trun omits per-sample sizes and tfhd has no default_sample_size.", nameof(segment));
+            }
+
+            // Sample-data anchor: an explicit base_data_offset (unless default-base-is-moof overrides it),
+            // otherwise the enclosing moof start (the CMAF default). data_offset is added to the anchor.
+            int anchor = (tfhd is { BaseDataOffset: long bdo, DefaultBaseIsMoof: false })
+                ? checked((int)bdo)
+                : moof.Offset;
+            int sampleStart = anchor + (trun.DataOffset ?? 0);
 
             using var decryptor = new CencDecryptor(key, scheme);
             for (int i = 0; i < senc.Count; i++)
             {
-                long size = trun.SampleSizes[i];
+                long size = sizes[i];
                 if (size > int.MaxValue)
                 {
                     throw new ArgumentException($"sample {i} size {size} exceeds Int32.", nameof(segment));
