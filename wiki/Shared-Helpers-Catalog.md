@@ -133,6 +133,24 @@ The Claude Code provider implementation is in [`Providers/ClaudeCode/`](../src/P
 
 ---
 
+## CLI Framework
+
+Streaming plugins that ship a standalone CLI inherit from `BaseStreamingCLI<TSettings>`, which provides 80%+ of the command-line logic out of the box. Six command classes are included:
+
+| Helper | Purpose | Source |
+|--------|---------|--------|
+| `BaseStreamingCLI<TSettings>` | Base CLI framework (DI, config, logging, root command wiring) | [`CLI/BaseStreamingCLI.cs`](../src/CLI/BaseStreamingCLI.cs) |
+| `AuthCommand<T>` | `auth login/logout/status` subcommands | [`CLI/Commands/BaseCommand.cs`](../src/CLI/Commands/BaseCommand.cs) |
+| `SearchCommand<T>` | `search --limit` subcommand | [`CLI/Commands/BaseCommand.cs`](../src/CLI/Commands/BaseCommand.cs) |
+| `DownloadCommand<T>` | `download --output` subcommand | [`CLI/Commands/BaseCommand.cs`](../src/CLI/Commands/BaseCommand.cs) |
+| `ConfigCommand<T>` | `config show/set/get/reset` subcommands | [`CLI/Commands/BaseCommand.cs`](../src/CLI/Commands/BaseCommand.cs) |
+| `QueueCommand<T>` | `queue status/list/clear/pause/resume/dashboard` subcommands | [`CLI/Commands/BaseCommand.cs`](../src/CLI/Commands/BaseCommand.cs) |
+| `HistoryCommand<T>` | `history show/clear/stats` subcommands | [`CLI/Commands/BaseCommand.cs`](../src/CLI/Commands/BaseCommand.cs) |
+
+Override `ConfigureServices` and `ConfigureCommands` on `BaseStreamingCLI<TSettings>` to add service-specific commands or DI registrations.
+
+---
+
 ## Bridge & Host Integration
 
 | Helper | Purpose | Source |
