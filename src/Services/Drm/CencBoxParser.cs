@@ -15,6 +15,13 @@ namespace Lidarr.Plugin.Common.Services.Drm
     public sealed record TrunInfo(int? DataOffset, IReadOnlyList<long> SampleSizes);
 
     /// <summary>
+    /// Track-fragment header info from a 'tfhd' box: the track ID, the explicit base_data_offset (when
+    /// present), the default_sample_size (used when 'trun' omits per-sample sizes), and whether sample data
+    /// is anchored at the enclosing moof (the default-base-is-moof flag, 0x020000).
+    /// </summary>
+    public sealed record TfhdInfo(uint TrackId, long? BaseDataOffset, uint? DefaultSampleSize, bool DefaultBaseIsMoof);
+
+    /// <summary>
     /// The track-encryption defaults from an ISO/IEC 23001-7 'tenc' box: whether the track is protected, the
     /// per-sample IV size, the default KID, the cbcs crypt:skip pattern, and (when the per-sample IV size is
     /// zero) the default constant IV.
@@ -234,6 +241,61 @@ namespace Lidarr.Plugin.Common.Services.Drm
             // perSample == 0: the run carries no per-sample records, so there is nothing to read per sample
             // and no loop runs (a huge sample_count can't burn CPU here).
             return new TrunInfo(dataOffset, sizes);
+        }
+
+        /// <summary>
+        /// Parses a 'tfhd' box payload (FullBox content from the version byte): track_ID and the optional
+        /// base_data_offset / default_sample_size, plus the default-base-is-moof flag. Bounds-checked.
+        /// </summary>
+        public static TfhdInfo ParseTfhd(ReadOnlySpan<byte> payload)
+        {
+            if (payload.Length < 8) // version(1) flags(3) track_ID(4)
+            {
+                throw new ArgumentException($"tfhd payload too short ({payload.Length} bytes, need >= 8).", nameof(payload));
+            }
+
+            uint flags = (uint)((payload[1] << 16) | (payload[2] << 8) | payload[3]);
+            uint trackId = ReadUInt32(payload, 4);
+            int pos = 8;
+
+            long? baseDataOffset = null;
+            if ((flags & 0x000001) != 0) // base-data-offset-present
+            {
+                RequireTfhd(payload, pos, 8, "base_data_offset");
+                baseDataOffset = (long)(((ulong)ReadUInt32(payload, pos) << 32) | ReadUInt32(payload, pos + 4));
+                pos += 8;
+            }
+
+            if ((flags & 0x000002) != 0) // sample-description-index-present
+            {
+                RequireTfhd(payload, pos, 4, "sample_description_index");
+                pos += 4;
+            }
+
+            if ((flags & 0x000008) != 0) // default-sample-duration-present
+            {
+                RequireTfhd(payload, pos, 4, "default_sample_duration");
+                pos += 4;
+            }
+
+            uint? defaultSampleSize = null;
+            if ((flags & 0x000010) != 0) // default-sample-size-present
+            {
+                RequireTfhd(payload, pos, 4, "default_sample_size");
+                defaultSampleSize = ReadUInt32(payload, pos);
+                pos += 4;
+            }
+
+            bool defaultBaseIsMoof = (flags & 0x020000) != 0;
+            return new TfhdInfo(trackId, baseDataOffset, defaultSampleSize, defaultBaseIsMoof);
+        }
+
+        private static void RequireTfhd(ReadOnlySpan<byte> payload, int pos, int need, string what)
+        {
+            if ((long)pos + need > payload.Length)
+            {
+                throw new ArgumentException($"tfhd box truncated reading {what} (need {need} at {pos}, have {payload.Length}).", nameof(payload));
+            }
         }
 
         private static uint ReadUInt32(ReadOnlySpan<byte> b, int pos)
