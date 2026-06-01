@@ -216,6 +216,57 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Empty(result);
         }
 
+        // ---- stateful instance API (one AES key schedule per track, reused across samples) -------
+
+        [Fact]
+        public void Instance_DecryptSampleInPlace_Cenc_MatchesNistVector()
+        {
+            var key = Convert.FromHexString("2b7e151628aed2a6abf7158809cf4f3c");
+            var iv = Convert.FromHexString("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
+            var data = Convert.FromHexString(
+                "874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff");
+            var expected = Convert.FromHexString(
+                "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51");
+
+            using var decryptor = new CencDecryptor(key, CencProtectionScheme.Cenc);
+            decryptor.DecryptSampleInPlace(data, iv);
+
+            Assert.Equal(expected, data);
+        }
+
+        // One instance (key schedule computed once) decrypts multiple samples, each with its own IV.
+        // Sample 2 starts at NIST CTR counter+2 (two 16-byte blocks consumed by sample 1).
+        [Fact]
+        public void Instance_ReusedAcrossSamples_DecryptsEachWithItsOwnIv()
+        {
+            var key = Convert.FromHexString("2b7e151628aed2a6abf7158809cf4f3c");
+            var ct = Convert.FromHexString(
+                "874d6191b620e3261bef6864990db6ce9806f66b7970fdff8617187bb9fffdff" +
+                "5ae4df3edbd5d35e5b4f09020db03eab1e031dda2fbe03d1792170a0f3009cee");
+            var pt = Convert.FromHexString(
+                "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51" +
+                "30c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710");
+
+            var sample1 = ct[0..32];
+            var sample2 = ct[32..64];
+            var iv1 = Convert.FromHexString("f0f1f2f3f4f5f6f7f8f9fafbfcfdfeff");
+            var iv2 = Convert.FromHexString("f0f1f2f3f4f5f6f7f8f9fafbfcfdff01"); // counter + 2
+
+            using var decryptor = new CencDecryptor(key, CencProtectionScheme.Cenc);
+            decryptor.DecryptSampleInPlace(sample1, iv1);
+            decryptor.DecryptSampleInPlace(sample2, iv2);
+
+            Assert.Equal(pt[0..32], sample1);
+            Assert.Equal(pt[32..64], sample2);
+        }
+
+        [Fact]
+        public void Instance_KeyNot16Bytes_Throws()
+        {
+            var ex = Assert.Throws<ArgumentException>(() => new CencDecryptor(new byte[24], CencProtectionScheme.Cenc));
+            Assert.Equal("key", ex.ParamName);
+        }
+
         private static byte[] Concat(params byte[][] parts) => parts.SelectMany(p => p).ToArray();
     }
 }
