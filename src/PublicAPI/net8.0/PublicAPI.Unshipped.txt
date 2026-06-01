@@ -142,3 +142,34 @@ Lidarr.Plugin.Common.Services.Streaming.Manifests.HlsManifestParser.CanParse(str
 Lidarr.Plugin.Common.Services.Streaming.Manifests.HlsManifestParser.Parse(string! manifestContent, string! baseUrl) -> Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest!
 Lidarr.Plugin.Common.Services.Streaming.Manifests.QualitySelector
 static Lidarr.Plugin.Common.Services.Streaming.Manifests.QualitySelector.SelectByBandwidthCeiling(System.Collections.Generic.IReadOnlyList<Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant!>! variants, int ceilingBps) -> Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant?
+Lidarr.Plugin.Common.HostBridge.AlbumSizeEstimator
+const Lidarr.Plugin.Common.HostBridge.AlbumSizeEstimator.DefaultMinimumSizeBytes = 1048576 -> long
+static Lidarr.Plugin.Common.HostBridge.AlbumSizeEstimator.EstimateBytesFromBitrate(double durationSeconds, double bitsPerSecond, long minimumBytes = 0) -> long
+static Lidarr.Plugin.Common.HostBridge.AlbumSizeEstimator.EstimateDurationSeconds(double albumDurationSeconds, System.Collections.Generic.IReadOnlyCollection<double>? trackDurationsSeconds, int fallbackTrackCount, double averageTrackSeconds, double minimumSeconds = 0) -> double
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.MultiQualityRelease(string! QualityHint, string! Guid, string! DownloadUrl, string! Title, long SizeBytes) -> void
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.QualityHint.get -> string!
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.QualityHint.init -> void
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.Guid.get -> string!
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.Guid.init -> void
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.DownloadUrl.get -> string!
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.DownloadUrl.init -> void
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.Title.get -> string!
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.Title.init -> void
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.SizeBytes.get -> long
+Lidarr.Plugin.Common.HostBridge.MultiQualityRelease.SizeBytes.init -> void
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.MultiQualityReleaseBuilder() -> void
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.AddQuality(string! qualityHint, string? formatMarker, string? extraMarker, double bitsPerSecond) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.Build() -> System.Collections.Generic.IReadOnlyList<Lidarr.Plugin.Common.HostBridge.MultiQualityRelease!>!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithAlbum(string! album) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithAlbumId(string! albumId) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithArtist(string! artist) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithDurationSeconds(double durationSeconds) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithEditionMarker(string? edition) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithExplicitMarker(bool isExplicit) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithLiveMarker(bool isLive) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithMinimumSizeBytes(long minimumBytes) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithReleaseGroup(string! group) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithScheme(string! scheme) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithYear(int? year) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!

@@ -35,6 +35,10 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Added
+- **`AlbumSizeEstimator`** (`Lidarr.Plugin.Common.HostBridge`) — shared release-size estimator: `bytes = durationSeconds × (bitrate ÷ 8)` with an optional floor, plus a duration-fallback ladder (album duration → summed track durations → count × average). Lifts the duplicated `EstimateAlbumSize` (tidalarr) / `QualitySizeCalculator` (qobuzarr) logic into one place. Bitrate is bits-per-second as a `double` so non-round per-quality bitrates (e.g. Qobuz FLAC ≈ 1 411 200 bps) aren't truncated, and double arithmetic avoids the `int × int` overflow a kbps integer formula hits on long hi-res albums.
+- **`MultiQualityReleaseBuilder` / `MultiQualityRelease`** (`Lidarr.Plugin.Common.HostBridge`) — emits one release per available quality for an album by composing `AlbumReleaseInfoBuilder` (per-tier GUID/URL/title) and `AlbumSizeEstimator` (per-tier size). Consolidates the "offer all quality tiers" indexer pattern (tidalarr `ConvertToReleaseInfosStatic`, qobuzarr's per-quality parser loop). Common cannot reference the host `ReleaseInfo` type, so `Build()` returns neutral `MultiQualityRelease` rows the plugin maps onto its own release object.
+
 ### Deprecations
 - **`IAuthFailureGateRegistry` / `AuthFailureGateRegistry`** — deprecated in favour of a direct `ConcurrentDictionary<string, AuthFailureGate>` per-plugin. A Wave-26 adversarial audit found zero non-test plugin consumers across all four ecosystem repos; every real call-site builds its own gate map so it can pair a custom `IAuthFailureHandler` (e.g. `SlidingWindowAuthFailureHandler`) with each gate — something the registry cannot do because it hard-wires `DefaultAuthFailureHandler` internally. Both the interface and the concrete class are marked `[Obsolete(error: false)]`. They will be removed in v2.0.0.
 
