@@ -72,6 +72,7 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         public ComplianceResult RunFileClassNameParity() => Check_FileClassNameParity();
         public ComplianceResult RunClaudeMdHelpers() => Check_ClaudeMdDocumentsCommonHelpers();
         public ComplianceResult RunDownloadClientIdStamp() => Check_DownloadClientStampsRegisteredClientId();
+        public ComplianceResult RunPayloadValidator() => Check_DownloadClientUsesCommonPayloadValidator();
     }
 
     /// <summary>A plugin-local re-declaration of the lyrics enricher (forbidden — must use common's).</summary>
@@ -728,6 +729,85 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.Contains(r.Errors, e => e.Contains("IgnDownloadClient"));
     }
 
+    // --- Check_DownloadClientUsesCommonPayloadValidator ---
+    //
+    // Audio-payload validation is consolidated on Common's DownloadPayloadValidator; a download-client
+    // plugin must not use the legacy AudioMagicBytesValidator nor declare its own *PayloadValidator fork.
+
+    [Fact]
+    public void PayloadValidator_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunPayloadValidator().Passed);
+    }
+
+    [Fact]
+    public void PayloadValidator_NoDownloadClient_NotApplicable_Passes()
+    {
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FileTokenStore<string>) },
+        };
+        Assert.True(h.RunPayloadValidator().Passed);
+    }
+
+    [Fact]
+    public void PayloadValidator_UsesCommonValidator_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "pv-clean");
+        WriteSrcFile(src, "FooDownloadClient.cs",
+            "namespace P;\npublic class FooDownloadClient : DownloadClientBase<FooSettings>\n{\n" +
+            "    void Validate(System.ReadOnlySpan<byte> b) => DownloadPayloadValidator.ValidateOrThrow(b, \".flac\", null);\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunPayloadValidator();
+        Assert.True(r.Passed, string.Join("; ", r.Errors));
+    }
+
+    [Fact]
+    public void PayloadValidator_UsesLegacyAudioMagicBytesValidator_Fails()
+    {
+        var src = Path.Combine(_tempRepo, "pv-legacy");
+        WriteSrcFile(src, "FooDownloadClient.cs",
+            "namespace P;\npublic class FooDownloadClient : DownloadClientBase<FooSettings>\n{\n" +
+            "    bool Validate(byte[] b) => AudioMagicBytesValidator.IsValidAudioMagicBytes(b.AsSpan());\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunPayloadValidator();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("AudioMagicBytesValidator"));
+    }
+
+    [Fact]
+    public void PayloadValidator_DeclaresLocalForkClass_Fails()
+    {
+        var src = Path.Combine(_tempRepo, "pv-fork");
+        WriteSrcFile(src, "RogueDownloadPayloadValidator.cs",
+            "namespace P;\ninternal static class RogueDownloadPayloadValidator\n{\n" +
+            "    public static void ValidateOrThrow(System.ReadOnlySpan<byte> s, string? e, string? m) { }\n}\n");
+        // The download client itself lives in another file so the gate is satisfied.
+        WriteSrcFile(src, "FooDownloadClient.cs",
+            "namespace P;\npublic class FooDownloadClient : DownloadClientBase<FooSettings> { }\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunPayloadValidator();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("PayloadValidator fork"));
+    }
+
     // --- Check_FileClassNameParity ---
 
     private string WriteSrcFile(string srcDir, string fileName, string content)
@@ -941,8 +1021,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(14, report.TotalCount);
-        // No assembly + no CLAUDE.md => the other 13 skip (Pass); Check_EnforcesAlbumCompletionPolicy
+        Assert.Equal(15, report.TotalCount);
+        // No assembly + no CLAUDE.md => the other 14 skip (Pass); Check_EnforcesAlbumCompletionPolicy
         // runs unconditionally (it asserts the shared rule directly, no assembly needed) and passes.
         Assert.True(report.AllPassed);
     }

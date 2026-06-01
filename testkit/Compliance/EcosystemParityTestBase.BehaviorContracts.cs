@@ -621,6 +621,69 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_DownloadClientUsesCommonPayloadValidator
+
+    /// <summary>
+    /// Audio-payload validation — is a downloaded blob real audio vs an HTML/JSON error page or the
+    /// wrong container? — is consolidated in Common's canonical <c>DownloadPayloadValidator</c>, a strict
+    /// superset of the legacy <c>AudioMagicBytesValidator</c> (it adds MP4/M4A ftyp recognition,
+    /// text/HTML/JSON/XML rejection, and file + span overloads). A plugin that ships a download client
+    /// must not (a) use the legacy <c>AudioMagicBytesValidator</c>, nor (b) declare its own
+    /// <c>*PayloadValidator</c> fork — the historical tidalarr <c>TidalDownloadPayloadValidator</c> +
+    /// qobuz m4a-workaround divergence this guard exists to prevent regressing. Applicable only to
+    /// download-client plugins (import-list plugins such as brainarr → N/A); source-scan based and
+    /// conservative (no source root → skip). Note: inline MP4-box integrity checks on decrypted DASH
+    /// segments (moov/mdat) are a DISTINCT concern (segment integrity, not file-level audio validation)
+    /// and are intentionally NOT flagged — this targets file-level audio-payload validation only.
+    /// </summary>
+    public virtual ComplianceResult Check_DownloadClientUsesCommonPayloadValidator()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+        if (!PluginDeclaresHostDownloadClient(assembly)) return ComplianceResult.Success; // N/A (no download client)
+        if (!Directory.Exists(PluginSourceRoot)) return Skipped();
+
+        var excluded = new[]
+        {
+            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}",
+            ".Tests" + Path.DirectorySeparatorChar,
+            $"{Path.DirectorySeparatorChar}examples{Path.DirectorySeparatorChar}",
+        };
+        // (a) legacy weak validator usage; (b) a plugin-local *PayloadValidator fork declaration.
+        var legacyUse = new System.Text.RegularExpressions.Regex(
+            @"\bAudioMagicBytesValidator\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+        var forkClass = new System.Text.RegularExpressions.Regex(
+            @"\bclass\s+[A-Za-z0-9_]*PayloadValidator\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch { continue; }
+            var rel = Path.GetRelativePath(RepoRootPath, file);
+            if (legacyUse.IsMatch(text))
+                offenders.Add($"{rel}: uses the legacy AudioMagicBytesValidator");
+            if (forkClass.IsMatch(text))
+                offenders.Add($"{rel}: declares a plugin-local *PayloadValidator fork");
+        }
+
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                "Audio-payload validation must use Lidarr.Plugin.Common.Utilities.DownloadPayloadValidator " +
+                $"(the canonical superset), not the legacy AudioMagicBytesValidator or a plugin-local fork: {string.Join("; ", offenders)}");
+    }
+
+    #endregion
+
     #region Check_FileClassNameParity
 
     /// <summary>
@@ -939,6 +1002,7 @@ public abstract partial class EcosystemParityTestBase
             [nameof(Check_UsesCommonDownloadTelemetrySink)] = Check_UsesCommonDownloadTelemetrySink(),
             [nameof(Check_DownloadClientUsesPathTraversalGuard)] = Check_DownloadClientUsesPathTraversalGuard(),
             [nameof(Check_DownloadClientStampsRegisteredClientId)] = Check_DownloadClientStampsRegisteredClientId(),
+            [nameof(Check_DownloadClientUsesCommonPayloadValidator)] = Check_DownloadClientUsesCommonPayloadValidator(),
             [nameof(Check_FileClassNameParity)] = Check_FileClassNameParity(),
             [nameof(Check_ClaudeMdDocumentsCommonHelpers)] = Check_ClaudeMdDocumentsCommonHelpers(),
         };

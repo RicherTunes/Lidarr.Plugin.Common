@@ -101,7 +101,7 @@ Orientation pages that map what exists and where to find it — full details liv
   dotnet run --project tools/DocTools/SnippetVerifier
   ```
 
-- GitHub Actions `docs.yml` enforces markdownlint, Vale, cspell, link checking, and snippet compilation on every documentation PR.
+- GitHub Actions `docs.yml` enforces markdownlint, cspell, and link checking on every documentation PR; Vale prose-linting and snippet compilation also run but are non-blocking (`continue-on-error`).
 
 ## Repository layout
 
