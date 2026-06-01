@@ -71,6 +71,7 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         public ComplianceResult RunPathTraversalGuard() => Check_DownloadClientUsesPathTraversalGuard();
         public ComplianceResult RunFileClassNameParity() => Check_FileClassNameParity();
         public ComplianceResult RunClaudeMdHelpers() => Check_ClaudeMdDocumentsCommonHelpers();
+        public ComplianceResult RunDownloadClientIdStamp() => Check_DownloadClientStampsRegisteredClientId();
     }
 
     /// <summary>A plugin-local re-declaration of the lyrics enricher (forbidden — must use common's).</summary>
@@ -584,6 +585,149 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.True(h.RunPathTraversalGuard().Passed);
     }
 
+    // --- Check_DownloadClientStampsRegisteredClientId ---
+    //
+    // Contract (live qobuz regression, 2026-05-31): a download client's GetItems() must stamp every
+    // reported DownloadClientItem with DownloadClientInfo.Id == this client's Definition.Id (never a
+    // literal 0). Lidarr resolves the owning client by that id; a 0/wrong id makes CompletedDownloadService
+    // throw "Sequence contains no matching element" and wedges every completed download before import.
+    // Canonical shape (tidal/apple/amazon): DownloadClientItemClientInfo.FromDownloadClient(this, …);
+    // qobuz derives the id explicitly from Definition?.Id. Both satisfy the guard.
+
+    private const string DlClientHeader =
+        "namespace P;\nusing System.Collections.Generic;\nusing System.Linq;\n";
+
+    [Fact]
+    public void DownloadClientIdStamp_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunDownloadClientIdStamp().Passed);
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_NoDownloadClient_NotApplicable_Passes()
+    {
+        // Import-list plugins (e.g. brainarr) ship no download client → N/A.
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FileTokenStore<string>) },
+        };
+        Assert.True(h.RunDownloadClientIdStamp().Passed);
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_HasClientButNoSourceFile_Passes()
+    {
+        // Ships a download client but no download-client source file is found under the source root
+        // (relocated/examples-only source) → don't false-fail; the GetItems() body can't be located.
+        var src = Path.Combine(_tempRepo, "empty-src");
+        Directory.CreateDirectory(src);
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        Assert.True(h.RunDownloadClientIdStamp().Passed);
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_CanonicalFromDownloadClient_Passes()
+    {
+        // tidal/apple/amazon shape — the host helper always reads this.Definition.Id/Name.
+        // The interpolated Title exercises the brace-matcher against balanced interpolation braces.
+        var src = Path.Combine(_tempRepo, "src-canonical");
+        WriteSrcFile(src, "FooDownloadClient.cs",
+            DlClientHeader +
+            "public class FooDownloadClient : DownloadClientBase<FooSettings>\n{\n" +
+            "    public override IEnumerable<DownloadClientItem> GetItems()\n    {\n" +
+            "        var result = new List<DownloadClientItem>();\n" +
+            "        foreach (var item in Tracker.GetSnapshot())\n        {\n" +
+            "            result.Add(new DownloadClientItem\n            {\n" +
+            "                DownloadId = item.Id,\n" +
+            "                Title = $\"{item.Artist} - {item.Title}\",\n" +
+            "                DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false)\n" +
+            "            });\n        }\n        return result;\n    }\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunDownloadClientIdStamp();
+        Assert.True(r.Passed, string.Join("; ", r.Errors));
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_DerivesIdFromDefinition_Passes()
+    {
+        // qobuz shape — hand-rolled converter, but the client id is derived from Definition?.Id.
+        var src = Path.Combine(_tempRepo, "src-definition");
+        WriteSrcFile(src, "BarDownloadClient.cs",
+            DlClientHeader +
+            "public class BarDownloadClient : DownloadClientBase<BarSettings>\n{\n" +
+            "    public override IEnumerable<DownloadClientItem> GetItems()\n    {\n" +
+            "        var clientId = Definition?.Id ?? 0;\n" +
+            "        var clientName = Definition?.Name ?? Name;\n" +
+            "        return Tracker.GetSnapshot().Select(i => i.ToDownloadClientItem(clientId, clientName)).ToList();\n" +
+            "    }\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunDownloadClientIdStamp();
+        Assert.True(r.Passed, string.Join("; ", r.Errors));
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_StampsLiteralZero_Fails()
+    {
+        // The exact historical regression: passing literal 0 as the client id, no Definition derivation.
+        var src = Path.Combine(_tempRepo, "src-zero");
+        WriteSrcFile(src, "BadDownloadClient.cs",
+            DlClientHeader +
+            "public class BadDownloadClient : DownloadClientBase<BadSettings>\n{\n" +
+            "    public override IEnumerable<DownloadClientItem> GetItems()\n    {\n" +
+            "        return Tracker.GetSnapshot().Select(i => i.ToDownloadClientItem(0, Name)).ToList();\n" +
+            "    }\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunDownloadClientIdStamp();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("BadDownloadClient"));
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_GetItemsIgnoresDefinition_Fails()
+    {
+        // GetItems builds client-info without deriving the id from Definition nor FromDownloadClient(this).
+        var src = Path.Combine(_tempRepo, "src-ignore");
+        WriteSrcFile(src, "IgnDownloadClient.cs",
+            DlClientHeader +
+            "public class IgnDownloadClient : DownloadClientBase<IgnSettings>\n{\n" +
+            "    public override IEnumerable<DownloadClientItem> GetItems()\n    {\n" +
+            "        var result = new List<DownloadClientItem>();\n" +
+            "        result.Add(new DownloadClientItem { DownloadId = \"x\", DownloadClientInfo = new DownloadClientItemClientInfo { Name = \"Foo\" } });\n" +
+            "        return result;\n" +
+            "    }\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunDownloadClientIdStamp();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("IgnDownloadClient"));
+    }
+
     // --- Check_FileClassNameParity ---
 
     private string WriteSrcFile(string srcDir, string fileName, string content)
@@ -797,8 +941,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(13, report.TotalCount);
-        // No assembly + no CLAUDE.md => the other 12 skip (Pass); Check_EnforcesAlbumCompletionPolicy
+        Assert.Equal(14, report.TotalCount);
+        // No assembly + no CLAUDE.md => the other 13 skip (Pass); Check_EnforcesAlbumCompletionPolicy
         // runs unconditionally (it asserts the shared rule directly, no assembly needed) and passes.
         Assert.True(report.AllPassed);
     }
