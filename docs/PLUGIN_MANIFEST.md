@@ -12,7 +12,7 @@ Each plugin ships a `plugin.json` that describes identity, compatibility expecta
 | `apiVersion` | pattern | ✅ | `1.x` | Must match the major version of `Lidarr.Plugin.Abstractions` (`^\d+\.x$`). |
 | `minHostVersion` | SemVer | ✅ | `2.14.0` | Host must be ≥ this version or the loader refuses the plugin. |
 | `targets` | array | ➖ | `["net8.0"]` | Optional diagnostics for supported TFMs. |
-| `commonVersion` | SemVer | ➖ | `1.1.4` | Informational only (per-plugin Common build). |
+| `commonVersion` | SemVer | ➖ | `1.17.0` | Informational only (per-plugin Common build). |
 
 Additional properties beyond the schema are permitted by the JSON schema but ignored by the loader. Keep the manifest concise and explicit.
 
@@ -65,5 +65,5 @@ pwsh tools/ManifestCheck.ps1 -ProjectPath plugins/Tidalarr/Tidalarr.csproj -Mani
 - The loader rejects the plugin when `apiVersion` does not match the host ABI major version.
 - `minHostVersion` guards against running on older hosts; loaders must fail fast with a helpful message.
 - `commonVersion` is informational; different plugins may ship different Common builds side-by-side.
-- Manifests must validate against `docs/reference/plugin.schema.json` (no additional properties, explicit fields only).
+- Manifests must validate against `docs/reference/plugin.schema.json`. (The schema permits additional properties, but the loader ignores any beyond the documented fields.)
 - Keep manifests under source control; never generate them at build time.

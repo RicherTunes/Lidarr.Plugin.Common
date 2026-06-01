@@ -92,7 +92,7 @@ Example: token manager + OAuth handler
 ```csharp
 // Build a token provider backed by your settings + token manager
 var tokenProvider = new MyTokenProvider(settings, tokenManager);
-var http = HttpClientFactory.Create(new OAuthDelegatingHandler(tokenProvider, logger));
+var http = new HttpClient(new OAuthDelegatingHandler(tokenProvider, logger));
 ```
 
 See also: how-to/AUTHENTICATE_OAUTH.md and how-to/TOKEN_MANAGER.md.

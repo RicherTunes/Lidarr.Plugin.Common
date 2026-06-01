@@ -49,11 +49,16 @@ public sealed class MyPlugin : IPlugin
         MinHostVersion = "2.12.0"
     };
 
+    private IPluginContext? _context;
+
     public ValueTask InitializeAsync(IPluginContext context, CancellationToken token = default)
-        => ValueTask.CompletedTask;
+    {
+        _context = context;
+        return ValueTask.CompletedTask;
+    }
 
     public ValueTask<IIndexer?> CreateIndexerAsync(CancellationToken token = default)
-        => ValueTask.FromResult<IIndexer?>(new MyIndexer(context.LoggerFactory.CreateLogger<MyIndexer>()));
+        => ValueTask.FromResult<IIndexer?>(new MyIndexer(_context!.LoggerFactory.CreateLogger<MyIndexer>()));
 
     public ValueTask<IDownloadClient?> CreateDownloadClientAsync(CancellationToken token = default)
         => ValueTask.FromResult<IDownloadClient?>(null);
