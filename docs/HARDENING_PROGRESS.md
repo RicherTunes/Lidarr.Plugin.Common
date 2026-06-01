@@ -18,8 +18,12 @@ amazonmusicarr (Widevine) and applemusicarr (FairPlay cbcs). Priority: correctne
 3. ✅ Canonical `PsshParser` (v0 + v1 KID list), supersedes amazon's buggy in-tree parser. (commit 7e7f6ab)
 4. ✅ Adversarial review of box + PSSH parsers (2 lenses) → folded: senc zero-progress DoS guard, long-math
    bounds (int-wrap bypass), pssh KID_count pre-reject + DataSize>Int32 guard, edge coverage. (commit fb8d9ad)
-5. ⏳ Top-level MP4 box walker (locate moof/traf/senc + moov/.../tenc + pssh in a real init/media segment) —
-   non-blocked, TDD with synthetic box trees. Then pssh `largesize`/box-size honoring (review Finding 6).
+5. ✅ MP4 box walker (`Mp4BoxWalker`) — ReadBoxes + recursive FindFirst with stsd/sample-entry descent to
+   reach tenc; hardened (depth cap vs StackOverflow DoS, largesize overflow). 9 tests. (commits 0a188fc, 87595a2)
+6. ⏳ End-to-end `CencSegmentDecryptor`: walker → ParseTenc/ParseSenc → CencDecryptor per sample, given a
+   content key (key is an INPUT — testable with a synthetic encrypted segment + known key, NO CDM needed).
+   This is what amazon will call with the key from the CDM. Then `FindAll` (multi-DRM pssh Widevine filter).
+   ⚠️ The CDM license layer that PRODUCES the key is the blocked item — surface device-cred decision to user.
 4. Widevine license protobuf (SignedLicenseRequest/SignedLicense) + CDM session-key derivation + content-key unwrap.
    - ⚠️ BLOCKED/SURFACE: a real CDM needs provisioned Widevine device creds (`.wvd` / client-id blob + device RSA key),
      SEPARATE from the ADP token the plugin mints. Architectural — surface to the user before wiring.
