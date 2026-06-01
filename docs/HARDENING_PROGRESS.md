@@ -29,28 +29,28 @@ amazonmusicarr (Widevine) and applemusicarr (FairPlay cbcs). Priority: correctne
 9. ✅ cbcs end-to-end coverage (whole-sample + clear-header subsample, NIST CBC). (commit b516067)
 10. ✅ `Mp4BoxWalker.FindAll` for multi-DRM pssh selection. (commit c6a5fb5)
 
-## MILESTONE: the deterministic CENC pipeline is COMPLETE + tested (~72 tests, PR #601).
-## cenc + cbcs, whole-sample + subsamples + cbcs pattern, tenc/senc/trun/tfhd parse, pssh parse, box
-## walk (FindFirst/FindAll), end-to-end segment decrypt (anchor + default_sample_size), all hardened via
-## adversarial review. Decryption works given a content key.
+**MILESTONE:** the deterministic CENC pipeline is COMPLETE + tested (~72 tests, PR #601):
+cenc + cbcs, whole-sample + subsamples + cbcs pattern, tenc/senc/trun/tfhd parse, pssh parse, box
+walk (FindFirst/FindAll), end-to-end segment decrypt (anchor + default_sample_size), all hardened via
+adversarial review and conformance-validated (NIST AES vectors + pywidevine PSSH). Decryption works given a content key.
 
-## NEXT-PHASE DECISION (surfaced to user):
-## - CDM license layer = the content-key producer = BLOCKED on Widevine device creds (.wvd). ARCHITECTURAL.
-## - Non-blocked alternatives: apple's security bugs (SSRF fail-open / non-functional path-traversal guard /
-##   threading torn-reads from the initial review); traf-scoping/multi-trun (low value for single-audio Amazon).
+**NEXT-PHASE DECISION (surfaced to user):**
+CDM license layer = the content-key producer = BLOCKED on Widevine device creds (.wvd). ARCHITECTURAL.
+Non-blocked alternatives: apple's security bugs (SSRF, path-traversal guard, threading torn-reads);
+traf-scoping/multi-trun (low value for single-audio Amazon).
 
-## All deterministic CENC primitives are now BUILT (CencDecryptor, tenc/senc/trun parser, PsshParser,
-## Mp4BoxWalker). The remaining piece is the CDM license layer — ⚠️ ARCHITECTURAL BLOCKER:
-## a real Widevine CDM needs provisioned device creds (.wvd / client-id blob + device RSA key), SEPARATE
-## from the ADP token the plugin mints. SURFACE this to the user before building the CDM/wiring into amazon.
-4. Widevine license protobuf (SignedLicenseRequest/SignedLicense) + CDM session-key derivation + content-key unwrap.
-   - ⚠️ BLOCKED/SURFACE: a real CDM needs provisioned Widevine device creds (`.wvd` / client-id blob + device RSA key),
-     SEPARATE from the ADP token the plugin mints. Architectural — surface to the user before wiring.
-5. Wire `CencDecryptor` into amazon `WidevineSegmentDecryptor`/`WidevineDecryptor`; delete dead crypto
-   (OptimizedHttpClient, SafeArray, unused CryptoUtilities); collapse duplicate license HTTP path into the API client.
-6. Apple: adopt Common `DrmTrack`/`IExternalDownloadHandler` seam; FairPlay cbcs via `CencDecryptor`; fix
-   path-traversal/SSRF/threading bugs (apple adversarial review).
-7. Converge Common pins: amazon `f2f84cb` / apple `80a0eb5` → `origin/main`; update `ext-common-sha.txt` + gitlink.
+**ARCHITECTURAL BLOCKER:** all deterministic CENC primitives are BUILT; the remaining piece is the CDM
+license layer. A real Widevine CDM needs provisioned device creds (.wvd / client-id blob + device RSA key),
+SEPARATE from the ADP token the plugin mints. Surface to the user before building the CDM / wiring into amazon.
+## Remaining roadmap
+
+- CDM license layer: Widevine license protobuf (SignedLicenseRequest/SignedLicense) + session-key
+  derivation + content-key unwrap. BLOCKED — needs provisioned Widevine device creds (`.wvd`), separate
+  from the ADP token; surface to the user before building.
+- Wire `CencDecryptor` into amazon (`WidevineSegmentDecryptor`/`WidevineDecryptor`); delete dead crypto
+  (OptimizedHttpClient, SafeArray, unused CryptoUtilities); collapse the duplicate license HTTP path.
+- Apple: adopt Common `DrmTrack`/`IExternalDownloadHandler` seam; FairPlay cbcs via `CencDecryptor`.
+- Converge Common pins (amazon `f2f84cb` / apple `80a0eb5` → `origin/main`); update `ext-common-sha.txt` + gitlink.
 
 ## Landing
 - Common CENC work → PR #601 (open, not auto-merged).
