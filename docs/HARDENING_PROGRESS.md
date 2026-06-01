@@ -13,9 +13,10 @@ amazonmusicarr (Widevine) and applemusicarr (FairPlay cbcs). Priority: correctne
   - 23 tests, NIST SP 800-38A F.2/F.5 vectors + chained-CBC pattern vector. 3 adversarial reviews folded in.
 
 ## Next (ordered)
-1. ⏳ Adversarial review of the perf refactor (in-place CBC correctness, instance reuse/thread-safety, perf) — fold findings as tests.
-2. MP4 `tenc`/`senc`/`saio`/`saiz` parser in Common → per-sample IVs + subsample maps + default pattern. TDD with synthetic boxes.
-3. Correct `WidevinePsshParser` (v1/KID handling) — promote to Common.
+1. ✅ Adversarial review of the perf refactor — folded: cbcs edge vectors (trailing partial, (1,9), 3-group chaining), single-threaded contract doc, disposed-instance test. (commit 81148d8)
+2. ✅ MP4 `tenc`/`senc` parser (`CencBoxParser`) → per-sample IVs + subsample maps + default pattern/constant-IV. 5 tests, bounds-checked. (commit 7b429c1)
+3. ⏳ Adversarial review of `CencBoxParser`; then correct `WidevinePsshParser` (v1/KID handling) — promote to Common.
+4. `saio`/`saiz` fallback for senc location (some muxers); top-level MP4 box walker to locate moof/traf/senc + moov/.../tenc.
 4. Widevine license protobuf (SignedLicenseRequest/SignedLicense) + CDM session-key derivation + content-key unwrap.
    - ⚠️ BLOCKED/SURFACE: a real CDM needs provisioned Widevine device creds (`.wvd` / client-id blob + device RSA key),
      SEPARATE from the ADP token the plugin mints. Architectural — surface to the user before wiring.
