@@ -56,6 +56,11 @@ namespace Lidarr.Plugin.Common.Services.Drm
             for (int i = 0; i < senc.Count; i++)
             {
                 long size = trun.SampleSizes[i];
+                if (size > int.MaxValue)
+                {
+                    throw new ArgumentException($"sample {i} size {size} exceeds Int32.", nameof(segment));
+                }
+
                 if (sampleStart < 0 || (long)sampleStart + size > segment.Length)
                 {
                     throw new ArgumentException($"sample {i} byte range [{sampleStart}, +{size}) exceeds the segment ({segment.Length}).", nameof(segment));
