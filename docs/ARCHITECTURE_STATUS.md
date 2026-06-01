@@ -49,7 +49,7 @@
 - 5 production bugs fixed (crypto-cache, null-ref, SampleRate, DI bypass, GUID collision)
 
 ### Operational Governance
-- Release policy: `docs/RELEASE_POLICY.md`
+- Release policy: `docs/dev-guide/RELEASE_POLICY.md`
 - Promotion checklist: `docs/ECOSYSTEM_PROMOTION_CHECKLIST.md`
 - Debt governance: quarterly review, exemption policy with review dates
 - Shadow-mode PR enforcement in billing-blocked repos
