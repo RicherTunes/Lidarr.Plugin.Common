@@ -15,8 +15,11 @@ amazonmusicarr (Widevine) and applemusicarr (FairPlay cbcs). Priority: correctne
 ## Next (ordered)
 1. ✅ Adversarial review of the perf refactor — folded: cbcs edge vectors (trailing partial, (1,9), 3-group chaining), single-threaded contract doc, disposed-instance test. (commit 81148d8)
 2. ✅ MP4 `tenc`/`senc` parser (`CencBoxParser`) → per-sample IVs + subsample maps + default pattern/constant-IV. 5 tests, bounds-checked. (commit 7b429c1)
-3. ⏳ Adversarial review of `CencBoxParser`; then correct `WidevinePsshParser` (v1/KID handling) — promote to Common.
-4. `saio`/`saiz` fallback for senc location (some muxers); top-level MP4 box walker to locate moof/traf/senc + moov/.../tenc.
+3. ✅ Canonical `PsshParser` (v0 + v1 KID list), supersedes amazon's buggy in-tree parser. (commit 7e7f6ab)
+4. ✅ Adversarial review of box + PSSH parsers (2 lenses) → folded: senc zero-progress DoS guard, long-math
+   bounds (int-wrap bypass), pssh KID_count pre-reject + DataSize>Int32 guard, edge coverage. (commit fb8d9ad)
+5. ⏳ Top-level MP4 box walker (locate moof/traf/senc + moov/.../tenc + pssh in a real init/media segment) —
+   non-blocked, TDD with synthetic box trees. Then pssh `largesize`/box-size honoring (review Finding 6).
 4. Widevine license protobuf (SignedLicenseRequest/SignedLicense) + CDM session-key derivation + content-key unwrap.
    - ⚠️ BLOCKED/SURFACE: a real CDM needs provisioned Widevine device creds (`.wvd` / client-id blob + device RSA key),
      SEPARATE from the ADP token the plugin mints. Architectural — surface to the user before wiring.
