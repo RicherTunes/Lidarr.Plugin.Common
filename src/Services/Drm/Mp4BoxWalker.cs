@@ -30,6 +30,10 @@ namespace Lidarr.Plugin.Common.Services.Drm
             "moov", "trak", "mdia", "minf", "stbl", "moof", "traf", "mvex", "edts", "dinf", "udta", "sinf", "schi",
         };
 
+        // Real ISO-BMFF CENC nesting tops out around a dozen levels (moov/.../sinf/schi); 32 is generous and
+        // bounds recursion so a maliciously deep box tree throws cleanly instead of crashing via StackOverflow.
+        private const int MaxDepth = 32;
+
         /// <summary>Reads the sequence of boxes at the top level of <paramref name="data"/>.</summary>
         public static IReadOnlyList<Mp4Box> ReadBoxes(ReadOnlySpan<byte> data)
         {
@@ -43,7 +47,7 @@ namespace Lidarr.Plugin.Common.Services.Drm
 
                 if (size == 1)
                 {
-                    if (pos + 16 > data.Length)
+                    if (data.Length - pos < 16)
                     {
                         throw new ArgumentException($"MP4 largesize box at {pos} is truncated.", nameof(data));
                     }
@@ -61,7 +65,9 @@ namespace Lidarr.Plugin.Common.Services.Drm
                     throw new ArgumentException($"MP4 box '{type}' at {pos} has size {size} smaller than its header.", nameof(data));
                 }
 
-                if (pos + size > data.Length)
+                // Compare against remaining bytes WITHOUT adding (pos+size could overflow long for a hostile
+                // largesize and wrap negative, bypassing the check). size >= headerLength > 0 here.
+                if (size > data.Length - pos)
                 {
                     throw new ArgumentException($"MP4 box '{type}' at {pos} (size {size}) extends past the buffer ({data.Length}).", nameof(data));
                 }
@@ -78,10 +84,15 @@ namespace Lidarr.Plugin.Common.Services.Drm
         /// container boxes. Returns absolute offsets into <paramref name="data"/>, or <c>null</c> if absent.
         /// </summary>
         public static Mp4Box? FindFirst(ReadOnlySpan<byte> data, string type)
-            => FindFirst(data, type, baseOffset: 0);
+            => FindFirst(data, type, baseOffset: 0, depth: 0);
 
-        private static Mp4Box? FindFirst(ReadOnlySpan<byte> data, string type, int baseOffset)
+        private static Mp4Box? FindFirst(ReadOnlySpan<byte> data, string type, int baseOffset, int depth)
         {
+            if (depth >= MaxDepth)
+            {
+                throw new ArgumentException($"MP4 box nesting exceeds {MaxDepth} levels.", nameof(data));
+            }
+
             foreach (var box in ReadBoxes(data))
             {
                 if (box.Type == type)
@@ -89,12 +100,19 @@ namespace Lidarr.Plugin.Common.Services.Drm
                     return box with { Offset = box.Offset + baseOffset };
                 }
 
-                if (ContainerTypes.Contains(box.Type))
+                // Bytes to skip past the box payload before its child boxes begin: 0 for plain containers,
+                // 8 for stsd (FullBox ver/flags + entry_count), and the SampleEntry+codec header for the
+                // protected sample entries (the path to tenc).
+                int childSkip = ChildSkip(box.Type);
+                if (childSkip >= 0 && box.PayloadLength >= childSkip)
                 {
+                    int childOffset = box.PayloadOffset + childSkip;
+                    int childLength = box.PayloadLength - childSkip;
                     var inner = FindFirst(
-                        data.Slice(box.PayloadOffset, box.PayloadLength),
+                        data.Slice(childOffset, childLength),
                         type,
-                        baseOffset + box.PayloadOffset);
+                        baseOffset + childOffset,
+                        depth + 1);
                     if (inner is not null)
                     {
                         return inner;
@@ -104,6 +122,14 @@ namespace Lidarr.Plugin.Common.Services.Drm
 
             return null;
         }
+
+        private static int ChildSkip(string type) => type switch
+        {
+            "stsd" => 8,           // FullBox: version(1) flags(3) entry_count(4)
+            "enca" => 28,          // SampleEntry(8) + AudioSampleEntry(20)
+            "encv" => 78,          // SampleEntry(8) + VisualSampleEntry(70)
+            _ => ContainerTypes.Contains(type) ? 0 : -1,
+        };
 
         private static uint ReadUInt32(ReadOnlySpan<byte> b, int pos)
             => (uint)((b[pos] << 24) | (b[pos + 1] << 16) | (b[pos + 2] << 8) | b[pos + 3]);

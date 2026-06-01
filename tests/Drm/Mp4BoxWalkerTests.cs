@@ -92,6 +92,49 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Null(Mp4BoxWalker.FindFirst(data, "senc"));
         }
 
+        // tenc lives at moov/trak/mdia/minf/stbl/stsd/enca/sinf/schi/tenc. stsd is a FullBox (skip 8 =
+        // version/flags + entry_count); enca is an audio sample entry (skip 28 = SampleEntry 8 +
+        // AudioSampleEntry 20) before its child sinf. frma/schm siblings precede schi.
+        [Fact]
+        public void FindFirst_DescendsStsdAndSampleEntry_FindsTenc()
+        {
+            var tenc = Box("tenc", new byte[24]);
+            var schi = Box("schi", tenc);
+            var schm = Box("schm", new byte[12]);
+            var frma = Box("frma", new byte[4]);
+            var sinf = Box("sinf", Concat(frma, schm, schi));
+            var enca = Box("enca", Concat(new byte[28], sinf));
+            var stsd = Box("stsd", Concat(new byte[8], enca));
+            var moov = Box("moov", Box("trak", Box("mdia", Box("minf", Box("stbl", stsd)))));
+
+            var found = Mp4BoxWalker.FindFirst(moov, "tenc");
+
+            Assert.NotNull(found);
+            Assert.Equal("tenc", found!.Type);
+            Assert.Equal(24, found.PayloadLength);
+        }
+
+        // A deeply nested container chain must throw (bounded), never StackOverflow (uncatchable host crash).
+        [Fact]
+        public void FindFirst_DeeplyNested_ThrowsInsteadOfStackOverflow()
+        {
+            var buf = new byte[4];
+            for (int i = 0; i < 100; i++) buf = Box("traf", buf);
+            Assert.Throws<ArgumentException>(() => Mp4BoxWalker.FindFirst(buf, "senc"));
+        }
+
+        // A positive-huge 64-bit largesize at pos>0 must not bypass the buffer check via pos+size overflow.
+        [Fact]
+        public void ReadBoxes_LargesizeOverflowsBufferCheck_Throws()
+        {
+            var data = Concat(
+                Box("ftyp", new byte[8]),                   // pos advances to 16
+                Be32(1), Ascii("mdat"), Be64(long.MaxValue), // largesize box at pos=16
+                new byte[8]);
+
+            Assert.Throws<ArgumentException>(() => Mp4BoxWalker.ReadBoxes(data));
+        }
+
         // ---- helpers: build well-formed boxes ----
         private static byte[] Box(string type, byte[] payload)
             => Concat(Be32(8 + payload.Length), Ascii(type), payload);
