@@ -123,6 +123,41 @@ namespace Lidarr.Plugin.Common.Services.Drm
             return null;
         }
 
+        /// <summary>
+        /// Finds <b>all</b> boxes of <paramref name="type"/> in the tree, in document order, descending into
+        /// container boxes. Returns absolute offsets. Use this when multiple matches are expected (e.g. the
+        /// several pssh boxes of a multi-DRM segment, or one senc per traf).
+        /// </summary>
+        public static IReadOnlyList<Mp4Box> FindAll(ReadOnlySpan<byte> data, string type)
+        {
+            var results = new List<Mp4Box>();
+            FindAll(data, type, baseOffset: 0, depth: 0, results);
+            return results;
+        }
+
+        private static void FindAll(ReadOnlySpan<byte> data, string type, int baseOffset, int depth, List<Mp4Box> results)
+        {
+            if (depth >= MaxDepth)
+            {
+                throw new ArgumentException($"MP4 box nesting exceeds {MaxDepth} levels.", nameof(data));
+            }
+
+            foreach (var box in ReadBoxes(data))
+            {
+                if (box.Type == type)
+                {
+                    results.Add(box with { Offset = box.Offset + baseOffset });
+                }
+
+                int childSkip = ChildSkip(box.Type);
+                if (childSkip >= 0 && box.PayloadLength >= childSkip)
+                {
+                    int childOffset = box.PayloadOffset + childSkip;
+                    FindAll(data.Slice(childOffset, box.PayloadLength - childSkip), type, baseOffset + childOffset, depth + 1, results);
+                }
+            }
+        }
+
         private static int ChildSkip(string type) => type switch
         {
             "stsd" => 8,           // FullBox: version(1) flags(3) entry_count(4)
