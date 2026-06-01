@@ -136,5 +136,9 @@ Lidarr.Plugin.Common.Services.Streaming.Manifests.DashManifestParser
 Lidarr.Plugin.Common.Services.Streaming.Manifests.DashManifestParser.DashManifestParser() -> void
 Lidarr.Plugin.Common.Services.Streaming.Manifests.DashManifestParser.CanParse(string! mimeTypeOrContent) -> bool
 Lidarr.Plugin.Common.Services.Streaming.Manifests.DashManifestParser.Parse(string! manifestContent, string! baseUrl) -> Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest!
+Lidarr.Plugin.Common.Services.Streaming.Manifests.HlsManifestParser
+Lidarr.Plugin.Common.Services.Streaming.Manifests.HlsManifestParser.HlsManifestParser() -> void
+Lidarr.Plugin.Common.Services.Streaming.Manifests.HlsManifestParser.CanParse(string! mimeTypeOrContent) -> bool
+Lidarr.Plugin.Common.Services.Streaming.Manifests.HlsManifestParser.Parse(string! manifestContent, string! baseUrl) -> Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamManifest!
 Lidarr.Plugin.Common.Services.Streaming.Manifests.QualitySelector
 static Lidarr.Plugin.Common.Services.Streaming.Manifests.QualitySelector.SelectByBandwidthCeiling(System.Collections.Generic.IReadOnlyList<Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant!>! variants, int ceilingBps) -> Lidarr.Plugin.Common.Services.Streaming.Manifests.StreamVariant?
