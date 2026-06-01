@@ -99,8 +99,27 @@ namespace Lidarr.Plugin.Common.Services.Drm
             long sampleCount = ReadUInt32(payload, pos);
             pos += 4;
 
-            // Do NOT pre-size from the attacker-controlled sample_count; bounds checks below cap the work to
-            // what the box actually contains, so a bogus huge count throws on exhaustion instead of OOM-ing.
+            // Reject a sample_count the box can't hold BEFORE looping. Each sample consumes at least the
+            // per-sample IV (+2 bytes for subsample_count when subsampled). The dangerous case: iv_size==0
+            // AND no subsamples means a sample consumes ZERO bytes, so a huge sample_count would loop ~4.3
+            // billion times allocating empty entries (an 8-byte hostile senc → OOM/hang) — guard it.
+            long minBytesPerSample = perSampleIvSize + (hasSubsamples ? 2 : 0);
+            if (minBytesPerSample == 0)
+            {
+                if (sampleCount != 0)
+                {
+                    throw new ArgumentException(
+                        "senc with per-sample IV size 0 and no subsamples carries no per-sample data; sample_count must be 0.", nameof(payload));
+                }
+            }
+            else if (sampleCount > (payload.Length - pos) / minBytesPerSample)
+            {
+                throw new ArgumentException(
+                    $"senc sample_count ({sampleCount}) exceeds the box capacity.", nameof(payload));
+            }
+
+            // Do NOT pre-size from the attacker-controlled sample_count; the guard above bounds it to the
+            // box's real byte budget, so a bogus count throws instead of OOM-ing.
             var samples = new List<CencSampleEncryptionInfo>();
             for (long s = 0; s < sampleCount; s++)
             {
@@ -144,7 +163,8 @@ namespace Lidarr.Plugin.Common.Services.Drm
 
         private static void Require(ReadOnlySpan<byte> payload, int pos, int need, string what)
         {
-            if (pos + need > payload.Length)
+            // long math so a large pos can't wrap negative and slip past the check (build is unchecked).
+            if ((long)pos + need > payload.Length)
             {
                 throw new ArgumentException($"senc box truncated reading {what} (need {need} bytes at {pos}, have {payload.Length}).", nameof(payload));
             }
