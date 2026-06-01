@@ -52,7 +52,7 @@ latch built on top of a registered `IAuthFailureHandler`.
 | `IsHealthy` | `true` when status is `Authenticated` or `Unknown` (initial). |
 | `EnsureCanProceed()` | Throws `AuthGatedException` (carrying `RetryAfter`) when status is `Failed`/`Expired`. |
 | `TryAcquireProbeSlot()` | When healthy, always `true`. When latched bad, returns `true` at most once per `probeInterval` (default 60s) so the plugin can attempt a single network call to detect that re-auth succeeded. |
-| `ForceReset()` | Clear latch + probe budget; used by `IAuthFailureGateRegistry.Reset(key)` for settings-UI "Test Connection" flows. (Note: `IAuthFailureGateRegistry` is Obsolete v1.18.0+; use `ConcurrentDictionary<string, AuthFailureGate>` directly.) |
+| `ForceReset()` | Clear latch + probe budget; used by `IAuthFailureGateRegistry.Reset(key)` for settings-UI "Test Connection" flows. (Note: `IAuthFailureGateRegistry` is marked `[Obsolete]` as of v1.18.0 (upcoming); prefer using `ConcurrentDictionary<string, AuthFailureGate>` directly.) |
 | `Metrics` | `AuthFailureGateMetrics` snapshot — counters for `LatchTransitions`, `RecoveryTransitions`, `ProbeAcquired`, `ProbeRejected`, `ProbeRefunded`, plus `LastLatchAt`/`LastRecoveryAt` timestamps. |
 
 #### K-of-N failure threshold

@@ -32,7 +32,7 @@ Summary only. The canonical reference lives in [Plugin isolation](../PLUGIN_ISOL
 ## Signing & hashing
 
 - Implement `IRequestSigner` when the service requires MD5/HMAC tokens.
-- Helpers: `Md5ConcatSigner`, `HmacSha256Signer`, plus `HashUtilities` for generic hashes.
+- Helpers: `Md5ConcatSigner`, `HmacSha256Signer`, plus `HashingUtility` for generic hashes.
 
 ## Downloads
 
