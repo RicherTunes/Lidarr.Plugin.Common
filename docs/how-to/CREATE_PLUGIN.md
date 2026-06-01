@@ -91,4 +91,6 @@ Copy the output to the host’s plugin directory or package it per distribution 
 
 Next steps: implement features via the other how-to guides (indexer, download client, OAuth, logging).
 
+> For a faster start using the project template (`dotnet new lidarr-plugin`), see [Create a Plugin with the Template](CREATE_PLUGIN_WITH_TEMPLATE.md).
+
 
