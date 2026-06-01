@@ -26,10 +26,18 @@ amazonmusicarr (Widevine) and applemusicarr (FairPlay cbcs). Priority: correctne
    NIST-CTR synthetic segment; hardened (size>Int32 guard + multi-sample/malicious tests). (5cb43f6, ae362f2)
 8. ✅ `tfhd` parser + wired into segment decryptor: (a) data_offset anchor (base_data_offset vs
    default-base-is-moof), (b) default_sample_size fallback when trun omits sizes. (commits 3777f0f, 4ae57b9)
-9. ⏳ **Remaining segment correctness:** scope senc+trun+tfhd to a single `traf` + support multiple `trun`
-   per traf (multi-track/multi-run) — currently FindFirst grabs the first of each across the whole tree
-   (fine for single-audio-track Amazon, wrong for video+audio). Plus cbcs+pattern+subsample end-to-end tests
-   and `FindAll` (multi-DRM pssh Widevine filter).
+9. ✅ cbcs end-to-end coverage (whole-sample + clear-header subsample, NIST CBC). (commit b516067)
+10. ✅ `Mp4BoxWalker.FindAll` for multi-DRM pssh selection. (commit c6a5fb5)
+
+## MILESTONE: the deterministic CENC pipeline is COMPLETE + tested (~72 tests, PR #601).
+## cenc + cbcs, whole-sample + subsamples + cbcs pattern, tenc/senc/trun/tfhd parse, pssh parse, box
+## walk (FindFirst/FindAll), end-to-end segment decrypt (anchor + default_sample_size), all hardened via
+## adversarial review. Decryption works given a content key.
+
+## NEXT-PHASE DECISION (surfaced to user):
+## - CDM license layer = the content-key producer = BLOCKED on Widevine device creds (.wvd). ARCHITECTURAL.
+## - Non-blocked alternatives: apple's security bugs (SSRF fail-open / non-functional path-traversal guard /
+##   threading torn-reads from the initial review); traf-scoping/multi-trun (low value for single-audio Amazon).
 
 ## All deterministic CENC primitives are now BUILT (CencDecryptor, tenc/senc/trun parser, PsshParser,
 ## Mp4BoxWalker). The remaining piece is the CDM license layer — ⚠️ ARCHITECTURAL BLOCKER:
