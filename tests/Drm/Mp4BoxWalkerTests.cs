@@ -135,6 +135,30 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Throws<ArgumentException>(() => Mp4BoxWalker.ReadBoxes(data));
         }
 
+        // FindAll returns every match (multi-DRM segments carry several pssh; the consumer filters by
+        // system id to pick Widevine).
+        [Fact]
+        public void FindAll_ReturnsAllMatchesInDocumentOrder()
+        {
+            var p1 = Box("pssh", new byte[4]);
+            var p2 = Box("pssh", new byte[8]);
+            var data = Concat(Box("ftyp", new byte[4]), Box("moov", Concat(p1, p2)));
+
+            var all = Mp4BoxWalker.FindAll(data, "pssh");
+
+            Assert.Equal(2, all.Count);
+            Assert.Equal(4, all[0].PayloadLength);
+            Assert.Equal(8, all[1].PayloadLength);
+            Assert.True(all[0].Offset < all[1].Offset);
+        }
+
+        [Fact]
+        public void FindAll_NoMatches_ReturnsEmpty()
+        {
+            var data = Box("moof", Box("traf", new byte[4]));
+            Assert.Empty(Mp4BoxWalker.FindAll(data, "pssh"));
+        }
+
         // ---- helpers: build well-formed boxes ----
         private static byte[] Box(string type, byte[] payload)
             => Concat(Be32(8 + payload.Length), Ascii(type), payload);
