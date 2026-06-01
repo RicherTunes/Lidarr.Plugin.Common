@@ -607,27 +607,7 @@ public abstract partial class EcosystemParityTestBase
     {
         var assembly = PluginAssembly;
         if (assembly == null) return Skipped();
-
-        const string dcIface = "Lidarr.Plugin.Abstractions.Contracts.IDownloadClient";
-        var hasDownloadClient = SafeGetTypes(assembly).Any(t =>
-        {
-            if (t == null) return false;
-            try
-            {
-                if (t.IsInterface || t.IsAbstract) return false;
-                if (t.GetInterfaces().Any(i => i.FullName == dcIface)) return true;
-                // Host-contract download clients subclass DownloadClientBase<T>.
-                var b = t.BaseType;
-                while (b != null)
-                {
-                    if ((b.Name ?? string.Empty).StartsWith("DownloadClientBase", StringComparison.Ordinal)) return true;
-                    b = b.BaseType;
-                }
-                return false;
-            }
-            catch { return false; }
-        });
-        if (!hasDownloadClient) return ComplianceResult.Success; // not applicable
+        if (!PluginDeclaresHostDownloadClient(assembly)) return ComplianceResult.Success; // not applicable
 
         string text;
         try { text = System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(assembly.Location)); }
@@ -731,6 +711,181 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_DownloadClientStampsRegisteredClientId
+
+    /// <summary>
+    /// A plugin's download client must stamp every reported <c>DownloadClientItem</c> with the
+    /// registered client id — <c>DownloadClientInfo.Id == this client's Definition.Id</c> — never a
+    /// literal <c>0</c>. Lidarr's <c>DownloadMonitoringService</c> → <c>CompletedDownloadService</c> →
+    /// <c>DownloadClientProvider.Get(DownloadClientInfo.Id)</c> resolves the owning client by that id;
+    /// a wrong/zero id makes its <c>.Single(...)</c> throw "Sequence contains no matching element", so
+    /// every completed download wedges at "Couldn't process tracked download" and never imports. (Live
+    /// qobuz regression, 2026-05-31: <c>GetItems()</c> passed <c>0</c> → every download stuck.)
+    /// <para>
+    /// Canonical shape (tidal/apple/amazon): <c>DownloadClientItemClientInfo.FromDownloadClient(this, …)</c>,
+    /// the host helper that always reads <c>this.Definition.Id/Name</c>. qobuz derives the id explicitly
+    /// from <c>Definition?.Id</c>. The guard accepts either; it fails a <c>GetItems()</c> that neither
+    /// uses <c>FromDownloadClient(this, …)</c> nor references <c>Definition.Id/Name</c>, or that passes a
+    /// literal <c>0</c> to a <c>ToDownloadClientItem(...)</c> converter.
+    /// </para>
+    /// <para>
+    /// Applicable only to plugins that ship a host-contract download client (import-list plugins such as
+    /// brainarr → N/A). Source-scan based (like <see cref="Check_NoFluentValidation_ErrorsApi_Drift"/>):
+    /// it isolates each download client's <c>GetItems()</c> body and is conservative — if no body can be
+    /// located it passes rather than false-fail.
+    /// </para>
+    /// </summary>
+    public virtual ComplianceResult Check_DownloadClientStampsRegisteredClientId()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+        if (!PluginDeclaresHostDownloadClient(assembly)) return ComplianceResult.Success; // N/A (no download client)
+        if (!Directory.Exists(PluginSourceRoot)) return Skipped();
+
+        var excluded = new[]
+        {
+            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}",
+            ".Tests" + Path.DirectorySeparatorChar,
+            $"{Path.DirectorySeparatorChar}examples{Path.DirectorySeparatorChar}",
+        };
+
+        // Host-contract download clients subclass DownloadClientBase<TSettings> and override GetItems().
+        var clientBasePattern = new System.Text.RegularExpressions.Regex(
+            @":\s*DownloadClientBase\s*<", System.Text.RegularExpressions.RegexOptions.Compiled);
+        var derivesFromDefinition = new System.Text.RegularExpressions.Regex(
+            @"FromDownloadClient\s*\(\s*this\b|Definition\s*\??\s*\.\s*(Id|Name)",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        var stampsLiteralZero = new System.Text.RegularExpressions.Regex(
+            @"ToDownloadClientItem\s*\(\s*0\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        var scannedAny = false;
+        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch { continue; }
+            if (!clientBasePattern.IsMatch(text)) continue;
+            if (!text.Contains("GetItems", StringComparison.Ordinal)) continue;
+
+            var body = ExtractMethodBody(text, "GetItems");
+            if (body == null) continue; // couldn't isolate the body — don't false-fail
+            scannedAny = true;
+
+            var derives = derivesFromDefinition.IsMatch(body);
+            var stampsZero = stampsLiteralZero.IsMatch(body);
+            if (!derives || stampsZero)
+            {
+                offenders.Add(
+                    $"{Path.GetRelativePath(RepoRootPath, file)}: GetItems() must stamp DownloadClientInfo.Id " +
+                    "from this client's Definition (use DownloadClientItemClientInfo.FromDownloadClient(this, …) " +
+                    "or pass Definition.Id) — a literal 0 makes Lidarr's CompletedDownloadService fail to resolve " +
+                    "the owning client and wedges every completed download.");
+            }
+        }
+
+        // No locatable download-client GetItems() body to assert against — treat as N/A rather than fail.
+        if (!scannedAny) return ComplianceResult.Success;
+
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Download client(s) must report DownloadClientInfo.Id == Definition.Id (download-client-id contract): {string.Join("; ", offenders)}");
+    }
+
+    /// <summary>
+    /// True if the plugin assembly declares a host-contract download client — a concrete type
+    /// implementing the abstractions <c>IDownloadClient</c> or subclassing Lidarr's
+    /// <c>DownloadClientBase&lt;T&gt;</c>. Import-list plugins (e.g. brainarr) declare neither.
+    /// </summary>
+    private bool PluginDeclaresHostDownloadClient(Assembly assembly)
+    {
+        const string dcIface = "Lidarr.Plugin.Abstractions.Contracts.IDownloadClient";
+        return SafeGetTypes(assembly).Any(t =>
+        {
+            if (t == null) return false;
+            try
+            {
+                if (t.IsInterface || t.IsAbstract) return false;
+                if (t.GetInterfaces().Any(i => i.FullName == dcIface)) return true;
+                var b = t.BaseType;
+                while (b != null)
+                {
+                    if ((b.Name ?? string.Empty).StartsWith("DownloadClientBase", StringComparison.Ordinal)) return true;
+                    b = b.BaseType;
+                }
+                return false;
+            }
+            catch { return false; }
+        });
+    }
+
+    /// <summary>
+    /// Extracts the body text (the enclosing <c>{ … }</c>, or the <c>=&gt; … ;</c> for an expression
+    /// body) of the first method named <paramref name="methodName"/> in <paramref name="source"/>.
+    /// Returns null if the method or a balanced body can't be located (callers treat null as "skip").
+    /// Brace-matching tolerates balanced interpolation braces (<c>$"{x}"</c>); a stray unbalanced brace
+    /// inside a string/comment yields null (safe — the caller skips rather than false-fails).
+    /// </summary>
+    private static string? ExtractMethodBody(string source, string methodName)
+    {
+        var searchFrom = 0;
+        while (true)
+        {
+            var nameIdx = source.IndexOf(methodName, searchFrom, StringComparison.Ordinal);
+            if (nameIdx < 0) return null;
+            var afterName = nameIdx + methodName.Length;
+            // Require a left word boundary so "GetItems" doesn't match inside "FooGetItems".
+            if (nameIdx > 0)
+            {
+                var prev = source[nameIdx - 1];
+                if (char.IsLetterOrDigit(prev) || prev == '_') { searchFrom = afterName; continue; }
+            }
+            // Next non-space char must open a parameter list.
+            var p = afterName;
+            while (p < source.Length && char.IsWhiteSpace(source[p])) p++;
+            if (p >= source.Length || source[p] != '(') { searchFrom = afterName; continue; }
+            // Match the parameter-list parens.
+            var parenDepth = 0;
+            var q = p;
+            for (; q < source.Length; q++)
+            {
+                if (source[q] == '(') parenDepth++;
+                else if (source[q] == ')') { parenDepth--; if (parenDepth == 0) { q++; break; } }
+            }
+            if (q >= source.Length) return null;
+            var r = q;
+            while (r < source.Length && char.IsWhiteSpace(source[r])) r++;
+            if (r >= source.Length) return null;
+            if (source[r] == '{')
+            {
+                var depth = 0;
+                for (var i = r; i < source.Length; i++)
+                {
+                    if (source[i] == '{') depth++;
+                    else if (source[i] == '}') { depth--; if (depth == 0) return source.Substring(r, i - r + 1); }
+                }
+                return null; // unbalanced
+            }
+            if (source[r] == '=' && r + 1 < source.Length && source[r + 1] == '>')
+            {
+                var semi = source.IndexOf(';', r);
+                return semi < 0 ? null : source.Substring(r, semi - r + 1);
+            }
+            // Declaration without an inline body (interface/abstract) or a generic constraint — keep looking.
+            searchFrom = afterName;
+        }
+    }
+
+    #endregion
+
     #region Aggregator
 
     #region Check_EnforcesAlbumCompletionPolicy
@@ -783,6 +938,7 @@ public abstract partial class EcosystemParityTestBase
             [nameof(Check_UsesCommonDiagnosticTypes)] = Check_UsesCommonDiagnosticTypes(),
             [nameof(Check_UsesCommonDownloadTelemetrySink)] = Check_UsesCommonDownloadTelemetrySink(),
             [nameof(Check_DownloadClientUsesPathTraversalGuard)] = Check_DownloadClientUsesPathTraversalGuard(),
+            [nameof(Check_DownloadClientStampsRegisteredClientId)] = Check_DownloadClientStampsRegisteredClientId(),
             [nameof(Check_FileClassNameParity)] = Check_FileClassNameParity(),
             [nameof(Check_ClaudeMdDocumentsCommonHelpers)] = Check_ClaudeMdDocumentsCommonHelpers(),
         };
