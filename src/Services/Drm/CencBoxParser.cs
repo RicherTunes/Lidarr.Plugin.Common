@@ -9,6 +9,12 @@ namespace Lidarr.Plugin.Common.Services.Drm
     public sealed record CencSampleEncryptionInfo(byte[] Iv, IReadOnlyList<CencSubsample> Subsamples);
 
     /// <summary>
+    /// Track-run info from a 'trun' box: the byte offset of the run's first sample (relative to the moof,
+    /// when present) and the per-sample sizes used to slice each sample out of 'mdat'.
+    /// </summary>
+    public sealed record TrunInfo(int? DataOffset, IReadOnlyList<long> SampleSizes);
+
+    /// <summary>
     /// The track-encryption defaults from an ISO/IEC 23001-7 'tenc' box: whether the track is protected, the
     /// per-sample IV size, the default KID, the cbcs crypt:skip pattern, and (when the per-sample IV size is
     /// zero) the default constant IV.
@@ -156,6 +162,78 @@ namespace Lidarr.Plugin.Common.Services.Drm
             }
 
             return samples;
+        }
+
+        /// <summary>
+        /// Parses a 'trun' box payload (FullBox content from the version byte): the optional data_offset and
+        /// the per-sample sizes (when the sample-size flag is set). Other optional per-sample fields are
+        /// skipped. Bounds-checked; an attacker-controlled sample_count can't drive a runaway loop/alloc.
+        /// </summary>
+        public static TrunInfo ParseTrun(ReadOnlySpan<byte> payload)
+        {
+            if (payload.Length < 8)
+            {
+                throw new ArgumentException($"trun payload too short ({payload.Length} bytes, need >= 8).", nameof(payload));
+            }
+
+            uint flags = (uint)((payload[1] << 16) | (payload[2] << 8) | payload[3]);
+            long sampleCount = ReadUInt32(payload, 4);
+            int pos = 8;
+
+            int? dataOffset = null;
+            if ((flags & 0x000001) != 0) // data-offset-present
+            {
+                if (pos + 4 > payload.Length)
+                {
+                    throw new ArgumentException("trun truncated reading data_offset.", nameof(payload));
+                }
+
+                dataOffset = (int)ReadUInt32(payload, pos); // signed per spec
+                pos += 4;
+            }
+
+            if ((flags & 0x000004) != 0) // first-sample-flags-present
+            {
+                if (pos + 4 > payload.Length)
+                {
+                    throw new ArgumentException("trun truncated reading first_sample_flags.", nameof(payload));
+                }
+
+                pos += 4;
+            }
+
+            bool hasDuration = (flags & 0x000100) != 0;
+            bool hasSize = (flags & 0x000200) != 0;
+            bool hasFlags = (flags & 0x000400) != 0;
+            bool hasCto = (flags & 0x000800) != 0;
+            int perSample = (hasDuration ? 4 : 0) + (hasSize ? 4 : 0) + (hasFlags ? 4 : 0) + (hasCto ? 4 : 0);
+
+            var sizes = new List<long>();
+            if (perSample > 0)
+            {
+                // Reject a sample_count the box can't hold up front; this also bounds every read in the loop.
+                if (sampleCount > (payload.Length - pos) / perSample)
+                {
+                    throw new ArgumentException($"trun sample_count ({sampleCount}) exceeds the box capacity.", nameof(payload));
+                }
+
+                for (long i = 0; i < sampleCount; i++)
+                {
+                    if (hasDuration) pos += 4;
+                    if (hasSize)
+                    {
+                        sizes.Add(ReadUInt32(payload, pos));
+                        pos += 4;
+                    }
+
+                    if (hasFlags) pos += 4;
+                    if (hasCto) pos += 4;
+                }
+            }
+
+            // perSample == 0: the run carries no per-sample records, so there is nothing to read per sample
+            // and no loop runs (a huge sample_count can't burn CPU here).
+            return new TrunInfo(dataOffset, sizes);
         }
 
         private static uint ReadUInt32(ReadOnlySpan<byte> b, int pos)

@@ -160,6 +160,73 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Null(tenc.DefaultConstantIv);
         }
 
+        // trun with data-offset (0x1) + sample-size (0x200) flags, 2 samples.
+        [Fact]
+        public void ParseTrun_DataOffsetAndSampleSizes_ReadsBoth()
+        {
+            var payload = Concat(
+                new byte[] { 0x00 },             // version
+                new byte[] { 0x00, 0x02, 0x01 }, // flags: data-offset + sample-size
+                new byte[] { 0x00, 0x00, 0x00, 0x02 }, // sample_count = 2
+                new byte[] { 0x00, 0x00, 0x00, 0x64 }, // data_offset = 100
+                new byte[] { 0x00, 0x00, 0x04, 0x00 }, // sample 0 size = 1024
+                new byte[] { 0x00, 0x00, 0x08, 0x00 }); // sample 1 size = 2048
+
+            var trun = CencBoxParser.ParseTrun(payload);
+
+            Assert.Equal(100, trun.DataOffset);
+            Assert.Equal(new long[] { 1024, 2048 }, trun.SampleSizes);
+        }
+
+        // All per-sample fields present (duration+size+flags+cto) — the size must be read from the right
+        // offset within each 16-byte per-sample record, and first_sample_flags (0x4) skipped.
+        [Fact]
+        public void ParseTrun_AllPerSampleFields_ExtractsSizeFromCorrectOffset()
+        {
+            var payload = Concat(
+                new byte[] { 0x00 },
+                new byte[] { 0x00, 0x0F, 0x05 }, // flags: data-offset(1) + first-sample-flags(4) + dur(100)+size(200)+flags(400)+cto(800)
+                new byte[] { 0x00, 0x00, 0x00, 0x01 }, // sample_count = 1
+                new byte[] { 0x00, 0x00, 0x00, 0x10 }, // data_offset = 16
+                new byte[] { 0xDE, 0xAD, 0xBE, 0xEF }, // first_sample_flags
+                new byte[] { 0x00, 0x00, 0x00, 0x05 }, // sample duration
+                new byte[] { 0x00, 0x00, 0x0A, 0x00 }, // sample size = 2560
+                new byte[] { 0x00, 0x00, 0x00, 0x00 }, // sample flags
+                new byte[] { 0x00, 0x00, 0x00, 0x00 }); // composition time offset
+
+            var trun = CencBoxParser.ParseTrun(payload);
+
+            Assert.Equal(16, trun.DataOffset);
+            Assert.Equal(new long[] { 2560 }, trun.SampleSizes);
+        }
+
+        [Fact]
+        public void ParseTrun_NoSizeFlag_ReturnsEmptySizes()
+        {
+            var payload = Concat(
+                new byte[] { 0x00 },
+                new byte[] { 0x00, 0x00, 0x01 }, // flags: data-offset only
+                new byte[] { 0x00, 0x00, 0x00, 0x02 }, // sample_count = 2
+                new byte[] { 0x00, 0x00, 0x00, 0x64 }); // data_offset
+
+            var trun = CencBoxParser.ParseTrun(payload);
+
+            Assert.Equal(100, trun.DataOffset);
+            Assert.Empty(trun.SampleSizes);
+        }
+
+        [Fact]
+        public void ParseTrun_Truncated_Throws()
+        {
+            var payload = Concat(
+                new byte[] { 0x00 },
+                new byte[] { 0x00, 0x02, 0x00 }, // sample-size flag
+                new byte[] { 0x00, 0x00, 0x00, 0x03 }, // claims 3 samples
+                new byte[] { 0x00, 0x00, 0x04, 0x00 }); // only 1 size present
+
+            Assert.Throws<ArgumentException>(() => CencBoxParser.ParseTrun(payload));
+        }
+
         private static byte[] Concat(params byte[][] parts)
         {
             int n = 0;
