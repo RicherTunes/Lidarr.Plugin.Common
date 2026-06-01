@@ -89,6 +89,64 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal(pt, segment.AsSpan(96, 16).ToArray());
         }
 
+        // cbcs whole-sample end-to-end (the realistic Widevine/FairPlay audio profile): a per-sample 16-byte
+        // IV in senc, no pattern, mdat payload = NIST CBC 4-block vector -> recovers the NIST plaintext.
+        [Fact]
+        public void DecryptSegmentInPlace_Cbcs_WholeSample_DecryptsMdat()
+        {
+            var key = Convert.FromHexString("2b7e151628aed2a6abf7158809cf4f3c");
+            var iv = Convert.FromHexString("000102030405060708090a0b0c0d0e0f");
+            var ct = Convert.FromHexString(
+                "7649abac8119b246cee98e9b12e9197d5086cb9b507219ee95db113a917678b2" +
+                "73bed6b8e3c1743b7116e69e222295163ff1caa1681fac09120eca307586e1a7");
+            var pt = Convert.FromHexString(
+                "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51" +
+                "30c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710");
+
+            var senc = Box("senc", Concat(new byte[] { 0, 0, 0, 0 }, Be32(1), iv));
+            var trun = Box("trun", Concat(new byte[] { 0x00, 0x00, 0x02, 0x01 }, Be32(1), Be32(80), Be32(64)));
+            var moof = Box("moof", Box("traf", Concat(trun, senc)));
+            var segment = Concat(moof, Box("mdat", ct));
+            Assert.Equal(80, moof.Length + 8);
+
+            var tenc = new TencDefaults(true, 16, new byte[16], 0, 0, null);
+            var n = CencSegmentDecryptor.DecryptSegmentInPlace(segment, key, CencProtectionScheme.Cbcs, tenc);
+
+            Assert.Equal(1, n);
+            Assert.Equal(pt, segment.AsSpan(80, 64).ToArray());
+        }
+
+        // cbcs with a clear-header subsample (16 clear bytes + 64 protected) — the clear prefix is left
+        // untouched and only the protected body is CBC-decrypted.
+        [Fact]
+        public void DecryptSegmentInPlace_Cbcs_WithSubsample_DecryptsProtectedOnly()
+        {
+            var key = Convert.FromHexString("2b7e151628aed2a6abf7158809cf4f3c");
+            var iv = Convert.FromHexString("000102030405060708090a0b0c0d0e0f");
+            var ct = Convert.FromHexString(
+                "7649abac8119b246cee98e9b12e9197d5086cb9b507219ee95db113a917678b2" +
+                "73bed6b8e3c1743b7116e69e222295163ff1caa1681fac09120eca307586e1a7");
+            var pt = Convert.FromHexString(
+                "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51" +
+                "30c81c46a35ce411e5fbc1191a0a52eff69f2445df4f9b17ad2b417be66c3710");
+            var clear = Enumerable.Repeat((byte)0x77, 16).ToArray();
+
+            // senc: subsamples flag, count 1, IV(16), subsample_count=1, clear=16, protected=64.
+            var senc = Box("senc", Concat(new byte[] { 0x00, 0x00, 0x00, 0x02 }, Be32(1), iv,
+                new byte[] { 0x00, 0x01 }, new byte[] { 0x00, 0x10 }, Be32(64)));
+            var trun = Box("trun", Concat(new byte[] { 0x00, 0x00, 0x02, 0x01 }, Be32(1), Be32(88), Be32(80)));
+            var moof = Box("moof", Box("traf", Concat(trun, senc)));
+            var segment = Concat(moof, Box("mdat", Concat(clear, ct)));
+            Assert.Equal(88, moof.Length + 8);
+
+            var tenc = new TencDefaults(true, 16, new byte[16], 0, 0, null);
+            var n = CencSegmentDecryptor.DecryptSegmentInPlace(segment, key, CencProtectionScheme.Cbcs, tenc);
+
+            Assert.Equal(1, n);
+            Assert.Equal(clear, segment.AsSpan(88, 16).ToArray());
+            Assert.Equal(pt, segment.AsSpan(88 + 16, 64).ToArray());
+        }
+
         [Fact]
         public void DecryptSegmentInPlace_NoMoof_Throws()
         {
