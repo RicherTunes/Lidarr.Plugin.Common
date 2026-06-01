@@ -44,6 +44,11 @@ namespace Lidarr.Plugin.Common.Services.Drm
                 Require(box, pos, 4, "KID_count");
                 long kidCount = ReadUInt32(box, pos);
                 pos += 4;
+                if (kidCount > (box.Length - pos) / 16)
+                {
+                    throw new ArgumentException($"pssh KID_count ({kidCount}) exceeds box capacity.", nameof(box));
+                }
+
                 for (long i = 0; i < kidCount; i++)
                 {
                     Require(box, pos, 16, "KID");
@@ -55,7 +60,7 @@ namespace Lidarr.Plugin.Common.Services.Drm
             Require(box, pos, 4, "DataSize");
             long dataSize = ReadUInt32(box, pos);
             pos += 4;
-            if (pos + dataSize > box.Length)
+            if (dataSize > int.MaxValue || pos + dataSize > box.Length)
             {
                 throw new ArgumentException(
                     $"pssh DataSize ({dataSize}) exceeds box ({box.Length - pos} available).", nameof(box));
@@ -70,7 +75,8 @@ namespace Lidarr.Plugin.Common.Services.Drm
 
         private static void Require(ReadOnlySpan<byte> box, int pos, int need, string what)
         {
-            if (pos + need > box.Length)
+            // long math so a large pos can't wrap negative and slip past the check (build is unchecked).
+            if ((long)pos + need > box.Length)
             {
                 throw new ArgumentException($"pssh box truncated reading {what} (need {need} at {pos}, have {box.Length}).", nameof(box));
             }

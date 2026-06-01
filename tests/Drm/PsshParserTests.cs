@@ -77,6 +77,41 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Throws<ArgumentException>(() => PsshParser.Parse(box));
         }
 
+        // v1 pssh carrying KIDs but no data (DataSize 0) — legal; Data must be empty, the KID still read.
+        [Fact]
+        public void Parse_V1_ZeroDataSize_ReadsKidWithEmptyData()
+        {
+            var kid = Convert.FromHexString("00112233445566778899aabbccddeeff");
+            var box = Concat(
+                Be32(8 + 4 + 16 + 4 + 16 + 4),
+                Ascii("pssh"),
+                new byte[] { 0x01, 0x00, 0x00, 0x00 },
+                Widevine,
+                Be32(1),
+                kid,
+                Be32(0)); // DataSize 0
+
+            var pssh = PsshParser.Parse(box);
+
+            Assert.Single(pssh.KeyIds);
+            Assert.Equal(kid, pssh.KeyIds[0]);
+            Assert.Empty(pssh.Data);
+        }
+
+        // Regression: a huge KID_count with no KID bytes must throw, not loop hundreds of millions of times.
+        [Fact]
+        public void Parse_V1_HugeKidCount_ThrowsFast()
+        {
+            var box = Concat(
+                Be32(8 + 4 + 16 + 4),
+                Ascii("pssh"),
+                new byte[] { 0x01, 0x00, 0x00, 0x00 },
+                Widevine,
+                Be32(0x10000000)); // 268M KIDs, none present
+
+            Assert.Throws<ArgumentException>(() => PsshParser.Parse(box));
+        }
+
         private static byte[] Be32(int v) => new[] { (byte)(v >> 24), (byte)(v >> 16), (byte)(v >> 8), (byte)v };
         private static byte[] Ascii(string s) => System.Text.Encoding.ASCII.GetBytes(s);
 

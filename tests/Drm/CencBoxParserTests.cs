@@ -120,6 +120,46 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Throws<ArgumentException>(() => CencBoxParser.ParseSenc(payload, perSampleIvSize: 8));
         }
 
+        // Regression: a crafted senc with per-sample IV size 0, no subsamples, and a huge sample_count would
+        // loop ~4.3 billion times allocating empty entries (OOM/hang). Must throw fast instead.
+        [Fact]
+        public void ParseSenc_ZeroIvNoSubsamples_HugeCount_ThrowsFast()
+        {
+            var payload = new byte[] { 0x00, 0x00, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF }; // count = 4.29e9
+            Assert.Throws<ArgumentException>(() => CencBoxParser.ParseSenc(payload, perSampleIvSize: 0));
+        }
+
+        [Fact]
+        public void ParseSenc_EmptySampleCount_ReturnsEmpty()
+        {
+            var payload = new byte[] { 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x00 }; // subsamples flag, count 0
+            var samples = CencBoxParser.ParseSenc(payload, perSampleIvSize: 8);
+            Assert.Empty(samples);
+        }
+
+        // cbcs can use a crypt:skip pattern AND a per-sample IV (size 16) with no constant IV — verify the
+        // constant IV is only read when iv_size==0, not merely because version>=1.
+        [Fact]
+        public void ParseTenc_V1_Cbcs_PatternWithPerSampleIv_NoConstantIv()
+        {
+            var kid = Convert.FromHexString("00112233445566778899aabbccddeeff");
+            var payload = Concat(
+                new byte[] { 0x01 },
+                new byte[] { 0x00, 0x00, 0x00 },
+                new byte[] { 0x00 },
+                new byte[] { (1 << 4) | 9 },     // crypt=1, skip=9
+                new byte[] { 0x01 },             // isProtected
+                new byte[] { 0x10 },             // per_sample_IV_size = 16 (NOT 0) => no constant IV
+                kid);
+
+            var tenc = CencBoxParser.ParseTenc(payload);
+
+            Assert.Equal(16, tenc.PerSampleIvSize);
+            Assert.Equal(1, tenc.CryptByteBlock);
+            Assert.Equal(9, tenc.SkipByteBlock);
+            Assert.Null(tenc.DefaultConstantIv);
+        }
+
         private static byte[] Concat(params byte[][] parts)
         {
             int n = 0;
