@@ -170,7 +170,20 @@
     "sanitises",
     "serialisation",
     "reloadable",
-    "retriable"
+    "retriable",
+    "Anson",
+    "HOSTBRIDGE",
+    "Standardisation",
+    "Standardise",
+    "anchore",
+    "bitrates",
+    "danielpalme",
+    "lycheeverse",
+    "ossf",
+    "reviewdog",
+    "sarif",
+    "sigstore",
+    "softprops"
   ],
   "ignorePaths": [
     "**/bin",
