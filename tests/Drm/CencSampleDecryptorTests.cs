@@ -267,6 +267,88 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal("key", ex.ParamName);
         }
 
+        [Fact]
+        public void Instance_DecryptSampleInPlace_AfterDispose_Throws()
+        {
+            var decryptor = new CencDecryptor(new byte[16], CencProtectionScheme.Cenc);
+            decryptor.Dispose();
+            Assert.Throws<ObjectDisposedException>(() => decryptor.DecryptSampleInPlace(new byte[16], new byte[16]));
+        }
+
+        // ---- cbcs edge cases (trailing partial block, asymmetric pattern, multi-group chaining) --------
+
+        // A trailing partial block (run length not a multiple of 16) is left in the clear; the whole blocks
+        // before it decrypt normally. 64-byte NIST CBC vector + 5 trailing clear bytes.
+        [Fact]
+        public void DecryptSample_Cbcs_TrailingPartialBlock_LeftClear()
+        {
+            var key = Convert.FromHexString("2b7e151628aed2a6abf7158809cf4f3c");
+            var iv = Convert.FromHexString("000102030405060708090a0b0c0d0e0f");
+            var ct = Convert.FromHexString(
+                "7649abac8119b246cee98e9b12e9197d5086cb9b507219ee95db113a917678b2" +
+                "73bed6b8e3c1743b7116e69e22229516" + "3ff1caa1681fac09120eca307586e1a7");
+            var pt = Convert.FromHexString(
+                "6bc1bee22e409f96e93d7e117393172aae2d8a571e03ac9c9eb76fac45af8e51" +
+                "30c81c46a35ce411e5fbc1191a0a52ef" + "f69f2445df4f9b17ad2b417be66c3710");
+            var tail = Enumerable.Repeat((byte)0x99, 5).ToArray();
+
+            var sample = Concat(ct, tail);
+            var expected = Concat(pt, tail);
+
+            var result = CencSampleDecryptor.DecryptSample(sample, key, iv, CencProtectionScheme.Cbcs);
+
+            Assert.Equal(expected, result);
+        }
+
+        // Asymmetric (1,9) pattern across 11 blocks = two crypt groups. Crypt blocks are consecutive NIST CBC
+        // blocks (ct1 chains from ct0) placed at block 0 and block 10; blocks 1-9 are clear skip blocks.
+        [Fact]
+        public void DecryptSample_Cbcs_Pattern_1_9_TwoCryptGroups()
+        {
+            var key = Convert.FromHexString("2b7e151628aed2a6abf7158809cf4f3c");
+            var iv = Convert.FromHexString("000102030405060708090a0b0c0d0e0f");
+            var ct0 = Convert.FromHexString("7649abac8119b246cee98e9b12e9197d");
+            var pt0 = Convert.FromHexString("6bc1bee22e409f96e93d7e117393172a");
+            var ct1 = Convert.FromHexString("5086cb9b507219ee95db113a917678b2");
+            var pt1 = Convert.FromHexString("ae2d8a571e03ac9c9eb76fac45af8e51");
+            var skip9 = Enumerable.Repeat((byte)0xCC, 9 * 16).ToArray();
+
+            var sample = Concat(ct0, skip9, ct1);
+            var expected = Concat(pt0, skip9, pt1);
+            var subsamples = new List<CencSubsample> { new(ClearBytes: 0, ProtectedBytes: 11 * 16) };
+
+            var result = CencSampleDecryptor.DecryptSample(
+                sample, key, iv, CencProtectionScheme.Cbcs, subsamples, cryptByteBlock: 1, skipByteBlock: 9);
+
+            Assert.Equal(expected, result);
+        }
+
+        // (1,1) over 5 blocks = three crypt groups (blocks 0,2,4), chaining ct0->ct1->ct2; blocks 1,3 clear.
+        // Exercises >2-group chaining and a final group where skip clamps to 0 (totalBlocks not a clean multiple).
+        [Fact]
+        public void DecryptSample_Cbcs_Pattern_1_1_ThreeCryptGroups()
+        {
+            var key = Convert.FromHexString("2b7e151628aed2a6abf7158809cf4f3c");
+            var iv = Convert.FromHexString("000102030405060708090a0b0c0d0e0f");
+            var ct0 = Convert.FromHexString("7649abac8119b246cee98e9b12e9197d");
+            var pt0 = Convert.FromHexString("6bc1bee22e409f96e93d7e117393172a");
+            var ct1 = Convert.FromHexString("5086cb9b507219ee95db113a917678b2");
+            var pt1 = Convert.FromHexString("ae2d8a571e03ac9c9eb76fac45af8e51");
+            var ct2 = Convert.FromHexString("73bed6b8e3c1743b7116e69e22229516");
+            var pt2 = Convert.FromHexString("30c81c46a35ce411e5fbc1191a0a52ef");
+            var clearX = Enumerable.Repeat((byte)0xDD, 16).ToArray();
+            var clearY = Enumerable.Repeat((byte)0xEE, 16).ToArray();
+
+            var sample = Concat(ct0, clearX, ct1, clearY, ct2);
+            var expected = Concat(pt0, clearX, pt1, clearY, pt2);
+            var subsamples = new List<CencSubsample> { new(ClearBytes: 0, ProtectedBytes: 5 * 16) };
+
+            var result = CencSampleDecryptor.DecryptSample(
+                sample, key, iv, CencProtectionScheme.Cbcs, subsamples, cryptByteBlock: 1, skipByteBlock: 1);
+
+            Assert.Equal(expected, result);
+        }
+
         private static byte[] Concat(params byte[][] parts) => parts.SelectMany(p => p).ToArray();
     }
 }
