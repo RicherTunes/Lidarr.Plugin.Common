@@ -78,7 +78,7 @@ public sealed class ManagerBackedTokenProvider : IStreamingTokenProvider
     public void ClearAuthenticationCache() => _mgr.ClearSession();
 }
 
-var http = HttpClientFactory.Create(
+var http = new HttpClient(
     new OAuthDelegatingHandler(new ManagerBackedTokenProvider(mgr, credentials), logger));
 ```
 

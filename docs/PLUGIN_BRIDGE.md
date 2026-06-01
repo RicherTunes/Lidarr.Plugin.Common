@@ -14,7 +14,7 @@ The base class registers plugin metadata and exposes helper methods (logging, se
 ```csharp file=../examples/PluginBridgeSample/MyServicePlugin.cs#bridge-module
 ```
 
-Use standard `IServiceCollection` registrations. The module can implement `IAsyncStartable`/`IAsyncStoppable` for warm-up or graceful shutdown hooks.
+Use standard `IServiceCollection` registrations. (The `IAsyncStartable`/`IAsyncStoppable` interfaces referenced in `examples/PluginBridgeSample` are sample-only — they are not defined or scanned for by the library; use your DI container's standard lifecycle mechanisms for warm-up or shutdown hooks.)
 
 ## Typed settings
 
