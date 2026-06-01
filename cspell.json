@@ -160,7 +160,17 @@
     "normalise",
     "Normalise",
     "synchronisation",
-    "alikes"
+    "alikes",
+    "initialising",
+    "optimise",
+    "optimisation",
+    "standardised",
+    "enumerables",
+    "sanitising",
+    "sanitises",
+    "serialisation",
+    "reloadable",
+    "retriable"
   ],
   "ignorePaths": [
     "**/bin",
