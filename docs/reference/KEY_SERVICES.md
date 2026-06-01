@@ -147,3 +147,42 @@ Source: [`src/Abstractions/Results/PluginErrorCode.cs`](../../src/Abstractions/R
 - `SafeOperationExecutor` — defensive wrappers: timeouts, try-execute patterns, and IO retry for transient sharing violations.
 - `FileNameSanitizer`/`Sanitize` — filesystem-safe names and URL-safe components.
 - `RequestSigning`/`IRequestSigner` — MD5/HMAC helpers for signature schemes.
+
+## Streaming Plugin Base Classes
+
+- `StreamingPlugin<TModule, TSettings>` — main plugin entry point. Wires DI, settings lifecycle, manifest loading, and the host bridge. Inherit from this to create a streaming-service plugin. → [Plugin Bridge](../PLUGIN_BRIDGE.md)
+- `StreamingPluginModule` — base class for streaming-service plugin modules (DI registration, service wiring).
+- `BaseStreamingIndexer<T>` — base class for streaming-service indexers. Provides search, rate-limit integration, and release cleanup.
+- `BaseStreamingDownloadClient<T>` — base class for streaming-service download clients. Provides tracked download lifecycle and path safety.
+
+## HTTP Execution
+
+- `CachingHttpExecutor` — HTTP executor that integrates caching with the resilience pipeline. Use when you need automatic GET caching alongside retries and dedup.
+
+## Resilience & Circuit Breaking
+
+- `AdvancedCircuitBreaker` — circuit breaker with dual-trip logic: trips on consecutive failures **or** failure-rate threshold within a sampling window. Configurable half-open probe interval.
+- `NetworkResilienceService` — coordinates resilience for batch operations and non-HTTP workflows (bulk lookups, metadata enrichment). Wraps `AdvancedCircuitBreaker` with per-endpoint tracking.
+
+## Authentication Failure Handling
+
+- `SlidingWindowAuthFailureHandler` — `IAuthFailureHandler` with K-of-N-in-W sliding-window failure threshold semantics. Trips when K failures occur within window W; auto-resets after cooldown. → [CHANGELOG v1.7.0](../../CHANGELOG.md)
+
+## HostBridge Subsystem
+
+- `HostBridgeDownloadOrchestrator` — centralizes fire-and-forget download enqueue pattern for streaming plugins.
+- `HostBridgeRuntimeCache<TRuntime, TSettings>` — generic singleton-runtime cache for per-plugin state keyed by settings instance.
+- `AlbumSizeEstimator` — estimates album byte size from duration × bitrate with fallback ladder.
+- `MultiQualityReleaseBuilder` — builds one `ReleaseInfo` per quality tier.
+- `AlbumReleaseInfoBuilder` — builds `Guid`, `DownloadUrl`, and `Title` fields with edition/explicit/live markers.
+
+→ Full HostBridge documentation: [HOSTBRIDGE.md](../HOSTBRIDGE.md)
+
+## Lyrics
+
+- `LyricsEnricher` — canonical synced-lyrics enricher shared across plugins. Orchestrates LRCLIB fallback with native-source lookup.
+- `LrclibClient` — minimal client for the LRCLIB public lyrics API.
+
+## Storage
+
+- `JsonFileStore` — JSON file persistence for plugin state (tokens, session data, user preferences). Handles atomic write, read, and schema migration.

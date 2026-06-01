@@ -453,7 +453,7 @@ Template to copy when drafting a release:
 - Request deduplication cancels in-flight tasks on dispose with TrySet* guards
 - README Maintainer Checklist references Lidarr setup script
 
-[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.6...v1.7)
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.6...v1.1.7)
 
 ## [1.1.6] - 2025-10-10
 **Upgrade note:** Diagnostics and concurrency improvements.

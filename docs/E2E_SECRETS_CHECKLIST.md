@@ -125,7 +125,7 @@ For organization-level secrets:
 ### "CROSS_REPO_PAT secret is missing or empty"
 
 The workflow skips when this secret is not configured. Solution:
-1. Create PAT at https://github.com/settings/tokens
+1. Create PAT at [GitHub Settings → Tokens](https://github.com/settings/tokens)
 2. Grant `repo` scope (classic) or fine-grained read access
 3. Add to repository secrets as `CROSS_REPO_PAT`
 

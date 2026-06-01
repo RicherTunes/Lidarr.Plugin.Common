@@ -18,7 +18,7 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## Key capabilities
 
-- **ALC isolation** — each plugin loads Common in a private `AssemblyLoadContext`; the host owns only `Lidarr.Plugin.Abstractions`. → [Plugin Isolation](docs/PLUGIN_ISOLATION.md)
+- **ALC isolation** — each plugin loads Common in a private `AssemblyLoadContext`; the host shares `Lidarr.Plugin.Abstractions` and two `Microsoft.Extensions` abstractions. → [Plugin Isolation](docs/PLUGIN_ISOLATION.md)
 - **Streaming plugin bridge** — `StreamingPlugin<TModule, TSettings>` base class wires DI, settings, lifecycle, and the host bridge. → [Plugin Bridge](docs/PLUGIN_BRIDGE.md)
 - **Resilient HTTP pipeline** — builder → options → executor → cache flow with retries, deadlines, concurrency caps, and request deduplication. → [HTTP Flow](docs/Flow.md) · [Key Services](docs/reference/KEY_SERVICES.md)
 - **Security helpers** — `PathTraversalGuard`, `SecureMemory`, `TokenProtectorFactory`, LLM prompt sanitization. → [Shared Helpers Catalog](wiki/Shared-Helpers-Catalog.md)
