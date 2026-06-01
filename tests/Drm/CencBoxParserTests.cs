@@ -227,6 +227,71 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Throws<ArgumentException>(() => CencBoxParser.ParseTrun(payload));
         }
 
+        // tfhd with base-data-offset (0x1) + default-sample-size (0x10) + default-base-is-moof (0x20000).
+        [Fact]
+        public void ParseTfhd_BaseOffsetDefaultSizeAndMoofBase_ReadsAll()
+        {
+            var payload = Concat(
+                new byte[] { 0x00 },             // version
+                new byte[] { 0x02, 0x00, 0x11 }, // tf_flags = 0x020011
+                new byte[] { 0x00, 0x00, 0x00, 0x01 }, // track_ID = 1
+                new byte[] { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00 }, // base_data_offset = 4096
+                new byte[] { 0x00, 0x00, 0x02, 0x00 }); // default_sample_size = 512
+
+            var tfhd = CencBoxParser.ParseTfhd(payload);
+
+            Assert.Equal(1u, tfhd.TrackId);
+            Assert.Equal(4096L, tfhd.BaseDataOffset);
+            Assert.Equal(512u, tfhd.DefaultSampleSize);
+            Assert.True(tfhd.DefaultBaseIsMoof);
+        }
+
+        [Fact]
+        public void ParseTfhd_TrackIdOnly_WithMoofBase()
+        {
+            var payload = Concat(
+                new byte[] { 0x00 },
+                new byte[] { 0x02, 0x00, 0x00 }, // only default-base-is-moof
+                new byte[] { 0x00, 0x00, 0x00, 0x02 }); // track_ID = 2
+
+            var tfhd = CencBoxParser.ParseTfhd(payload);
+
+            Assert.Equal(2u, tfhd.TrackId);
+            Assert.Null(tfhd.BaseDataOffset);
+            Assert.Null(tfhd.DefaultSampleSize);
+            Assert.True(tfhd.DefaultBaseIsMoof);
+        }
+
+        // default-sample-size present, but NO base-offset and NO default-base-is-moof.
+        [Fact]
+        public void ParseTfhd_DefaultSizeNoMoofBase()
+        {
+            var payload = Concat(
+                new byte[] { 0x00 },
+                new byte[] { 0x00, 0x00, 0x10 }, // default-sample-size only
+                new byte[] { 0x00, 0x00, 0x00, 0x03 }, // track_ID = 3
+                new byte[] { 0x00, 0x00, 0x01, 0x00 }); // default_sample_size = 256
+
+            var tfhd = CencBoxParser.ParseTfhd(payload);
+
+            Assert.Equal(3u, tfhd.TrackId);
+            Assert.Null(tfhd.BaseDataOffset);
+            Assert.Equal(256u, tfhd.DefaultSampleSize);
+            Assert.False(tfhd.DefaultBaseIsMoof);
+        }
+
+        [Fact]
+        public void ParseTfhd_Truncated_Throws()
+        {
+            // base-offset flag set but the 8 base_data_offset bytes are missing.
+            var payload = Concat(
+                new byte[] { 0x00 },
+                new byte[] { 0x00, 0x00, 0x01 }, // base-data-offset-present
+                new byte[] { 0x00, 0x00, 0x00, 0x01 }); // track_ID only
+
+            Assert.Throws<ArgumentException>(() => CencBoxParser.ParseTfhd(payload));
+        }
+
         private static byte[] Concat(params byte[][] parts)
         {
             int n = 0;
