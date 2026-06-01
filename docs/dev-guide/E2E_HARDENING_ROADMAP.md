@@ -142,7 +142,7 @@ Mapping rules (minimal):
 - [x] Reduce/disable fuzzy fallback in `Select-ConfiguredComponent` (flag-gated), and add explicit tests for “no accidental selection”.
 
 ### P2 (concurrency + usability)
-- [x] Add state-write lock backoff tuning via env var (still best-effort).      
+- [x] Add state-write lock backoff tuning via env var (still best-effort).
 - [x] Add `E2E_INSTANCE_KEY` override for power users (explicit key beats heuristics).
 
 ## References

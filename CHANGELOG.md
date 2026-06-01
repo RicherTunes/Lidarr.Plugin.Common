@@ -35,78 +35,282 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Added
+- **`AlbumSizeEstimator`** (`Lidarr.Plugin.Common.HostBridge`) — shared release-size estimator: `bytes = durationSeconds × (bitrate ÷ 8)` with an optional floor, plus a duration-fallback ladder (album duration → summed track durations → count × average). Lifts the duplicated `EstimateAlbumSize` (tidalarr) / `QualitySizeCalculator` (qobuzarr) logic into one place. Bitrate is bits-per-second as a `double` so non-round per-quality bitrates (e.g. Qobuz FLAC ≈ 1 411 200 bps) aren't truncated, and double arithmetic avoids the `int × int` overflow a kbps integer formula hits on long hi-res albums.
+- **`MultiQualityReleaseBuilder` / `MultiQualityRelease`** (`Lidarr.Plugin.Common.HostBridge`) — emits one release per available quality for an album by composing `AlbumReleaseInfoBuilder` (per-tier GUID/URL/title) and `AlbumSizeEstimator` (per-tier size). Consolidates the "offer all quality tiers" indexer pattern (tidalarr `ConvertToReleaseInfosStatic`, qobuzarr's per-quality parser loop). Common cannot reference the host `ReleaseInfo` type, so `Build()` returns neutral `MultiQualityRelease` rows the plugin maps onto its own release object.
+
 ### Deprecations
 - **`IAuthFailureGateRegistry` / `AuthFailureGateRegistry`** — deprecated in favour of a direct `ConcurrentDictionary<string, AuthFailureGate>` per-plugin. A Wave-26 adversarial audit found zero non-test plugin consumers across all four ecosystem repos; every real call-site builds its own gate map so it can pair a custom `IAuthFailureHandler` (e.g. `SlidingWindowAuthFailureHandler`) with each gate — something the registry cannot do because it hard-wires `DefaultAuthFailureHandler` internally. Both the interface and the concrete class are marked `[Obsolete(error: false)]`. They will be removed in v2.0.0.
 
+## [1.17.0] - 2026-05-25
+**Upgrade note:** Wave 21 parity helpers for plugin ecosystem consistency.
+
+### Added
+- Unified plugin version-bump helper (Wave 18C)
+- Edition/Explicit/Live bracket slots to AlbumReleaseInfoBuilder
+- AlbumDownloadUri parser + builder (Wave 19B)
+- PathTraversalGuard.ContainsTraversalAttempt probe
+
+### Fixed
+- Secrets context not allowed in if expressions across 4 workflow files
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.16.0...v1.17.0)
+
+## [1.16.0] - 2026-05-25
+**Upgrade note:** Adds SlidingWindowAuthFailureHandler, observability helpers, and ecosystem parity matrix.
+
+### Added
+- SlidingWindowAuthFailureHandler — K-of-N-in-W circuit semantics
+- Scrub.UrlAndStripQuery (defensive query-strip sibling)
+- Ecosystem parity matrix — single source of truth across 5 repos
+
+### Fixed
+- Secrets context not allowed in if expressions across 4 files
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.15.0...v1.16.0)
+
+## [1.15.0] - 2026-05-25
+**Upgrade note:** BoundedConcurrentDictionary API extension with packaging and test improvements.
+
+### Added
+- BoundedConcurrentDictionary API extension
+
+### Fixed
+- ecosystem-parity-lint falls back to Directory.Build.props for <Version>
+- PackageClosure discovers plugin repos via env or sibling walk
+- Nightly Run tests step uses bash so '\' line continuation works on Windows
+- local-ci.ps1 initializes $resolvedFlags so empty BuildFlags doesn't trip strict-mode
+- PackageClosure plugin tests use [SkippableTheory] so missing builds skip
+- TokenProtectorFactory degrades on SecretService 'not available' (Wave 17O)
+- local-ci .NET 8 guardrail tolerates includedFrameworks shape
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.14.2...v1.15.0)
+
+## [1.14.2] - 2026-05-24
+**Upgrade note:** OAuth single-flight refresh fix.
+
+### Fixed
+- OAuth single-flight RefreshTokensAsync via promise sharing
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.14.1...v1.14.2)
+
+## [1.14.1] - 2026-05-24
+**Upgrade note:** SimpleDownloadOrchestrator OCE rethrow fix.
+
+### Fixed
+- SimpleDownloadOrchestrator rethrows OCE from stream-provider path
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.14.0...v1.14.1)
+
+## [1.14.0] - 2026-05-24
+**Upgrade note:** Removes deprecated AdaptiveRateLimiter family and WithExecutor (Wave 17K) plus test coverage improvements.
+
+### Removed
+- Deprecated AdaptiveRateLimiter family (removed in Wave 17K)
+- WithExecutor method (removed in Wave 17K)
+
+### Added
+- Cancellation, concurrency boundary, and backpressure test coverage (Wave 11C audit)
+- OAuthStreamingAuthenticationService Wave 11C edge-case coverage
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.13.1...v1.14.0)
+
+## [1.13.1] - 2026-05-24
+**Upgrade note:** PluginPackaging absolute-path fix.
+
+### Fixed
+- PluginPackaging absolute LidarrAssembliesPath no longer double-prefixed
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.13.0...v1.13.1)
+
+## [1.13.0] - 2026-05-24
+**Upgrade note:** Scrub.Url unification plus PathTraversalGuard hardening.
+
+### Added
+- PathTraversalGuard hardening from adversarial review (Wave 17F)
+
+### Changed
+- Scrub.Url delegates recognition to LogRedactor (Wave 17F)
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.12.0...v1.13.0)
+
+## [1.12.0] - 2026-05-24
+**Upgrade note:** StreamingApiRequestBuilder fail-on-reuse guard plus urgent PathTraversalGuard fix.
+
+### Added
+- StreamingApiRequestBuilder seals after Build() to prevent query bleed
+- lint-sync-over-async accepts -SrcDir for non-standard layouts (e.g., Brainarr)
+
+### Fixed
+- PathTraversalGuard rejected valid descendants when root had trailing separator (URGENT)
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.11.0...v1.12.0)
+
+## [1.11.0] - 2026-05-24
+**Upgrade note:** Host-bridge orchestration primitives and resilience improvements.
+
+### Added
+- HostBridgeDownloadOrchestrator — settings-snapshot + tracked enqueue (lift wave A item 2)
+- RetryPolicyOptions.ForLocalProviders preset (100ms/2s, 3 attempts)
+- AlbumReleaseInfoBuilder — unified ReleaseInfo string construction (lift wave A item 8)
+- CONSUMING.md cross-plugin helper guide
+
+### Fixed
+- Removed stale paramref in HostBridgeDownloadOrchestrator class-level doc
+- Verify-tag-matches-version to check Directory.Build.props
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.10.0...v1.11.0)
+
+## [1.10.0] - 2026-05-24
+**Upgrade note:** Host-bridge, resilience, and observability primitives plus adversarial-review fixes.
+
+### Added
+- PluginLifecycle.Shutdown — static teardown hook registry
+- BoundedConcurrentDictionary<TKey,TValue> — clear-on-overflow capped dict
+- HostGateRegistry.Shutdown() — release timer on plugin unload
+- HostBridgeRuntimeCache — generic gated runtime cache (lift wave D item 6)
+- Scrub helpers for secret-redaction in logs and URLs
+- PluginLogContext — pluginName/correlationId/provider/operation scope
+- BackendHealthCache — 30s grace cache for known-down backends
+
+### Fixed
+- Path-traversal guard + remaining-time rounding (adversarial review)
+- MultiPluginAlcTests Skip.If calls use [SkippableFact] instead of [Fact]
+- XML cref refs qualified for -warnaserror CI
+- Reduced WarnOnce concurrent-stress thread count for CI thread-pool
+
+### Changed
+- Single-source <Version> across Common + Abstractions csprojs
+- Host-bridge types hardening from adversarial review
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.5...v1.10.0)
+
+## [1.9.5] - 2026-05-23
+**Upgrade note:** Host-bridge primitives plus WarnOnce, TestValidationBuilder, JsonFileStore, and configuration fixes.
+
+### Added
+- TestValidationBuilder — accumulate-then-build pattern for plugin Test() pipelines
+- WarnOnce helper for warn-then-debug log gating
+- PlaceholderSearchUri — unify search-query placeholder URIs (lift wave A item 5)
+- HostBridgeDownloadTracker — unify per-download state (lift wave A item 1)
+- PrefixedReleaseGuidParser — unify GUID/URL extraction (lift wave A item 3)
+- JsonFileStore for file-based configuration storage
+
+### Fixed
+- Trim trailing slash from TargetDir before passing to pwsh -OutputDir
+- ValidatePackageClosure delegates to .ps1 file (shell var-eat fix)
+- WarnOnce concurrent tests use Task.WhenAll (xUnit1031)
+- FileStreamingResponseCache + FileConditionalRequestState use PluginConfigRoots
+- OS-aware case sensitivity in PathTraversalGuard
+- Abstractions Version bumped to 1.9.5 to match release tag
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.4...v1.9.5)
+
+## [1.9.4] - 2026-05-23
+**Upgrade note:** Closes deferred adversarial-review findings F4 + F5 + F7 + F8.
+
+### Added
+- NullUniversalAdaptiveRateLimiter — single source of truth for plugin test stubs
+- PathTraversalGuard — defense-in-depth for plugin download paths
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.3...v1.9.4)
+
+## [1.9.3] - 2026-05-23
+**Upgrade note:** Adversarial-review hardening of v1.9.2: F1+F2+F3+F6 fixes.
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.2...v1.9.3)
+
+## [1.9.2] - 2026-05-23
+**Upgrade note:** Lidarr-Docker token-protection startup fix.
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.1...v1.9.2)
+
+## [1.9.1] - 2026-05-23
+**Upgrade note:** HttpExceptionClassifier for categorised connection-test failures.
+
+### Added
+- HttpExceptionClassifier — categorised connection-test failures (TDD)
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.9.0...v1.9.1)
+
 ## [1.9.0] - 2026-05-23
-**Upgrade note:** Adds the AuthFailureGate surface (fail-fast latch + delegating handler + per-key registry) plus SecureMemory, Conservative rate-limit profile, PagedResponseValidator, testkit-lifted plugin contracts, and `Lidarr.Plugin.*.dll` naming enforcement. The new surface is additive — `IUniversalAdaptiveRateLimiter.RecordAuthFailure` is a default interface method so existing alternate implementations continue to compile without changes.
+**Upgrade note:** AuthFailureGate surface, adversarial-review must-fixes, and TestKit lifts.
 
-**Highlights**
-- **AuthFailureGate** (`src/Services/Bridge/`): fail-fast latch built on `IAuthFailureHandler` that prevents plugins from hammering an upstream service when authentication is known bad — the failure mode that previously got Qobuzarr users IP-banned. `TryAcquireProbeSlot()` rate-limits one network call per probe-interval while latched so the plugin can detect re-credentialing without spamming the upstream. Per-key `AuthFailureGateRegistry` for multi-provider plugins (brainarr's 11 LLM providers each get an isolated gate). `AuthFailureDelegatingHandler` auto-wires the gate into any `AddHttpClient` typed client. New `HandleFailureAsync` / `HandleSuccessAsync` pass-throughs on the gate let callers signal without touching the underlying `IAuthFailureHandler` (which is internalized per plugin via ILRepack, so direct sharing across plugin ALC boundaries is unsafe).
-- **SecureMemory** + **Conservative rate-limit profile** + **PagedResponseValidator** consumed by applemusicarr's APL-006 / APL-009 / APL-010 closures.
-- **5 adversarial-review must-fixes**:
-  1. `IUniversalAdaptiveRateLimiter.RecordAuthFailure` is a default interface method (no compile break in alternate impls).
-  2. `SecureMemory.ZeroPemKey` short-circuits on length-0 strings (would otherwise corrupt the interned `string.Empty`).
-  3. `LogRedactor` split into bare-word + URL-query-context patterns; bare `state=available`, `status code=ETIMEDOUT`, etc. no longer false-positive-redact.
-  4. `PublicAPI.Unshipped.txt` baselines populated for the full new surface (clears RS0016 warning flood downstream).
-  5. `AuthFailureGate` cross-ALC hazard documented; pass-through methods added so callers don't need to touch the `Handler` property.
-- **TestKit plugin contracts lifted** (`testkit/Compliance/`): `PluginVersionContract`, `PluginPackagingContract`, `PublishedReleaseInstallability` are now part of the public TestKit so downstream plugins can run the same compliance checks without copy-paste.
-- **`Lidarr.Plugin.*.dll` naming convention** enforced by `PluginPackagingContract`. Lidarr's `PluginLoader` silently ignores any other DLL filename — the contract catches it at build time instead of at runtime.
+### Added
+- AuthFailureGate surface + 5 adversarial-review must-fixes
+- SecureMemory + Conservative rate-limit profile + PagedResponseValidator
+- PluginVersionContract, PluginPackagingContract, PublishedReleaseInstallability lifted to TestKit
+- Lidarr.Plugin.*.dll naming convention enforcement
+- ValidatePackageClosure target rejects forbidden DLLs at build time
+- Multi-plugin ALC coexistence + per-plugin package-closure tests
+- Ecosystem version contract + version-contract enforcement
 
-**Breaking changes:** None
-**Deprecations:** None
-**Dependency changes:** None
+### Fixed
+- Blocking-wait + flaky cache tests + version contract docs
+- COM-005 path-validation hardening + COM-011 download integrity check
+- Coexistence proof pointed at renamed applemusicarr DLL
+- Forced single-threaded MSBuild in nightly to avoid Windows parallel-build file lock
+
+### Changed
+- Fixed blocking-wait inside lock with SemaphoreSlim + await Task.Delay in StreamingPluginMixins.StreamingIndexerMixin.ApplyRateLimitAsync
+- Removed Task.Delay(...).Wait() inside lock pattern
 
 [Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.8.0...v1.9.0)
 
-## [1.8.0] - 2026-05-23
-**Upgrade note:** Ecosystem version contract, parity-lint forbiddenFields enforcement, ALC fix, and async rate-limit refactor. No breaking API changes.
+## [1.8.0] - 2026-05-10
+**Upgrade note:** Multi-plugin co-existence fix, parity-lint enforcement, async rate-limit refactor, and SmartCache test suite fixes.
 
-**Highlights**
-- Ecosystem version contract (`versionContract`) added to `scripts/parity-spec.json`; plugin CI should call `ecosystem-parity-lint.ps1 -Check VersionContract` to enforce that a plugin's `VERSION` file and manifest version align with the Common library version.
-- `forbiddenFields` enforcement wired into parity-lint — fields listed as forbidden in `parity-spec.json` now cause lint failures.
-- ALC multi-plugin co-existence fix: isolated `AssemblyLoadContext` per plugin prevents type-identity collisions when multiple streaming plugins are loaded simultaneously.
-- `StreamingPluginMixins.StreamingIndexerMixin.ApplyRateLimitAsync`: replaced `Task.Delay(...).Wait()` inside a lock with `SemaphoreSlim` + `await Task.Delay`, eliminating the blocking-wait-inside-lock anti-pattern and enabling proper async flow.
-- `SmartCache` test suite: removed `Skip` from two flaky tests (`TryGet_ReturnsFalseForExpiredItem`, `Eviction_LowPriorityItemsEvictedFirst`) by injecting a `TimeProvider` for deterministic time control.
+### Added
+- Ecosystem version contract (versionContract) to parity-spec.json
+- forbiddenFields enforcement wired into parity-lint
+- Isolated AssemblyLoadContext per plugin for multi-plugin co-existence
 
-**Breaking changes:** None
-**Deprecations:** None
-**Dependency changes:** None
+### Fixed
+- Multi-plugin ALC co-existence prevents type-identity collisions
+- PluginSandbox strict/permissive loader modes
+- PluginType validation, thread-safe bridges, GetTypes restore, fixture caching
+- IsHostBridgeBuild accepts merged builds (C1) + sidecar-tolerant scripts (C3)
+- Microsoft.Extensions.* pinned to 8.0.x to match Lidarr host
+- Lidarr.Plugin.Abstractions merged into plugin DLL (cross-ALC fix)
+- Cross-ALC HttpClient metrics + Azure DataProtection
+- Build flags propagated through local-ci restore/package/test stages
+- Microsoft.Extensions.* >=9.0.0 blocked with wildcard
+- Sync-over-async patterns eliminated and lint allowlist key fixed
+
+### Changed
+- StreamingPluginMixins.StreamingIndexerMixin.ApplyRateLimitAsync replaced Task.Delay(...).Wait() with SemaphoreSlim + await Task.Delay
+- SmartCache tests: removed Skip from TryGet_ReturnsFalseForExpiredItem and Eviction_LowPriorityItemsEvictedFirst with TimeProvider injection
 
 [Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.7.1...v1.8.0)
 
 ## [1.7.1] - 2026-03-27
-**Upgrade note:** Patch release hardening bridge defaults, sandbox resilience, and test coverage. No new public API surface.
+**Upgrade note:** Patch release hardening bridge defaults, sandbox resilience, and test coverage.
 
-**Highlights**
-- `DefaultDownloadStatusReporter` added; `AddBridgeDefaults()` now registers 4 reporters (auth, indexer, rate-limit, download status)
-- `PluginSandbox` hardening: `ReflectionTypeLoadException` handling, single `IPlugin` enforcement, `PluginType` option, `DefaultHostVersion` updated to 3.1.2.4913
-- Thread-safe bridge singletons (`volatile` + `lock` pattern)
-- Compliance test rewrite: fixture-backed `BridgeComplianceTests` with `BridgeComplianceFixture` caching
-- 74 new tests: `MemoryHealthMonitor`, `StreamingApiRequestBuilder`, rate limit edge cases
-- Guard patterns (`ArgumentNullException.ThrowIfNull`) throughout bridge layer
-- `GetTypes` restored (from `GetExportedTypes`) for broader type discovery
+### Added
+- DefaultDownloadStatusReporter; AddBridgeDefaults() now registers 4 reporters
+- 74 new tests: MemoryHealthMonitor, StreamingApiRequestBuilder, rate limit edge cases
 
-**Breaking changes:** None
-**Deprecations:** None
-**Dependency changes:** None
+### Fixed
+- PluginSandbox hardening: ReflectionTypeLoadException handling, single IPlugin enforcement, PluginType option, DefaultHostVersion updated to 3.1.2.4913
+- Thread-safe bridge singletons (volatile + lock pattern)
+- Compliance test rewrite with fixture-backed BridgeComplianceTests
+- Guard patterns (ArgumentNullException.ThrowIfNull) throughout bridge layer
+- GetTypes restored (from GetExportedTypes) for broader type discovery
 
 [Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.7.0...v1.7.1)
 
 ## [1.7.0] - 2026-03-26
-**Upgrade note:** Bridge contracts shipped. 8 new Abstractions interfaces for host-boundary communication (auth, indexer, rate-limit, download status). Default implementations and DI extensions in Common. First consumer: Tidalarr.
+**Upgrade note:** Bridge contracts shipped with 8 new Abstractions interfaces and default implementations.
 
-**Highlights**
-- Bridge contract interfaces: `IAuthFailureHandler`, `IIndexerStatusReporter`, `IRateLimitReporter`, `IDownloadStatusReporter`, `IIndexerRequestBuilder`, `IIndexerResponseParser<T>`, `IIndexerWithMetadata`, `IRssFeedProvider`
-- Default implementations: `DefaultAuthFailureHandler`, `DefaultIndexerStatusReporter`, `DefaultRateLimitReporter` with logging and state tracking
-- DI extension: `AddBridgeDefaults()` registers all defaults via `TryAddSingleton`
-- Fixture-backed compliance tests: `BridgeComplianceTests` (15 behavioral) + `BridgeDefaultsActivationTests` (4 DI activation)
-- TestKit: `PluginSandbox` for isolated ALC plugin loading, `BridgeComplianceFixture` for bridge contract testing
-- Behavioral docs: `BRIDGE_RUNTIME_CONTRACTS.md` with triggers, reliability, host assumptions
+### Added
+- Bridge contract interfaces: IAuthFailureHandler, IIndexerStatusReporter, IRateLimitReporter, IDownloadStatusReporter, IIndexerRequestBuilder, IIndexerResponseParser<T>, IIndexerWithMetadata, IRssFeedProvider
+- Default implementations: DefaultAuthFailureHandler, DefaultIndexerStatusReporter, DefaultRateLimitReporter
+- DI extension: AddBridgeDefaults() registers all defaults via TryAddSingleton
+- Fixture-backed compliance tests: BridgeComplianceTests (15 behavioral) + BridgeDefaultsActivationTests (4 DI activation)
+- TestKit: PluginSandbox for isolated ALC plugin loading, BridgeComplianceFixture for bridge contract testing
+- Behavioral docs: BRIDGE_RUNTIME_CONTRACTS.md
 
-**Breaking changes:** None
-**Deprecations:** None
-**Dependency changes:**
+### Changed
 - CliWrap 3.10.0 -> 3.10.1
 - coverlet.collector 8.0.0 -> 8.0.1
 - DataProtection 8.0.x -> 8.0.25
@@ -116,312 +320,173 @@ Template to copy when drafting a release:
 [Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.6.0...v1.7.0)
 
 ## [1.6.0] - 2026-03-11
-**Upgrade note:** Major infrastructure release — ecosystem parity testing, sync-over-async cleanup, diagnostics namespace, and comprehensive dependency updates. No breaking API changes.
+**Upgrade note:** Major infrastructure release with ecosystem parity testing, sync-over-async cleanup, diagnostics namespace, and dependency updates.
 
-**Highlights**
+### Added
 - Ecosystem parity test infrastructure (lint + TestKit base class)
 - Sync-over-async pattern elimination with lint enforcement
 - Diagnostics namespace for non-LLM providers
 - Packaging gates improvements (contents manifest, canonical Abstractions)
-- Local CI runner (`local-ci.ps1`) for offline verification
+- Local CI runner (local-ci.ps1) for offline verification
 - 6-Month Autonomous Development Roadmap (Phases 12-23)
+- SHA pin enforcement, contents manifest gate, warning budget visibility
+- Canonical reason codes, diagnostic error codes
+- Cross-platform path validation
+- Comprehensive documentation (roadmap phases 12-23, KPI definitions, phase gate evidence)
 
-**Breaking changes:** None
-**Deprecations:** None
-**Dependency changes:**
-- Microsoft.CodeAnalysis.CSharp 4.10.0→4.14.0
-- Microsoft.Extensions.Configuration.Json 8.0.0→8.0.1
-- Microsoft.Extensions.TimeProvider.Testing 8.5.0→9.10.0
-- System.Security.Cryptography.ProtectedData 8.0.0→9.0.14
-- coverlet.collector 6.0.4→8.0.0
-- xunit 2.9.2→2.9.3
-- Spectre.Console 0.50.0→0.54.0
-- Microsoft.NET.Test.Sdk 17.11.1→18.3.0
-- Microsoft.Extensions.Logging.Abstractions 8.0.1→8.0.3
-- JsonSchema.Net 7.2.3→7.4.0
-- actions/download-artifact v4→v8, actions/upload-artifact v4→v7
+### Fixed
+- Sync-over-async patterns in StreamingTokenManager.ClearSession()
+- Windows CI credential issue in change detection step
+- Local CI Docker exit codes capture
+- ManifestCheck StrictMode null-safe access for optional manifest targets
+- PluginPack cached path temp dir cleanup race condition
+- Reserved device name normalization for cross-platform filesystem safety
 
-[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.5.0...v1.6.0)
+### Changed
+- Microsoft.CodeAnalysis.CSharp 4.10.0 -> 4.14.0
+- Microsoft.Extensions.Configuration.Json 8.0.0 -> 8.0.1
+- Microsoft.Extensions.TimeProvider.Testing 8.5.0 -> 9.10.0
+- System.Security.Cryptography.ProtectedData 8.0.0 -> 9.0.14
+- coverlet.collector 6.0.4 -> 8.0.0
+- xunit 2.9.2 -> 2.9.3
+- Spectre.Console 0.50.0 -> 0.54.0
+- Microsoft.NET.Test.Sdk 17.11.1 -> 18.3.0
+- Microsoft.Extensions.Logging.Abstractions 8.0.1 -> 8.0.3
+- JsonSchema.Net 7.2.3 -> 7.4.0
+- actions/download-artifact v4 -> v8, actions/upload-artifact v4 -> v7
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.5.1...v1.6.0)
+
+## [1.5.1] - 2026-01-17
+**Upgrade note:** Verification merge-train improvements and test coverage.
 
 ### Added
-- **Ecosystem Parity Infrastructure** (#393)
-  - `scripts/parity-spec.json` — single source of truth for parity requirements
-  - `scripts/ecosystem-parity-lint.ps1` — PowerShell structural lint for repos
-  - `testkit/Compliance/EcosystemParityTestBase.cs` — C# xUnit base class
-- **Diagnostics Namespace** (#331) — abstractions for non-LLM providers
-- **Sync-Over-Async Lint** (#332) — `lint-sync-over-async.ps1` with allowlist support
-- **SHA Pin Enforcement** (#330) — workflow SHA pinning lint
-- **Contents Manifest Gate** (#333) — plugin ZIP closure validation
-- **Local CI Runner** (#363) — `local-ci.ps1` for offline verification
-- **Warning Budget Visibility** (#366) — build warning tracking
-- **Canonical Reason Codes** (#380) — triage contracts
-- **Diagnostic Error Codes** (#341) — `DiagnosticErrorCodes` for providers
-- **Cross-Platform Path Validation** — `PathValidation.IsReasonablePath`
-- **Comprehensive Documentation** — roadmap phases 12-23, KPI definitions, phase gate evidence
+- verify-merge-train scripts
+- -SkipIntegration switch for test filtering
+- lidarr-taglib NuGet source for Docker builds
+- Comprehensive filename/path contract tests
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.5.0...v1.5.1)
+
+## [1.5.0] - 2026-01-17
+**Upgrade note:** E2E infrastructure, string protection facade, advanced circuit breaker, and extensive CI improvements.
+
+### Added
+- Publish canonical Abstractions DLL as release asset
+- NuGet.org publishing for Abstractions
+- IStringProtector facade for security
+- AdvancedCircuitBreaker for Brainarr parity
+- TimeProvider injection to CircuitBreaker for deterministic testing
+- E2E contract invariant tests
+- e2e-host-versions.psm1 module for host version compatibility checks
+- E2E infrastructure: tripwire workflow self-test, sources hermetic test, multiPluginMode
+- Parity-lint for detecting code re-inventions
+- CI Gate workflow for docs-only PR branch protection
+- Build & Test always report status (skip steps on docs-only PRs)
+- Change detection self-test to prevent regression
+- E2E error codes: E2E_CONFIG_INVALID, E2E_DOCKER_UNAVAILABLE, E2E_IMPORT_FAILED, E2E_API_TIMEOUT, E2E_QUEUE_NOT_FOUND, E2E_ZERO_AUDIO_FILES
+- Structured details for E2E_NO_RELEASES_ATTRIBUTED, E2E_METADATA_MISSING, E2E_PROVIDER_UNAVAILABLE, E2E_INTERNAL_ERROR
+- E2E_CONFIG_INVALID helper and tests
+- E2E preflight: Lidarr API unreachable detection and retry logic
+- Shared deterministic release selection helper
+- Host ALC fix detection to manifest
+- Stable sort key to PostRestartGrab release selection
+- SampleFile guarantee for all E2E_METADATA_MISSING paths
 
 ### Fixed
-- **Sync-Over-Async Patterns** (#408) — `StreamingTokenManager.ClearSession()` now truly sync
-- **Windows CI Credential Issue** (#383) — change detection step fix
-- **Local CI Docker Exit Codes** (#364, #365) — reliable Docker exit code capture
-- **ManifestCheck StrictMode** (#326) — null-safe access for optional manifest targets
-- **PluginPack Cached Path** (#320) — temp dir cleanup race condition
-- **Reserved Device Name Normalization** (#297) — cross-platform filesystem safety
+- Request log URLs query-safe
+- Multi-plugin smoke test canary gating
+- StreamingTokenManager deterministically testable with TimeProvider
+- TestKit AdditionalProperties to prevent CS2012 file locks
+- E2E schema gate matches implementation field
+- Grab gate SelectionBasis + explicit internal error
+- E2E_CONFIG_INVALID wired to Configure gate failure sites
+- E2E preflight auth detection and retry logic
+- E2E cap foundIndexerNames and emit attribution details
+- E2E stop PowerShell parse error
+- CI: normalize ./ prefix in change detection classifier
+- CI: host override steps run
+- ILRepack internalize exclude syntax corrected
 
 ### Changed
-- **LLM Provider System**: Complete LLM provider abstraction layer
-  - `ILlmProvider` interface with standard chat completion contract
-  - `LlmRequest`/`LlmResponse` data contracts with message structure
-  - `LlmErrorCode` enum with standardized error codes
-  - `LlmProviderException` base exception with concrete exception types
-    - `LlmAuthenticationException` for credential/authorization failures
-    - `LlmRateLimitException` for rate limiting scenarios
-    - `LlmProviderException` for general provider errors
-    - `LlmNetworkException` for network-related failures
-  - `LlmErrorMapper` utility for mapping provider-specific errors
-- **Structured Logging for LLM Providers**
-  - `LlmLoggerExtensions` for provider-specific structured logging
-  - `LlmEventIds` for standardized LLM event codes (2000-2039 range)
-  - `LogRedactor` for sensitive data masking in logs
-- **Claude Code Provider**: Full Claude Code CLI integration
-  - `ClaudeCodeProvider` implementing `ILlmProvider` interface
-  - `ClaudeCodeSettings` configuration record
-  - `ClaudeCodeDetector` for Claude CLI installation detection
-  - `ClaudeCodeResponseParser` for NDJSON streaming response parsing
-  - `Claude CLI JSON response` DTOs for deserialization
-  - Capability probe for provider feature detection
-- **CLI Infrastructure**: Reusable CLI execution framework
-  - `ICliRunner` interface for cross-platform CLI execution
-  - `CliRunner` implementation with CliWrap integration
-  - Support for Windows .cmd/.bat execution via cmd.exe /c
-  - Stdin/stdout stress tests for subprocess reliability
-- **Streaming Decoders**: SSE streaming support
-  - `SseStreamDecoder` for Server-Sent Events parsing
-  - `ClaudeCodeNdjsonDecoder` for Claude-specific NDJSON format
-  - Streaming token aggregation and response assembly
-- **CI Improvements**
-  - Lint enforcement for adoption guardrails
-  - Submodule pinning with ext-common-sha.txt
-- **Documentation**
-  - ADR-001: Streaming architecture decision
-  - ADR-002: Subscription auth research
-  - Streaming support matrix
-  - Tech debt registry
-  - Expanded LLM provider documentation
-  - Pre-merge tightening for v2 milestone
-- **E2E Improvements**
-  - Strictness promotion checker with actionable drift issues
-  - Harden drift issue management + secrets validation
+- Removed paid-down parity-lint baselines
+- Error codes documentation sync tripwire
 
-### Changed
-- **Documentation Cleanup**: Removed deprecated redirect stubs
-  - Removed docs/concepts/PLUGIN_ISOLATION.md (redirect stub)
-  - Removed docs/concepts/COMPATIBILITY.md (redirect stub)
-  - Removed docs/how-to/TEST_WITH_TESTKIT.md (redirect stub)
-  - Fixed broken link paths after redirect removal
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.2.1...v1.5.0)
 
-### Fixed
-- **Exception References**: Corrected LlmProviderException cref namespace
-- **Unresolvable Exception Cref**: Removed unresolvable exception cref in ILlmProvider
-- **CLI Execution**: Added safe CLI defaults and fixed error mapping
-- **Test Runner**: Robust TRX skip count and build hardening
-- **Documentation**: Avoid unresolved exception cref in abstractions
-
-### Tests
-- Added `ClaudeCodeProvider` unit tests
-- Added `ClaudeCodeDetector` unit tests
-- Added `ClaudeCodeResponseParser` unit tests
-- Added `CliRunner` unit tests
-- Added CliRunner stdin/stdout stress tests
-
-## [1.2.2] - 2025-10-19
-**Upgrade note:** Maintenance release aligning PR #39 merge; no breaking changes.
-
-**Highlights**
-- Merge “Prepare for public release” PR (#39) with conflict resolution on top of 1.2.1 baseline.
-- Documentation consistency (README Latest v1.2.2).
-- No functional changes beyond those in 1.2.1.
-
-[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.2.1...v1.2.2)
 ## [1.2.1] - 2025-10-11
-**Upgrade note:** Security + packaging polish. Encrypted token storage by default; safer feed configuration; improved CI supply-chain checks.
+**Upgrade note:** Security, packaging, and CI improvements.
 
-**Highlights**
-- Token store: encrypt at rest with pluggable providers (DPAPI on Windows; Keychain on macOS; Secret Service or Data Protection on Linux). Auto-migrates legacy plaintext to v2 envelope.
-- Packaging: default to public TagLibSharp; CI-only override for TagLibSharp-Lidarr via UseLidarrTaglib.
-- CI security: CodeQL, SBOM generation + upload, dependency review gate, Gitleaks PR/push + full history workflows.
-- Docs: SECURITY.md, CODE_OF_CONDUCT.md, TOKEN_PROTECTION.md, TAGLIB_DEPENDENCY.md; README updated.
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.2.0...v1.2.1)
 
-**Breaking changes:** None
-**Deprecations:** None
-**Dependency changes:** Added Azure.* packages (net8) for optional AKV DP key wrapping.
+## [1.2.0] - 2025-10-11
+**Upgrade note:** Publish-packages workflow, observability helpers, and path validation.
 
-[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.7...v1.2.1)
+### Added
+- Publish-packages workflow for GitHub Packages
+- Minimal ILogger/Activity helpers (draft)
+- Shared observability events proposal
+- PathValidation.IsReasonablePath for permissive CLI/plugin checks
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.7-rc.1...v1.2.0)
+
+## [1.1.7-rc.1] - 2025-10-11
+**Upgrade note:** Release candidate for v1.1.7.
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.7...v1.1.7-rc.1)
+
 ## [1.1.7] - 2025-10-11
-**Upgrade note:** Policy-first HTTP path wired end-to-end; safer dedup/caching defaults; clearer redirect semantics.
+**Upgrade note:** Policy-first HTTP path, safer dedup/caching defaults, clearer redirect semantics.
 
-### Highlights
-- Builder → Options → Executor integration: stamp endpoint/profile/params/scope; executor consumes them for per-host|profile gates and stable keys.
-- GET singleflight dedup when cache misses; race-guarded recheck; avoids caching failures/cancels.
-- Query canonicalization for multivalue params (ordinal sort, lowercase percent-encoding).
-- Redirects: 307/308 auto-follow preserving method/body; 301/302 auto-follow only for safe methods (GET/HEAD).
-- Cache sliding TTL coalesced under concurrency; bounded by absolute expiration; short stale-grace for 304s.
-- Conditional GET: ETag/Last-Modified persisted and revalidation path tested.
-- Docs: OTel quickstart (feature flag `LPC_OTEL_ENABLE=1`) + sample Grafana dashboard.
-- Template: `dotnet new lidarr-plugin` with minimal settings/module/indexer and a passing test; includes cache policy defaults and OAuth2 settings stub.
-- Analyzers (dev dependency): LPC0001 avoid raw HttpClient usage; LPC0002 prefer policy-based overload.
+### Added
+- Builder → Options → Executor integration: stamp endpoint/profile/params/scope
+- GET singleflight dedup when cache misses with race-guarded recheck
+- Query canonicalization for multivalue params
+- 307/308 auto-follow preserving method/body; 301/302 auto-follow for safe methods only
+- Cache sliding TTL coalesced with absolute expiration and stale-grace
+- Conditional GET: ETag/Last-Modified persisted and revalidation path tested
+- OTel quickstart (feature flag LPC_OTEL_ENABLE=1) + sample Grafana dashboard
+- Template: dotnet new lidarr-plugin with minimal settings/module/indexer
+- Analyzers (dev dependency): LPC0001 avoid raw HttpClient usage; LPC0002 prefer policy-based overload
 
-**Breaking changes:** None
-**Deprecations:** None (legacy overloads may be hidden in next minor)
-**Dependency changes:** None
+### Changed
+- Request deduplication cancels in-flight tasks on dispose with TrySet* guards
+- README Maintainer Checklist references Lidarr setup script
 
 [Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.6...v1.1.7)
 
-- Carved out `Lidarr.Plugin.Abstractions` as the host-owned ABI package with public API analyzers and AssemblyLoadContext guidance.
-- `NuGet.config` maps TagLibSharp packages to the public Lidarr Azure Artifacts feed so CI restores `TagLibSharp-Lidarr` 2.2.0.27.
-- `Directory.Build.props` pins `<AssemblyVersion>`/`<FileVersion>` to `10.0.0.35686` (Lidarr 2.14.2.4786 host) so every downstream plugin consumes matching binaries.
-- `scripts/verify-assemblies.ps1` copies host assemblies, validates `FileVersion` <-> `AssemblyVersion`, and fails fast when the Lidarr output folder is missing.
-- `scripts/prepare-host-stub.ps1` generates a `10.0.0.35686` Lidarr host stub so CI and clean machines can satisfy verification without the full Lidarr repo.
-- `scripts/setup-lidarr.ps1` mirrors Brainarr's bootstrap to clone/update Lidarr into `../Lidarr` and optionally build or stub host assemblies for validation.
-- Solution now includes `Lidarr.Plugin.Common.Tests` so CI collects coverage and enforces regression suites.
-- `.github/workflows/pr-validation.yml` enforces the verification script, `dotnet build -c Release -warnaserror:NU1903`, and `dotnet test -c Release --no-build` on every pull request.
-- `docs/UNIFIED_PLUGIN_PIPELINE.md` describes the shared platform repo, version-gated CI, ILRepack guardrails, release orchestration, packaging, and monitoring expectations for plugins.
-- `TokenDelegatingHandler` and `ContentDecodingSnifferHandler` provide reusable bearer-token injection and mislabelled gzip recovery across all plugins.
+## [1.1.6] - 2025-10-10
+**Upgrade note:** Diagnostics and concurrency improvements.
+
+### Added
+- PluginOperationResultJson helper for consistent diagnostics
+- 304 revalidation path with brief stale grace
+- Windows file concurrency improvements in FileTokenStore
+
+### Fixed
+- Retry semantics: when honoring Retry-After absolute dates, do not add jitter
+- CI: grant permissions for PR test result annotations
 
 ### Changed
-- Request deduplication now cancels in-flight tasks when the deduplicator is disposed and uses `TrySet*` guards to avoid race exceptions.
-- README Maintainer Checklist now references the Lidarr setup script for host bootstrap.
-- CI only runs the test-result annotation step on Linux runners to avoid the Windows container limitation.
-- README gains a Maintainer Checklist and Plugin Version Governance section referencing the sync script and unified pipeline playbook.
-- NuGet dependencies (System.Text.Json, Microsoft.Extensions.* , Newtonsoft.Json) updated to the latest 6.0.x/13.0.x patches to clear NU1903 advisories during Release builds.
-- `HttpClientExtensions.GetJsonAsync<T>` now verifies Content-Type and includes payload previews when responses are not JSON.
-- Removed unused Polly packages and disabled `AllowUnsafeBlocks` in the library project to avoid accidental unsafe usage.
-- Multi-targeted the library for net6.0 and net8.0 with conditional Microsoft.Extensions dependency versions.
-- BaseStreamingIndexer now accepts an optional HttpClient factory for DI scenarios.
+- QueryCanonicalizer made public; DefaultProfiles constants added; PublicAPI baselines updated
+- FileTokenStore writes use unique temp files with retry on replace/move
+- CI: disable analyzers during build steps; dedicated PublicAPI drift steps retained
 
-### Deprecated
-- Marked `IAdaptiveRateLimiter` / `AdaptiveRateLimiter` as obsolete; migrate to `IUniversalAdaptiveRateLimiter` and `UniversalAdaptiveRateLimiter`.
-
-### Reminder
-- Maintainers must keep host assemblies in sync with Lidarr 2.14.2.4786 before shipping plugin updates; see `docs/UNIFIED_PLUGIN_PIPELINE.md` for the complete process.
-
-## [1.1.6] - 2025-10-11
-**Upgrade note:** No public API changes. Improves diagnostics and hardens concurrency + caching behavior under load.
-
-### Highlights
-- New `PluginOperationResultJson` helper for consistent, structured diagnostics across plugins.
-- 304 revalidation path: add a brief stale grace to avoid races and preserve cached bodies when validators hit right at TTL.
-- Windows file concurrency: `FileTokenStore` now writes via unique temp files and retries atomic replace/move to avoid transient sharing violations.
-- Retry semantics: when honoring `Retry-After` absolute dates, do not add jitter; still clamped by the retry budget.
-- CI: grant permissions for PR test result annotations; coverage summary appears reliably on PRs.
-
-**Breaking changes:** None
-**Deprecations:** None
-**Dependency changes:** None
-
-[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.5...v1.1.6)
-
-## [1.1.5] - 2025-10-01
-**Upgrade note:** No public API changes. CLI `config` commands now persist settings consistently and surface the latest metadata across hosts.
-
-### Highlights
-- CLI `config` commands persist settings through `PluginHost`, apply invariant culture conversions, and mask sensitive values the same way on .NET 6.0 and .NET 8.0.
-- `config show` renders output from the settings metadata so new properties appear automatically.
-- `config reset` clears persisted storage, rewrites defaults from the host cache, and avoids stale state on reruns.
-- Added `ConfigCommandTests` to cover typed updates, invalid values, secret masking, and reset behaviour.
-
-**Breaking changes:** None
-**Deprecations:** None
-**Dependency changes:** None
-
-[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.4...v1.1.5)
-## [1.1.4] - 2025-09-30
-**Upgrade note:** No public API changes. New TestKit and resilience upgrades make plugin integration tests and HTTP handling more reliable.
-
-### Highlights
-- Introduced `Lidarr.Plugin.Common.TestKit` with reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context.
-- Added `docs/how-to/TEST_WITH_TESTKIT.md` plus sample `PluginSandboxTests` harness.
-- Centralised host semaphore management in `HostGateRegistry` and shared it with the generic resilience executor.
-- HTTP helpers accept per-request timeouts, raise `TimeoutException`, and reuse the host gate registry; response cache trims oldest entries when over size limits.
-- `ContentDecodingSnifferHandler` peeks only the gzip header, clears encoding metadata after inflation, and streams large bodies without buffering.
-- Packaging excludes `docs/**` and `examples/**` from the nupkg, with updated release notes and metadata.
-
-**Breaking changes:** None
-**Deprecations:** `AdaptiveRateLimiter` (removal planned for 1.3)
-**Dependency changes:** Updated Microsoft.Extensions.* and System.Text.Json patch versions across net6.0/net8.0 builds
-
-[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.1.3...v1.1.4)
-## [1.1.3] - 2025-09-03
-
-### Added
-- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
-- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
-- `BaseStreamingIndexer`: streaming search helpers (`SearchAlbumsStreamAsync`, `SearchTracksStreamAsync`, `FetchPagedAsync<T>`) plus deduplication on title/artist/year.
-- `BaseStreamingDownloadClient`: overridable retry hook with `Retry-After` handling and jittered backoff; configurable retry counts per service.
-
-### Notes
-- All additions are non-breaking; existing list-based APIs remain fully supported.
-
-## [1.1.2] - 2025-09-03
-
-### Added
-- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
-- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
-- Preview detection improvements: duration threshold (default ~90s), extended URL markers, additional heuristics.
-- Validation enhancements: `ValidateFileSignature` for FLAC/OGG/MP4/M4A/WAV and richer overloads of `ValidateDownloadedFile`.
-- Hashing/signing utilities: `ComputeSHA256`, `ComputeHmacSha256`, and `IRequestSigner` implementations (`Md5ConcatSigner`, `HmacSha256Signer`).
-- File system hardening: NFC normalization, expanded reserved-name guard.
-- Settings: `Locale` property on `BaseStreamingSettings` (default `en-US`).
-
-### Changed
-- Documentation refreshed to reference the new utilities and configuration options.
-
-### Notes
-- Changes are additive and backward compatible; submodule consumers can adopt incrementally.
-
-## [1.1.1] - 2025-09-03
-
-### Added
-- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
-- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
-- Context-specific sanitizers: `Sanitize.UrlComponent`, `Sanitize.PathSegment`, `Sanitize.DisplayText`, `Sanitize.IsSafePath`.
-- HTTP resilience: `HttpClientExtensions.ExecuteWithResilienceAsync` with 429/Retry-After awareness, jittered backoff, retry budgets, and per-host concurrency gating.
-- OAuth token refresh: `OAuthDelegatingHandler` for bearer injection and single-flight refresh on 401.
-- Atomic/resumable downloads: `.partial` staging, atomic moves, resume on 206.
-- Model metadata: `StreamingAlbum.ExternalIds`, `StreamingTrack.ExternalIds`, `MusicBrainzId` support.
-
-### Changed
-- `BaseStreamingIndexer` now shares a resilient `HttpClient` pipeline to reduce socket exhaustion.
-- Legacy `InputSanitizer` methods marked `[Obsolete]` in favor of the context-specific helpers.
-
-### Notes
-- No breaking changes; obsolete APIs remain available for compatibility.
-
-## [1.1.0] - 2025-08-30
-
-### Added
-- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
-- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
-- OAuth/PKCE authentication base classes and token lifecycle helpers.
-- Core streaming indexer/download client frameworks.
-- Performance and memory management helpers (batch manager, monitors).
-
-### Notes
-- Prepared the library for packaging with Source Link and symbols.
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.0.0...v1.1.6)
 
 ## [1.0.0] - 2025-08-26
+**Upgrade note:** Initial release of Lidarr.Plugin.Common shared library.
 
 ### Added
-- Introduced `Lidarr.Plugin.Common.TestKit` with the reusable plugin sandbox, HTTP simulators, settings bridge, and log-capturing host context shared by the core library.
-- Added `docs/how-to/TEST_WITH_TESTKIT.md` and a sample `PluginSandboxTests` harness demonstrating isolated plugin loading and HTTP edge-case helpers.
-- Base classes: `BaseStreamingSettings`, `BaseStreamingIndexer<T>`, `BaseStreamingDownloadClient<T>`, `BaseStreamingAuthenticationService<T>`.
-- Services: `StreamingResponseCache`, `StreamingApiRequestBuilder`, `QualityMapper`, `PerformanceMonitor`, `StreamingPluginModule`.
-- Models: `StreamingArtist`, `StreamingAlbum`, `StreamingTrack`, `StreamingQuality`, `StreamingQualityTier`.
-- Utilities: `FileNameSanitizer`, `HttpClientExtensions`, `RetryUtilities`.
-- Testing support: `MockFactories`, `TestDataSets`.
-- Interfaces: `IStreamingAuthenticationService<T>`, `IStreamingResponseCache`, `IQueryOptimizer`.
+- Initial shared library repository with base streaming infrastructure
+- Base classes: BaseStreamingSettings, BaseStreamingIndexer<T>, BaseStreamingDownloadClient<T>, BaseStreamingAuthenticationService<T>
+- Services: StreamingResponseCache, StreamingApiRequestBuilder, QualityMapper, PerformanceMonitor, StreamingPluginModule
+- Models: StreamingArtist, StreamingAlbum, StreamingTrack, StreamingQuality, StreamingQualityTier
+- Utilities: FileNameSanitizer, HttpClientExtensions, RetryUtilities
+- Testing support: MockFactories, TestDataSets
+- Interfaces: IStreamingAuthenticationService<T>, IStreamingResponseCache, IQueryOptimizer
 
-### Highlights
-- 60–75% code reduction for new streaming plugins, thread-safe operations, built-in security, performance optimizations, comprehensive error handling, and rich documentation/examples.
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/082800c...v1.0.0)
 
 ---
 
@@ -446,5 +511,3 @@ Template to copy when drafting a release:
 - **Feature Requests**: Discuss in GitHub Discussions.
 - **Community**: Join the streaming plugin developer community.
 - **Documentation**: See `README.md` and the `docs/` folder.
-
-

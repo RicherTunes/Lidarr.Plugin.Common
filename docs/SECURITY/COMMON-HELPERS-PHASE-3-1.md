@@ -69,6 +69,6 @@ Throws `PagedResponseIntegrityException` (with `ReceivedItemCount`, `DeclaredTot
 | `tests/Services/Http/PagedResponseValidatorTests.cs` | 12 tests — happy paths (3), mismatch assertions (5), exception properties (2), edge cases (2) |
 | `tests/Services/Performance/UniversalAdaptiveRateLimiterConservativeTests.cs` | 10 tests — back-compat (3), conservative preset (7) |
 
-**Total: 31 new tests. All GREEN.**
+**Total: 32 new tests. All GREEN.**
 
 Full suite: 2920 passed, 1 skipped (PluginLoads — no sample DLL on this machine), 1 pre-existing failure (PackageClosure/brainarr — external repo issue, unrelated to this phase).

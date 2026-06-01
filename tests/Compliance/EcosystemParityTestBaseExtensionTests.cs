@@ -9,6 +9,7 @@ using Lidarr.Plugin.Abstractions.Results;
 using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Common.Services.Authentication;
 using Lidarr.Plugin.Common.Services.Caching;
+using Lidarr.Plugin.Common.Services.Download;
 using Lidarr.Plugin.Common.Services.Registration;
 using Lidarr.Plugin.Common.TestKit.Compliance;
 using Xunit;
@@ -64,6 +65,36 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         public ComplianceResult RunCapabilities() => Check_PluginManifest_Capabilities_HaveBackingTypes();
         public ComplianceResult RunValidationDrift() => Check_NoFluentValidation_ErrorsApi_Drift();
         public ComplianceResult RunConfigRoots() => Check_UsesCommonPluginConfigRoots();
+        public ComplianceResult RunLyricsEnricher() => Check_UsesCommonLyricsEnricher();
+        public ComplianceResult RunDiagnosticTypes() => Check_UsesCommonDiagnosticTypes();
+        public ComplianceResult RunDownloadTelemetrySink() => Check_UsesCommonDownloadTelemetrySink();
+        public ComplianceResult RunPathTraversalGuard() => Check_DownloadClientUsesPathTraversalGuard();
+        public ComplianceResult RunFileClassNameParity() => Check_FileClassNameParity();
+        public ComplianceResult RunClaudeMdHelpers() => Check_ClaudeMdDocumentsCommonHelpers();
+        public ComplianceResult RunDownloadClientIdStamp() => Check_DownloadClientStampsRegisteredClientId();
+    }
+
+    /// <summary>A plugin-local re-declaration of the lyrics enricher (forbidden — must use common's).</summary>
+    private static class RogueLyrics
+    {
+        public interface ILyricsEnricher { }
+    }
+
+    /// <summary>A fake plugin *HealthDiagnostics with a nested DiagnosticTypes (forbidden duplicate).</summary>
+    private static class FakeHealthDiagnostics
+    {
+        public static class DiagnosticTypes { public const string AuthValidate = "auth_validate"; }
+    }
+
+    /// <summary>A fake plugin-local download client (implements the host-bridge IDownloadClient contract).</summary>
+    private sealed class FakeDownloadClient : IDownloadClient
+    {
+        public System.Threading.Tasks.ValueTask<PluginValidationResult> InitializeAsync(System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public System.Threading.Tasks.ValueTask<string> EnqueueAlbumDownloadAsync(string albumId, string outputPath, System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public System.Threading.Tasks.ValueTask<bool> RemoveDownloadAsync(string downloadId, bool deleteData = false, System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public System.Threading.Tasks.ValueTask<IReadOnlyList<StreamingDownloadItem>> GetActiveDownloadsAsync(System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public System.Threading.Tasks.ValueTask<StreamingDownloadItem?> GetDownloadAsync(string downloadId, System.Threading.CancellationToken cancellationToken = default) => throw new NotImplementedException();
+        public System.Threading.Tasks.ValueTask DisposeAsync() => default;
     }
 
     // --- Fixture types ---
@@ -91,6 +122,12 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
 
     /// <summary>Plugin-local config-path helper (forbidden).</summary>
     private sealed class MyServiceConfigPathDefaults { }
+
+    /// <summary>A fake plugin-local IDownloadTelemetrySink (forbidden — hand-rolls the log format).</summary>
+    private sealed class RogueTelemetrySink : IDownloadTelemetrySink
+    {
+        public void OnTrackCompleted(DownloadTelemetry telemetry) { }
+    }
 
     /// <summary>Subclass of StreamingPluginModule for bridge-defaults check.</summary>
     private abstract class FakeModule : StreamingPluginModule { }
@@ -405,6 +442,498 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.True(h.RunConfigRoots().Passed);
     }
 
+    // --- Check_UsesCommonLyricsEnricher ---
+
+    [Fact]
+    public void LyricsEnricher_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunLyricsEnricher().Passed);
+    }
+
+    [Fact]
+    public void LyricsEnricher_PluginLocalRedeclaration_Fails()
+    {
+        // A plugin-local type named ILyricsEnricher/LyricsEnricher (the historical qobuz/tidal
+        // duplication) must be flagged — lyrics is consolidated in common.
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(RogueLyrics.ILyricsEnricher) },
+        };
+        var r = h.RunLyricsEnricher();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("ILyricsEnricher"));
+    }
+
+    [Fact]
+    public void LyricsEnricher_CommonType_Passes()
+    {
+        // Common's own enricher (here referenced directly; in production it's ILRepack-internalized
+        // but keeps its Lidarr.Plugin.Common.* namespace) is the canonical implementation.
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(Lidarr.Plugin.Common.Services.Lyrics.LyricsEnricher) },
+        };
+        Assert.True(h.RunLyricsEnricher().Passed);
+    }
+
+    // --- Check_UsesCommonDiagnosticTypes ---
+
+    [Fact]
+    public void DiagnosticTypes_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunDiagnosticTypes().Passed);
+    }
+
+    [Fact]
+    public void DiagnosticTypes_PluginLocalNestedInHealthDiagnostics_Fails()
+    {
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeHealthDiagnostics.DiagnosticTypes) },
+        };
+        var r = h.RunDiagnosticTypes();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("DiagnosticTypes"));
+    }
+
+    [Fact]
+    public void DiagnosticTypes_CommonType_Passes()
+    {
+        // common's canonical DiagnosticTypes is top-level in Abstractions.Diagnostics (no
+        // *HealthDiagnostics declaring type) so it is not flagged.
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(Lidarr.Plugin.Common.Abstractions.Diagnostics.DiagnosticTypes) },
+        };
+        Assert.True(h.RunDiagnosticTypes().Passed);
+    }
+
+    // --- Check_UsesCommonDownloadTelemetrySink ---
+
+    [Fact]
+    public void TelemetrySink_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunDownloadTelemetrySink().Passed);
+    }
+
+    [Fact]
+    public void TelemetrySink_PluginLocalImpl_Fails()
+    {
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(RogueTelemetrySink) },
+        };
+        var r = h.RunDownloadTelemetrySink();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("RogueTelemetrySink"));
+    }
+
+    [Fact]
+    public void TelemetrySink_CommonSink_Passes()
+    {
+        // common's own LoggingDownloadTelemetrySink lives under Lidarr.Plugin.Common.* so it is
+        // accepted (this also covers the ILRepack-internalized case).
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(LoggingDownloadTelemetrySink) },
+        };
+        Assert.True(h.RunDownloadTelemetrySink().Passed);
+    }
+
+    // --- Check_DownloadClientUsesPathTraversalGuard ---
+
+    [Fact]
+    public void PathTraversalGuard_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunPathTraversalGuard().Passed);
+    }
+
+    [Fact]
+    public void PathTraversalGuard_NoDownloadClient_NotApplicable_Passes()
+    {
+        // A plugin with no IDownloadClient (e.g. an import-list plugin) is not applicable.
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FileTokenStore<string>) },
+        };
+        Assert.True(h.RunPathTraversalGuard().Passed);
+    }
+
+    [Fact]
+    public void PathTraversalGuard_HasDownloadClient_AndAssemblyReferencesGuard_Passes()
+    {
+        // The tests assembly references PathTraversalGuard (PathTraversalGuardTests), so a plugin
+        // that ships a download client AND references the guard passes. (Mirrors the
+        // Check_RegistersBridgeDefaults assembly-metadata-scan approach; a true-negative cannot be
+        // synthesized within a single assembly that already contains the string.)
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+        };
+        Assert.True(h.RunPathTraversalGuard().Passed);
+    }
+
+    // --- Check_DownloadClientStampsRegisteredClientId ---
+    //
+    // Contract (live qobuz regression, 2026-05-31): a download client's GetItems() must stamp every
+    // reported DownloadClientItem with DownloadClientInfo.Id == this client's Definition.Id (never a
+    // literal 0). Lidarr resolves the owning client by that id; a 0/wrong id makes CompletedDownloadService
+    // throw "Sequence contains no matching element" and wedges every completed download before import.
+    // Canonical shape (tidal/apple/amazon): DownloadClientItemClientInfo.FromDownloadClient(this, …);
+    // qobuz derives the id explicitly from Definition?.Id. Both satisfy the guard.
+
+    private const string DlClientHeader =
+        "namespace P;\nusing System.Collections.Generic;\nusing System.Linq;\n";
+
+    [Fact]
+    public void DownloadClientIdStamp_NoAssembly_ReturnsSkipped()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+        Assert.True(h.RunDownloadClientIdStamp().Passed);
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_NoDownloadClient_NotApplicable_Passes()
+    {
+        // Import-list plugins (e.g. brainarr) ship no download client → N/A.
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FileTokenStore<string>) },
+        };
+        Assert.True(h.RunDownloadClientIdStamp().Passed);
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_HasClientButNoSourceFile_Passes()
+    {
+        // Ships a download client but no download-client source file is found under the source root
+        // (relocated/examples-only source) → don't false-fail; the GetItems() body can't be located.
+        var src = Path.Combine(_tempRepo, "empty-src");
+        Directory.CreateDirectory(src);
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        Assert.True(h.RunDownloadClientIdStamp().Passed);
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_CanonicalFromDownloadClient_Passes()
+    {
+        // tidal/apple/amazon shape — the host helper always reads this.Definition.Id/Name.
+        // The interpolated Title exercises the brace-matcher against balanced interpolation braces.
+        var src = Path.Combine(_tempRepo, "src-canonical");
+        WriteSrcFile(src, "FooDownloadClient.cs",
+            DlClientHeader +
+            "public class FooDownloadClient : DownloadClientBase<FooSettings>\n{\n" +
+            "    public override IEnumerable<DownloadClientItem> GetItems()\n    {\n" +
+            "        var result = new List<DownloadClientItem>();\n" +
+            "        foreach (var item in Tracker.GetSnapshot())\n        {\n" +
+            "            result.Add(new DownloadClientItem\n            {\n" +
+            "                DownloadId = item.Id,\n" +
+            "                Title = $\"{item.Artist} - {item.Title}\",\n" +
+            "                DownloadClientInfo = DownloadClientItemClientInfo.FromDownloadClient(this, false)\n" +
+            "            });\n        }\n        return result;\n    }\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunDownloadClientIdStamp();
+        Assert.True(r.Passed, string.Join("; ", r.Errors));
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_DerivesIdFromDefinition_Passes()
+    {
+        // qobuz shape — hand-rolled converter, but the client id is derived from Definition?.Id.
+        var src = Path.Combine(_tempRepo, "src-definition");
+        WriteSrcFile(src, "BarDownloadClient.cs",
+            DlClientHeader +
+            "public class BarDownloadClient : DownloadClientBase<BarSettings>\n{\n" +
+            "    public override IEnumerable<DownloadClientItem> GetItems()\n    {\n" +
+            "        var clientId = Definition?.Id ?? 0;\n" +
+            "        var clientName = Definition?.Name ?? Name;\n" +
+            "        return Tracker.GetSnapshot().Select(i => i.ToDownloadClientItem(clientId, clientName)).ToList();\n" +
+            "    }\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunDownloadClientIdStamp();
+        Assert.True(r.Passed, string.Join("; ", r.Errors));
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_StampsLiteralZero_Fails()
+    {
+        // The exact historical regression: passing literal 0 as the client id, no Definition derivation.
+        var src = Path.Combine(_tempRepo, "src-zero");
+        WriteSrcFile(src, "BadDownloadClient.cs",
+            DlClientHeader +
+            "public class BadDownloadClient : DownloadClientBase<BadSettings>\n{\n" +
+            "    public override IEnumerable<DownloadClientItem> GetItems()\n    {\n" +
+            "        return Tracker.GetSnapshot().Select(i => i.ToDownloadClientItem(0, Name)).ToList();\n" +
+            "    }\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunDownloadClientIdStamp();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("BadDownloadClient"));
+    }
+
+    [Fact]
+    public void DownloadClientIdStamp_GetItemsIgnoresDefinition_Fails()
+    {
+        // GetItems builds client-info without deriving the id from Definition nor FromDownloadClient(this).
+        var src = Path.Combine(_tempRepo, "src-ignore");
+        WriteSrcFile(src, "IgnDownloadClient.cs",
+            DlClientHeader +
+            "public class IgnDownloadClient : DownloadClientBase<IgnSettings>\n{\n" +
+            "    public override IEnumerable<DownloadClientItem> GetItems()\n    {\n" +
+            "        var result = new List<DownloadClientItem>();\n" +
+            "        result.Add(new DownloadClientItem { DownloadId = \"x\", DownloadClientInfo = new DownloadClientItemClientInfo { Name = \"Foo\" } });\n" +
+            "        return result;\n" +
+            "    }\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunDownloadClientIdStamp();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("IgnDownloadClient"));
+    }
+
+    // --- Check_FileClassNameParity ---
+
+    private string WriteSrcFile(string srcDir, string fileName, string content)
+    {
+        Directory.CreateDirectory(srcDir);
+        var path = Path.Combine(srcDir, fileName);
+        File.WriteAllText(path, content);
+        return path;
+    }
+
+    [Fact]
+    public void FileClassParity_NoSourceRoot_Passes()
+    {
+        var h = new Harness(_tempRepo) { SourceRootValue = Path.Combine(_tempRepo, "missing-src") };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_MatchingName_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Foo.cs", "namespace N;\npublic sealed class Foo { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_SingleTypeMismatch_Fails()
+    {
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Bar.cs", "namespace N;\npublic class Different { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        var r = h.RunFileClassNameParity();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("Bar") && e.Contains("Different"));
+    }
+
+    [Fact]
+    public void FileClassParity_InternalPrimaryWithPublicNestedHelper_Passes()
+    {
+        // A file whose TOP-LEVEL type matches the file name (here `internal`) is correctly named even
+        // if its only PUBLIC type is a nested helper — the *HealthDiagnostics pattern (internal
+        // HealthDiagnostics + public nested Capabilities). Must NOT be flagged on the nested type.
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "QobuzHealthDiagnostics.cs",
+            "namespace N;\ninternal static class QobuzHealthDiagnostics\n{\n    public static class Capabilities { }\n}");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_MultiTypeGroupingFile_Passes()
+    {
+        // DTO/exception-family grouping files declare >1 public type — allowed, not flagged.
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Dtos.cs", "namespace N;\npublic record A();\npublic record B();");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_PartialType_Passes()
+    {
+        // Partial types legitimately span multiple files with different names.
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Split.cs", "namespace N;\npublic partial class Engine { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_DottedAndGeneratedFileNames_Skipped()
+    {
+        // Dotted file names (X.Designer.cs / X.g.cs / partial splits) are skipped.
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Widget.Designer.cs", "namespace N;\npublic class Generated { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_GenericType_MatchesOnBareName_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Cache.cs", "namespace N;\npublic class Cache<TKey, TValue> { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_NoPublicTopLevelType_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "Internals.cs", "namespace N;\ninternal class Helper { }");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    // --- Check_ClaudeMdDocumentsCommonHelpers ---
+
+    [Fact]
+    public void ClaudeMd_MissingFile_Skipped()
+    {
+        var h = new Harness(_tempRepo); // _tempRepo has no CLAUDE.md
+        Assert.True(h.RunClaudeMdHelpers().Passed);
+    }
+
+    [Fact]
+    public void ClaudeMd_WithHelpersSection_Passes()
+    {
+        File.WriteAllText(Path.Combine(_tempRepo, "CLAUDE.md"),
+            "# CLAUDE.md\n\n## Common helpers in use\n- PluginConfigRoots\n");
+        var h = new Harness(_tempRepo);
+        Assert.True(h.RunClaudeMdHelpers().Passed);
+    }
+
+    [Fact]
+    public void ClaudeMd_WithoutHelpersSection_Fails()
+    {
+        File.WriteAllText(Path.Combine(_tempRepo, "CLAUDE.md"),
+            "# CLAUDE.md\n\n## Build Commands\ndotnet build\n");
+        var h = new Harness(_tempRepo);
+        var r = h.RunClaudeMdHelpers();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("Common helpers in use"));
+    }
+
+    // --- DirectoryPackagesProps_HostVersionsMatchCanonical ---
+
+    [Fact]
+    public void HostVersions_MatchingCanonical_Passes()
+    {
+        File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
+            "<Project><ItemGroup>"
+            + "<PackageVersion Include=\"NLog\" Version=\"5.4.0\" />"
+            + "<PackageVersion Include=\"FluentValidation\" Version=\"9.5.4\" />"
+            + "<PackageVersion Include=\"Microsoft.Extensions.Http\" Version=\"8.0.1\" />"
+            + "<PackageVersion Include=\"Newtonsoft.Json\" Version=\"13.0.3\" />" // not host-coupled — ignored
+            + "</ItemGroup></Project>");
+        var h = new Harness(_tempRepo);
+        Assert.True(h.DirectoryPackagesProps_HostVersionsMatchCanonical().Passed);
+    }
+
+    [Fact]
+    public void HostVersions_MismatchedHostCoupled_Fails()
+    {
+        File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
+            "<Project><ItemGroup>"
+            + "<PackageVersion Include=\"NLog\" Version=\"6.0.3\" />" // host-coupled drift (host ships 5.x)
+            + "</ItemGroup></Project>");
+        var h = new Harness(_tempRepo);
+        var r = h.DirectoryPackagesProps_HostVersionsMatchCanonical();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("NLog") && e.Contains("5.4.0"));
+    }
+
+    [Fact]
+    public void HostVersions_AllSixCanonicalPackagesPresent_Passes()
+    {
+        // Characterization: proves all six canonical keys are wired correctly (a typo in any
+        // dictionary key would let a wrong version slip through for that package).
+        File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
+            "<Project><ItemGroup>"
+            + "<PackageVersion Include=\"Microsoft.Extensions.DependencyInjection\" Version=\"8.0.1\" />"
+            + "<PackageVersion Include=\"Microsoft.Extensions.Logging\" Version=\"8.0.1\" />"
+            + "<PackageVersion Include=\"Microsoft.Extensions.Logging.Abstractions\" Version=\"8.0.3\" />"
+            + "<PackageVersion Include=\"Microsoft.Extensions.Http\" Version=\"8.0.1\" />"
+            + "<PackageVersion Include=\"FluentValidation\" Version=\"9.5.4\" />"
+            + "<PackageVersion Include=\"NLog\" Version=\"5.4.0\" />"
+            + "</ItemGroup></Project>");
+        var h = new Harness(_tempRepo);
+        var r = h.DirectoryPackagesProps_HostVersionsMatchCanonical();
+        Assert.True(r.Passed, string.Join("; ", r.Errors));
+    }
+
+    [Fact]
+    public void HostVersions_NoHostCoupledPackagesDeclared_Passes()
+    {
+        // "Absence is OK" is intentional: this guard is the DECLARED-PINS layer. A plugin that
+        // doesn't declare a host-coupled package (e.g. applemusicarr omits
+        // Microsoft.Extensions.DependencyInjection, which resolves transitively) is validated at
+        // the RESOLVED-VERSION layer by the per-plugin host-DLL-grounded HostVersionCouplingTests.
+        File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
+            "<Project><ItemGroup>"
+            + "<PackageVersion Include=\"Newtonsoft.Json\" Version=\"13.0.3\" />"
+            + "</ItemGroup></Project>");
+        var h = new Harness(_tempRepo);
+        Assert.True(h.DirectoryPackagesProps_HostVersionsMatchCanonical().Passed);
+    }
+
+    [Fact]
+    public void HostVersions_NonLiteralVersionExpression_FailsLoud()
+    {
+        // A host-coupled package pinned to an MSBuild expression can't be statically verified for
+        // parity (and defeats the greppability the literal-pin philosophy depends on). The guard
+        // must fail with an actionable message, not silently miscompare the raw "$(...)" string.
+        File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
+            "<Project><ItemGroup>"
+            + "<PackageVersion Include=\"NLog\" Version=\"$(NLogVersion)\" />"
+            + "</ItemGroup></Project>");
+        var h = new Harness(_tempRepo);
+        var r = h.DirectoryPackagesProps_HostVersionsMatchCanonical();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("NLog") && e.Contains("literal"));
+    }
+
     // --- Aggregator ---
 
     [Fact]
@@ -412,8 +941,9 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(6, report.TotalCount);
-        // No assembly => all 6 skipped (Pass).
+        Assert.Equal(14, report.TotalCount);
+        // No assembly + no CLAUDE.md => the other 13 skip (Pass); Check_EnforcesAlbumCompletionPolicy
+        // runs unconditionally (it asserts the shared rule directly, no assembly needed) and passes.
         Assert.True(report.AllPassed);
     }
 }

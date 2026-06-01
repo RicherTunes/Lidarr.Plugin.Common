@@ -1,3 +1,5 @@
+> ⚠️ Historical (flagged 2026-05-31): describes a past state; some details below no longer match the current code.
+
 # Ecosystem Parity — Full Alignment Plan
 
 > **For agentic workers:** REQUIRED: Use superpowers:subagent-driven-development (if subagents available) or superpowers:executing-plans to implement this plan. Steps use checkbox (`- [ ]`) syntax for tracking.
@@ -758,7 +760,7 @@ Tidalarr has `security.yml` in its workflow list. Verify it's functional and com
 **Files:**
 - Modify: `lidarr.plugin.common/scripts/parity-lint.ps1`
 
-**Current state:** The `Get-PluginRepos` function only scans `qobuzarr`, `tidalarr`, `brainarr`.
+**Current state:** The `Get-PluginRepos` function only scans `qobuzarr`, `tidalarr`, `brainarr`. <!-- TODO(docval): Incorrect as of 2026-05-31 — actual code scans 'qobuzarr', 'tidalarr', 'applemusicarr' (scripts/parity-lint.ps1:179) -->
 
 - [ ] **Step 1: Read the script**
 
