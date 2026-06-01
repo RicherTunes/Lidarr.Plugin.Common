@@ -183,7 +183,9 @@
     "reviewdog",
     "sarif",
     "sigstore",
-    "softprops"
+    "softprops",
+    "unsha'd",
+    "unsha"
   ],
   "ignorePaths": [
     "**/bin",
