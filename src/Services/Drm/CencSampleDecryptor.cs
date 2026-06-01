@@ -27,6 +27,12 @@ namespace Lidarr.Plugin.Common.Services.Drm
     /// cached <see cref="Aes"/> is reused for every sample of the track. This is the CDM-agnostic crypto
     /// primitive (the actual AES, not key acquisition). Construct one per content key and call
     /// <see cref="DecryptSampleInPlace"/> per sample with that sample's IV + subsample map.
+    /// <para>
+    /// <b>Not thread-safe.</b> A single instance shares one mutable <see cref="Aes"/>; do not call
+    /// <see cref="DecryptSampleInPlace"/> concurrently on the same instance. Decrypt a track's samples
+    /// sequentially (the natural order — 'cenc' CTR continuity is itself a serial contract), or construct
+    /// one <see cref="CencDecryptor"/> per thread/track.
+    /// </para>
     /// </summary>
     public sealed class CencDecryptor : IDisposable
     {
