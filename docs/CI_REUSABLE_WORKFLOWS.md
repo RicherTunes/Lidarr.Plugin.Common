@@ -1,7 +1,7 @@
 # Reusable Workflow Proposals
 
-**Generated**: 2026-05-23  
-**Agent**: ci-cd-agent (Phase 1.5)  
+**Generated**: 2026-05-23
+**Agent**: ci-cd-agent (Phase 1.5)
 **Status**: PROPOSAL ONLY — do not implement without design review
 
 ---
@@ -17,7 +17,7 @@ eliminate drift, centralise version bumps, and reduce per-repo CI YAML by ~40%.
 
 ## Candidate 1: `setup-plugin-dotnet.yml`
 
-**Occurrences**: 42+ identical blocks across 5 repos  
+**Occurrences**: 42+ identical blocks across 5 repos
 **Pattern identified in**: every CI, test-and-coverage, and nightly workflow
 
 ### Current duplicated block (verbatim example from qobuzarr/ci.yml):
@@ -66,7 +66,7 @@ on:
 
 ## Candidate 2: `init-common-submodule.yml`
 
-**Occurrences**: 42+ across all plugin repos  
+**Occurrences**: 42+ across all plugin repos
 **Pattern identified in**: every CI, packaging-gates caller, nightly workflows
 
 ### Current duplicated block (verbatim example from tidalarr/ci.yml):
@@ -113,7 +113,7 @@ action). This pattern should be **promoted to Common** so all repos share it.
 
 ## Candidate 3: `parity-lint-job.yml`
 
-**Occurrences**: 5 repos, each with an identical `parity-lint` job  
+**Occurrences**: 5 repos, each with an identical `parity-lint` job
 **Pattern identified in**: brainarr/ci.yml, qobuzarr/ci.yml, tidalarr/ci.yml,
 applemusicarr/ci.yml, lidarr.plugin.common/ci.yml
 
@@ -166,7 +166,7 @@ on:
 
 ## Candidate 4: `extract-lidarr-assemblies-job.yml`
 
-**Occurrences**: 40+ in brainarr alone, 15+ in applemusicarr, 8+ in qobuzarr  
+**Occurrences**: 40+ in brainarr alone, 15+ in applemusicarr, 8+ in qobuzarr
 **Pattern identified in**: ci.yml, docker-e2e.yml, nightly.yml, test-and-coverage.yml
 
 ### Current pattern (brainarr ci.yml, `prepare-lidarr` job):

@@ -21,7 +21,7 @@ Pick the guide that matches what you need to do.
 
 - [Create a plugin project](how-to/CREATE_PLUGIN.md)
 - [Test a plugin with the isolation loader](how-to/TEST_PLUGIN.md)
-- [Leverage the Common TestKit](how-to/TEST_WITH_TESTKIT.md)
+- [Leverage the Common TestKit](TESTING_WITH_TESTKIT.md)
 - [Implement an indexer](how-to/IMPLEMENT_INDEXER.md)
 - [Use the shared download orchestrator](how-to/USE_DOWNLOAD_ORCHESTRATOR.md)
 - [Authenticate with OAuth](how-to/AUTHENTICATE_OAUTH.md)
@@ -60,6 +60,32 @@ Pick the guide that matches what you need to do.
 - [Multi-plugin smoke test](MULTI_PLUGIN_SMOKE_TEST.md)
 - [Documentation style guide](dev-guide/STYLE_GUIDE.md)
 - [Doc testing & snippet verification](dev-guide/TESTING_DOCS.md)
+
+### Infrastructure & operations
+
+- [CI lane strategy](CI_LANE_STRATEGY.md)
+- [CI reusable workflows](CI_REUSABLE_WORKFLOWS.md)
+- [CI SHA pins](CI_SHA_PINS.md)
+- [Security hardening overview](SECURITY_HARDENING_OVERVIEW.md)
+- [Security hardening backlog](SECURITY_HARDENING_BACKLOG.md)
+- [E2E error codes](E2E_ERROR_CODES.md)
+- [Quarantine process](QUARANTINE_PROCESS.md)
+
+### Architecture decisions (ADRs)
+
+- [ADR-001: Streaming architecture](decisions/ADR-001-streaming-architecture.md)
+- [ADR-002: Subscription auth research](decisions/ADR-002-subscription-auth-research.md)
+
+### Planning & roadmap
+
+- [Tech debt register](TECH_DEBT.md)
+- [6-month takeover roadmap](TAKEOVER_6M_ROADMAP.md)
+- [H2 2026 roadmap](TAKEOVER_H2_2026.md)
+
+### Observability
+
+- [OpenTelemetry quickstart](observability/OTEL-QUICKSTART.md)
+- [Observability proposal](observability/PROPOSAL.md)
 
 ## Plugins using this library
 

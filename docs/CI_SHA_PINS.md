@@ -1,7 +1,7 @@
 # CI SHA Pins Inventory
 
-**Generated**: 2026-05-23  
-**Agent**: ci-cd-agent (Phase 1.5)  
+**Generated**: 2026-05-23
+**Agent**: ci-cd-agent (Phase 1.5)
 **Scope**: All 5 ecosystem repos — brainarr, qobuzarr, tidalarr, applemusicarr, lidarr.plugin.common
 
 ---

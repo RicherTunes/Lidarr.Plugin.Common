@@ -112,7 +112,7 @@ Redaction Check:
 Phase: 17 — Tech Debt Burn-Down
 Status: In Progress (7-day flake window closes Feb 23)
 Date completed: pending
-PR(s): https://github.com/RicherTunes/Brainarr/pull/502
+PR(s): [Brainarr #502](https://github.com/RicherTunes/Brainarr/pull/502)
 
 Exit Criteria:
   1. [x] EnhancedRecommendationCache registered in DI
