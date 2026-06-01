@@ -8,6 +8,24 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 [![NuGet (Common)](https://img.shields.io/nuget/v/Lidarr.Plugin.Common?logo=nuget)](https://www.nuget.org/packages/Lidarr.Plugin.Common)
 [![NuGet (Abstractions)](https://img.shields.io/nuget/v/Lidarr.Plugin.Abstractions?logo=nuget)](https://www.nuget.org/packages/Lidarr.Plugin.Abstractions)
 
+## Quick start
+
+| Role | Start here |
+|------|-----------|
+| Plugin author | [Quickstart: Build a Plugin](docs/quickstart/PLUGIN_AUTHOR.md) |
+| Host maintainer | [Quickstart: Load Plugins Safely](docs/quickstart/HOST_MAINTAINER.md) |
+| Library contributor | [Developer guide](docs/dev-guide/DEVELOPER_GUIDE.md) |
+
+## Key capabilities
+
+- **ALC isolation** — each plugin loads Common in a private `AssemblyLoadContext`; the host owns only `Lidarr.Plugin.Abstractions`. → [Plugin Isolation](docs/PLUGIN_ISOLATION.md)
+- **Streaming plugin bridge** — `StreamingPlugin<TModule, TSettings>` base class wires DI, settings, lifecycle, and the host bridge. → [Plugin Bridge](docs/PLUGIN_BRIDGE.md)
+- **Resilient HTTP pipeline** — builder → options → executor → cache flow with retries, deadlines, concurrency caps, and request deduplication. → [HTTP Flow](docs/Flow.md) · [Key Services](docs/reference/KEY_SERVICES.md)
+- **Security helpers** — `PathTraversalGuard`, `SecureMemory`, `TokenProtectorFactory`, LLM prompt sanitization. → [Shared Helpers Catalog](wiki/Shared-Helpers-Catalog.md)
+- **TestKit** — reusable test fixtures, HTTP handlers, ALC harness, and ecosystem-parity guard tests. → [Testing with the TestKit](docs/TESTING_WITH_TESTKIT.md)
+- **Packaging** — `PluginPack.psm1` standardises build, manifest validation, and ZIP packaging for every plugin release. → [Packaging](docs/PACKAGING.md)
+- **Ecosystem parity** — mechanical guard tests enforce that all plugins follow the same canonical patterns. → [Ecosystem Parity and Guards](wiki/Ecosystem-Parity-and-Guards.md)
+
 ## What's New
 
 Latest: v1.17.0 — May 25, 2026
@@ -27,6 +45,7 @@ Ecosystem-wide parity (every plugin × every cross-cutting concern): see [docs/E
 ## Choose your adventure
 
 ### Plugin authors
+
 - [Create a plugin project](docs/how-to/CREATE_PLUGIN.md)
 - [Use the streaming plugin bridge](docs/PLUGIN_BRIDGE.md)
 - [Test a streaming plugin end-to-end](docs/how-to/USE_STREAMING_PLUGIN.md)
@@ -40,31 +59,52 @@ Ecosystem-wide parity (every plugin × every cross-cutting concern): see [docs/E
 - [Bump the submodule in downstream repos](docs/how-to/BUMP_SUBMODULE.md)
 
 ### Host maintainers
+
 - [AssemblyLoadContext isolation](docs/PLUGIN_ISOLATION.md)
 - [Plugin manifest schema & validation](docs/PLUGIN_MANIFEST.md)
 - [Compatibility matrix & EOL policy](docs/COMPATIBILITY.md)
 - [Migration checklist for legacy plugins](docs/migration/PLUGIN_MIGRATION.md)
 
 ### Library contributors
+
 - [Abstractions overview & API baselines](docs/ABSTRACTIONS.md)
 - [Developer guide](docs/dev-guide/DEVELOPER_GUIDE.md)
 - [Docs & tooling guide](docs/dev-guide/TESTING_DOCS.md)
 - [Packaging playbook](docs/PACKAGING.md)
 - [Upgrade checklist for releases](docs/UPGRADING.md)
 
+## Wiki
+
+Orientation pages that map what exists and where to find it — full details live in the linked `docs/`.
+
+| Page | Scope |
+|------|-------|
+| [Home](wiki/Home.md) | Wiki index and orientation for plugin authors |
+| [Architecture Overview](wiki/Architecture-Overview.md) | ALC isolation, bridge runtime, layer diagram |
+| [SDK and Extension Points](wiki/SDK-and-Extension-Points.md) | `StreamingPlugin<TModule,TSettings>`, DI seams, provider interfaces |
+| [Shared Helpers Catalog](wiki/Shared-Helpers-Catalog.md) | Security, resilience, HTTP defaults, collections, validation |
+| [Ecosystem Parity and Guards](wiki/Ecosystem-Parity-and-Guards.md) | Parity matrix, promotion checklist, drift enforcement |
+| [Versioning and Submodule Pinning](wiki/Versioning-and-Submodule-Pinning.md) | Version contract, submodule workflow, upgrade checklist |
+| [Testing with the TestKit](wiki/Testing-with-the-TestKit.md) | TestKit fixtures, HTTP handlers, ALC harness |
+| [CI and Packaging](wiki/CI-and-Packaging.md) | `PluginPack.psm1`, reusable workflows, SHA pins |
+
 ## Documentation workflow
+
 - Markdown lives under `docs/`; every page is the single source for its topic.
 - Code samples use snippet includes (` ```csharp file=...`) verified by `tools/DocTools/SnippetVerifier`.
 - Run the docs toolchain locally:
+
   ```bash
   # lint + spell check + links + snippets
   gh workflow run docs.yml --ref <branch>
   # or run manually
   dotnet run --project tools/DocTools/SnippetVerifier
   ```
+
 - GitHub Actions `docs.yml` enforces markdownlint, Vale, cspell, link checking, and snippet compilation on every documentation PR.
 
 ## Repository layout
+
 - `src/` – library source (`Lidarr.Plugin.Common`, `Lidarr.Plugin.Abstractions`).
 - `tests/` – unit/integration tests.
 - `examples/` – sample hosts, plugin bridge snippets, manifest helpers.
@@ -76,9 +116,11 @@ Ecosystem-wide parity (every plugin × every cross-cutting concern): see [docs/E
 - [Changelog](CHANGELOG.md)
 - [Contributing](CONTRIBUTING.md)
 - [Security](SECURITY.md)
+- [Glossary](docs/GLOSSARY.md)
 - [Docs directory](docs/)
 
 ## License
+
 MIT – see [LICENSE](LICENSE).
 
 Note: All product and company names (e.g., Qobuz, TIDAL, Spotify) are trademarks of their respective owners; usage here is for descriptive purposes only and does not imply endorsement.
