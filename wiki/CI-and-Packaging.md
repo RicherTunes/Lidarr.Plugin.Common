@@ -6,7 +6,7 @@ Plugin builds are packaged by **PluginPack.psm1** and driven through reusable Gi
 
 [`tools/PluginPack.psm1`](../tools/PluginPack.psm1) is the PowerShell module that standardises every plugin release. Its main entry point is `New-PluginPackage`, which orchestrates building, manifest validation, host-assembly stripping, and ZIP packaging. Other exported functions — `Get-PluginOutput`, `Test-PluginManifest`, `Invoke-PluginCleanup`, `Invoke-PluginMerge`, `Install-CanonicalAbstractions`, `Assert-CanonicalAbstractions` — can be called individually for advanced scenarios.
 
-A copy is shipped inside the NuGet package at `ext/Lidarr.Plugin.Common/tools/PluginPack.psm1`.
+Downstream plugins vendor Common as a git submodule, so the module is available to them at `ext/Lidarr.Plugin.Common/tools/PluginPack.psm1`. (The NuGet package itself ships only the library assemblies plus `README.md`/`CHANGELOG.md`, not the `tools/` scripts.)
 
 Full usage details and the recommended folder-based flow → [**Packaging Plugins**](../docs/PACKAGING.md).
 
