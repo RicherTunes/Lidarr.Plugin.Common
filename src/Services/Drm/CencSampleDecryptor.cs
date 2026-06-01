@@ -44,13 +44,75 @@ namespace Lidarr.Plugin.Common.Services.Drm
             ReadOnlySpan<byte> key,
             ReadOnlySpan<byte> iv,
             CencProtectionScheme scheme,
-            IReadOnlyList<CencSubsample>? subsamples = null)
+            IReadOnlyList<CencSubsample>? subsamples = null,
+            int cryptByteBlock = 0,
+            int skipByteBlock = 0)
         {
+            if (key.Length != 16)
+            {
+                throw new ArgumentException(
+                    $"CENC content key must be 16 bytes (AES-128), got {key.Length}.", nameof(key));
+            }
+
+            if (scheme is not (CencProtectionScheme.Cenc or CencProtectionScheme.Cbcs))
+            {
+                throw new ArgumentOutOfRangeException(nameof(scheme), scheme, "Unsupported CENC protection scheme.");
+            }
+
+            if (cryptByteBlock < 0 || skipByteBlock < 0)
+            {
+                throw new ArgumentException("crypt/skip byte-block counts must be non-negative.", nameof(cryptByteBlock));
+            }
+
+            // The crypt:skip striping pattern applies to 'cbcs' only (and 'cens', which is unsupported);
+            // plain 'cenc' must be unpatterned.
+            if (scheme == CencProtectionScheme.Cenc && (cryptByteBlock != 0 || skipByteBlock != 0))
+            {
+                throw new ArgumentException("'cenc' does not support a crypt:skip pattern; use 'cbcs'.", nameof(scheme));
+            }
+
+            // 'cenc' IVs are 8 or 16 bytes (8 → low 8 bytes are the block counter); 'cbcs' uses a 16-byte IV.
+            bool ivOk = scheme == CencProtectionScheme.Cenc ? iv.Length is 8 or 16 : iv.Length == 16;
+            if (!ivOk)
+            {
+                throw new ArgumentException(
+                    $"CENC IV must be {(scheme == CencProtectionScheme.Cbcs ? "16" : "8 or 16")} bytes for {scheme}, got {iv.Length}.",
+                    nameof(iv));
+            }
+
+            if (subsamples is not null)
+            {
+                ValidateSubsamples(subsamples, sample.Length);
+            }
+
             var output = sample.ToArray();
 
             using var aes = Aes.Create();
-            aes.Key = key.ToArray();
+            var keyCopy = key.ToArray();
+            try
+            {
+                aes.Key = keyCopy;
+                DecryptInto(aes, output, iv, scheme, subsamples, cryptByteBlock, skipByteBlock);
+            }
+            finally
+            {
+                // Scrub the transient managed copy of the content key (the Aes-internal key schedule is
+                // framework-owned and not portably wipeable, but this removes the obvious heap copy).
+                CryptographicOperations.ZeroMemory(keyCopy);
+            }
 
+            return output;
+        }
+
+        private static void DecryptInto(
+            Aes aes,
+            byte[] output,
+            ReadOnlySpan<byte> iv,
+            CencProtectionScheme scheme,
+            IReadOnlyList<CencSubsample>? subsamples,
+            int cryptByteBlock,
+            int skipByteBlock)
+        {
             var ivBlock = new byte[16];
             iv.CopyTo(ivBlock);
 
@@ -65,12 +127,82 @@ namespace Lidarr.Plugin.Common.Services.Drm
             else
             {
                 // 'cbcs' resets the IV at the start of each protected run and decrypts only whole 16-byte
-                // blocks; any trailing partial block in a run is left in the clear.
+                // blocks; any trailing partial block in a run is left in the clear. When a crypt:skip pattern
+                // is set, only the first cryptByteBlock blocks of each (crypt+skip) group are encrypted and
+                // CBC chaining continues across the skipped blocks from crypt group to crypt group.
+                bool patterned = skipByteBlock > 0 && cryptByteBlock > 0;
                 ForEachProtectedRun(output.Length, subsamples, (offset, length) =>
-                    CbcDecryptFullBlocks(aes, ivBlock, output, offset, length));
+                {
+                    if (patterned)
+                    {
+                        CbcDecryptPattern(aes, ivBlock, output, offset, length, cryptByteBlock, skipByteBlock);
+                    }
+                    else
+                    {
+                        CbcDecryptFullBlocks(aes, ivBlock, output, offset, length);
+                    }
+                });
             }
+        }
 
-            return output;
+        /// <summary>
+        /// 'cbcs' striped CBC decryption of a protected run: decrypt the first <paramref name="cryptBlocks"/>
+        /// whole blocks of each (crypt+skip) block group, leave the next <paramref name="skipBlocks"/> blocks
+        /// clear, and continue CBC chaining across the skipped blocks (the last ciphertext block of one crypt
+        /// group is the IV of the next). A trailing partial block (run not a multiple of 16) is left clear.
+        /// </summary>
+        private static void CbcDecryptPattern(
+            Aes aes, byte[] iv, byte[] data, int offset, int length, int cryptBlocks, int skipBlocks)
+        {
+            int totalBlocks = length / 16;
+            var chainIv = (byte[])iv.Clone();
+            int pos = offset;
+            int done = 0;
+
+            while (done < totalBlocks)
+            {
+                int crypt = Math.Min(cryptBlocks, totalBlocks - done);
+                int cryptBytes = crypt * 16;
+
+                var cipher = new byte[cryptBytes];
+                Array.Copy(data, pos, cipher, 0, cryptBytes);
+                var plain = aes.DecryptCbc(cipher, chainIv, PaddingMode.None);
+                Array.Copy(plain, 0, data, pos, cryptBytes);
+
+                // Chain into the next crypt group from this group's last ciphertext block.
+                Array.Copy(cipher, cryptBytes - 16, chainIv, 0, 16);
+
+                pos += cryptBytes;
+                done += crypt;
+
+                int skip = Math.Min(skipBlocks, totalBlocks - done);
+                pos += skip * 16;
+                done += skip;
+            }
+        }
+
+        /// <summary>
+        /// Rejects a malformed/malicious subsample map before any crypto or allocation runs: negative run
+        /// lengths, and a clear+protected total that overflows or exceeds the sample length. Closes the
+        /// OOB-read, silent-corruption, and over-allocation (OOM) vectors a crafted MP4 could trigger.
+        /// </summary>
+        private static void ValidateSubsamples(IReadOnlyList<CencSubsample> subsamples, int totalLength)
+        {
+            long pos = 0;
+            foreach (var ss in subsamples)
+            {
+                if (ss.ClearBytes < 0 || ss.ProtectedBytes < 0)
+                {
+                    throw new ArgumentException("CENC subsample lengths must be non-negative.", nameof(subsamples));
+                }
+
+                pos += (long)ss.ClearBytes + ss.ProtectedBytes; // long avoids int overflow on the running sum
+                if (pos > totalLength)
+                {
+                    throw new ArgumentException(
+                        $"CENC subsample map ({pos} bytes) exceeds sample length ({totalLength}).", nameof(subsamples));
+                }
+            }
         }
 
         /// <summary>
