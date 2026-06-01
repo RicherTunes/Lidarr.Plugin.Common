@@ -24,11 +24,12 @@ amazonmusicarr (Widevine) and applemusicarr (FairPlay cbcs). Priority: correctne
    DoS-guarded. (commit 635ab42)
 7. ✅ End-to-end `CencSegmentDecryptor` (box walker → trun/senc → CencDecryptor per sample). Proven against a
    NIST-CTR synthetic segment; hardened (size>Int32 guard + multi-sample/malicious tests). (5cb43f6, ae362f2)
-8. ⏳ **Real-world segment correctness (next unit, from review):** add a `tfhd` parser and use it to
-   (a) resolve the data_offset anchor (default-base-is-moof vs explicit base_data_offset),
-   (b) fall back to tfhd default_sample_size when trun omits per-sample sizes (valid + common — currently throws),
-   (c) scope senc+trun to a single traf + support multiple trun per traf (multi-track/multi-run).
-   Plus cbcs+pattern+subsample end-to-end integration tests. Then `FindAll` (multi-DRM pssh Widevine filter).
+8. ✅ `tfhd` parser + wired into segment decryptor: (a) data_offset anchor (base_data_offset vs
+   default-base-is-moof), (b) default_sample_size fallback when trun omits sizes. (commits 3777f0f, 4ae57b9)
+9. ⏳ **Remaining segment correctness:** scope senc+trun+tfhd to a single `traf` + support multiple `trun`
+   per traf (multi-track/multi-run) — currently FindFirst grabs the first of each across the whole tree
+   (fine for single-audio-track Amazon, wrong for video+audio). Plus cbcs+pattern+subsample end-to-end tests
+   and `FindAll` (multi-DRM pssh Widevine filter).
 
 ## All deterministic CENC primitives are now BUILT (CencDecryptor, tenc/senc/trun parser, PsshParser,
 ## Mp4BoxWalker). The remaining piece is the CDM license layer — ⚠️ ARCHITECTURAL BLOCKER:
