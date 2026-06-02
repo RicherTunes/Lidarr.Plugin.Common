@@ -28,8 +28,9 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 
 ## What's New
 
-Latest: v1.17.0 — May 25, 2026
+Latest release: v1.17.0 — May 25, 2026. Current dev: **v1.18.0-dev** (unreleased — see [CHANGELOG](CHANGELOG.md#unreleased)).
 
+- **v1.18.0-dev (unreleased)** — release-size consolidation (`AlbumSizeEstimator`, `MultiQualityReleaseBuilder`); shared streaming/manifest seams (`HlsManifestParser` alongside `DashManifestParser`, `CencSampleDecryptor`); `HeuristicQueryOptimizer` (rule-based `IQueryOptimizer`); `PathTraversalGuard` trailing-separator fix; opt-in canonical-abstractions packaging gate; `IAuthFailureGateRegistry` deprecated.
 - **v1.17.0** — Wave-21 parity helpers (PathTraversalGuard.ContainsTraversalAttempt probe, AlbumDownloadUri parser, AlbumReleaseInfoBuilder Edition/Explicit/Live slots, unified plugin version-bump helper).
 - **v1.16.0** — `SlidingWindowAuthFailureHandler` (K-of-N-in-W sliding-window circuit semantics, sibling of `DefaultAuthFailureHandler`); unblocks brainarr's `LlmAuthCircuit` convergence onto the shared Common stack.
 - **v1.15.0** — `BoundedConcurrentDictionary` richer API surface (indexer setter, `ContainsKey`, `Values`, `IEnumerable<KeyValuePair>`); SecureMemory + Conservative rate-limit profile + PagedResponseValidator.
