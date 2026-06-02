@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using Lidarr.Plugin.Common.Services.Download;
 
 namespace Lidarr.Plugin.Common.TestKit.Compliance;
 
@@ -437,7 +438,549 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_UsesCommonLyricsEnricher
+
+    /// <summary>
+    /// Synced-lyrics enrichment is consolidated in common
+    /// (<c>Lidarr.Plugin.Common.Services.Lyrics.ILyricsEnricher</c> / <c>LyricsEnricher</c>).
+    /// A plugin must not define its own <c>ILyricsEnricher</c>/<c>LyricsEnricher</c> (the
+    /// historical qobuz/tidal duplication) nor fork the orchestration by implementing common's
+    /// interface in plugin-local code — it consumes common's type directly. Service-specific
+    /// fetches belong behind common's <c>INativeLyricsSource</c>, not a re-declared enricher.
+    /// </summary>
+    public virtual ComplianceResult Check_UsesCommonLyricsEnricher()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+
+        const string commonInterfaceFullName = "Lidarr.Plugin.Common.Services.Lyrics.ILyricsEnricher";
+        var offenders = new List<string>();
+        foreach (var type in SafeGetTypes(assembly))
+        {
+            if (type == null) continue;
+            string ns, name;
+            try { ns = type.Namespace ?? string.Empty; name = type.Name ?? string.Empty; }
+            catch { continue; }
+
+            // Common's own types (incl. ILRepack-internalized) are the canonical implementation.
+            if (IsCommonProductionNamespace(ns)) continue;
+
+            // (a) A plugin-local re-declaration of the lyrics-enricher shape (the historical fork).
+            if (name == "ILyricsEnricher" || name == "LyricsEnricher")
+            {
+                offenders.Add(type.FullName ?? name);
+                continue;
+            }
+
+            // (b) A plugin-local fork that implements common's shared interface directly.
+            try
+            {
+                if (type.IsInterface || type.IsAbstract) continue;
+                if (type.GetInterfaces().Any(i => i.FullName == commonInterfaceFullName))
+                {
+                    offenders.Add(type.FullName ?? name);
+                }
+            }
+            catch { /* unresolved interfaces — skip safely */ }
+        }
+
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Plugin defines its own lyrics enricher — consolidate on Lidarr.Plugin.Common.Services.Lyrics.ILyricsEnricher/LyricsEnricher (put service-specific fetches behind INativeLyricsSource): {string.Join(", ", offenders)}");
+    }
+
+    #endregion
+
+    #region Check_UsesCommonDiagnosticTypes
+
+    /// <summary>
+    /// Plugins must reference common's canonical
+    /// <c>Lidarr.Plugin.Common.Abstractions.Diagnostics.DiagnosticTypes</c> +
+    /// <c>DiagnosticErrorCodes</c> rather than re-declaring identical <c>DiagnosticTypes</c> /
+    /// <c>ErrorCodes</c> nested classes inside their <c>*HealthDiagnostics</c> type. Those per-plugin
+    /// copies (qobuz/tidal/apple all had them) drift independently — collapsing them to Common makes
+    /// a rename land in one place. This flags a class named <c>DiagnosticTypes</c> or <c>ErrorCodes</c>
+    /// nested in a <c>*HealthDiagnostics</c> type, outside common's own namespace.
+    /// </summary>
+    public virtual ComplianceResult Check_UsesCommonDiagnosticTypes()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+
+        var offenders = new List<string>();
+        foreach (var type in SafeGetTypes(assembly))
+        {
+            if (type == null) continue;
+            string name;
+            try { name = type.Name ?? string.Empty; }
+            catch { continue; }
+            if (name != "DiagnosticTypes" && name != "ErrorCodes") continue;
+
+            // Only the *HealthDiagnostics-nested copies are the consolidation target; an unrelated
+            // top-level type that happens to share the name is out of scope.
+            Type? declaring;
+            try { declaring = type.DeclaringType; }
+            catch { continue; }
+            if (declaring == null || !(declaring.Name ?? string.Empty).EndsWith("HealthDiagnostics", StringComparison.Ordinal)) continue;
+
+            // common's own types (incl. ILRepack-internalized) are fine.
+            string ns;
+            try { ns = type.Namespace ?? string.Empty; }
+            catch { continue; }
+            if (IsCommonProductionNamespace(ns)) continue;
+
+            offenders.Add(type.FullName ?? name);
+        }
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Plugin-local DiagnosticTypes/ErrorCodes nested in *HealthDiagnostics are forbidden — reference Lidarr.Plugin.Common.Abstractions.Diagnostics.DiagnosticTypes + DiagnosticErrorCodes: {string.Join(", ", offenders)}");
+    }
+
+    #endregion
+
+    #region Check_UsesCommonDownloadTelemetrySink
+
+    /// <summary>
+    /// Plugins must consume common's canonical download-telemetry sink
+    /// (<c>LoggingDownloadTelemetrySink</c>, registered via <c>AddDownloadTelemetry()</c>) instead
+    /// of hand-rolling an <c>IDownloadTelemetrySink</c>. A plugin-local implementation re-creates
+    /// the per-track log format that lives in <c>DownloadTelemetryService</c>, re-introducing the
+    /// cross-plugin logging divergence this contract exists to prevent. A genuinely custom sink
+    /// (e.g. one that forwards telemetry to an external metrics backend instead of logging) is a
+    /// legitimate divergence — document it by overriding this check to return
+    /// <see cref="ComplianceResult.Success"/> with a rationale.
+    /// </summary>
+    public virtual ComplianceResult Check_UsesCommonDownloadTelemetrySink()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+
+        const string ifaceFullName = "Lidarr.Plugin.Common.Services.Download.IDownloadTelemetrySink";
+        const string commonSinkFullName = "Lidarr.Plugin.Common.Services.Download.LoggingDownloadTelemetrySink";
+
+        var offenders = new List<string>();
+        foreach (var type in SafeGetTypes(assembly))
+        {
+            if (type == null) continue;
+            try { if (type.IsInterface || type.IsAbstract) continue; }
+            catch { continue; }
+
+            Type[] ifaces;
+            try { ifaces = type.GetInterfaces(); }
+            catch { continue; }
+            if (!ifaces.Any(i => i.FullName == ifaceFullName)) continue;
+
+            // common's own types (incl. ILRepack-internalized LoggingDownloadTelemetrySink) are fine.
+            string ns;
+            try { ns = type.Namespace ?? string.Empty; }
+            catch { continue; }
+            if (IsCommonProductionNamespace(ns)) continue;
+
+            // Belt-and-suspenders: allow the canonical sink by full name even if its namespace
+            // classification ever changes.
+            var fullName = type.FullName ?? type.Name;
+            if (fullName == commonSinkFullName) continue;
+
+            offenders.Add(fullName);
+        }
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Plugin-local IDownloadTelemetrySink implementations are forbidden — register common's via AddDownloadTelemetry() / LoggingDownloadTelemetrySink (or override this check to document a custom telemetry backend): {string.Join(", ", offenders)}");
+    }
+
+    #endregion
+
+    #region Check_DownloadClientUsesPathTraversalGuard
+
+    /// <summary>
+    /// Plugins that ship a download client must sanitize user-supplied path segments through common's
+    /// <c>PathTraversalGuard</c> (<c>SanitizeSegment</c> / <c>IsPathWithinRoot</c>) before writing to
+    /// disk — otherwise a crafted artist/album/track name can escape the download root. This guard is
+    /// applicable only when the plugin declares a download client (import-list plugins such as brainarr
+    /// have no download path → N/A). Detection mirrors <see cref="Check_RegistersBridgeDefaults"/>: a
+    /// reference to <c>PathTraversalGuard</c> in the (un-merged, in test context) plugin assembly.
+    /// </summary>
+    public virtual ComplianceResult Check_DownloadClientUsesPathTraversalGuard()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+        if (!PluginDeclaresHostDownloadClient(assembly)) return ComplianceResult.Success; // not applicable
+
+        string text;
+        try { text = System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(assembly.Location)); }
+        catch { return ComplianceResult.Success; } // unreadable — don't false-fail
+        if (text.Contains("PathTraversalGuard", StringComparison.Ordinal))
+            return ComplianceResult.Success;
+
+        return ComplianceResult.Failure(
+            "Plugin ships a download client but its assembly does not reference Lidarr.Plugin.Common.HostBridge.PathTraversalGuard — user-supplied path segments must be sanitized via PathTraversalGuard (SanitizeSegment / IsPathWithinRoot) to prevent path-traversal writes outside the download root.");
+    }
+
+    #endregion
+
+    #region Check_DownloadClientUsesCommonPayloadValidator
+
+    /// <summary>
+    /// Audio-payload validation — is a downloaded blob real audio vs an HTML/JSON error page or the
+    /// wrong container? — is consolidated in Common's canonical <c>DownloadPayloadValidator</c>, a strict
+    /// superset of the legacy <c>AudioMagicBytesValidator</c> (it adds MP4/M4A ftyp recognition,
+    /// text/HTML/JSON/XML rejection, and file + span overloads). A plugin that ships a download client
+    /// must not (a) use the legacy <c>AudioMagicBytesValidator</c>, nor (b) declare its own
+    /// <c>*PayloadValidator</c> fork — the historical tidalarr <c>TidalDownloadPayloadValidator</c> +
+    /// qobuz m4a-workaround divergence this guard exists to prevent regressing. Applicable only to
+    /// download-client plugins (import-list plugins such as brainarr → N/A); source-scan based and
+    /// conservative (no source root → skip). Note: inline MP4-box integrity checks on decrypted DASH
+    /// segments (moov/mdat) are a DISTINCT concern (segment integrity, not file-level audio validation)
+    /// and are intentionally NOT flagged — this targets file-level audio-payload validation only.
+    /// </summary>
+    public virtual ComplianceResult Check_DownloadClientUsesCommonPayloadValidator()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+        if (!PluginDeclaresHostDownloadClient(assembly)) return ComplianceResult.Success; // N/A (no download client)
+        if (!Directory.Exists(PluginSourceRoot)) return Skipped();
+
+        var excluded = new[]
+        {
+            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}",
+            ".Tests" + Path.DirectorySeparatorChar,
+            $"{Path.DirectorySeparatorChar}examples{Path.DirectorySeparatorChar}",
+        };
+        // (a) legacy weak validator usage; (b) a plugin-local *PayloadValidator fork declaration.
+        var legacyUse = new System.Text.RegularExpressions.Regex(
+            @"\bAudioMagicBytesValidator\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+        var forkClass = new System.Text.RegularExpressions.Regex(
+            @"\bclass\s+[A-Za-z0-9_]*PayloadValidator\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch { continue; }
+            var rel = Path.GetRelativePath(RepoRootPath, file);
+            if (legacyUse.IsMatch(text))
+                offenders.Add($"{rel}: uses the legacy AudioMagicBytesValidator");
+            if (forkClass.IsMatch(text))
+                offenders.Add($"{rel}: declares a plugin-local *PayloadValidator fork");
+        }
+
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                "Audio-payload validation must use Lidarr.Plugin.Common.Utilities.DownloadPayloadValidator " +
+                $"(the canonical superset), not the legacy AudioMagicBytesValidator or a plugin-local fork: {string.Join("; ", offenders)}");
+    }
+
+    #endregion
+
+    #region Check_FileClassNameParity
+
+    /// <summary>
+    /// Single-type C# files should be named after the public type they declare (parity-matrix
+    /// row 30: file ↔ class name parity). Flags a <c>.cs</c> file under <see cref="PluginSourceRoot"/>
+    /// that declares EXACTLY ONE public top-level type whose name (generic arity stripped) differs
+    /// from the file name. Conservative to avoid false positives: multi-type grouping files (DTO
+    /// bundles, exception families, interface+impl pairs) declare more than one public type and are
+    /// skipped; partial types and dotted/generated file names (<c>X.Designer.cs</c>, <c>X.g.cs</c>,
+    /// partial-split files) are skipped. All four plugins are currently clean (row 30 ✓); this guard
+    /// turns that into drift-prevention so a future copy-pasted mis-named file fails CI.
+    /// </summary>
+    public virtual ComplianceResult Check_FileClassNameParity()
+    {
+        if (!Directory.Exists(PluginSourceRoot)) return Skipped();
+
+        var excluded = new[]
+        {
+            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
+        };
+        // Public top-level (or nested — counted, which makes multi-type files exceed 1 and skip) type.
+        var typeDecl = new System.Text.RegularExpressions.Regex(
+            @"(?m)^\s*(?:\[[^\]]*\]\s*)*public\s+(?:sealed\s+|abstract\s+|static\s+|partial\s+|readonly\s+|unsafe\s+)*(?:class|interface|record|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        var partialDecl = new System.Text.RegularExpressions.Regex(
+            @"(?m)^\s*(?:\[[^\]]*\]\s*)*public\s+(?:sealed\s+|abstract\s+|static\s+|readonly\s+|unsafe\s+)*partial\s+(?:class|interface|record|struct)\s+",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
+            var fileName = Path.GetFileNameWithoutExtension(file);
+            if (fileName.Contains('.')) continue; // dotted (partial splits / *.Designer / *.g) — skip
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch { continue; }
+            if (partialDecl.IsMatch(text)) continue; // partial type spans files — name needn't match
+            var matches = typeDecl.Matches(text);
+            if (matches.Count != 1) continue; // 0 = no public type; >1 = grouping file (allowed)
+            var typeName = matches[0].Groups[1].Value;
+            if (string.Equals(typeName, fileName, StringComparison.Ordinal)) continue;
+
+            // The single PUBLIC type's name differs from the file name — but if the file's TOP-LEVEL
+            // type (any accessibility) is itself named after the file, the file IS correctly named and
+            // the public type is a nested helper (e.g. an `internal *HealthDiagnostics` whose only
+            // public member is a nested `Capabilities`). Only flag when no top-level type matches the
+            // file name. (^-anchored = top-level in the file-scoped-namespace style these repos use.)
+            var declaresFileNameTopLevelType = System.Text.RegularExpressions.Regex.IsMatch(
+                text,
+                $@"(?m)^(?:\[[^\]]*\]\s*)*(?:(?:public|internal|private|protected|file|sealed|abstract|static|partial|readonly|unsafe)\s+)*(?:class|interface|record|struct|enum)\s+{System.Text.RegularExpressions.Regex.Escape(fileName)}\b");
+            if (declaresFileNameTopLevelType) continue;
+
+            offenders.Add($"{Path.GetRelativePath(RepoRootPath, file)} (file '{fileName}' != type '{typeName}')");
+        }
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Single-type files must be named after their public type (file↔class parity): {string.Join("; ", offenders)}");
+    }
+
+    #endregion
+
+    #region Check_ClaudeMdDocumentsCommonHelpers
+
+    /// <summary>
+    /// Each plugin's <c>CLAUDE.md</c> must carry a "Common helpers in use" section (parity-matrix
+    /// row 29) — the human-readable index of which shared Common helpers the plugin adopts, kept
+    /// next to the code so reviewers can spot a plugin that quietly hand-rolls instead of adopting.
+    /// Presence-only check (the content is reviewed by humans); repos without a CLAUDE.md are skipped.
+    /// </summary>
+    public virtual ComplianceResult Check_ClaudeMdDocumentsCommonHelpers()
+    {
+        var path = Path.Combine(RepoRootPath, "CLAUDE.md");
+        if (!File.Exists(path)) return Skipped();
+        string text;
+        try { text = File.ReadAllText(path); }
+        catch { return Skipped(); }
+        return text.Contains("Common helpers in use", StringComparison.OrdinalIgnoreCase)
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                "CLAUDE.md is missing the 'Common helpers in use' section — document which Lidarr.Plugin.Common helpers the plugin adopts so reviewers can catch hand-rolled drift.");
+    }
+
+    #endregion
+
+    #region Check_DownloadClientStampsRegisteredClientId
+
+    /// <summary>
+    /// A plugin's download client must stamp every reported <c>DownloadClientItem</c> with the
+    /// registered client id — <c>DownloadClientInfo.Id == this client's Definition.Id</c> — never a
+    /// literal <c>0</c>. Lidarr's <c>DownloadMonitoringService</c> → <c>CompletedDownloadService</c> →
+    /// <c>DownloadClientProvider.Get(DownloadClientInfo.Id)</c> resolves the owning client by that id;
+    /// a wrong/zero id makes its <c>.Single(...)</c> throw "Sequence contains no matching element", so
+    /// every completed download wedges at "Couldn't process tracked download" and never imports. (Live
+    /// qobuz regression, 2026-05-31: <c>GetItems()</c> passed <c>0</c> → every download stuck.)
+    /// <para>
+    /// Canonical shape (tidal/apple/amazon): <c>DownloadClientItemClientInfo.FromDownloadClient(this, …)</c>,
+    /// the host helper that always reads <c>this.Definition.Id/Name</c>. qobuz derives the id explicitly
+    /// from <c>Definition?.Id</c>. The guard accepts either; it fails a <c>GetItems()</c> that neither
+    /// uses <c>FromDownloadClient(this, …)</c> nor references <c>Definition.Id/Name</c>, or that passes a
+    /// literal <c>0</c> to a <c>ToDownloadClientItem(...)</c> converter.
+    /// </para>
+    /// <para>
+    /// Applicable only to plugins that ship a host-contract download client (import-list plugins such as
+    /// brainarr → N/A). Source-scan based (like <see cref="Check_NoFluentValidation_ErrorsApi_Drift"/>):
+    /// it isolates each download client's <c>GetItems()</c> body and is conservative — if no body can be
+    /// located it passes rather than false-fail.
+    /// </para>
+    /// </summary>
+    public virtual ComplianceResult Check_DownloadClientStampsRegisteredClientId()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+        if (!PluginDeclaresHostDownloadClient(assembly)) return ComplianceResult.Success; // N/A (no download client)
+        if (!Directory.Exists(PluginSourceRoot)) return Skipped();
+
+        var excluded = new[]
+        {
+            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}",
+            ".Tests" + Path.DirectorySeparatorChar,
+            $"{Path.DirectorySeparatorChar}examples{Path.DirectorySeparatorChar}",
+        };
+
+        // Host-contract download clients subclass DownloadClientBase<TSettings> and override GetItems().
+        var clientBasePattern = new System.Text.RegularExpressions.Regex(
+            @":\s*DownloadClientBase\s*<", System.Text.RegularExpressions.RegexOptions.Compiled);
+        var derivesFromDefinition = new System.Text.RegularExpressions.Regex(
+            @"FromDownloadClient\s*\(\s*this\b|Definition\s*\??\s*\.\s*(Id|Name)",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        var stampsLiteralZero = new System.Text.RegularExpressions.Regex(
+            @"ToDownloadClientItem\s*\(\s*0\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        var scannedAny = false;
+        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch { continue; }
+            if (!clientBasePattern.IsMatch(text)) continue;
+            if (!text.Contains("GetItems", StringComparison.Ordinal)) continue;
+
+            var body = ExtractMethodBody(text, "GetItems");
+            if (body == null) continue; // couldn't isolate the body — don't false-fail
+            scannedAny = true;
+
+            var derives = derivesFromDefinition.IsMatch(body);
+            var stampsZero = stampsLiteralZero.IsMatch(body);
+            if (!derives || stampsZero)
+            {
+                offenders.Add(
+                    $"{Path.GetRelativePath(RepoRootPath, file)}: GetItems() must stamp DownloadClientInfo.Id " +
+                    "from this client's Definition (use DownloadClientItemClientInfo.FromDownloadClient(this, …) " +
+                    "or pass Definition.Id) — a literal 0 makes Lidarr's CompletedDownloadService fail to resolve " +
+                    "the owning client and wedges every completed download.");
+            }
+        }
+
+        // No locatable download-client GetItems() body to assert against — treat as N/A rather than fail.
+        if (!scannedAny) return ComplianceResult.Success;
+
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Download client(s) must report DownloadClientInfo.Id == Definition.Id (download-client-id contract): {string.Join("; ", offenders)}");
+    }
+
+    /// <summary>
+    /// True if the plugin assembly declares a host-contract download client — a concrete type
+    /// implementing the abstractions <c>IDownloadClient</c> or subclassing Lidarr's
+    /// <c>DownloadClientBase&lt;T&gt;</c>. Import-list plugins (e.g. brainarr) declare neither.
+    /// </summary>
+    private bool PluginDeclaresHostDownloadClient(Assembly assembly)
+    {
+        const string dcIface = "Lidarr.Plugin.Abstractions.Contracts.IDownloadClient";
+        return SafeGetTypes(assembly).Any(t =>
+        {
+            if (t == null) return false;
+            try
+            {
+                if (t.IsInterface || t.IsAbstract) return false;
+                if (t.GetInterfaces().Any(i => i.FullName == dcIface)) return true;
+                var b = t.BaseType;
+                while (b != null)
+                {
+                    if ((b.Name ?? string.Empty).StartsWith("DownloadClientBase", StringComparison.Ordinal)) return true;
+                    b = b.BaseType;
+                }
+                return false;
+            }
+            catch { return false; }
+        });
+    }
+
+    /// <summary>
+    /// Extracts the body text (the enclosing <c>{ … }</c>, or the <c>=&gt; … ;</c> for an expression
+    /// body) of the first method named <paramref name="methodName"/> in <paramref name="source"/>.
+    /// Returns null if the method or a balanced body can't be located (callers treat null as "skip").
+    /// Brace-matching tolerates balanced interpolation braces (<c>$"{x}"</c>); a stray unbalanced brace
+    /// inside a string/comment yields null (safe — the caller skips rather than false-fails).
+    /// </summary>
+    private static string? ExtractMethodBody(string source, string methodName)
+    {
+        var searchFrom = 0;
+        while (true)
+        {
+            var nameIdx = source.IndexOf(methodName, searchFrom, StringComparison.Ordinal);
+            if (nameIdx < 0) return null;
+            var afterName = nameIdx + methodName.Length;
+            // Require a left word boundary so "GetItems" doesn't match inside "FooGetItems".
+            if (nameIdx > 0)
+            {
+                var prev = source[nameIdx - 1];
+                if (char.IsLetterOrDigit(prev) || prev == '_') { searchFrom = afterName; continue; }
+            }
+            // Next non-space char must open a parameter list.
+            var p = afterName;
+            while (p < source.Length && char.IsWhiteSpace(source[p])) p++;
+            if (p >= source.Length || source[p] != '(') { searchFrom = afterName; continue; }
+            // Match the parameter-list parens.
+            var parenDepth = 0;
+            var q = p;
+            for (; q < source.Length; q++)
+            {
+                if (source[q] == '(') parenDepth++;
+                else if (source[q] == ')') { parenDepth--; if (parenDepth == 0) { q++; break; } }
+            }
+            if (q >= source.Length) return null;
+            var r = q;
+            while (r < source.Length && char.IsWhiteSpace(source[r])) r++;
+            if (r >= source.Length) return null;
+            if (source[r] == '{')
+            {
+                var depth = 0;
+                for (var i = r; i < source.Length; i++)
+                {
+                    if (source[i] == '{') depth++;
+                    else if (source[i] == '}') { depth--; if (depth == 0) return source.Substring(r, i - r + 1); }
+                }
+                return null; // unbalanced
+            }
+            if (source[r] == '=' && r + 1 < source.Length && source[r + 1] == '>')
+            {
+                var semi = source.IndexOf(';', r);
+                return semi < 0 ? null : source.Substring(r, semi - r + 1);
+            }
+            // Declaration without an inline body (interface/abstract) or a generic constraint — keep looking.
+            searchFrom = afterName;
+        }
+    }
+
+    #endregion
+
     #region Aggregator
+
+    #region Check_EnforcesAlbumCompletionPolicy
+
+    /// <summary>
+    /// Every streaming plugin must share one album-completion rule: an incomplete album (any
+    /// track missing) is NOT a successful download, so it is reported Failed (Lidarr blocklists
+    /// + re-searches / falls back) rather than Completed (which Lidarr permanently rejects as
+    /// "Has missing tracks", silently wasting the downloaded files). The rule lives in
+    /// <see cref="AlbumCompletionPolicy"/>; this guard pins it in every plugin's pinned Common,
+    /// so a plugin that delegates to it provably inherits the fix and cannot regress to
+    /// "partial album == success". (Was a live qobuz regression: Aphex Twin – Drukqs, 29/30.)
+    /// Unlike the other behavior checks this needs no <see cref="PluginAssembly"/> — it asserts
+    /// the shared rule directly, so it runs for every plugin regardless of opt-in.
+    /// </summary>
+    public virtual ComplianceResult Check_EnforcesAlbumCompletionPolicy()
+    {
+        var errors = new List<string>();
+
+        // Incomplete must never be successful — not even above the success-rate threshold.
+        if (AlbumCompletionPolicy.IsAlbumDownloadSuccessful(totalTracks: 30, successfulTracks: 29))
+            errors.Add("AlbumCompletionPolicy treats 29/30 as successful; an incomplete album must report Failed.");
+        if (AlbumCompletionPolicy.IsAlbumDownloadSuccessful(totalTracks: 10, successfulTracks: 8))
+            errors.Add("AlbumCompletionPolicy treats 8/10 as successful; an incomplete album must report Failed.");
+        // A complete album must be successful.
+        if (!AlbumCompletionPolicy.IsAlbumDownloadSuccessful(totalTracks: 10, successfulTracks: 10))
+            errors.Add("AlbumCompletionPolicy treats a complete 10/10 album as unsuccessful.");
+
+        return errors.Count == 0 ? ComplianceResult.Success : new ComplianceResult(false, errors);
+    }
+
+    #endregion
 
     /// <summary>
     /// Runs the behavior-contract checks. Returns a separate report so callers can decide
@@ -447,12 +990,21 @@ public abstract partial class EcosystemParityTestBase
     {
         var results = new Dictionary<string, ComplianceResult>
         {
+            [nameof(Check_EnforcesAlbumCompletionPolicy)] = Check_EnforcesAlbumCompletionPolicy(),
             [nameof(Check_UsesCommonFileTokenStore)] = Check_UsesCommonFileTokenStore(),
             [nameof(Check_UsesCommonHttpResponseCache)] = Check_UsesCommonHttpResponseCache(),
             [nameof(Check_RegistersBridgeDefaults)] = Check_RegistersBridgeDefaults(),
             [nameof(Check_PluginManifest_Capabilities_HaveBackingTypes)] = Check_PluginManifest_Capabilities_HaveBackingTypes(),
             [nameof(Check_NoFluentValidation_ErrorsApi_Drift)] = Check_NoFluentValidation_ErrorsApi_Drift(),
             [nameof(Check_UsesCommonPluginConfigRoots)] = Check_UsesCommonPluginConfigRoots(),
+            [nameof(Check_UsesCommonLyricsEnricher)] = Check_UsesCommonLyricsEnricher(),
+            [nameof(Check_UsesCommonDiagnosticTypes)] = Check_UsesCommonDiagnosticTypes(),
+            [nameof(Check_UsesCommonDownloadTelemetrySink)] = Check_UsesCommonDownloadTelemetrySink(),
+            [nameof(Check_DownloadClientUsesPathTraversalGuard)] = Check_DownloadClientUsesPathTraversalGuard(),
+            [nameof(Check_DownloadClientStampsRegisteredClientId)] = Check_DownloadClientStampsRegisteredClientId(),
+            [nameof(Check_DownloadClientUsesCommonPayloadValidator)] = Check_DownloadClientUsesCommonPayloadValidator(),
+            [nameof(Check_FileClassNameParity)] = Check_FileClassNameParity(),
+            [nameof(Check_ClaudeMdDocumentsCommonHelpers)] = Check_ClaudeMdDocumentsCommonHelpers(),
         };
 
         var passed = results.Values.Count(r => r.Passed);
