@@ -31,6 +31,7 @@ For Medium/Search/Grab gates and Drift Sentinel success mode:
 | `QOBUZ_APP_ID` | Qobuz application ID | All API calls |
 | `QOBUZ_APP_SECRET` | Qobuz application secret | Authenticated calls |
 | `QOBUZ_AUTH_TOKEN` | Pre-authenticated token | Drift sentinel success mode |
+| `QOBUZ_USER_ID` | Qobuz user ID | Authenticated API calls |
 | `QOBUZ_COUNTRY_CODE` | Market (e.g., `US`) | Search/quality filtering |
 
 **Alternative naming**: `QOBUZARR_*` prefix also supported.
@@ -43,6 +44,7 @@ For Medium/Search/Grab gates:
 |--------|-------------|--------------|
 | `TIDAL_REDIRECT_URL` | OAuth redirect URL | Medium gate (OAuth flow) |
 | `TIDAL_MARKET` | Market code (e.g., `US`) | Search/quality filtering |
+| `TIDAL_CONFIG_PATH` | Config file path for OAuth state | Session persistence |
 
 For Drift Sentinel success mode (OAuth client credentials flow):
 
@@ -52,6 +54,17 @@ For Drift Sentinel success mode (OAuth client credentials flow):
 | `TIDAL_CLIENT_SECRET` | Tidal API client secret | OAuth token acquisition |
 
 **Alternative naming**: `TIDALARR_*` prefix also supported.
+
+### Brainarr Credentials
+
+For ImportList gate and LLM functional gate:
+
+| Secret | Description | Required For |
+|--------|-------------|--------------|
+| `BRAINARR_LLM_BASE_URL` | LLM endpoint URL | ImportList gate (LLM sync) |
+| `BRAINARR_MODEL_ID` | Model identifier | LLM functional gate |
+| `BRAINARR_MODEL` | Model name | Alternative model selector |
+| `BRAINARR_PROVIDER` | LLM provider name | Provider-specific configuration |
 
 ## Mode-Specific Requirements
 
@@ -71,6 +84,7 @@ Requires full credentials for enabled gates:
 - `CROSS_REPO_PAT`
 - Qobuz: `QOBUZ_APP_ID` + `QOBUZ_AUTH_TOKEN` (for success mode)
 - Tidal: `TIDAL_CLIENT_ID` + `TIDAL_CLIENT_SECRET` (for OAuth flow)
+- Brainarr: `BRAINARR_LLM_BASE_URL` (for ImportList gate)
 
 ### Drift Sentinel Strict Mode
 
@@ -83,7 +97,7 @@ When `drift_sentinel_fail_on_drift: true` AND `drift_sentinel_include_success_mo
 The smoke test workflow includes validation steps:
 
 1. **CROSS_REPO_PAT health check**: Validates token is not expired
-2. **Live gate credentials check**: Validates provider creds for medium/search/grab gates
+2. **Live gate credentials check**: Validates provider creds for medium/search/grab/importlist gates
 3. **Drift sentinel strict mode check**: Validates API credentials when strict success mode enabled
 
 If validation fails, the workflow provides clear instructions on which secrets are missing.
@@ -111,7 +125,7 @@ For organization-level secrets:
 ### "CROSS_REPO_PAT secret is missing or empty"
 
 The workflow skips when this secret is not configured. Solution:
-1. Create PAT at https://github.com/settings/tokens
+1. Create PAT at [GitHub Settings → Tokens](https://github.com/settings/tokens)
 2. Grant `repo` scope (classic) or fine-grained read access
 3. Add to repository secrets as `CROSS_REPO_PAT`
 

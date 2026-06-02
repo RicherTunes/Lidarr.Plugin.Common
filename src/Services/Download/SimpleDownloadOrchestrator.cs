@@ -191,11 +191,18 @@ namespace Lidarr.Plugin.Common.Services.Download
             }
 
             var failures = result.TrackResults.Where(tr => !tr.Success).ToList();
-            if (failures.Count > 0)
+            // Delegate the completeness decision to Common's canonical AlbumCompletionPolicy:
+            // an album is successful ONLY when every track lands (successfulTracks == totalTracks).
+            // Incomplete => the host reports Failed so Lidarr can fall back to another source instead
+            // of importing a partial album that NoMissingOrUnmatchedTracksSpecification permanently
+            // rejects ("Has missing tracks"). Equivalent to the prior failures.Count > 0 gate.
+            var successfulTracks = result.TrackResults.Count - failures.Count;
+            if (!AlbumCompletionPolicy.IsAlbumDownloadSuccessful(result.TrackResults.Count, successfulTracks))
             {
                 result.Success = false;
-                var first = failures[0];
-                result.ErrorMessage = $"Failed to download {failures.Count}/{result.TrackResults.Count} tracks. First error: {first.ErrorMessage}";
+                result.ErrorMessage = failures.Count > 0
+                    ? $"Failed to download {failures.Count}/{result.TrackResults.Count} tracks. First error: {failures[0].ErrorMessage}"
+                    : $"Incomplete album: only {successfulTracks}/{result.TrackResults.Count} tracks downloaded.";
             }
             else if (files.Count == 0)
             {
