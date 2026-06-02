@@ -34,4 +34,11 @@ public static class TriageReasonCodes
 
     /// <summary>Provider is known to produce lower-quality confidence estimates.</summary>
     public const string LowCalibrationProvider = "LOW_CALIBRATION_PROVIDER";
+
+    /// <summary>
+    /// The model did not provide a confidence score (the parser fabricated a default),
+    /// so all confidence-derived scoring is skipped for this item. Confidence-independent
+    /// checks (MBID, duplicate signals) still apply. Emitted with a non-enum "unscored" band.
+    /// </summary>
+    public const string ConfidenceNotProvided = "CONFIDENCE_NOT_PROVIDED";
 }

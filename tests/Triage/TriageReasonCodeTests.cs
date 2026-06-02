@@ -71,6 +71,7 @@ public class TriageReasonCodeTests
     [InlineData(nameof(TriageReasonCodes.ConsistentSignals), "CONSISTENT_SIGNALS")]
     [InlineData(nameof(TriageReasonCodes.CalibrationApplied), "CALIBRATION_APPLIED")]
     [InlineData(nameof(TriageReasonCodes.LowCalibrationProvider), "LOW_CALIBRATION_PROVIDER")]
+    [InlineData(nameof(TriageReasonCodes.ConfidenceNotProvided), "CONFIDENCE_NOT_PROVIDED")]
     public void ReasonCode_HasExpectedValue(string fieldName, string expectedValue)
     {
         var field = typeof(TriageReasonCodes).GetField(fieldName, BindingFlags.Public | BindingFlags.Static);
