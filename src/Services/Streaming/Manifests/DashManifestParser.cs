@@ -29,6 +29,12 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
         // Widevine DRM system id used by ContentProtection@schemeIdUri (case-insensitive).
         private const string WidevineSystemId = "edef8ba9-79d6-4ace-a3c8-27dcd51d21ed";
 
+        // DoS guards against a hostile/malformed manifest (the parser is fed semi-trusted CDN content;
+        // mirrors the bounds the CENC parsers enforce): cap how many segments we will allocate and how
+        // wide a $Number%0Nd$ zero-pad can be, so a crafted manifest can't exhaust memory.
+        private const int MaxSegments = 100_000;
+        private const int MaxPadWidth = 32;
+
         // Matches $Number%0Nd$ (width-padded $Number$), e.g. $Number%06d$. Group "w" = the N digits of width.
         private static readonly Regex PaddedNumberToken =
             new(@"\$Number%0(?<w>\d+)d\$", RegexOptions.Compiled);
@@ -249,6 +255,12 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
 
                     double? durationSeconds = d > 0 ? d / (double)timescale : (double?)null;
 
+                    if ((long)segments.Count + r + 1L > MaxSegments)
+                    {
+                        throw new FormatException(
+                            $"DASH SegmentTimeline declares too many segments (> {MaxSegments}); refusing to allocate.");
+                    }
+
                     for (int i = 0; i <= r; i++)
                     {
                         string url = ResolveUrl(baseUrl, SubstituteTemplate(media, repId, bandwidth, number));
@@ -269,7 +281,13 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
             if (segDuration > 0 && totalSeconds > 0)
             {
                 double segSeconds = segDuration / (double)timescale;
-                int count = (int)Math.Ceiling(totalSeconds / segSeconds);
+                double countD = Math.Ceiling(totalSeconds / segSeconds);
+                if (double.IsNaN(countD) || countD < 0 || countD > MaxSegments)
+                {
+                    throw new FormatException(
+                        $"DASH manifest declares too many segments (~{countD:F0}); refusing to allocate (max {MaxSegments}).");
+                }
+                int count = (int)countD;
                 long number = startNumber;
                 for (int i = 0; i < count; i++)
                 {
@@ -300,7 +318,11 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
                     result,
                     m =>
                     {
-                        int width = int.Parse(m.Groups["w"].Value, CultureInfo.InvariantCulture);
+                        // Clamp the zero-pad width: a hostile $Number%0<huge>d$ would otherwise PadLeft a
+                        // multi-GB string per segment. No real manifest pads beyond a handful of digits.
+                        int width = int.TryParse(m.Groups["w"].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out int w)
+                            ? Math.Min(w, MaxPadWidth)
+                            : MaxPadWidth;
                         return number.Value.ToString(CultureInfo.InvariantCulture).PadLeft(width, '0');
                     });
                 result = result.Replace("$Number$", number.Value.ToString(CultureInfo.InvariantCulture));

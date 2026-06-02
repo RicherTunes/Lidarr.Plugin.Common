@@ -29,6 +29,59 @@ namespace Lidarr.Plugin.Common.Tests.Services.Streaming.Manifests
             return File.ReadAllText(path);
         }
 
+        // --- DoS guards: a hostile/malformed manifest must not make us allocate unbounded segments or
+        //     pad-strings (the shared parser is fed semi-trusted CDN content; mirrors the CENC parsers' caps). ---
+
+        // SegmentTimeline <S r="N"/> is attacker-controllable: N+1 segments. A huge r must be rejected, not looped.
+        private const string TimelineDosMpd =
+            "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\"><Period><AdaptationSet>" +
+            "<BaseURL>https://cdn.example.com/x/</BaseURL>" +
+            "<Representation id=\"r1\" bandwidth=\"128000\">" +
+            "<SegmentTemplate media=\"seg_$Number$.m4s\" timescale=\"1\" startNumber=\"1\">" +
+            "<SegmentTimeline><S t=\"0\" d=\"1\" r=\"100001\"/></SegmentTimeline>" +
+            "</SegmentTemplate></Representation></AdaptationSet></Period></MPD>";
+
+        // Duration-based SegmentTemplate: count = ceil(mediaPresentationDuration / segmentDuration). A long
+        // duration with tiny segments yields a huge in-range count -> must be rejected before allocating.
+        private const string DurationDosMpd =
+            "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" mediaPresentationDuration=\"PT200000S\"><Period><AdaptationSet>" +
+            "<BaseURL>https://cdn.example.com/x/</BaseURL>" +
+            "<Representation id=\"r1\" bandwidth=\"128000\">" +
+            "<SegmentTemplate media=\"seg_$Number$.m4s\" duration=\"1\" timescale=\"1\" startNumber=\"1\"/>" +
+            "</Representation></AdaptationSet></Period></MPD>";
+
+        // $Number%0<width>d$ with a pathological width would PadLeft a multi-GB string per segment.
+        private const string WideWidthMpd =
+            "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\"><Period><AdaptationSet>" +
+            "<BaseURL>https://cdn.example.com/x/</BaseURL>" +
+            "<Representation id=\"r1\" bandwidth=\"128000\">" +
+            "<SegmentTemplate media=\"seg_$Number%0100d$.m4s\" timescale=\"1\" startNumber=\"1\">" +
+            "<SegmentTimeline><S t=\"0\" d=\"1\" r=\"0\"/></SegmentTimeline>" +
+            "</SegmentTemplate></Representation></AdaptationSet></Period></MPD>";
+
+        [Fact]
+        public void Parse_SegmentTimeline_HugeRepeatCount_IsRejected()
+        {
+            Assert.Throws<FormatException>(() => _parser.Parse(TimelineDosMpd, "https://cdn.example.com/x/m.mpd"));
+        }
+
+        [Fact]
+        public void Parse_DurationTemplate_HugeSegmentCount_IsRejected()
+        {
+            Assert.Throws<FormatException>(() => _parser.Parse(DurationDosMpd, "https://cdn.example.com/x/m.mpd"));
+        }
+
+        [Fact]
+        public void Parse_PathologicalPadWidth_IsClamped_NotAllocatedHuge()
+        {
+            StreamManifest manifest = _parser.Parse(WideWidthMpd, "https://cdn.example.com/x/m.mpd");
+            StreamSegment seg = manifest.Segments.Single();
+            // startNumber=1 zero-padded; the width-100 token must be clamped to <=32, so the number is 32 chars
+            // (31 zeros + "1"), NOT 100. (Width 32 is the cap; no real manifest pads beyond a handful of digits.)
+            Assert.Contains("seg_" + new string('0', 31) + "1.m4s", seg.Url);
+            Assert.DoesNotContain(new string('0', 40), seg.Url);
+        }
+
         [Theory]
         [InlineData("application/dash+xml")]
         [InlineData("<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\">")]
