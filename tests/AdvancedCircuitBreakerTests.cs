@@ -83,6 +83,30 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         /// <summary>
+        /// Regression (harden campaign): caller-initiated cancellation flowed through
+        /// HandleException/IsFailure and was recorded as a service failure, so a cancelled request
+        /// could trip the breaker. It must not count toward failures.
+        /// </summary>
+        [Fact]
+        public async Task ExecuteAsync_CallerCancellation_IsNotCountedAsFailure()
+        {
+            var options = new AdvancedCircuitBreakerOptions { ConsecutiveFailureThreshold = 2 };
+            var cb = new AdvancedCircuitBreaker("test-cancel", options);
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            for (int i = 0; i < 5; i++)
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                    cb.ExecuteAsync<int>(ct => { ct.ThrowIfCancellationRequested(); return Task.FromResult(1); }, cts.Token, "op"));
+            }
+
+            // Pre-fix: each cancellation was recorded and the breaker opened after 2.
+            Assert.Equal(CircuitState.Closed, cb.State);
+            Assert.Equal(0, cb.ConsecutiveFailures);
+        }
+
+        /// <summary>
         /// Test 2: Success resets consecutive failure count.
         /// After recording failures, a success should reset the counter.       
         /// </summary>
