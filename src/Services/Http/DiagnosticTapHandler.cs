@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -68,7 +69,7 @@ namespace Lidarr.Plugin.Common.Services.Http
                             var bytes = await response.Content.ReadAsByteArrayAsync(cancellationToken).ConfigureAwait(false);
                             var toLog = bytes.Length > MaxLoggedBodyBytes ? bytes.AsSpan(0, MaxLoggedBodyBytes).ToArray() : bytes;
                             var encoding = TryGetEncoding(response.Content.Headers?.ContentType?.CharSet) ?? Encoding.UTF8;
-                            var snippet = SafeGetString(encoding, toLog);
+                            var snippet = RedactBodyForLog(SafeGetString(encoding, toLog));
                             _logger.LogDebug("http[{Id}] body: {Snippet}{Trunc}", id, snippet, bytes.Length > MaxLoggedBodyBytes ? " [truncated]" : string.Empty);
 
                             // Rebuild content so downstream can still read it.
@@ -175,15 +176,49 @@ namespace Lidarr.Plugin.Common.Services.Http
         private static bool IsSensitiveHeader(string name)
             => name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
             || name.Equals("Cookie", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase) // response credential leak
             || name.EndsWith("-Authorization", StringComparison.OrdinalIgnoreCase)
-            || name.EndsWith("-Signature", StringComparison.OrdinalIgnoreCase);
+            || name.EndsWith("-Signature", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith("-Token", StringComparison.OrdinalIgnoreCase)    // e.g. Music-User-Token
+            || name.Contains("ApiKey", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Api-Key", StringComparison.OrdinalIgnoreCase);
 
         private static bool IsSensitiveKey(string key)
             => key.Contains("token", StringComparison.OrdinalIgnoreCase)
             || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
             || key.Contains("password", StringComparison.OrdinalIgnoreCase)
             || key.Contains("code", StringComparison.OrdinalIgnoreCase)
-            || key.Contains("key", StringComparison.OrdinalIgnoreCase);
+            || key.Contains("key", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("sig", StringComparison.OrdinalIgnoreCase)      // sig / signature / request_sig
+            || key.Contains("auth", StringComparison.OrdinalIgnoreCase)     // auth / user_auth_token
+            || key.Contains("session", StringComparison.OrdinalIgnoreCase); // session / sessionId
+
+        // Matches a JSON string key/value pair: "key":"value" (tolerating escaped chars and
+        // whitespace around the colon). Used to redact secret-bearing values from logged bodies.
+        private static readonly Regex JsonStringPairPattern = new Regex(
+            "\"(?<key>(?:\\\\.|[^\"\\\\])*)\"\\s*:\\s*\"(?<val>(?:\\\\.|[^\"\\\\])*)\"",
+            RegexOptions.Compiled);
+
+        /// <summary>
+        /// Redacts the values of secret-bearing JSON string fields (access_token, refresh_token,
+        /// client_secret, api_key, code, password, …) from a textual body snippet before it is
+        /// logged. Reuses <see cref="IsSensitiveKey"/> so the body, header, and query-parameter
+        /// redaction policies stay in lockstep. Best-effort: only JSON string values are masked
+        /// (the only place credentials realistically appear in a logged body); everything else is
+        /// passed through unchanged.
+        /// </summary>
+        internal static string? RedactBodyForLog(string? body)
+        {
+            if (string.IsNullOrEmpty(body)) return body;
+
+            return JsonStringPairPattern.Replace(body, m =>
+            {
+                var key = m.Groups["key"].Value;
+                return IsSensitiveKey(key)
+                    ? $"\"{key}\":\"REDACTED\""
+                    : m.Value;
+            });
+        }
 
         private static bool IsTextual(HttpContentHeaders? headers)
         {

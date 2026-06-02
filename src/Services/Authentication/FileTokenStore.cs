@@ -83,8 +83,11 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                         var bytes = Convert.FromBase64String(maybeProtected.Payload);
                         var json = _protector.Unprotect(bytes);
                         var restored = JsonSerializer.Deserialize<PersistedEnvelope>(json, _serializerOptions);
-                        if (restored == null) return null;
-                        return new TokenEnvelope<TSession>(restored.Session!, restored.ExpiresAt, restored.Metadata);
+                        // Treat a malformed envelope with a null Session as "no token" rather than
+                        // letting the TokenEnvelope ctor throw ArgumentNullException — that escaped the
+                        // catch filter below and propagated out of LoadAsync.
+                        if (restored?.Session is null) return null;
+                        return new TokenEnvelope<TSession>(restored.Session, restored.ExpiresAt, restored.Metadata);
                     }
                     catch (Exception ex) when (ex is FormatException or JsonException or IOException)
                     {
@@ -101,8 +104,9 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     return null;
                 }
 
+                if (legacy.Session is null) return null;
                 TryMigrateToProtectedFormat(legacy);
-                return new TokenEnvelope<TSession>(legacy.Session!, legacy.ExpiresAt, legacy.Metadata);
+                return new TokenEnvelope<TSession>(legacy.Session, legacy.ExpiresAt, legacy.Metadata);
             }
             catch (Exception ex) when (ex is IOException or JsonException)
             {
@@ -123,6 +127,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 throw new ArgumentNullException(nameof(envelope));
             }
 
+            string? tempPath = null;
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -130,7 +135,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 var protectedEnv = CreateProtectedEnvelope(persisted);
 
                 // Use a unique temp file name per save to avoid sharing violations
-                var tempPath = _filePath + "." + Guid.NewGuid().ToString("n") + ".tmp";
+                tempPath = _filePath + "." + Guid.NewGuid().ToString("n") + ".tmp";
 
                 await using (var stream = new FileStream(tempPath, new FileStreamOptions
                 {
@@ -202,6 +207,13 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             }
             finally
             {
+                // Remove the temp file if a failure/cancellation left it behind. A successful
+                // move/replace consumes it, so this only deletes on the error path — preventing
+                // unbounded accumulation of orphaned *.tmp files next to the token store.
+                if (tempPath != null)
+                {
+                    try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { /* best-effort */ }
+                }
                 _gate.Release();
             }
         }

@@ -188,6 +188,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             using var manager = CreateManager();
 
             // Act
+            var totalProcessed = 0;
             await foreach (var result in manager.ProcessWithMemoryManagementAsync<int, int>(
                 items,
                 async (batch, ct) =>
@@ -208,15 +209,15 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
                     MaxBatchSize = 100
                 }))
             {
-                // Assert - Should handle OOM and retry with smaller batch
-                if (oomThrown && callCount > 1)
-                {
-                    Assert.True(result.ItemsInBatch <= 50); // Smaller batch after OOM
-                }
+                totalProcessed += result.Results.Count;
             }
 
-            // Assert - Should have recovered from OOM
+            // Assert - OOM was exercised and recovered.
+            Assert.True(oomThrown);
             Assert.True(callCount >= 1);
+            // Regression (#24): the OOM retry previously processed only batch.Take(count/2) and
+            // silently dropped the remainder. After recovery ALL items must be processed.
+            Assert.Equal(items.Count, totalProcessed);
         }
 
         [Fact]
@@ -854,6 +855,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             // Arrange
             var items = Enumerable.Range(1, 50).ToList();
             using var manager = CreateManager();
+            var resultCount = 0;
 
             // Act
             await foreach (var result in manager.ProcessWithMemoryManagementAsync<int, int>(
@@ -864,9 +866,23 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
                     return batch.ToList();
                 }))
             {
-                // Assert - Duration should be tracked
-                Assert.True(result.BatchDuration >= TimeSpan.FromMilliseconds(50));
+                resultCount++;
+
+                // Assert - Each batch records a non-negative duration. We deliberately
+                // do NOT assert elapsed >= the work's Task.Delay(50): BatchDuration is
+                // wall-clock (DateTime.UtcNow deltas), and Task.Delay can complete a hair
+                // early on fast/loaded CI, making a positive threshold flaky. Instead we
+                // verify the tracking mechanism populated a sane value: it is non-negative
+                // and bounded by the manager's total processing time (which spans every
+                // batch), so a default/untracked TimeSpan or a corrupt value is still caught.
+                Assert.True(result.BatchDuration >= TimeSpan.Zero,
+                    $"BatchDuration should be non-negative but was {result.BatchDuration}");
+                Assert.True(result.BatchDuration <= manager.GetMemoryStatistics().ProcessingDuration,
+                    $"Per-batch duration {result.BatchDuration} should not exceed total processing duration");
             }
+
+            // Assert - the loop actually ran (otherwise the per-batch asserts are vacuous).
+            Assert.True(resultCount > 0);
         }
 
         #endregion

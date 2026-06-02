@@ -23,7 +23,11 @@ function Get-PluginOutput {
 
     # Use `dotnet build` instead of `dotnet publish` so projects using PluginPackaging.targets
     # (ILRepack) produce the same merged output that is used in real plugin deployment.
-    $buildArgs = @($projectPath, '-c', $Configuration, '-f', $Framework, '-o', $publishDirectory,
+    # `-m:1` serializes MSBuild project builds. ILRepack-merged plugin projects reference the same
+    # Abstractions/Common projects; parallel builds can run GenerateDepsFile for one project twice at
+    # once and collide on `*.deps.json` ("being used by another process"), an intermittent packaging
+    # failure. Serializing removes the race at negligible cost for these small project graphs.
+    $buildArgs = @($projectPath, '-c', $Configuration, '-f', $Framework, '-o', $publishDirectory, '-m:1',
         '/p:CopyLocalLockFileAssemblies=true', '/p:ContinuousIntegrationBuild=true')
     if ($ExtraBuildArgs) { $buildArgs += $ExtraBuildArgs }
     # Capture build output so failures are diagnosable. Previously piped to Out-Null,

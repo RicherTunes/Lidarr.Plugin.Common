@@ -32,6 +32,15 @@ $script:CommonRepoPattern = 'RicherTunes/Lidarr\.Plugin\.Common/'
 $script:ShaRegex = '^[0-9a-fA-F]{40}$'
 $script:AllowedTagPattern = '^workflows/v\d+$'
 
+# Bootstrap workflows that intentionally track @main HEAD because they manage
+# pin/version state and need to be self-updating. Listed by workflow filename
+# (the basename of the path after `.github/workflows/`).
+$script:BootstrapWorkflows = @(
+    'verify-common-pins.yml',
+    'bump-common-plugin.yml',
+    'release-plugin.yml'
+)
+
 # ─── Allowlist ───────────────────────────────────────────────────────────────
 
 function Read-Allowlist {
@@ -123,6 +132,11 @@ function Find-Violations {
 
                 # Only lint Common repo references
                 if ($fullRef -notmatch $script:CommonRepoPattern) { continue }
+
+                # Bootstrap workflows (verify-common-pins, bump-common-plugin, release-plugin)
+                # may use @main because they manage pin/version state and must track HEAD.
+                $workflowBasename = ($fullRef -split '/')[-1]
+                if ($script:BootstrapWorkflows -contains $workflowBasename -and $ref -eq 'main') { continue }
 
                 # Check if ref is a full 40-char SHA or an approved tag pattern
                 if ($ref -notmatch $script:ShaRegex -and $ref -notmatch $script:AllowedTagPattern) {

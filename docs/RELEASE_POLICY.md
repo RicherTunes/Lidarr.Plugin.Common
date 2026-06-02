@@ -1,3 +1,5 @@
+> ⚠️ Historical (flagged 2026-05-31): describes a past state; some details below no longer match the current code. The "Current Baseline" section references v1.7.1 (2026-03-27), but the current working version is 1.18.0-dev and the latest tag is v1.9.5.
+
 # Release & Promotion Policy
 
 ## Consumption Model

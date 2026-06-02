@@ -88,6 +88,34 @@ The bridge:
 
 > Prefer flat settings objects. Nested objects are currently unsupported and require custom logic.
 
+## BaseStreamingSettings properties
+
+`BaseStreamingSettings` (namespace `Lidarr.Plugin.Common.Base`) is the recommended base class for streaming-service plugin settings. It provides common configuration with sensible defaults.
+
+| Property | Type | Default | Description |
+|----------|------|---------|-------------|
+| `BaseUrl` | `string` | — | Base URL for the streaming service API |
+| `Email` | `string` | — | User email for authentication |
+| `Password` | `string` | — | User password for authentication (mark as sensitive) |
+| `AuthToken` | `string` | — | Authentication token for token-based auth services |
+| `UserId` | `string` | — | User ID for services that require it |
+| `CountryCode` | `string` | `"US"` | ISO 3166-1 alpha-2 country code for content availability |
+| `Locale` | `string` | `"en-US"` | BCP 47 locale tag |
+| `SearchLimit` | `int` | `100` | Max search results per query (1–1000) |
+| `IncludeSingles` | `bool` | `false` | Include singles and EPs in results |
+| `IncludeCompilations` | `bool` | `false` | Include compilation albums in results |
+| `ApiRateLimit` | `int` | `60` | Max API requests per minute (1–1000) |
+| `SearchCacheDuration` | `int` | `5` | Cache TTL in minutes (0–1440) |
+| `ConnectionTimeout` | `int` | `30` | Connection timeout in seconds (5–300) |
+| `OrganizeByArtist` | `bool` | `true` | Organize downloads by artist/album folder structure |
+| `EarlyReleaseDayLimit` | `int` | `0` | Include albums up to N days before official release (0–90) |
+
+Computed accessors: `CacheDuration` (`TimeSpan`), `RequestTimeout` (`TimeSpan`), `RateLimitWindow` (`TimeSpan` = 1 min).
+
+Override `IsValid(out string errorMessage)` in derived classes to add service-specific validation.
+
+Source: [`src/Base/BaseStreamingSettings.cs`](../../src/Base/BaseStreamingSettings.cs).
+
 ## Recommended keys
 
 | Key | Type | Required | Notes |
