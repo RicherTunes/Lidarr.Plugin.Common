@@ -37,7 +37,7 @@ Automate and streamline releases for the Lidarr.Plugin.Common shared library, en
 - Manage package references in consuming projects
 
 ### 5. Release Validation
-- Run full test suite across all TFMs (net6.0, net8.0)
+- Run full test suite across all TFMs (net8.0)
 - Validate public API against previous release
 - Check documentation is current
 - Verify package metadata
@@ -48,7 +48,7 @@ Automate and streamline releases for the Lidarr.Plugin.Common shared library, en
 ### Lidarr.Plugin.Common Infrastructure
 - **Current Status**: Enterprise-grade (release.yml exists)
 - **Package Type**: NuGet library (.nupkg)
-- **Target Frameworks**: net6.0, net8.0 (multi-targeting)
+- **Target Framework**: net8.0
 - **Packages**:
   - Lidarr.Plugin.Abstractions (host-owned ABI)
   - Lidarr.Plugin.Common (main library)
@@ -139,7 +139,7 @@ See [MIGRATION.md](docs/migration/v1.1-to-v1.2.md) for detailed upgrade instruct
 ```bash
 # Generate public API files
 dotnet tool restore
-dotnet public-api-generator src/Lidarr.Plugin.Common.csproj -o .config/PublicAPI/net6.0/PublicAPI.Shipped.txt
+dotnet public-api-generator src/Lidarr.Plugin.Common.csproj -o .config/PublicAPI/net8.0/PublicAPI.Shipped.txt
 ```
 
 ### Package Build
@@ -166,8 +166,8 @@ dotnet apicompat --package Lidarr.Plugin.Common --package-version 1.1.5 --assemb
 
 ### GitHub Actions Release Flow
 1. **Trigger**: Tag push `v*.*.*` or manual dispatch
-2. **Build**: Restore and build for net6.0 + net8.0
-3. **Validate**: Public API drift checks for both TFMs
+2. **Build**: Restore and build for net8.0
+3. **Validate**: Public API drift checks for net8.0
 4. **Test**: Run test suite (with timing flake filters on tags)
 5. **Pack**: Create NuGet packages with ContinuousIntegrationBuild=true
 6. **API Check**: Validate compatibility with previous release
@@ -213,8 +213,8 @@ dotnet apicompat --package Lidarr.Plugin.Common --package-version 1.1.5 --assemb
 2. Run with same TFM as CI (net8.0)
 3. Consider adding test filters for known flakes
 
-### Multi-TFM Build Issues
-**Problem**: Build succeeds for net6.0 but fails for net8.0
+### Build Issues (net8.0)
+**Problem**: Build fails for net8.0 (net6.0 is retired; net8.0 is the only TFM)
 **Solution**:
 1. Check conditional dependencies in csproj
 2. Verify framework-specific code paths

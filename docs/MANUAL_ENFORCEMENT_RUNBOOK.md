@@ -24,11 +24,11 @@
    ```
    Expected: all pass (Tidalarr 10, Qobuzarr 11, AppleMusicarr 10)
 
-4. **No net6.0 regressions**
+4. **No net6.0 references (net6 retired)**
    ```bash
    grep -r "net6\.0" --include="*.csproj" --include="*.props" --include="*.ps1" --include="*.sh" --include="*.yml" . | grep -v ext/ | grep -v obj/ | grep -v .git/
    ```
-   Expected: 0 matches (Common is allowed 2 in tooling)
+   Expected: 0 matches
 
 5. **Single IPlugin** (plugin repos only)
    ```bash
