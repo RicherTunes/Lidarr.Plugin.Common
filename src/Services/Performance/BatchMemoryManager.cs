@@ -211,20 +211,29 @@ namespace Lidarr.Plugin.Common.Services.Performance
                         // Retry with smaller batch if possible
                         if (batch.Count > DEFAULT_MIN_BATCH_SIZE)
                         {
-                            var smallerBatch = batch.Take(Math.Max(1, batch.Count / 2)).ToList();
+                            // Process the batch in two smaller halves to relieve memory pressure —
+                            // BOTH halves, not just the first. The previous code processed only
+                            // batch.Take(count/2) and silently dropped the remaining items.
+                            var half = Math.Max(1, batch.Count / 2);
+                            var firstHalf = batch.Take(half).ToList();
+                            var secondHalf = batch.Skip(half).ToList();
 
                             try
                             {
-                                var retryResults = await processor(smallerBatch, cancellationToken);
-                                var retryResultsList = retryResults?.ToList() ?? new List<TResult>();
+                                var retryResultsList = (await processor(firstHalf, cancellationToken))?.ToList() ?? new List<TResult>();
+                                if (secondHalf.Count > 0)
+                                {
+                                    var secondResults = await processor(secondHalf, cancellationToken);
+                                    if (secondResults != null) retryResultsList.AddRange(secondResults);
+                                }
 
-                                processedItems += smallerBatch.Count;
+                                processedItems += batch.Count;
 
                                 streamingResult = new StreamingBatchResult<TResult>
                                 {
                                     Results = retryResultsList,
                                     BatchNumber = batchNumber,
-                                    ItemsInBatch = smallerBatch.Count,
+                                    ItemsInBatch = batch.Count,
                                     ProcessedItems = processedItems,
                                     TotalItems = totalItems,
                                     IsCompleted = false,

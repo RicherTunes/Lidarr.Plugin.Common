@@ -167,6 +167,12 @@ namespace Lidarr.Plugin.Common.Services.Resilience
                 RecordSuccess();
                 return result;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Caller-initiated cancellation is not a service failure — re-throw without
+                // recording it, so a cancelled request can't trip the breaker.
+                throw;
+            }
             catch (Exception ex)
             {
                 HandleException(ex);
@@ -206,6 +212,12 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             {
                 await operation(cancellationToken).ConfigureAwait(false);
                 RecordSuccess();
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // Caller-initiated cancellation is not a service failure — re-throw without
+                // recording it, so a cancelled request can't trip the breaker.
+                throw;
             }
             catch (Exception ex)
             {

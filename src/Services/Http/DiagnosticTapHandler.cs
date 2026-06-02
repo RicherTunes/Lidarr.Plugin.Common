@@ -176,15 +176,22 @@ namespace Lidarr.Plugin.Common.Services.Http
         private static bool IsSensitiveHeader(string name)
             => name.Equals("Authorization", StringComparison.OrdinalIgnoreCase)
             || name.Equals("Cookie", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("Set-Cookie", StringComparison.OrdinalIgnoreCase) // response credential leak
             || name.EndsWith("-Authorization", StringComparison.OrdinalIgnoreCase)
-            || name.EndsWith("-Signature", StringComparison.OrdinalIgnoreCase);
+            || name.EndsWith("-Signature", StringComparison.OrdinalIgnoreCase)
+            || name.EndsWith("-Token", StringComparison.OrdinalIgnoreCase)    // e.g. Music-User-Token
+            || name.Contains("ApiKey", StringComparison.OrdinalIgnoreCase)
+            || name.Contains("Api-Key", StringComparison.OrdinalIgnoreCase);
 
         private static bool IsSensitiveKey(string key)
             => key.Contains("token", StringComparison.OrdinalIgnoreCase)
             || key.Contains("secret", StringComparison.OrdinalIgnoreCase)
             || key.Contains("password", StringComparison.OrdinalIgnoreCase)
             || key.Contains("code", StringComparison.OrdinalIgnoreCase)
-            || key.Contains("key", StringComparison.OrdinalIgnoreCase);
+            || key.Contains("key", StringComparison.OrdinalIgnoreCase)
+            || key.Contains("sig", StringComparison.OrdinalIgnoreCase)      // sig / signature / request_sig
+            || key.Contains("auth", StringComparison.OrdinalIgnoreCase)     // auth / user_auth_token
+            || key.Contains("session", StringComparison.OrdinalIgnoreCase); // session / sessionId
 
         // Matches a JSON string key/value pair: "key":"value" (tolerating escaped chars and
         // whitespace around the colon). Used to redact secret-bearing values from logged bodies.

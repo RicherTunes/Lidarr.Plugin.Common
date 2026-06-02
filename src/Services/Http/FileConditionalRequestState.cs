@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Concurrent;
 using System.IO;
 using System.Text.Json;
 using System.Threading;
@@ -16,7 +15,26 @@ namespace Lidarr.Plugin.Common.Services.Http
     {
         private readonly string _folder;
         private readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web) { WriteIndented = false };
-        private readonly ConcurrentDictionary<string, SemaphoreSlim> _locks = new();
+        // Bounded lock striping: a fixed set of gates hashed by cache key, rather than one
+        // SemaphoreSlim per distinct key. The previous ConcurrentDictionary<string,SemaphoreSlim>
+        // added (and never removed) a lock for every distinct cache key, growing without bound
+        // across a long-running process. A fixed stripe set caps memory while still serializing
+        // access per file (rare cross-key collisions merely share a stripe).
+        private readonly SemaphoreSlim[] _locks = CreateStripes(64);
+
+        private static SemaphoreSlim[] CreateStripes(int count)
+        {
+            var stripes = new SemaphoreSlim[count];
+            for (var i = 0; i < count; i++)
+            {
+                stripes[i] = new SemaphoreSlim(1, 1);
+            }
+
+            return stripes;
+        }
+
+        private SemaphoreSlim GateFor(string path)
+            => _locks[(int)((uint)StringComparer.Ordinal.GetHashCode(path) % (uint)_locks.Length)];
 
         public FileConditionalRequestState(string? folder = null)
         {
@@ -32,7 +50,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         {
             var path = PathFor(cacheKey);
             if (!File.Exists(path)) return null;
-            var gate = _locks.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
+            var gate = GateFor(path);
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
@@ -49,7 +67,7 @@ namespace Lidarr.Plugin.Common.Services.Http
             var path = PathFor(cacheKey);
             var model = new Model { ETag = eTag, LastModified = lastModified, StoredAt = DateTimeOffset.UtcNow };
             var tmp = path + ".tmp";
-            var gate = _locks.GetOrAdd(path, _ => new SemaphoreSlim(1, 1));
+            var gate = GateFor(path);
             await gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {

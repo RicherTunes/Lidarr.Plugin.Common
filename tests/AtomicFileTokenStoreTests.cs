@@ -51,6 +51,30 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task LoadAsync_NullSessionInFile_ReturnsNull_DoesNotThrow()
+        {
+            // Regression (harden campaign): a malformed token file whose Session field is null made
+            // the TokenEnvelope ctor throw ArgumentNullException, which ESCAPED the
+            // IOException/JsonException catch filter and propagated out of LoadAsync. A malformed
+            // envelope must be treated as "no token" (return null).
+            var dir = Directory.CreateDirectory(Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("n")));
+            try
+            {
+                var file = Path.Combine(dir.FullName, "tokens.json");
+                await File.WriteAllTextAsync(file, "{\"Session\":null,\"ExpiresAt\":\"2099-01-01T00:00:00+00:00\"}");
+                var store = CreateFileStore(file);
+
+                var loaded = await store.LoadAsync();
+
+                Assert.Null(loaded); // pre-fix: threw ArgumentNullException
+            }
+            finally
+            {
+                try { Directory.Delete(dir.FullName, true); } catch { }
+            }
+        }
+
+        [Fact]
         public async Task RapidSequentialSaves_ReleaseLockEachTime_NoStallOrThrow()
         {
             // Regression: the Windows cross-process lock was a thread-affine Mutex whose
