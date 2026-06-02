@@ -78,7 +78,7 @@ public sealed class ManagerBackedTokenProvider : IStreamingTokenProvider
     public void ClearAuthenticationCache() => _mgr.ClearSession();
 }
 
-var http = HttpClientFactory.Create(
+var http = new HttpClient(
     new OAuthDelegatingHandler(new ManagerBackedTokenProvider(mgr, credentials), logger));
 ```
 
@@ -98,8 +98,8 @@ By default, the manager only refreshes tokens on-demand (when `GetValidSessionAs
 var options = new StreamingTokenManagerOptions<MySession>
 {
     DefaultSessionLifetime = TimeSpan.FromHours(1),
-    RefreshBuffer = TimeSpan.FromMinutes(5),  // Refresh 5 min before expiry   
-    RefreshCheckInterval = TimeSpan.FromMinutes(1),  // Check every minute     
+    RefreshBuffer = TimeSpan.FromMinutes(5),  // Refresh 5 min before expiry
+    RefreshCheckInterval = TimeSpan.FromMinutes(1),  // Check every minute
     GetSessionExpiry = s => s.ExpiresAt,
 
     // Enable proactive refresh by providing a credentials factory

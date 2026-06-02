@@ -97,7 +97,9 @@ jobs:
 
       - name: Build
         shell: bash
-        run: dotnet build -c Release -v minimal
+        # -m:1 serializes MSBuild project builds to avoid the GenerateDepsFile race
+        # (parallel nodes writing the same Abstractions/Common deps.json -> MSB4018). Matches PR #582.
+        run: dotnet build -c Release -v minimal -m:1
 
       - name: Run Quarantined Tests
         id: run_quarantined

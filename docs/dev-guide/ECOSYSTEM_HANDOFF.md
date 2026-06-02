@@ -132,5 +132,5 @@ The Lidarr host has an AssemblyLoadContext lifecycle bug that affects multi-plug
 
 ## Contact
 
-- Repository: https://github.com/RicherTunes/Lidarr.Plugin.Common
-- Issues: https://github.com/RicherTunes/Lidarr.Plugin.Common/issues
+- Repository: [Lidarr.Plugin.Common](https://github.com/RicherTunes/Lidarr.Plugin.Common)
+- Issues: [Lidarr.Plugin.Common Issues](https://github.com/RicherTunes/Lidarr.Plugin.Common/issues)

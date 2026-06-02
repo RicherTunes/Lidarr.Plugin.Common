@@ -25,7 +25,7 @@ Example:
   "name": "My Plugin",
   "version": "2.3.0",
   "apiVersion": "1.x",
-  "commonVersion": "1.1.4",
+  "commonVersion": "1.17.0",
   "minHostVersion": "2.12.0",
   "entryAssembly": "MyPlugin.dll"
 }
