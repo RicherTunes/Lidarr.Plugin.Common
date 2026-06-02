@@ -30,3 +30,14 @@
 - GitHub Actions expect both .NET 6.0 and 8.0 SDKs; mirror that locally when debugging.
 - Packaging is handled via `PluginPackaging.targets`; use `dotnet pack -c Release` to produce plugins and verify `dist/` outputs.
 - Secrets and tokens must flow through the provided masking helpers (`IsSensitiveParameter`) before logging.
+
+## Reusable Workflow Pin Policy
+Same-org reusable workflow references (`RicherTunes/Lidarr.Plugin.Common/.github/workflows/*.yml`) use a tiered pinning model — enforced by `scripts/lint-workflow-sha-pins.ps1`:
+
+| Tier | Pattern | Used by | Reason |
+|------|---------|---------|--------|
+| Versioned | `@workflows/v1` | General reusable workflows (packaging-gates, multi-plugin-smoke-test, single-plugin-e2e) | Stable API. Move tag with `git tag -f workflows/v1 origin/main && git push --force` after Common changes. Bump `v1` → `v2` only on breaking workflow input/output changes. |
+| Bootstrap | `@main` | `verify-common-pins`, `bump-common-plugin`, `release-plugin` | These manage pin/version state — must self-update by tracking HEAD. |
+| Third-party | `@<40-char SHA>` | Non-org actions (`actions/checkout`, etc.) | Security: prevents tag-mutation supply chain attacks. |
+
+The lint script rejects any other pattern. To add a new bootstrap workflow, update `$script:BootstrapWorkflows` in `scripts/lint-workflow-sha-pins.ps1`.
