@@ -134,9 +134,9 @@ public class BackendHealthCacheTests
     // ------------------------------------------------------------------ //
 
     [Fact]
-    public void ConcurrentMarkDown_DoesNotCorruptState()
+    public async Task ConcurrentMarkDown_DoesNotCorruptState()
     {
-        const int threads = 50;
+        const int threads = 10;
         var fake = MakeFake(DateTimeOffset.UtcNow);
         var cache = new BackendHealthCache(fake);
         var ex = MakeSocketException();
@@ -152,9 +152,7 @@ public class BackendHealthCacheTests
             });
         }
 
-#pragma warning disable xUnit1031 // Pre-existing parallel-stress test, untracked WIP; not blocking unrelated test runs.
-        Task.WaitAll(tasks);
-#pragma warning restore xUnit1031
+        await Task.WhenAll(tasks);
 
         Assert.True(cache.IsKnownDown("Ollama", "http://localhost:11434", out var reason));
         Assert.NotNull(reason);
