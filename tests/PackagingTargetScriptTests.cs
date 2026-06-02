@@ -22,6 +22,7 @@ namespace Lidarr.Plugin.Common.Tests
     /// <c>pwsh -File</c> (paths passed as parameters) fixes that. These tests run on Linux CI
     /// and Windows alike, exercising the scripts directly.
     /// </summary>
+    [Collection("ExternalProcess")]
     public class PackagingTargetScriptTests
     {
         private static string RepoRoot => GetRepoRoot();
@@ -225,6 +226,10 @@ namespace Lidarr.Plugin.Common.Tests
                 CreateNoWindow = true,
                 WorkingDirectory = RepoRoot
             };
+            // Avoid lingering MSBuild nodes that keep the redirected pipe open past process
+            // exit (the Windows-CI file-lock/hang class).
+            psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+            psi.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
             psi.ArgumentList.Add("msbuild");
             psi.ArgumentList.Add(targetsFile);
             psi.ArgumentList.Add($"-t:{target}");

@@ -8,6 +8,7 @@ using Xunit;
 
 namespace Lidarr.Plugin.Common.Tests
 {
+    [Collection("ExternalProcess")]
     public class ManifestCheckScriptTests
     {
         private static string RepoRoot => GetRepoRoot();
@@ -244,13 +245,18 @@ public sealed class MarkerType { }
             var psi = new ProcessStartInfo
             {
                 FileName = "dotnet",
-                Arguments = $"build \"{projectPath}\" -c Release -nologo -o \"{outputPath}\" -m:1",
+                Arguments = $"build \"{projectPath}\" -c Release -nologo -o \"{outputPath}\" -m:1 -p:UseSharedCompilation=false",
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
                 UseShellExecute = false,
                 CreateNoWindow = true,
                 WorkingDirectory = Path.GetDirectoryName(projectPath)!
             };
+            // Prevent the build from leaving persistent MSBuild/VBCSCompiler nodes alive: they
+            // inherit the redirected stdout/stderr handles, so the pipe never reaches EOF and
+            // WaitForExitAsync blocks past the timeout (the Windows-CI file-lock/hang class).
+            psi.Environment["MSBUILDDISABLENODEREUSE"] = "1";
+            psi.Environment["DOTNET_CLI_USE_MSBUILD_SERVER"] = "0";
 
             using var p = new Process { StartInfo = psi };
             var sbOut = new StringBuilder();
