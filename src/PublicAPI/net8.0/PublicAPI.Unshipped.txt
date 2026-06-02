@@ -1,4 +1,10 @@
 #nullable enable
+Lidarr.Plugin.Common.Services.Intelligence.HeuristicQueryOptimizer
+Lidarr.Plugin.Common.Services.Intelligence.HeuristicQueryOptimizer.HeuristicQueryOptimizer(Microsoft.Extensions.Logging.ILogger? logger = null) -> void
+Lidarr.Plugin.Common.Services.Intelligence.HeuristicQueryOptimizer.OptimizeQueryAsync(string! originalQuery, Lidarr.Plugin.Common.Services.Intelligence.QueryContext? context = null) -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Intelligence.OptimizedQuery!>!
+Lidarr.Plugin.Common.Services.Intelligence.HeuristicQueryOptimizer.LearnFromResultsAsync(string! query, Lidarr.Plugin.Common.Services.Intelligence.QueryResults! results, Lidarr.Plugin.Common.Services.Intelligence.QueryFeedback! userFeedback) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.Intelligence.HeuristicQueryOptimizer.GetMetricsAsync() -> System.Threading.Tasks.Task<Lidarr.Plugin.Common.Services.Intelligence.OptimizationMetrics!>!
+Lidarr.Plugin.Common.Services.Intelligence.HeuristicQueryOptimizer.ResetAsync() -> System.Threading.Tasks.Task!
 static Lidarr.Plugin.Common.HostBridge.PathTraversalGuard.ContainsTraversalAttempt(string? input) -> bool
 Lidarr.Plugin.Common.Services.Http.AdaptiveRateLimitingHandler
 Lidarr.Plugin.Common.Services.Http.AdaptiveRateLimitingHandler.AdaptiveRateLimitingHandler(Lidarr.Plugin.Common.Services.Performance.IUniversalAdaptiveRateLimiter! limiter, string! serviceName, Microsoft.Extensions.Logging.ILogger? logger = null) -> void
