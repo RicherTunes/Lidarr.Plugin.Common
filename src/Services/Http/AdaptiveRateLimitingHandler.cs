@@ -77,7 +77,7 @@ namespace Lidarr.Plugin.Common.Services.Http
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            string endpointKey = BuildEndpointKey(request);
+            string endpointKey = RateLimitHeaderUtilities.BuildHostFirstSegmentKey(request);
 
             // Pre-send: wait for the limiter to permit this request.
             try
@@ -102,7 +102,7 @@ namespace Lidarr.Plugin.Common.Services.Http
             if (response.StatusCode == HttpStatusCode.TooManyRequests
                 && response.Headers.RetryAfter is { } retryAfter)
             {
-                TimeSpan delay = ResolveRetryAfter(retryAfter);
+                TimeSpan delay = RateLimitHeaderUtilities.ResolveRetryAfter(retryAfter);
                 // Clamp: a far-future Retry-After Date (or an enormous Delta) yields a delay beyond
                 // Task.Delay's ~49.7-day limit, which throws ArgumentOutOfRangeException — and that
                 // escapes the OperationCanceledException-only catch below, turning a 429 into a hard
@@ -125,38 +125,6 @@ namespace Lidarr.Plugin.Common.Services.Http
             }
 
             return response;
-        }
-
-        /// <summary>
-        /// Derives a stable endpoint key from the request URI.
-        /// Uses <c>host:firstPathSegment</c> to balance specificity vs. cardinality:
-        /// <list type="bullet">
-        /// <item><description><c>api.tidal.com/v1/search</c> → <c>api.tidal.com:v1</c></description></item>
-        /// <item><description><c>sp-ap-eu.audio.tidal.com/.../seg.mp4</c> → <c>sp-ap-eu.audio.tidal.com:</c></description></item>
-        /// </list>
-        /// </summary>
-        private static string BuildEndpointKey(HttpRequestMessage request)
-        {
-            Uri? uri = request.RequestUri;
-            if (uri is null) return "unknown";
-            string host = uri.Host;
-            string firstSeg = uri.Segments.Length > 1 ? uri.Segments[1].TrimEnd('/') : string.Empty;
-            return $"{host}:{firstSeg}";
-        }
-
-        /// <summary>
-        /// Resolves the effective delay from a <c>Retry-After</c> header value.
-        /// Precedence: Delta → Date → Zero.
-        /// </summary>
-        private static TimeSpan ResolveRetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue retryAfter)
-        {
-            if (retryAfter.Delta is { } delta) return delta;
-            if (retryAfter.Date is { } date)
-            {
-                TimeSpan untilDate = date - DateTimeOffset.UtcNow;
-                return untilDate > TimeSpan.Zero ? untilDate : TimeSpan.Zero;
-            }
-            return TimeSpan.Zero;
         }
     }
 }
