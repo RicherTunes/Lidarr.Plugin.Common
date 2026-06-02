@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using System.Text.Json;
+using Lidarr.Plugin.Common.Services.Download;
 
 namespace Lidarr.Plugin.Common.TestKit.Compliance;
 
@@ -606,27 +607,7 @@ public abstract partial class EcosystemParityTestBase
     {
         var assembly = PluginAssembly;
         if (assembly == null) return Skipped();
-
-        const string dcIface = "Lidarr.Plugin.Abstractions.Contracts.IDownloadClient";
-        var hasDownloadClient = SafeGetTypes(assembly).Any(t =>
-        {
-            if (t == null) return false;
-            try
-            {
-                if (t.IsInterface || t.IsAbstract) return false;
-                if (t.GetInterfaces().Any(i => i.FullName == dcIface)) return true;
-                // Host-contract download clients subclass DownloadClientBase<T>.
-                var b = t.BaseType;
-                while (b != null)
-                {
-                    if ((b.Name ?? string.Empty).StartsWith("DownloadClientBase", StringComparison.Ordinal)) return true;
-                    b = b.BaseType;
-                }
-                return false;
-            }
-            catch { return false; }
-        });
-        if (!hasDownloadClient) return ComplianceResult.Success; // not applicable
+        if (!PluginDeclaresHostDownloadClient(assembly)) return ComplianceResult.Success; // not applicable
 
         string text;
         try { text = System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(assembly.Location)); }
@@ -636,6 +617,69 @@ public abstract partial class EcosystemParityTestBase
 
         return ComplianceResult.Failure(
             "Plugin ships a download client but its assembly does not reference Lidarr.Plugin.Common.HostBridge.PathTraversalGuard — user-supplied path segments must be sanitized via PathTraversalGuard (SanitizeSegment / IsPathWithinRoot) to prevent path-traversal writes outside the download root.");
+    }
+
+    #endregion
+
+    #region Check_DownloadClientUsesCommonPayloadValidator
+
+    /// <summary>
+    /// Audio-payload validation — is a downloaded blob real audio vs an HTML/JSON error page or the
+    /// wrong container? — is consolidated in Common's canonical <c>DownloadPayloadValidator</c>, a strict
+    /// superset of the legacy <c>AudioMagicBytesValidator</c> (it adds MP4/M4A ftyp recognition,
+    /// text/HTML/JSON/XML rejection, and file + span overloads). A plugin that ships a download client
+    /// must not (a) use the legacy <c>AudioMagicBytesValidator</c>, nor (b) declare its own
+    /// <c>*PayloadValidator</c> fork — the historical tidalarr <c>TidalDownloadPayloadValidator</c> +
+    /// qobuz m4a-workaround divergence this guard exists to prevent regressing. Applicable only to
+    /// download-client plugins (import-list plugins such as brainarr → N/A); source-scan based and
+    /// conservative (no source root → skip). Note: inline MP4-box integrity checks on decrypted DASH
+    /// segments (moov/mdat) are a DISTINCT concern (segment integrity, not file-level audio validation)
+    /// and are intentionally NOT flagged — this targets file-level audio-payload validation only.
+    /// </summary>
+    public virtual ComplianceResult Check_DownloadClientUsesCommonPayloadValidator()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+        if (!PluginDeclaresHostDownloadClient(assembly)) return ComplianceResult.Success; // N/A (no download client)
+        if (!Directory.Exists(PluginSourceRoot)) return Skipped();
+
+        var excluded = new[]
+        {
+            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}",
+            ".Tests" + Path.DirectorySeparatorChar,
+            $"{Path.DirectorySeparatorChar}examples{Path.DirectorySeparatorChar}",
+        };
+        // (a) legacy weak validator usage; (b) a plugin-local *PayloadValidator fork declaration.
+        var legacyUse = new System.Text.RegularExpressions.Regex(
+            @"\bAudioMagicBytesValidator\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+        var forkClass = new System.Text.RegularExpressions.Regex(
+            @"\bclass\s+[A-Za-z0-9_]*PayloadValidator\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch { continue; }
+            var rel = Path.GetRelativePath(RepoRootPath, file);
+            if (legacyUse.IsMatch(text))
+                offenders.Add($"{rel}: uses the legacy AudioMagicBytesValidator");
+            if (forkClass.IsMatch(text))
+                offenders.Add($"{rel}: declares a plugin-local *PayloadValidator fork");
+        }
+
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                "Audio-payload validation must use Lidarr.Plugin.Common.Utilities.DownloadPayloadValidator " +
+                $"(the canonical superset), not the legacy AudioMagicBytesValidator or a plugin-local fork: {string.Join("; ", offenders)}");
     }
 
     #endregion
@@ -730,7 +774,213 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_DownloadClientStampsRegisteredClientId
+
+    /// <summary>
+    /// A plugin's download client must stamp every reported <c>DownloadClientItem</c> with the
+    /// registered client id — <c>DownloadClientInfo.Id == this client's Definition.Id</c> — never a
+    /// literal <c>0</c>. Lidarr's <c>DownloadMonitoringService</c> → <c>CompletedDownloadService</c> →
+    /// <c>DownloadClientProvider.Get(DownloadClientInfo.Id)</c> resolves the owning client by that id;
+    /// a wrong/zero id makes its <c>.Single(...)</c> throw "Sequence contains no matching element", so
+    /// every completed download wedges at "Couldn't process tracked download" and never imports. (Live
+    /// qobuz regression, 2026-05-31: <c>GetItems()</c> passed <c>0</c> → every download stuck.)
+    /// <para>
+    /// Canonical shape (tidal/apple/amazon): <c>DownloadClientItemClientInfo.FromDownloadClient(this, …)</c>,
+    /// the host helper that always reads <c>this.Definition.Id/Name</c>. qobuz derives the id explicitly
+    /// from <c>Definition?.Id</c>. The guard accepts either; it fails a <c>GetItems()</c> that neither
+    /// uses <c>FromDownloadClient(this, …)</c> nor references <c>Definition.Id/Name</c>, or that passes a
+    /// literal <c>0</c> to a <c>ToDownloadClientItem(...)</c> converter.
+    /// </para>
+    /// <para>
+    /// Applicable only to plugins that ship a host-contract download client (import-list plugins such as
+    /// brainarr → N/A). Source-scan based (like <see cref="Check_NoFluentValidation_ErrorsApi_Drift"/>):
+    /// it isolates each download client's <c>GetItems()</c> body and is conservative — if no body can be
+    /// located it passes rather than false-fail.
+    /// </para>
+    /// </summary>
+    public virtual ComplianceResult Check_DownloadClientStampsRegisteredClientId()
+    {
+        var assembly = PluginAssembly;
+        if (assembly == null) return Skipped();
+        if (!PluginDeclaresHostDownloadClient(assembly)) return ComplianceResult.Success; // N/A (no download client)
+        if (!Directory.Exists(PluginSourceRoot)) return Skipped();
+
+        var excluded = new[]
+        {
+            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}",
+            ".Tests" + Path.DirectorySeparatorChar,
+            $"{Path.DirectorySeparatorChar}examples{Path.DirectorySeparatorChar}",
+        };
+
+        // Host-contract download clients subclass DownloadClientBase<TSettings> and override GetItems().
+        var clientBasePattern = new System.Text.RegularExpressions.Regex(
+            @":\s*DownloadClientBase\s*<", System.Text.RegularExpressions.RegexOptions.Compiled);
+        var derivesFromDefinition = new System.Text.RegularExpressions.Regex(
+            @"FromDownloadClient\s*\(\s*this\b|Definition\s*\??\s*\.\s*(Id|Name)",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+        var stampsLiteralZero = new System.Text.RegularExpressions.Regex(
+            @"ToDownloadClientItem\s*\(\s*0\b", System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        var offenders = new List<string>();
+        var scannedAny = false;
+        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        {
+            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch { continue; }
+            if (!clientBasePattern.IsMatch(text)) continue;
+            if (!text.Contains("GetItems", StringComparison.Ordinal)) continue;
+
+            var body = ExtractMethodBody(text, "GetItems");
+            if (body == null) continue; // couldn't isolate the body — don't false-fail
+            scannedAny = true;
+
+            var derives = derivesFromDefinition.IsMatch(body);
+            var stampsZero = stampsLiteralZero.IsMatch(body);
+            if (!derives || stampsZero)
+            {
+                offenders.Add(
+                    $"{Path.GetRelativePath(RepoRootPath, file)}: GetItems() must stamp DownloadClientInfo.Id " +
+                    "from this client's Definition (use DownloadClientItemClientInfo.FromDownloadClient(this, …) " +
+                    "or pass Definition.Id) — a literal 0 makes Lidarr's CompletedDownloadService fail to resolve " +
+                    "the owning client and wedges every completed download.");
+            }
+        }
+
+        // No locatable download-client GetItems() body to assert against — treat as N/A rather than fail.
+        if (!scannedAny) return ComplianceResult.Success;
+
+        return offenders.Count == 0
+            ? ComplianceResult.Success
+            : ComplianceResult.Failure(
+                $"Download client(s) must report DownloadClientInfo.Id == Definition.Id (download-client-id contract): {string.Join("; ", offenders)}");
+    }
+
+    /// <summary>
+    /// True if the plugin assembly declares a host-contract download client — a concrete type
+    /// implementing the abstractions <c>IDownloadClient</c> or subclassing Lidarr's
+    /// <c>DownloadClientBase&lt;T&gt;</c>. Import-list plugins (e.g. brainarr) declare neither.
+    /// </summary>
+    private bool PluginDeclaresHostDownloadClient(Assembly assembly)
+    {
+        const string dcIface = "Lidarr.Plugin.Abstractions.Contracts.IDownloadClient";
+        return SafeGetTypes(assembly).Any(t =>
+        {
+            if (t == null) return false;
+            try
+            {
+                if (t.IsInterface || t.IsAbstract) return false;
+                if (t.GetInterfaces().Any(i => i.FullName == dcIface)) return true;
+                var b = t.BaseType;
+                while (b != null)
+                {
+                    if ((b.Name ?? string.Empty).StartsWith("DownloadClientBase", StringComparison.Ordinal)) return true;
+                    b = b.BaseType;
+                }
+                return false;
+            }
+            catch { return false; }
+        });
+    }
+
+    /// <summary>
+    /// Extracts the body text (the enclosing <c>{ … }</c>, or the <c>=&gt; … ;</c> for an expression
+    /// body) of the first method named <paramref name="methodName"/> in <paramref name="source"/>.
+    /// Returns null if the method or a balanced body can't be located (callers treat null as "skip").
+    /// Brace-matching tolerates balanced interpolation braces (<c>$"{x}"</c>); a stray unbalanced brace
+    /// inside a string/comment yields null (safe — the caller skips rather than false-fails).
+    /// </summary>
+    private static string? ExtractMethodBody(string source, string methodName)
+    {
+        var searchFrom = 0;
+        while (true)
+        {
+            var nameIdx = source.IndexOf(methodName, searchFrom, StringComparison.Ordinal);
+            if (nameIdx < 0) return null;
+            var afterName = nameIdx + methodName.Length;
+            // Require a left word boundary so "GetItems" doesn't match inside "FooGetItems".
+            if (nameIdx > 0)
+            {
+                var prev = source[nameIdx - 1];
+                if (char.IsLetterOrDigit(prev) || prev == '_') { searchFrom = afterName; continue; }
+            }
+            // Next non-space char must open a parameter list.
+            var p = afterName;
+            while (p < source.Length && char.IsWhiteSpace(source[p])) p++;
+            if (p >= source.Length || source[p] != '(') { searchFrom = afterName; continue; }
+            // Match the parameter-list parens.
+            var parenDepth = 0;
+            var q = p;
+            for (; q < source.Length; q++)
+            {
+                if (source[q] == '(') parenDepth++;
+                else if (source[q] == ')') { parenDepth--; if (parenDepth == 0) { q++; break; } }
+            }
+            if (q >= source.Length) return null;
+            var r = q;
+            while (r < source.Length && char.IsWhiteSpace(source[r])) r++;
+            if (r >= source.Length) return null;
+            if (source[r] == '{')
+            {
+                var depth = 0;
+                for (var i = r; i < source.Length; i++)
+                {
+                    if (source[i] == '{') depth++;
+                    else if (source[i] == '}') { depth--; if (depth == 0) return source.Substring(r, i - r + 1); }
+                }
+                return null; // unbalanced
+            }
+            if (source[r] == '=' && r + 1 < source.Length && source[r + 1] == '>')
+            {
+                var semi = source.IndexOf(';', r);
+                return semi < 0 ? null : source.Substring(r, semi - r + 1);
+            }
+            // Declaration without an inline body (interface/abstract) or a generic constraint — keep looking.
+            searchFrom = afterName;
+        }
+    }
+
+    #endregion
+
     #region Aggregator
+
+    #region Check_EnforcesAlbumCompletionPolicy
+
+    /// <summary>
+    /// Every streaming plugin must share one album-completion rule: an incomplete album (any
+    /// track missing) is NOT a successful download, so it is reported Failed (Lidarr blocklists
+    /// + re-searches / falls back) rather than Completed (which Lidarr permanently rejects as
+    /// "Has missing tracks", silently wasting the downloaded files). The rule lives in
+    /// <see cref="AlbumCompletionPolicy"/>; this guard pins it in every plugin's pinned Common,
+    /// so a plugin that delegates to it provably inherits the fix and cannot regress to
+    /// "partial album == success". (Was a live qobuz regression: Aphex Twin – Drukqs, 29/30.)
+    /// Unlike the other behavior checks this needs no <see cref="PluginAssembly"/> — it asserts
+    /// the shared rule directly, so it runs for every plugin regardless of opt-in.
+    /// </summary>
+    public virtual ComplianceResult Check_EnforcesAlbumCompletionPolicy()
+    {
+        var errors = new List<string>();
+
+        // Incomplete must never be successful — not even above the success-rate threshold.
+        if (AlbumCompletionPolicy.IsAlbumDownloadSuccessful(totalTracks: 30, successfulTracks: 29))
+            errors.Add("AlbumCompletionPolicy treats 29/30 as successful; an incomplete album must report Failed.");
+        if (AlbumCompletionPolicy.IsAlbumDownloadSuccessful(totalTracks: 10, successfulTracks: 8))
+            errors.Add("AlbumCompletionPolicy treats 8/10 as successful; an incomplete album must report Failed.");
+        // A complete album must be successful.
+        if (!AlbumCompletionPolicy.IsAlbumDownloadSuccessful(totalTracks: 10, successfulTracks: 10))
+            errors.Add("AlbumCompletionPolicy treats a complete 10/10 album as unsuccessful.");
+
+        return errors.Count == 0 ? ComplianceResult.Success : new ComplianceResult(false, errors);
+    }
+
+    #endregion
 
     /// <summary>
     /// Runs the behavior-contract checks. Returns a separate report so callers can decide
@@ -740,6 +990,7 @@ public abstract partial class EcosystemParityTestBase
     {
         var results = new Dictionary<string, ComplianceResult>
         {
+            [nameof(Check_EnforcesAlbumCompletionPolicy)] = Check_EnforcesAlbumCompletionPolicy(),
             [nameof(Check_UsesCommonFileTokenStore)] = Check_UsesCommonFileTokenStore(),
             [nameof(Check_UsesCommonHttpResponseCache)] = Check_UsesCommonHttpResponseCache(),
             [nameof(Check_RegistersBridgeDefaults)] = Check_RegistersBridgeDefaults(),
@@ -750,6 +1001,8 @@ public abstract partial class EcosystemParityTestBase
             [nameof(Check_UsesCommonDiagnosticTypes)] = Check_UsesCommonDiagnosticTypes(),
             [nameof(Check_UsesCommonDownloadTelemetrySink)] = Check_UsesCommonDownloadTelemetrySink(),
             [nameof(Check_DownloadClientUsesPathTraversalGuard)] = Check_DownloadClientUsesPathTraversalGuard(),
+            [nameof(Check_DownloadClientStampsRegisteredClientId)] = Check_DownloadClientStampsRegisteredClientId(),
+            [nameof(Check_DownloadClientUsesCommonPayloadValidator)] = Check_DownloadClientUsesCommonPayloadValidator(),
             [nameof(Check_FileClassNameParity)] = Check_FileClassNameParity(),
             [nameof(Check_ClaudeMdDocumentsCommonHelpers)] = Check_ClaudeMdDocumentsCommonHelpers(),
         };

@@ -1,3 +1,5 @@
+> ⚠️ Partially implemented (flagged 2026-05-31): describes planned providers; only ClaudeCodeProvider is implemented currently.
+
 # LLM Provider System
 
 The Common library provides a standardized interface for integrating Large Language Model providers into Lidarr plugins.
@@ -23,30 +25,30 @@ public interface ILlmProvider
 
 ### Cloud Providers (API Key Auth)
 
-| Provider | Provider ID | Default Model | Max Context | Notes |
-|----------|-------------|---------------|-------------|-------|
-| OpenAI | `openai` | gpt-4o | 128K | |
-| Anthropic | `anthropic` | claude-3-5-sonnet-20241022 | 200K | |
-| Gemini | `gemini` | gemini-2.0-flash-exp | 1M | |
-| Z.AI GLM | `zai` | glm-4.7-flash | 128K-200K | Free tier available |
-| Perplexity | `perplexity` | sonnet-small | - | Web-aware fallback |
-| Groq | `groq` | llama-3.3-70b | - | Low-latency batches |
-| DeepSeek | `deepseek` | deepseek-chat | - | Budget-friendly option |
-| OpenRouter | `openrouter` | anthropic/claude-3-sonnet | - | Gateway to many models |
+| Provider | Provider ID | Default Model | Max Context | Status | Notes |
+|----------|-------------|---------------|-------------|--------|-------|
+| OpenAI | `openai` | gpt-4o | 128K | Planned | |
+| Anthropic | `anthropic` | claude-3-5-sonnet-20241022 | 200K | Planned | |
+| Gemini | `gemini` | gemini-2.0-flash-exp | 1M | Planned | |
+| Z.AI GLM | `zai` | glm-4.7-flash | 128K-200K | Planned | Free tier available |
+| Perplexity | `perplexity` | sonnet-small | - | Planned | Web-aware fallback |
+| Groq | `groq` | llama-3.3-70b | - | Planned | Low-latency batches |
+| DeepSeek | `deepseek` | deepseek-chat | - | Planned | Budget-friendly option |
+| OpenRouter | `openrouter` | anthropic/claude-3-sonnet | - | Planned | Gateway to many models |
 
 ### Local Providers
 
-| Provider | Provider ID | Default Model | Setup |
-|----------|-------------|---------------|-------|
-| Ollama | `ollama` | qwen2.5:latest | `ollama pull <model>` |
-| LM Studio | `lmstudio` | (user selected) | Run LM Studio API server |
+| Provider | Provider ID | Default Model | Status | Setup |
+|----------|-------------|---------------|--------|-------|
+| Ollama | `ollama` | qwen2.5:latest | Planned | `ollama pull <model>` |
+| LM Studio | `lmstudio` | (user selected) | Planned | Run LM Studio API server |
 
 ### Subscription Providers (CLI Auth)
 
-| Provider | Provider ID | Models | Credentials |
-|----------|-------------|--------|-------------|
-| Claude Code | `claude-code` | sonnet, opus, haiku | `~/.claude/.credentials.json` |
-| OpenAI Codex | `openai-codex` | gpt-4o | `~/.codex/auth.json` |
+| Provider | Provider ID | Models | Status | Credentials |
+|----------|-------------|--------|--------|-------------|
+| Claude Code | `claude-code` | sonnet, opus, haiku | Implemented | `~/.claude/.credentials.json` |
+| OpenAI Codex | `openai-codex` | gpt-4o | Planned | `~/.codex/auth.json` |
 
 ---
 
@@ -103,6 +105,23 @@ The `ClaudeCodeCapabilities` class probes the CLI's `--help` output to detect su
 
 **Safe Defaults:** When capability detection fails, conservative defaults are used that only assume basic stable flags.
 
+### LlmCapabilityFlags
+
+Every `ILlmProvider` exposes a `LlmProviderCapabilities` object whose `Flags` property is a `[Flags]` enum — `LlmCapabilityFlags`. Check these before calling optional features:
+
+| Flag | Value | Meaning |
+|------|-------|---------|
+| `TextCompletion` | 1 | Basic prompt-in, text-out |
+| `Streaming` | 2 | `StreamAsync` returns chunks |
+| `JsonMode` | 4 | Structured JSON output |
+| `SystemPrompt` | 8 | `LlmRequest.SystemPrompt` honoured |
+| `ToolCalling` | 16 | Function/tool use |
+| `Vision` | 32 | Image input |
+| `ExtendedThinking` | 64 | Reasoning/thinking mode |
+| `TokenCounting` | 128 | Token estimation |
+
+Source: [`src/Abstractions/Llm/LlmCapabilityFlags.cs`](../../src/Abstractions/Llm/LlmCapabilityFlags.cs).
+
 ## Error Handling
 
 Providers map errors to standardized exception types:
@@ -144,6 +163,6 @@ All providers use consistent structured logging via `LlmLoggerExtensions`:
 2. Use `LlmLoggerExtensions` for consistent logging
 3. Map errors to standard exception types
 4. Add capability detection if provider has version-specific features
-5. Write contract tests using `ProviderContractTestBase<T>`
+5. Write integration tests covering your provider's error-mapping and capability detection
 
 See `ClaudeCodeProvider` for a reference implementation.

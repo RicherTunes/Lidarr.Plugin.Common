@@ -41,7 +41,7 @@ Tweak the `.rsp` or exclude file if you need extra filters, but keep `Lidarr.Plu
 
 ```mermaid
 flowchart TD
-  A[Commit/PR] --> CI[Build + Test (net6/net8)]
+  A[Commit/PR] --> CI[Build + Test (net8.0)]
   CI --> Pack[Run PluginPack.psm1]
   Pack --> Publish[Tag  NuGet push]
   Publish --> Consumers[Plugins pick up new Common]

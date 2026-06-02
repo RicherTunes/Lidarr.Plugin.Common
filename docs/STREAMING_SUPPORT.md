@@ -41,7 +41,7 @@ The Common library includes SSE decoders ready for future use:
 - `GeminiStreamDecoder` - Google Gemini
 - `ZaiStreamDecoder` - Z.AI GLM
 
-These decoders are fully tested (~230 tests passing as of 2026-01-30) and will be activated when HTTP streaming becomes possible.
+These decoders are fully tested (~113 tests passing as of 2026-05-31) and will be activated when HTTP streaming becomes possible.
 
 ### Decoder Consumer Status
 

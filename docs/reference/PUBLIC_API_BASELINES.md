@@ -4,14 +4,12 @@ The repository uses `Microsoft.CodeAnalysis.PublicApiAnalyzers` to ensure any ch
 
 ## Files
 
-- `src/Abstractions/PublicAPI/net6.0/PublicAPI.Shipped.txt`
-- `src/Abstractions/PublicAPI/net6.0/PublicAPI.Unshipped.txt`
 - `src/Abstractions/PublicAPI/net8.0/PublicAPI.Shipped.txt`
 - `src/Abstractions/PublicAPI/net8.0/PublicAPI.Unshipped.txt`
-- `src/PublicAPI/net6.0/PublicAPI.Shipped.txt`
-- `src/PublicAPI/net6.0/PublicAPI.Unshipped.txt`
 - `src/PublicAPI/net8.0/PublicAPI.Shipped.txt`
 - `src/PublicAPI/net8.0/PublicAPI.Unshipped.txt`
+
+Baselines are tracked per target framework. `net8.0` is the only supported target — the `net6.0` baselines were removed when .NET 6 support was retired (2026-03-31).
 
 `Shipped` files describe the APIs released in the latest NuGet version. `Unshipped` files accumulate new APIs until the next release.
 

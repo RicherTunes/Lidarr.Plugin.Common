@@ -100,12 +100,12 @@ Edit `MyStreamingPlugin/MyStreamingPlugin.csproj`:
 
   <ItemGroup>
     <!-- Abstractions: compile-time only, host provides at runtime -->
-    <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.2.0"
+    <PackageReference Include="Lidarr.Plugin.Abstractions" Version="1.17.0"
                       PrivateAssets="all"
                       ExcludeAssets="runtime;native;contentfiles" />
 
     <!-- Common: ships with your plugin -->
-    <PackageReference Include="Lidarr.Plugin.Common" Version="1.2.2" />
+    <PackageReference Include="Lidarr.Plugin.Common" Version="1.17.0" />
   </ItemGroup>
 
   <ItemGroup>
@@ -609,7 +609,7 @@ Create `MyStreamingPlugin/plugin.json`:
   "name": "My Streaming Plugin",
   "version": "1.0.0",
   "apiVersion": "1.x",
-  "commonVersion": "1.2.2",
+  "commonVersion": "1.17.0",
   "minHostVersion": "2.12.0",
   "entryAssembly": "MyStreamingPlugin.dll",
   "author": "Your Name",

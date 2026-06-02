@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Golden fixture: single-Representation DASH audio manifest using SegmentTimeline.
+  Designed to pin the two correctness invariants:
+    1. SegmentTimeline S@r is ADDITIONAL repeats -> <S d=.. r=N/> yields N+1 segments.
+       Here: <S d="44100" r="2"/> (=> 3) and <S d="22050" r="0"/> (=> 1) => 4 media segments.
+    2. SegmentTemplate@startNumber=5 -> first media $Number$ is 5, then 6,7,8.
+  Also exercises: init segment (index 0, no $Number$ substitution), $Number%06d$ padded
+  substitution, $RepresentationID$ substitution, relative-URL resolution against <BaseURL>,
+  and Widevine ContentProtection (cenc:pssh + cenc:default_KID) surfaced as opaque data.
+  Shape mirrors Tidal's application/dash+xml audio manifests (FLAC-in-MP4).
+-->
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011"
+     xmlns:cenc="urn:mpeg:cenc:2013"
+     profiles="urn:mpeg:dash:profile:isoff-on-demand:2011"
+     type="static"
+     minBufferTime="PT2S">
+  <Period>
+    <AdaptationSet contentType="audio" mimeType="audio/mp4" segmentAlignment="true">
+      <ContentProtection schemeIdUri="urn:mpeg:dash:mp4protection:2011" value="cenc"
+                         cenc:default_KID="9eb4050d-e44b-4802-932e-27d75083e266"/>
+      <ContentProtection schemeIdUri="urn:uuid:edef8ba9-79d6-4ace-a3c8-27dcd51d21ed">
+        <cenc:pssh>AAAAW3Bzc2gAAAAA7e+LqXnWSs6jyCfc1R0h7QAAADsIARIQnrQFDeRLSAKTLifXUIPiZhoNd2lkZXZpbmVfdGVzdCIQbWFuaWZlc3RfdGVzdF9pZA==</cenc:pssh>
+      </ContentProtection>
+      <BaseURL>https://cdn.example.com/audio/track-42/</BaseURL>
+      <Representation id="flac_lossless" codecs="flac" bandwidth="1129000" audioSamplingRate="44100">
+        <SegmentTemplate initialization="init_$RepresentationID$.mp4"
+                         media="seg_$RepresentationID$_$Number%06d$.m4s"
+                         timescale="44100"
+                         startNumber="5">
+          <SegmentTimeline>
+            <S t="0" d="44100" r="2"/>
+            <S d="22050" r="0"/>
+          </SegmentTimeline>
+        </SegmentTemplate>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
