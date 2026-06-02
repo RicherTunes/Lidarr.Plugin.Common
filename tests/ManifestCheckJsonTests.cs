@@ -7,6 +7,7 @@ using Xunit;
 
 namespace Lidarr.Plugin.Common.Tests
 {
+    [Collection("ExternalProcess")]
     public class ManifestCheckJsonTests
     {
         [Fact]
@@ -62,7 +63,11 @@ namespace Lidarr.Plugin.Common.Tests
             p.Start();
             p.BeginOutputReadLine();
             p.BeginErrorReadLine();
-            await p.WaitForExitAsync();
+
+            using var cts = new System.Threading.CancellationTokenSource(TimeSpan.FromSeconds(60));
+            try { await p.WaitForExitAsync(cts.Token); }
+            catch (OperationCanceledException) { try { p.Kill(entireProcessTree: true); } catch { } return (-1, so.ToString(), "Process timed out after 60s"); }
+
             return (p.ExitCode, so.ToString(), se.ToString());
         }
 
