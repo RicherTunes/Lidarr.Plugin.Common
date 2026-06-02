@@ -188,6 +188,7 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
             using var manager = CreateManager();
 
             // Act
+            var totalProcessed = 0;
             await foreach (var result in manager.ProcessWithMemoryManagementAsync<int, int>(
                 items,
                 async (batch, ct) =>
@@ -208,15 +209,15 @@ namespace Lidarr.Plugin.Common.Tests.Services.Performance
                     MaxBatchSize = 100
                 }))
             {
-                // Assert - Should handle OOM and retry with smaller batch
-                if (oomThrown && callCount > 1)
-                {
-                    Assert.True(result.ItemsInBatch <= 50); // Smaller batch after OOM
-                }
+                totalProcessed += result.Results.Count;
             }
 
-            // Assert - Should have recovered from OOM
+            // Assert - OOM was exercised and recovered.
+            Assert.True(oomThrown);
             Assert.True(callCount >= 1);
+            // Regression (#24): the OOM retry previously processed only batch.Take(count/2) and
+            // silently dropped the remainder. After recovery ALL items must be processed.
+            Assert.Equal(items.Count, totalProcessed);
         }
 
         [Fact]

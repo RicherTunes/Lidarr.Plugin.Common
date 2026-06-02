@@ -66,9 +66,14 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         {
             await EnsurePersistedSessionAsync().ConfigureAwait(false);
 
-            if (IsSessionValid())
+            // Capture the session under the lock so a concurrent refresh/clear can't slip a null
+            // (or stale) value in between the validity check and the read (TOCTOU).
+            lock (_tokenLock)
             {
-                return _currentSession!;
+                if (IsSessionValidUnsafe())
+                {
+                    return _currentSession!;
+                }
             }
 
             if (fallbackCredentials == null)
@@ -284,9 +289,12 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 bool needsRefresh;
                 lock (_tokenLock)
                 {
+                    // Refresh once inside the pre-expiry buffer AND keep trying if that window was
+                    // missed (timer didn't fire — machine sleep / GC pause — and the session already
+                    // fully expired). The previous `< _sessionExpiryTime` upper bound made proactive
+                    // refresh permanently stop the instant the session passed its expiry.
                     needsRefresh = _currentSession != null &&
-                                   _timeProvider.GetUtcNow().UtcDateTime >= _sessionExpiryTime.Subtract(_options.RefreshBuffer) &&
-                                   _timeProvider.GetUtcNow().UtcDateTime < _sessionExpiryTime;
+                                   _timeProvider.GetUtcNow().UtcDateTime >= _sessionExpiryTime.Subtract(_options.RefreshBuffer);
                 }
 
                 if (!needsRefresh || _isRefreshing)
