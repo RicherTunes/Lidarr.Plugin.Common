@@ -179,3 +179,5 @@ Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithMinimumSizeBytes(
 Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithReleaseGroup(string! group) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
 Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithScheme(string! scheme) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
 Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithYear(int? year) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.Utilities.SettingsSnapshot
+static Lidarr.Plugin.Common.Utilities.SettingsSnapshot.Copy<T>(T source) -> T
