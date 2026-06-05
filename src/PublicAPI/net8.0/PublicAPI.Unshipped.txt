@@ -213,3 +213,6 @@ static Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult.Noop.get ->
 static Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult.Refused(string! reason) -> Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult
 Lidarr.Plugin.Common.Services.Download.SafeDirectoryCleanup
 static Lidarr.Plugin.Common.Services.Download.SafeDirectoryCleanup.DeleteTreeUnderRoot(string? path, string? root) -> Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult
+Lidarr.Plugin.Common.Services.Download.MediaRedirectSafeSender
+const Lidarr.Plugin.Common.Services.Download.MediaRedirectSafeSender.DefaultMaxRedirects = 10 -> int
+static Lidarr.Plugin.Common.Services.Download.MediaRedirectSafeSender.SendValidatedAsync(System.Net.Http.HttpClient! client, System.Net.Http.HttpRequestMessage! request, Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy! policy, System.Net.Http.HttpCompletionOption completionOption = System.Net.Http.HttpCompletionOption.ResponseHeadersRead, int maxRedirects = 10, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task<System.Net.Http.HttpResponseMessage!>!
