@@ -1,0 +1,17 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build (Release)
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release
+      - name: Test (security + download surface)
+        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "FullyQualifiedName~SafeDirectoryCleanup|FullyQualifiedName~PartialFileReset|FullyQualifiedName~ResilienceRedirectSsrf|FullyQualifiedName~TimeParsing|FullyQualifiedName~RemoteMediaUriGuard|FullyQualifiedName~MediaRedirectSafeSender"
