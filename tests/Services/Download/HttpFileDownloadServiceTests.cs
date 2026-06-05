@@ -53,7 +53,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
     {
         var svc = new HttpFileDownloadService(new HttpClient());
         await Assert.ThrowsAsync<ArgumentException>(async () =>
-            await svc.DownloadToFileAsync("https://example.com/file", path, CancellationToken.None));
+            await svc.DownloadToFileAsync("https://93.184.216.34/file", path, CancellationToken.None));
     }
 
     [Fact]
@@ -63,7 +63,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
         var svc = new HttpFileDownloadService(MakeFakeHttpClient(flacBytes, "audio/flac"));
         var dest = Path.Combine(_tempDir, "track.flac");
 
-        var written = await svc.DownloadToFileAsync("https://api.example.com/track.flac", dest, CancellationToken.None);
+        var written = await svc.DownloadToFileAsync("https://93.184.216.34/track.flac", dest, CancellationToken.None);
 
         Assert.True(written > 0);
         Assert.True(File.Exists(dest));
@@ -86,7 +86,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
         var dest = Path.Combine(_tempDir, "track.flac");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await svc.DownloadToFileAsync("https://api.example.com/track.flac", dest, CancellationToken.None));
+            await svc.DownloadToFileAsync("https://93.184.216.34/track.flac", dest, CancellationToken.None));
         Assert.Contains("Unexpected content type", ex.Message);
         Assert.Contains("text/html", ex.Message);
     }
@@ -99,7 +99,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
         var dest = Path.Combine(_tempDir, "track.flac");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await svc.DownloadToFileAsync("https://api.example.com/track.flac", dest, CancellationToken.None));
+            await svc.DownloadToFileAsync("https://93.184.216.34/track.flac", dest, CancellationToken.None));
         Assert.Contains("no content", ex.Message);
     }
 
@@ -112,7 +112,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
 
         // EnsureSuccessStatusCode → HttpRequestException
         await Assert.ThrowsAsync<HttpRequestException>(async () =>
-            await svc.DownloadToFileAsync("https://api.example.com/missing.flac", dest, CancellationToken.None));
+            await svc.DownloadToFileAsync("https://93.184.216.34/missing.flac", dest, CancellationToken.None));
         Assert.False(File.Exists(dest));
     }
 
@@ -126,7 +126,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
         var dest = Path.Combine(_tempDir, "track.flac");
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
-            await svc.DownloadToFileAsync("https://api.example.com/track.flac", dest, CancellationToken.None));
+            await svc.DownloadToFileAsync("https://93.184.216.34/track.flac", dest, CancellationToken.None));
     }
 
     [Fact]
@@ -138,7 +138,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
         var flac = MakeMinimalFlacFile(payloadSize: 1024);
         var svc = new HttpFileDownloadService(MakeFakeHttpClient(flac, "audio/flac"));
 
-        await svc.DownloadToFileAsync("https://api.example.com/track.flac", nested, CancellationToken.None);
+        await svc.DownloadToFileAsync("https://93.184.216.34/track.flac", nested, CancellationToken.None);
 
         Assert.True(File.Exists(nested));
     }

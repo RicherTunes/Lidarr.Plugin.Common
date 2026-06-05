@@ -34,7 +34,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
     {
         var data = System.Text.Encoding.UTF8.GetBytes("hello world");
         using var http = new HttpClient(new ChunkSourceHandler(("https://test/c0", data)));
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         var output = OutputPath();
 
         var result = await sut.AssembleAsync(
@@ -60,7 +60,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
             ("https://test/c1", c1),
             ("https://test/c2", c2)));
 
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         var output = OutputPath();
 
         var result = await sut.AssembleAsync(
@@ -92,7 +92,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
             ("https://test/c2", c2),
             ("https://test/c3", c3)));
 
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         var output = OutputPath();
 
         var result = await sut.AssembleAsync(
@@ -122,7 +122,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
             ("https://test/c1", c1),
             ("https://test/c2", c2)));
 
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         var output = OutputPath();
 
         // Submit in reverse order — should still emit AAABBBCCC.
@@ -150,7 +150,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
         var progressEvents = new List<ChunkedAssemblyProgress>();
         var progress = new Progress<ChunkedAssemblyProgress>(p => progressEvents.Add(p));
 
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         await sut.AssembleAsync(
             new[]
             {
@@ -178,7 +178,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
     {
         var data = System.Text.Encoding.UTF8.GetBytes("payload");
         using var http = new HttpClient(new ChunkSourceHandler(("https://test/c0", data)));
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         var output = OutputPath();
 
         await sut.AssembleAsync(new[] { new ChunkSpec(0, "https://test/c0") }, output);
@@ -191,7 +191,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
     public async Task AssembleAsync_OnFailure_RemovesPartialFile()
     {
         using var http = new HttpClient(new AlwaysFailingHandler());
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         var output = OutputPath();
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
@@ -205,7 +205,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
     public async Task AssembleAsync_ThrowsOnEmptyChunkList()
     {
         using var http = new HttpClient(new AlwaysFailingHandler());
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
 
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await sut.AssembleAsync(Array.Empty<ChunkSpec>(), OutputPath()));
@@ -220,7 +220,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
             ("https://test/c1", data),
             ("https://test/c2", data)));
 
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         using var cts = new CancellationTokenSource();
         cts.Cancel();
 

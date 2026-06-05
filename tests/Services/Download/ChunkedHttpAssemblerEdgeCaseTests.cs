@@ -48,7 +48,7 @@ public sealed class ChunkedHttpAssemblerEdgeCaseTests : IDisposable
     public async Task AssembleAsync_NullChunks_Throws()
     {
         using var http = new HttpClient(new ChunkSourceHandler());
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         await Assert.ThrowsAsync<ArgumentNullException>(async () =>
             await sut.AssembleAsync(null!, OutputPath()));
     }
@@ -60,7 +60,7 @@ public sealed class ChunkedHttpAssemblerEdgeCaseTests : IDisposable
     public async Task AssembleAsync_NullOrEmptyOutputPath_Throws(string? output)
     {
         using var http = new HttpClient(new ChunkSourceHandler());
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         await Assert.ThrowsAsync<ArgumentException>(async () =>
             await sut.AssembleAsync(new[] { new ChunkSpec(0, "https://test/c0") }, output!));
     }
@@ -74,7 +74,7 @@ public sealed class ChunkedHttpAssemblerEdgeCaseTests : IDisposable
             ("https://test/c0", c0),
             ("https://test/c1", c1)));
 
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
 
         var result = await sut.AssembleAsync(
             new[]
@@ -100,7 +100,7 @@ public sealed class ChunkedHttpAssemblerEdgeCaseTests : IDisposable
             ("https://test/c1", c1),
             ("https://test/c2", c2)));
 
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
 
         // High MaxConcurrency requested, but ChunkDelay > 0 must downgrade to sequential.
         var result = await sut.AssembleAsync(
@@ -128,7 +128,7 @@ public sealed class ChunkedHttpAssemblerEdgeCaseTests : IDisposable
 
         var data = System.Text.Encoding.UTF8.GetBytes("new");
         using var http = new HttpClient(new ChunkSourceHandler(("https://test/c0", data)));
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
 
         await sut.AssembleAsync(new[] { new ChunkSpec(0, "https://test/c0") }, output);
 
@@ -143,7 +143,7 @@ public sealed class ChunkedHttpAssemblerEdgeCaseTests : IDisposable
 
         var data = System.Text.Encoding.UTF8.GetBytes("ok");
         using var http = new HttpClient(new ChunkSourceHandler(("https://test/c0", data)));
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
 
         await sut.AssembleAsync(new[] { new ChunkSpec(0, "https://test/c0") }, nested);
 
@@ -154,7 +154,7 @@ public sealed class ChunkedHttpAssemblerEdgeCaseTests : IDisposable
     public async Task AssembleAsync_PreserveTempOnFailure_True_KeepsPartial()
     {
         using var http = new HttpClient(new AlwaysFailingHandler());
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         var output = OutputPath("preserve.bin");
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
@@ -182,7 +182,7 @@ public sealed class ChunkedHttpAssemblerEdgeCaseTests : IDisposable
             { "https://test/c0", HttpStatusCode.OK },
             { "https://test/c1", HttpStatusCode.InternalServerError },
         }));
-        var sut = new ChunkedHttpAssembler(http);
+        var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
 
         await Assert.ThrowsAnyAsync<Exception>(async () =>
             await sut.AssembleAsync(

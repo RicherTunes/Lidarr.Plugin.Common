@@ -95,7 +95,7 @@ namespace Lidarr.Plugin.Common.Tests.Properties
             try
             {
                 using var http = new HttpClient(new UrlPayloadHandler(entries));
-                var sut = new ChunkedHttpAssembler(http);
+                var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
                 var output = Path.Combine(dir, "out.bin");
 
                 var result = sut.AssembleAsync(
@@ -130,7 +130,7 @@ namespace Lidarr.Plugin.Common.Tests.Properties
             try
             {
                 using var http = new HttpClient(new UrlPayloadHandler(entries));
-                var sut = new ChunkedHttpAssembler(http);
+                var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
                 var output = Path.Combine(dir, "final.bin");
                 var partial = output + ".partial";
 
@@ -163,7 +163,7 @@ namespace Lidarr.Plugin.Common.Tests.Properties
             try
             {
                 using var http = new HttpClient(new AlwaysFailingHandler());
-                var sut = new ChunkedHttpAssembler(http);
+                var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
                 var output = Path.Combine(dir, "final.bin");
                 var partial = output + ".partial";
 
@@ -204,7 +204,7 @@ namespace Lidarr.Plugin.Common.Tests.Properties
             try
             {
                 using var http = new HttpClient(new UrlPayloadHandler(entries));
-                var sut = new ChunkedHttpAssembler(http);
+                var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
                 var output = Path.Combine(dir, "out.bin");
 
                 var result = sut.AssembleAsync(specs, output, new ChunkedAssemblyOptions { MaxConcurrency = concurrency })

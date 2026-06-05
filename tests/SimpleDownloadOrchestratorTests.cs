@@ -76,7 +76,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
-                getStreamAsync: (id, q) => Task.FromResult(("http://unused", "bin")),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/unused", "bin")),
                 streamProvider: streamProvider,
                 postProcessor: postProcessor);
 
@@ -115,7 +115,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
-                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin"))
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin"))
             );
 
             var temp = Path.Combine(Path.GetTempPath(), $"orch_test_progress_{Guid.NewGuid():N}.bin");
@@ -144,7 +144,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
-                getStreamAsync: (id, q) => Task.FromResult(("http://test/file2", "bin"))
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file2", "bin"))
             );
 
             var temp = Path.Combine(Path.GetTempPath(), $"orch_test_resume_{Guid.NewGuid():N}.bin");
@@ -179,7 +179,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
-                getStreamAsync: (id, q) => Task.FromResult(("http://slow/track", "bin"))
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/track", "bin"))
             );
 
             var outputPath = Path.Combine(Path.GetTempPath(), $"orch_test_cancel_{Guid.NewGuid():N}.bin");
@@ -223,7 +223,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
-                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin"))
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin"))
             );
 
             var outputPath = Path.Combine(Path.GetTempPath(), $"orch_test_empty_{Guid.NewGuid():N}.bin");
@@ -254,7 +254,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 10 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string>()),
-                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin"))
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin"))
             );
 
             var dir = Path.Combine(Path.GetTempPath(), $"orch_test_album_empty_{Guid.NewGuid():N}");
@@ -316,7 +316,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
-                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin")),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin")),
                 metadataApplier: throwingApplier
             );
 
@@ -353,7 +353,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
-                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin")),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin")),
                 metadataApplier: countingApplier
             );
 
@@ -388,7 +388,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = "track123", Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
-                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin")),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin")),
                 metadataApplier: throwingApplier,
                 logger: capturingLogger
             );
@@ -424,7 +424,7 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
-                getStreamAsync: (id, q) => Task.FromResult(("http://test/file", "bin")),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin")),
                 metadataApplier: countingApplier
             );
 

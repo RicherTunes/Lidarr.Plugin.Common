@@ -18,16 +18,21 @@ namespace Lidarr.Plugin.Common.Services.Download
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger<HttpFileDownloadService> _logger;
+        private readonly RemoteMediaUriPolicy _mediaUriPolicy;
 
         /// <summary>
         /// Creates a new HttpFileDownloadService.
         /// </summary>
         /// <param name="httpClient">The HttpClient to use for downloads. Should be configured with appropriate timeouts and connection limits.</param>
         /// <param name="logger">Optional logger for diagnostic output</param>
-        public HttpFileDownloadService(HttpClient httpClient, ILogger<HttpFileDownloadService>? logger = null)
+        /// <param name="mediaUriPolicy">SSRF policy applied to every download URL before fetch. Defaults to
+        /// <see cref="RemoteMediaUriPolicy.Strict"/> (https-only, public destinations). Pass a relaxed policy
+        /// only for explicitly-local providers (e.g. a self-hosted endpoint).</param>
+        public HttpFileDownloadService(HttpClient httpClient, ILogger<HttpFileDownloadService>? logger = null, RemoteMediaUriPolicy? mediaUriPolicy = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<HttpFileDownloadService>.Instance;
+            _mediaUriPolicy = mediaUriPolicy ?? RemoteMediaUriPolicy.Strict;
         }
 
         /// <inheritdoc/>
@@ -37,6 +42,11 @@ namespace Lidarr.Plugin.Common.Services.Download
                 throw new ArgumentException("URL must not be empty.", nameof(url));
             if (string.IsNullOrWhiteSpace(filePath))
                 throw new ArgumentException("File path must not be empty.", nameof(filePath));
+
+            // SSRF guard: validate the destination before any fetch (provider URLs are hostile-controllable).
+            var guard = RemoteMediaUriGuard.Validate(url, _mediaUriPolicy);
+            if (!guard.IsAllowed)
+                throw new InvalidOperationException($"Refusing to download from an unsafe URL: {guard.Reason}");
 
             // Stream to a temporary .partial file, then atomic move to final
             var partialPath = filePath + ".partial";

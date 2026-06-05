@@ -52,7 +52,7 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
         var dest = Path.Combine(_tempDir, "track.flac");
 
         var ex = await Assert.ThrowsAsync<DownloadIntegrityException>(async () =>
-            await svc.DownloadToFileAsync("https://example.com/track.flac", dest, CancellationToken.None));
+            await svc.DownloadToFileAsync("https://93.184.216.34/track.flac", dest, CancellationToken.None));
 
         Assert.Contains("500", ex.Message);       // actual bytes mentioned
         Assert.Contains("1000", ex.Message);      // expected bytes mentioned
@@ -72,7 +72,7 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
         var dest = Path.Combine(_tempDir, "truncated.flac");
 
         var ex = await Assert.ThrowsAsync<DownloadIntegrityException>(async () =>
-            await svc.DownloadToFileAsync("https://example.com/truncated.flac", dest, CancellationToken.None));
+            await svc.DownloadToFileAsync("https://93.184.216.34/truncated.flac", dest, CancellationToken.None));
 
         Assert.Equal(200L, ex.ActualBytes);
         Assert.Equal(1000L, ex.ExpectedBytes);
@@ -103,7 +103,7 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
         var svc = new HttpFileDownloadService(new HttpClient(handler));
 
         var ex = await Assert.ThrowsAsync<DownloadIntegrityException>(async () =>
-            await svc.DownloadToFileAsync("https://example.com/track.flac", dest, CancellationToken.None));
+            await svc.DownloadToFileAsync("https://93.184.216.34/track.flac", dest, CancellationToken.None));
 
         // 300 (existing) + 200 (chunk) = 500; expected = 1000
         Assert.Equal(500L, ex.ActualBytes);
@@ -126,7 +126,7 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
         var svc = new HttpFileDownloadService(new HttpClient(handler));
         var dest = Path.Combine(_tempDir, "exact.flac");
 
-        var written = await svc.DownloadToFileAsync("https://example.com/exact.flac", dest, CancellationToken.None);
+        var written = await svc.DownloadToFileAsync("https://93.184.216.34/exact.flac", dest, CancellationToken.None);
 
         Assert.Equal((long)body.Length, written);
         Assert.True(File.Exists(dest));
@@ -151,7 +151,7 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
         var dest = Path.Combine(_tempDir, "chunked.flac");
 
         // Must NOT throw DownloadIntegrityException.
-        var written = await svc.DownloadToFileAsync("https://example.com/chunked.flac", dest, CancellationToken.None);
+        var written = await svc.DownloadToFileAsync("https://93.184.216.34/chunked.flac", dest, CancellationToken.None);
 
         Assert.Equal((long)body.Length, written);
         Assert.True(File.Exists(dest));
