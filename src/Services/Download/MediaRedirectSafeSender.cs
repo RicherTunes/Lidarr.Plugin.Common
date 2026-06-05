@@ -46,6 +46,16 @@ namespace Lidarr.Plugin.Common.Services.Download
             var current = request;
             for (var hop = 0; ; hop++)
             {
+                // Validate the target BEFORE issuing the request — refuse a private/internal/non-https host
+                // up-front rather than only catching it on the response. This covers the FIRST hop (the initial
+                // URL) too, so a direct request to an internal host is never sent at all (R2-01 follow-up).
+                if (current.RequestUri is { } targetUri && !RemoteMediaUriGuard.Validate(targetUri, policy).IsAllowed)
+                {
+                    if (current != request) current.Dispose();
+                    throw new InvalidOperationException(
+                        $"Refusing media request to an unsafe URL: {Redact(targetUri)}.");
+                }
+
                 var response = await client.SendAsync(current, completionOption, cancellationToken).ConfigureAwait(false);
 
                 // Defense-in-depth: if the client auto-followed redirects internally, RequestMessage.RequestUri

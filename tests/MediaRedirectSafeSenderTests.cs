@@ -79,6 +79,16 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task DirectPrivateHost_IsRefused_BeforeAnyRequestIsSent()
+        {
+            // The initial URL itself targets a private host. It must be refused BEFORE the first send — the
+            // handler must never be invoked, so the internal host is never contacted at all.
+            var handler = new ScriptedHandler(_ => Ok()); // would 200 if ever called
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Send(handler, "https://10.0.0.1/internal"));
+            Assert.Empty(handler.Sent); // never sent
+        }
+
+        [Fact]
         public async Task PublicRedirect_IsFollowed_AndReturned()
         {
             var handler = new ScriptedHandler(
