@@ -222,3 +222,5 @@ Lidarr.Plugin.Common.Utilities.TimeParsing
 static Lidarr.Plugin.Common.Utilities.TimeParsing.TryFromUnixTimeSeconds(long seconds, out System.DateTimeOffset value) -> bool
 static Lidarr.Plugin.Common.Utilities.TimeParsing.TryFromUnixTimeMilliseconds(long milliseconds, out System.DateTimeOffset value) -> bool
 static Lidarr.Plugin.Common.Utilities.TimeParsing.TryParseIsoDateInvariant(string? text, out System.DateTimeOffset value) -> bool
+Lidarr.Plugin.Common.Services.Download.PartialFileReset
+static Lidarr.Plugin.Common.Services.Download.PartialFileReset.ResolveWriteMode(bool serverHonoredRange) -> System.IO.FileMode

@@ -106,8 +106,13 @@ namespace Lidarr.Plugin.Common.Services.Download
             long totalWritten = existing;
             int read;
 
+            // LOOP-003: on a 200 (server ignored the resume Range) truncate instead of appending, so a stale
+            // .partial that the best-effort delete above failed to remove can't be appended onto (silent
+            // stale+fresh corruption that the byte-count check below does NOT catch — it counts session bytes).
+            var partialWriteMode = PartialFileReset.ResolveWriteMode(serverHonoredRange: isPartial);
+
             // Explicit scope ensures fileStream is closed before File.Move
-            await using (var fileStream = new FileStream(partialPath, FileMode.Append, FileAccess.Write, FileShare.None, 131072, useAsync: true))
+            await using (var fileStream = new FileStream(partialPath, partialWriteMode, FileAccess.Write, FileShare.None, 131072, useAsync: true))
             {
                 read = await responseStream.ReadAsync(buffer.AsMemory(0, buffer.Length), cancellationToken).ConfigureAwait(false);
                 if (read <= 0)
