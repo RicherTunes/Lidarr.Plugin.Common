@@ -414,7 +414,13 @@ namespace Lidarr.Plugin.Common.Services.Download
                     else if (lastModified.HasValue) req.Headers.TryAddWithoutValidation("If-Range", lastModified.Value.ToString("R"));
                 }
 
-                using var resp = await _httpClient.ExecuteWithResilienceAsync(req, ResiliencePolicy.Streaming, cancellationToken).ConfigureAwait(false);
+                // LOOP-004: keep the SSRF policy in force across the resilience layer's redirect-following — the
+                // initial URL is validated above, but a 3xx could otherwise bounce to an internal host.
+                using var resp = await _httpClient.ExecuteWithResilienceAsync(
+                    req,
+                    ResiliencePolicy.Streaming,
+                    cancellationToken,
+                    validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
                 resp.EnsureSuccessStatusCode();
 
                 var totalHeader = resp.Content.Headers.ContentLength;
