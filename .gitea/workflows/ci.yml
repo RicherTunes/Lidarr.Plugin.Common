@@ -12,7 +12,19 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
-      - name: Build (Release)
-        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release
-      - name: Test (security + download surface)
-        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "FullyQualifiedName~SafeDirectoryCleanup|FullyQualifiedName~PartialFileReset|FullyQualifiedName~ResilienceRedirectSsrf|FullyQualifiedName~TimeParsing|FullyQualifiedName~RemoteMediaUriGuard|FullyQualifiedName~MediaRedirectSafeSender"
+      - name: Restore
+        run: dotnet restore
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1
+      - name: Test (full unit suite, excl. quarantined)
+        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined"
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: gitleaks (secret scan)
+        run: |
+          set -e
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz -o /tmp/gl.tgz
+          tar -xzf /tmp/gl.tgz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-banner --redact --exit-code 1
