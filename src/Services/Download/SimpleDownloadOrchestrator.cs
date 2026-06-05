@@ -35,6 +35,7 @@ namespace Lidarr.Plugin.Common.Services.Download
         private readonly ILogger _logger;
         private readonly int _maxConcurrentTracks;
         private readonly IDownloadTelemetrySink? _telemetrySink;
+        private readonly RemoteMediaUriPolicy _mediaUriPolicy;
 
         public string ServiceName { get; }
 
@@ -49,7 +50,8 @@ namespace Lidarr.Plugin.Common.Services.Download
             IAudioStreamProvider? streamProvider = null,
             IAudioMetadataApplier? metadataApplier = null,
             ILogger? logger = null,
-            IAudioPostProcessor? postProcessor = null)
+            IAudioPostProcessor? postProcessor = null,
+            RemoteMediaUriPolicy? mediaUriPolicy = null)
         {
             ServiceName = serviceName;
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -63,6 +65,7 @@ namespace Lidarr.Plugin.Common.Services.Download
             _metadataApplier = metadataApplier ?? new TagLibAudioMetadataApplier();
             _logger = logger ?? NullLogger.Instance;
             _telemetrySink = null;
+            _mediaUriPolicy = mediaUriPolicy ?? RemoteMediaUriPolicy.Strict;
         }
 
         public SimpleDownloadOrchestrator(
@@ -77,8 +80,9 @@ namespace Lidarr.Plugin.Common.Services.Download
             IAudioMetadataApplier? metadataApplier,
             ILogger? logger,
             IAudioPostProcessor? postProcessor,
-            IDownloadTelemetrySink? telemetrySink)
-            : this(serviceName, httpClient, getAlbumAsync, getTrackAsync, getAlbumTrackIdsAsync, getStreamAsync, maxConcurrentTracks, streamProvider, metadataApplier, logger, postProcessor)
+            IDownloadTelemetrySink? telemetrySink,
+            RemoteMediaUriPolicy? mediaUriPolicy = null)
+            : this(serviceName, httpClient, getAlbumAsync, getTrackAsync, getAlbumTrackIdsAsync, getStreamAsync, maxConcurrentTracks, streamProvider, metadataApplier, logger, postProcessor, mediaUriPolicy)
         {
             _telemetrySink = telemetrySink;
         }
@@ -365,6 +369,11 @@ namespace Lidarr.Plugin.Common.Services.Download
 
             var (url, extension) = await _getStreamAsync(trackId, quality).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(url)) return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Empty stream URL" };
+
+            // SSRF guard: validate the resolved stream URL before fetch (provider-controlled).
+            var uriGuard = RemoteMediaUriGuard.Validate(url, _mediaUriPolicy);
+            if (!uriGuard.IsAllowed) return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Unsafe stream URL: {uriGuard.Reason}" };
+
             if (!string.IsNullOrWhiteSpace(extension)) outputPath = Path.ChangeExtension(outputPath, extension.TrimStart('.'));
 
             try
