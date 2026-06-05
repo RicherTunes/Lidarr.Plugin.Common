@@ -106,5 +106,52 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.True(RemoteMediaUriGuard.Validate("https://a.trusted-cdn.com/x", policy, ResolvePublic).IsAllowed);
             Assert.False(RemoteMediaUriGuard.Validate("https://evil.example.com/x", policy, ResolvePublic).IsAllowed);
         }
+
+        // R2-09: suffix matching must be on a label (dot) boundary, not a raw substring tail. A bare suffix
+        // "trusted-cdn.com" must NOT let "eviltrusted-cdn.com" through; only the exact host or a real
+        // ".trusted-cdn.com" subdomain qualifies. Tested with both the bare and leading-dot suffix forms.
+        [Theory]
+        [InlineData("trusted-cdn.com", "https://eviltrusted-cdn.com/x", false)]   // glued prefix — NOT a subdomain
+        [InlineData("trusted-cdn.com", "https://trusted-cdn.com/x", true)]        // exact host
+        [InlineData("trusted-cdn.com", "https://a.trusted-cdn.com/x", true)]      // real subdomain
+        [InlineData(".trusted-cdn.com", "https://eviltrusted-cdn.com/x", false)]  // leading-dot form, same boundary rule
+        [InlineData(".trusted-cdn.com", "https://trusted-cdn.com/x", true)]       // leading-dot form still allows exact
+        public void Validate_AllowedHostSuffixes_MatchesOnLabelBoundary(string suffix, string url, bool allowed)
+        {
+            var policy = new RemoteMediaUriPolicy { AllowedHostSuffixes = new List<string> { suffix } };
+            Assert.Equal(allowed, RemoteMediaUriGuard.Validate(url, policy, ResolvePublic).IsAllowed);
+        }
+
+        // R2-09: a trailing-dot FQDN ("host.") is the same host — it must not bypass the metadata-host blocklist
+        // nor the allowed-suffix check.
+        [Fact]
+        public void Validate_TrailingDotFqdn_IsNormalized()
+        {
+            // metadata host with a trailing dot is still the metadata host -> blocked
+            Assert.False(RemoteMediaUriGuard.Validate("https://metadata.google.internal./x", RemoteMediaUriPolicy.Strict).IsAllowed);
+            // trailing-dot subdomain still satisfies the suffix allow-list
+            var policy = new RemoteMediaUriPolicy { AllowedHostSuffixes = new List<string> { "trusted-cdn.com" } };
+            Assert.True(RemoteMediaUriGuard.Validate("https://a.trusted-cdn.com./x", policy, ResolvePublic).IsAllowed);
+        }
+
+        // R2-02: production code wires the guard with only a policy (no dnsResolver arg). The policy must be able
+        // to carry a DnsResolver so a host's resolution can be classified — letting production keep ResolveDns=true
+        // while tests inject a deterministic resolver instead of relaxing the policy to ResolveDns=false.
+        [Fact]
+        public void Validate_PolicyDnsResolver_IsUsed_WhenNoExplicitResolverPassed()
+        {
+            var resolvesPrivate = new RemoteMediaUriPolicy
+            {
+                DnsResolver = _ => new[] { System.Net.IPAddress.Parse("10.0.0.1") }
+            };
+            // No explicit dnsResolver arg — the policy's resolver classifies the host as private and blocks it.
+            Assert.False(RemoteMediaUriGuard.Validate("https://cdn.example.com/seg.m4s", resolvesPrivate).IsAllowed);
+
+            var resolvesPublic = new RemoteMediaUriPolicy
+            {
+                DnsResolver = _ => new[] { System.Net.IPAddress.Parse("8.8.8.8") }
+            };
+            Assert.True(RemoteMediaUriGuard.Validate("https://cdn.example.com/seg.m4s", resolvesPublic).IsAllowed);
+        }
     }
 }
