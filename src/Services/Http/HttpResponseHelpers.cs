@@ -53,10 +53,13 @@ namespace Lidarr.Plugin.Common.Services.Http
                         return TimeSpan.FromSeconds(Math.Max(0, seconds));
                     }
 
-                    // HTTP-date — RFC 7231 (e.g. "Wed, 21 Oct 2025 07:28:00 GMT").
+                    // HTTP-date — RFC 7231 IMF-fixdate (e.g. "Wed, 21 Oct 2025 07:28:00 GMT"). Always English
+                    // day/month names on a Gregorian calendar, so parse with InvariantCulture: the host's
+                    // CurrentCulture (esp. non-Gregorian, e.g. Thai Buddhist) fails to recognize "Oct"/"Wed"
+                    // and would silently drop the Retry-After header.
                     if (DateTimeOffset.TryParse(
                             raw,
-                            null,
+                            CultureInfo.InvariantCulture,
                             DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
                             out var when))
                     {

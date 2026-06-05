@@ -144,7 +144,7 @@ namespace Lidarr.Plugin.Common.Tests
                     return Task.FromResult(MakeTrack(id, idx >= 0 ? idx + 1 : 1));
                 },
                 getAlbumTrackIdsAsync: _ => Task.FromResult((IReadOnlyList<string>)trackIds),
-                getStreamAsync: (_, _) => Task.FromResult(("http://unused", "bin")),
+                getStreamAsync: (_, _) => Task.FromResult(("https://93.184.216.34/unused", "bin")),
                 maxConcurrentTracks: maxConcurrent,
                 streamProvider: streamProvider);
         }

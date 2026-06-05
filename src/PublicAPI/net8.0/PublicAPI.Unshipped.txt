@@ -179,3 +179,37 @@ Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithMinimumSizeBytes(
 Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithReleaseGroup(string! group) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
 Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithScheme(string! scheme) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
 Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder.WithYear(int? year) -> Lidarr.Plugin.Common.HostBridge.MultiQualityReleaseBuilder!
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.RemoteMediaUriPolicy() -> void
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.AllowHttp.get -> bool
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.AllowHttp.init -> void
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.AllowPrivateNetworks.get -> bool
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.AllowPrivateNetworks.init -> void
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.AllowedHostSuffixes.get -> System.Collections.Generic.IReadOnlyList<string!>?
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.AllowedHostSuffixes.init -> void
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.ResolveDns.get -> bool
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.ResolveDns.init -> void
+static Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.Strict.get -> Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy!
+Lidarr.Plugin.Common.Services.Download.UriGuardResult
+Lidarr.Plugin.Common.Services.Download.UriGuardResult.UriGuardResult(bool IsAllowed, string? Reason) -> void
+Lidarr.Plugin.Common.Services.Download.UriGuardResult.IsAllowed.get -> bool
+Lidarr.Plugin.Common.Services.Download.UriGuardResult.IsAllowed.init -> void
+Lidarr.Plugin.Common.Services.Download.UriGuardResult.Reason.get -> string?
+Lidarr.Plugin.Common.Services.Download.UriGuardResult.Reason.init -> void
+static Lidarr.Plugin.Common.Services.Download.UriGuardResult.Allowed.get -> Lidarr.Plugin.Common.Services.Download.UriGuardResult
+static Lidarr.Plugin.Common.Services.Download.UriGuardResult.Blocked(string! reason) -> Lidarr.Plugin.Common.Services.Download.UriGuardResult
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriGuard
+static Lidarr.Plugin.Common.Services.Download.RemoteMediaUriGuard.Validate(string? url, Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy? policy = null, System.Func<string!, System.Net.IPAddress![]!>? dnsResolver = null) -> Lidarr.Plugin.Common.Services.Download.UriGuardResult
+static Lidarr.Plugin.Common.Services.Download.RemoteMediaUriGuard.Validate(System.Uri? uri, Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy? policy = null, System.Func<string!, System.Net.IPAddress![]!>? dnsResolver = null) -> Lidarr.Plugin.Common.Services.Download.UriGuardResult
+static Lidarr.Plugin.Common.Services.Download.RemoteMediaUriGuard.IsBlocked(System.Net.IPAddress! address) -> bool
+Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult
+Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult.DirectoryCleanupResult(bool Deleted, string? Reason) -> void
+Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult.Deleted.get -> bool
+Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult.Deleted.init -> void
+Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult.Reason.get -> string?
+Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult.Reason.init -> void
+static Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult.Removed.get -> Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult
+static Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult.Noop.get -> Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult
+static Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult.Refused(string! reason) -> Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult
+Lidarr.Plugin.Common.Services.Download.SafeDirectoryCleanup
+static Lidarr.Plugin.Common.Services.Download.SafeDirectoryCleanup.DeleteTreeUnderRoot(string? path, string? root) -> Lidarr.Plugin.Common.Services.Download.DirectoryCleanupResult
