@@ -74,6 +74,24 @@ namespace Lidarr.Plugin.Common.Services.Download
                 return DirectoryCleanupResult.Noop;
             }
 
+            // R2-05: the lexical containment check above resolves "." and ".." but NOT symlink/junction targets,
+            // so a reparse point can be in-bounds by path yet point at an unrelated tree. Refuse to recursively
+            // delete through a reparse-point target. (Nested reparse points are not traversed by .NET's recursive
+            // delete, so this closes the top-level case; a legitimate download tree is never a symlink.) The
+            // residual TOCTOU race — a path component swapped to a reparse point between this check and the
+            // delete — requires concurrent write access to the trusted download root and is out of scope.
+            try
+            {
+                if (new DirectoryInfo(canonicalPath).Attributes.HasFlag(FileAttributes.ReparsePoint))
+                {
+                    return DirectoryCleanupResult.Refused("path is a reparse point (symlink/junction); refusing to delete through it.");
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return DirectoryCleanupResult.Refused("path attributes could not be read.");
+            }
+
             Directory.Delete(canonicalPath, recursive: true);
             return DirectoryCleanupResult.Removed;
         }
