@@ -112,7 +112,10 @@ public static class LlmErrorMapper
     public static TimeSpan? ParseRetryAfterHeader(RetryConditionHeaderValue? header)
     {
         if (header is null) return null;
-        if (header.Delta.HasValue) return header.Delta.Value;
+        // Clamp negative deltas to zero — a clock-skewed/malformed upstream (surfaced via an adapter that
+        // builds the header from its own transport) must never produce a negative delay. Mirrors the Date
+        // branch below and the canonical RateLimitHeaderUtilities.ResolveRetryAfter.
+        if (header.Delta.HasValue) return header.Delta.Value > TimeSpan.Zero ? header.Delta.Value : TimeSpan.Zero;
         if (header.Date.HasValue)
         {
             var delta = header.Date.Value - DateTimeOffset.UtcNow;

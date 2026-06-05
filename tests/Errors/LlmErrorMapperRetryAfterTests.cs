@@ -96,6 +96,17 @@ public class LlmErrorMapperRetryAfterTests
     }
 
     [Fact]
+    public void ParseRetryAfterHeader_NegativeDelta_ReturnsZero()
+    {
+        // A negative Retry-After delta (e.g. a clock-skewed/malformed upstream surfaced via an adapter that
+        // constructs the header from its own transport — the documented public use-case) must clamp to zero,
+        // never yield a negative delay. The Date branch already clamps; the Delta branch must too, mirroring
+        // the canonical RateLimitHeaderUtilities.ResolveRetryAfter.
+        var header = new RetryConditionHeaderValue(TimeSpan.FromSeconds(-5));
+        Assert.Equal(TimeSpan.Zero, LlmErrorMapper.ParseRetryAfterHeader(header));
+    }
+
+    [Fact]
     public void MapHttpError_NonRateLimitStatus_LeavesRetryAfterNull()
     {
         // 503 should not carry retry-after even when supplied — it's a different exception type.
