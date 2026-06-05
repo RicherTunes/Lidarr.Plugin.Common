@@ -282,7 +282,8 @@ namespace Lidarr.Plugin.Common.Services.Download
         private async Task<long> DownloadChunkToStreamAsync(ChunkSpec chunk, Stream output, int bufferSize, CancellationToken cancellationToken)
         {
             using var request = new HttpRequestMessage(HttpMethod.Get, chunk.Url);
-            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            // R2-01: validate redirect targets against the SSRF policy (hostile manifest chunk URLs).
+            using var response = await MediaRedirectSafeSender.SendValidatedAsync(_httpClient, request, _mediaUriPolicy, HttpCompletionOption.ResponseHeadersRead, cancellationToken: cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
             await using var content = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
 
@@ -303,7 +304,8 @@ namespace Lidarr.Plugin.Common.Services.Download
             try
             {
                 using var request = new HttpRequestMessage(HttpMethod.Get, chunk.Url);
-                using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+                // R2-01: validate redirect targets against the SSRF policy (hostile manifest chunk URLs).
+                using var response = await MediaRedirectSafeSender.SendValidatedAsync(_httpClient, request, _mediaUriPolicy, HttpCompletionOption.ResponseHeadersRead, cancellationToken: cancellationToken).ConfigureAwait(false);
                 response.EnsureSuccessStatusCode();
                 await using var content = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
                 await using var fs = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize, useAsync: true);
