@@ -27,6 +27,12 @@ namespace Lidarr.Plugin.Common.Services.Download
         /// Mitigates (does not fully prevent — see remarks) DNS-rebinding to internal hosts.</summary>
         public bool ResolveDns { get; init; } = true;
 
+        /// <summary>Optional DNS resolver used when <see cref="ResolveDns"/> is on and no explicit resolver is
+        /// passed to <c>Validate</c>. Lets production wire the guard with a policy alone while keeping
+        /// <see cref="ResolveDns"/> = true, and lets tests inject a deterministic resolver instead of weakening
+        /// the policy to <c>ResolveDns = false</c> (R2-02). Null ⇒ real <see cref="System.Net.Dns"/>.</summary>
+        public Func<string, IPAddress[]>? DnsResolver { get; init; }
+
         /// <summary>Strict default: https only, public destinations only.</summary>
         public static RemoteMediaUriPolicy Strict { get; } = new();
     }
@@ -102,13 +108,20 @@ namespace Lidarr.Plugin.Common.Services.Download
                 return UriGuardResult.Blocked("URL has no host.");
             }
 
+            // R2-09: a trailing-dot FQDN ("host." == "host"). Normalize before any host comparison so a trailing
+            // dot can't bypass the metadata blocklist or the allowed-suffix check.
+            if (host.Length > 1 && host[^1] == '.')
+            {
+                host = host[..^1];
+            }
+
             if (MetadataHosts.Any(m => string.Equals(host, m, StringComparison.OrdinalIgnoreCase)))
             {
                 return UriGuardResult.Blocked("URL targets a cloud metadata host.");
             }
 
             if (policy.AllowedHostSuffixes is { Count: > 0 } &&
-                !policy.AllowedHostSuffixes.Any(s => host.EndsWith(s, StringComparison.OrdinalIgnoreCase)))
+                !policy.AllowedHostSuffixes.Any(s => HostMatchesSuffix(host, s)))
             {
                 return UriGuardResult.Blocked("URL host is not in the allowed host-suffix list.");
             }
@@ -130,7 +143,8 @@ namespace Lidarr.Plugin.Common.Services.Download
                 IPAddress[] resolved;
                 try
                 {
-                    resolved = (dnsResolver ?? Dns.GetHostAddresses)(host);
+                    // Precedence: explicit arg > policy-carried resolver (R2-02) > real DNS.
+                    resolved = (dnsResolver ?? policy.DnsResolver ?? Dns.GetHostAddresses)(host);
                 }
                 catch (Exception ex) when (ex is SocketException or ArgumentException)
                 {
@@ -152,6 +166,28 @@ namespace Lidarr.Plugin.Common.Services.Download
             }
 
             return UriGuardResult.Allowed;
+        }
+
+        /// <summary>R2-09: host matches an allowed suffix only on a label (dot) boundary — exact host, or a
+        /// real subdomain ending in ".&lt;suffix&gt;". A bare suffix "cdn.com" must not admit "evilcdn.com".
+        /// Accepts the suffix written with or without a leading dot.</summary>
+        private static bool HostMatchesSuffix(string host, string suffix)
+        {
+            if (string.IsNullOrEmpty(suffix))
+            {
+                return false;
+            }
+
+            var bare = suffix[0] == '.' ? suffix[1..] : suffix;
+            if (bare.Length == 0)
+            {
+                return false;
+            }
+
+            return string.Equals(host, bare, StringComparison.OrdinalIgnoreCase) ||
+                   (host.Length > bare.Length &&
+                    host[host.Length - bare.Length - 1] == '.' &&
+                    host.EndsWith(bare, StringComparison.OrdinalIgnoreCase));
         }
 
         /// <summary>True if the address is loopback, link-local, private, ULA, multicast, unspecified, or

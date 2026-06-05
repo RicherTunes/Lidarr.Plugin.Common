@@ -189,6 +189,8 @@ Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.AllowedHostSuffixes.
 Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.AllowedHostSuffixes.init -> void
 Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.ResolveDns.get -> bool
 Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.ResolveDns.init -> void
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.DnsResolver.get -> System.Func<string!, System.Net.IPAddress![]!>?
+Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.DnsResolver.init -> void
 static Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy.Strict.get -> Lidarr.Plugin.Common.Services.Download.RemoteMediaUriPolicy!
 Lidarr.Plugin.Common.Services.Download.UriGuardResult
 Lidarr.Plugin.Common.Services.Download.UriGuardResult.UriGuardResult(bool IsAllowed, string? Reason) -> void
