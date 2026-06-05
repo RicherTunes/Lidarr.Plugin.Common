@@ -13,7 +13,7 @@ namespace Lidarr.Plugin.Common.Services.Network
     /// <summary>
     /// Network resilience service for coordinating batch operations and non-HTTP workflows.
     /// For outbound HTTP, this service delegates to the unified HTTP executor to prevent drift
-    /// and avoid double-retry. Use <see cref="HttpClientExtensions.ExecuteWithResilienceAsync(HttpClient, HttpRequestMessage, ResiliencePolicy, CancellationToken)"/>
+    /// and avoid double-retry. Use <see cref="HttpClientExtensions.ExecuteWithResilienceAsync(HttpClient, HttpRequestMessage, ResiliencePolicy, CancellationToken, System.Func{System.Uri, bool})"/>
     /// for all HTTP calls; this service remains as a thin adapter for batches and cross-cutting policies.
     /// </summary>
     /// <remarks>
@@ -64,7 +64,7 @@ namespace Lidarr.Plugin.Common.Services.Network
 
         /// <summary>
         /// Thin adapter that executes a batch of HTTP requests via the shared HTTP resilience executor.
-        /// Avoids double-retry by delegating all retry behavior to <see cref="HttpClientExtensions.ExecuteWithResilienceAsync(HttpClient, HttpRequestMessage, ResiliencePolicy, CancellationToken)"/>.
+        /// Avoids double-retry by delegating all retry behavior to <see cref="HttpClientExtensions.ExecuteWithResilienceAsync(HttpClient, HttpRequestMessage, ResiliencePolicy, CancellationToken, System.Func{System.Uri, bool})"/>.
         /// Batch-level checkpoints/circuit-breaker are still honored.
         /// </summary>
         public async Task<ResilientBatchResult<HttpResponseMessage>> ExecuteHttpBatchAsync(

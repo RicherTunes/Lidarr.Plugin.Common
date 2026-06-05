@@ -165,7 +165,8 @@ namespace Lidarr.Plugin.Common.Utilities
             this HttpClient httpClient,
             HttpRequestMessage request,
             ResiliencePolicy policy,
-            CancellationToken cancellationToken = default)
+            CancellationToken cancellationToken = default,
+            Func<Uri, bool>? validateRedirectTarget = null)
         {
             if (policy == null) throw new ArgumentNullException(nameof(policy));
             return ExecuteWithResilienceAsyncCore(
@@ -176,7 +177,8 @@ namespace Lidarr.Plugin.Common.Utilities
                 policy.MaxConcurrencyPerHost,
                 policy.MaxTotalConcurrencyPerHost,
                 policy.PerRequestTimeout,
-                cancellationToken);
+                cancellationToken,
+                validateRedirectTarget);
         }
 
 
@@ -343,7 +345,8 @@ namespace Lidarr.Plugin.Common.Utilities
             int maxConcurrencyPerHost,
             int maxTotalConcurrencyPerHost,
             TimeSpan? perRequestTimeout,
-            CancellationToken cancellationToken)
+            CancellationToken cancellationToken,
+            Func<Uri, bool>? validateRedirectTarget = null)
         {
             if (httpClient == null) throw new ArgumentNullException(nameof(httpClient));
             if (request == null) throw new ArgumentNullException(nameof(request));
@@ -477,6 +480,16 @@ namespace Lidarr.Plugin.Common.Utilities
                                 var loc = response.Headers.Location;
                                 var targetUri = loc.IsAbsoluteUri ? loc : new Uri(attemptRequest.RequestUri!, loc);
 
+                                // LOOP-004: re-validate the redirect target when a validator is supplied (media
+                                // callers pass the SSRF guard) — a hostile/compromised host must not be able to
+                                // bounce the request to an internal address via a 3xx. Refuse before the next hop.
+                                if (validateRedirectTarget != null && !validateRedirectTarget(targetUri))
+                                {
+                                    response.Dispose();
+                                    throw new InvalidOperationException(
+                                        $"Refusing redirect to an unsafe URL: {targetUri.Scheme}://{targetUri.Host}.");
+                                }
+
                                 // Bound redirect-following: cap the hop count and honor the retry-budget deadline
                                 // so a redirect cycle (A->B->A, or a self-redirect) cannot loop forever. The
                                 // deadline check below the retryable path is skipped by the redirect `continue`,
@@ -536,6 +549,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                 // Continue immediately without backoff; do not count against retry budget
                                 continue;
                             }
+                            catch (InvalidOperationException) { throw; } // LOOP-004: an SSRF redirect refusal must propagate, not be swallowed
                             catch (Exception swallowEx) { SwallowToTrace(swallowEx); /* fall through to return */ }
                         }
                         // Handle 301/302 redirects only when safe (GET/HEAD). Do not auto-follow for unsafe methods (e.g., POST)
@@ -546,6 +560,15 @@ namespace Lidarr.Plugin.Common.Utilities
                             {
                                 var loc = response.Headers.Location;
                                 var targetUri = loc.IsAbsoluteUri ? loc : new Uri(attemptRequest.RequestUri!, loc);
+
+                                // LOOP-004: re-validate the redirect target when a validator is supplied (see the
+                                // 307/308 branch above) — refuse a 3xx that points at an internal/unsafe host.
+                                if (validateRedirectTarget != null && !validateRedirectTarget(targetUri))
+                                {
+                                    response.Dispose();
+                                    throw new InvalidOperationException(
+                                        $"Refusing redirect to an unsafe URL: {targetUri.Scheme}://{targetUri.Host}.");
+                                }
 
                                 // Bound redirect-following: cap the hop count and honor the retry-budget deadline
                                 // so a redirect cycle (A->B->A, or a self-redirect) cannot loop forever. The
@@ -601,6 +624,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                 // Continue without backoff; redirect handling should not consume retry budget
                                 continue;
                             }
+                            catch (InvalidOperationException) { throw; } // LOOP-004: an SSRF redirect refusal must propagate, not be swallowed
                             catch (Exception swallowEx) { SwallowToTrace(swallowEx); /* fall through to return */ }
                         }
                         return response;
