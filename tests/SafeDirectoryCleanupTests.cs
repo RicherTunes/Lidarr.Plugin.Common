@@ -112,5 +112,44 @@ namespace Lidarr.Plugin.Common.Tests
             }
             finally { try { Directory.Delete(root, true); } catch { } }
         }
+
+        // R2-05: a directory symlink/junction can be lexically in-bounds (Path.GetFullPath resolves "." and ".."
+        // but NOT the link target) while pointing OUTSIDE the root. Recursively deleting through it must be
+        // refused so cleanup can't be steered into deleting an unrelated tree. (Nested reparse points are already
+        // not traversed by .NET's recursive delete; this closes the top-level case.)
+        [Fact]
+        public void DeleteTreeUnderRoot_ReparsePointTarget_Refuses_AndLinkTargetSurvives()
+        {
+            var root = NewTempRoot();
+            var outside = NewTempRoot();
+            try
+            {
+                var outsideFile = Path.Combine(outside, "precious.flac");
+                File.WriteAllText(outsideFile, "do not delete");
+
+                var link = Path.Combine(root, "link");
+                try
+                {
+                    Directory.CreateSymbolicLink(link, outside);
+                }
+                catch (System.Exception ex) when (ex is System.IO.IOException or System.UnauthorizedAccessException or System.PlatformNotSupportedException)
+                {
+                    // Creating a directory symlink needs privilege on some platforms (e.g. Windows without
+                    // Developer Mode). Where we can't create one, there's nothing to assert here.
+                    return;
+                }
+
+                var result = SafeDirectoryCleanup.DeleteTreeUnderRoot(link, root);
+
+                Assert.False(result.Deleted, "a reparse-point target must not be recursively deleted");
+                Assert.False(string.IsNullOrEmpty(result.Reason));
+                Assert.True(File.Exists(outsideFile), "the link's real target must be untouched");
+            }
+            finally
+            {
+                try { Directory.Delete(root, true); } catch { }
+                try { Directory.Delete(outside, true); } catch { }
+            }
+        }
     }
 }
