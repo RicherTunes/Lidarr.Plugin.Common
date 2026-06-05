@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -31,6 +32,13 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// <param name="serializerOptions">Optional serializer configuration for <typeparamref name="TSession"/>.</param>
         /// <param name="logger">Optional logger for diagnostics.</param>
         public FileTokenStore(string filePath, JsonSerializerOptions? serializerOptions = null, ILogger<FileTokenStore<TSession>>? logger = null)
+            : this(filePath, TokenProtectorFactory.CreateFromEnvironment(), serializerOptions, logger)
+        {
+        }
+
+        /// <summary>Test seam: inject a specific <see cref="ITokenProtector"/> (e.g. to assert plaintext
+        /// buffers are zeroized).</summary>
+        internal FileTokenStore(string filePath, ITokenProtector protector, JsonSerializerOptions? serializerOptions = null, ILogger<FileTokenStore<TSession>>? logger = null)
         {
             if (string.IsNullOrWhiteSpace(filePath))
             {
@@ -46,7 +54,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
                 PropertyNameCaseInsensitive = true,
             };
-            _protector = TokenProtectorFactory.CreateFromEnvironment();
+            _protector = protector ?? throw new ArgumentNullException(nameof(protector));
 
             var directory = Path.GetDirectoryName(_filePath);
             if (!string.IsNullOrEmpty(directory))
@@ -78,10 +86,12 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 var maybeProtected = await JsonSerializer.DeserializeAsync<ProtectedEnvelope>(stream, _serializerOptions, cancellationToken).ConfigureAwait(false);
                 if (maybeProtected != null && maybeProtected.V == 2 && !string.IsNullOrWhiteSpace(maybeProtected.Payload))
                 {
+                    byte[]? bytes = null;
+                    byte[]? json = null;
                     try
                     {
-                        var bytes = Convert.FromBase64String(maybeProtected.Payload);
-                        var json = _protector.Unprotect(bytes);
+                        bytes = Convert.FromBase64String(maybeProtected.Payload);
+                        json = _protector.Unprotect(bytes);
                         var restored = JsonSerializer.Deserialize<PersistedEnvelope>(json, _serializerOptions);
                         // Treat a malformed envelope with a null Session as "no token" rather than
                         // letting the TokenEnvelope ctor throw ArgumentNullException — that escaped the
@@ -93,6 +103,13 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     {
                         _logger?.LogWarning(ex, "Failed to decrypt token envelope from {FilePath}", _filePath);
                         return null;
+                    }
+                    finally
+                    {
+                        // Zeroize the base64-decoded blob (plaintext under the null protector) and the
+                        // unprotected plaintext JSON so token bytes don't linger on the managed heap.
+                        if (bytes is not null) CryptographicOperations.ZeroMemory(bytes);
+                        if (json is not null) CryptographicOperations.ZeroMemory(json);
                     }
                 }
 
@@ -330,8 +347,19 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private ProtectedEnvelope CreateProtectedEnvelope(PersistedEnvelope payload)
         {
             var json = JsonSerializer.SerializeToUtf8Bytes(payload, _serializerOptions);
-            var cipher = _protector.Protect(json);
-            return new ProtectedEnvelope { V = 2, Alg = _protector.AlgorithmId, Payload = Convert.ToBase64String(cipher) };
+            byte[]? cipher = null;
+            try
+            {
+                cipher = _protector.Protect(json);
+                return new ProtectedEnvelope { V = 2, Alg = _protector.AlgorithmId, Payload = Convert.ToBase64String(cipher) };
+            }
+            finally
+            {
+                // Zeroize the serialized plaintext JSON and the cipher buffer (plaintext under the null
+                // protector) once base64-encoded — they hold token material.
+                CryptographicOperations.ZeroMemory(json);
+                if (cipher is not null) CryptographicOperations.ZeroMemory(cipher);
+            }
         }
 
         private void TryMigrateToProtectedFormat(PersistedEnvelope legacy)
