@@ -62,7 +62,8 @@ namespace Lidarr.Plugin.Common.Services.Download
                 request.Headers.Range = new RangeHeaderValue(existing, null);
             }
 
-            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            // R2-01: keep the SSRF policy in force across redirects (validate each hop + the final URI).
+            using var response = await MediaRedirectSafeSender.SendValidatedAsync(_httpClient, request, _mediaUriPolicy, HttpCompletionOption.ResponseHeadersRead, cancellationToken: cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
 
             var contentType = response.Content.Headers.ContentType?.MediaType ?? "unknown";
