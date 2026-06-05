@@ -101,12 +101,18 @@ namespace Lidarr.Plugin.Common.Services.Download
     {
         private readonly HttpClient _httpClient;
         private readonly ILogger _logger;
+        private readonly RemoteMediaUriPolicy _mediaUriPolicy;
 
         /// <summary>Creates a new assembler that uses the supplied <paramref name="httpClient"/> for chunk fetches.</summary>
-        public ChunkedHttpAssembler(HttpClient httpClient, ILogger<ChunkedHttpAssembler>? logger = null)
+        /// <param name="httpClient">Host HttpClient used for chunk GETs.</param>
+        /// <param name="logger">Optional logger.</param>
+        /// <param name="mediaUriPolicy">SSRF policy applied to every chunk URL before fetch. Defaults to
+        /// <see cref="RemoteMediaUriPolicy.Strict"/>. Pass a relaxed policy only for explicitly-local providers.</param>
+        public ChunkedHttpAssembler(HttpClient httpClient, ILogger<ChunkedHttpAssembler>? logger = null, RemoteMediaUriPolicy? mediaUriPolicy = null)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _logger = (ILogger?)logger ?? NullLogger.Instance;
+            _mediaUriPolicy = mediaUriPolicy ?? RemoteMediaUriPolicy.Strict;
         }
 
         /// <summary>
@@ -129,6 +135,14 @@ namespace Lidarr.Plugin.Common.Services.Download
             if (orderedChunks.Length == 0)
             {
                 throw new ArgumentException("Chunk list must contain at least one chunk.", nameof(chunks));
+            }
+
+            // SSRF guard: validate every chunk destination before any fetch (chunk URLs come from provider manifests).
+            foreach (var chunk in orderedChunks)
+            {
+                var guard = RemoteMediaUriGuard.Validate(chunk.Url, _mediaUriPolicy);
+                if (!guard.IsAllowed)
+                    throw new InvalidOperationException($"Refusing to download chunk {chunk.Index} from an unsafe URL: {guard.Reason}");
             }
 
             var maxConcurrency = Math.Max(1, options.MaxConcurrency);
