@@ -14,6 +14,7 @@ using System.Runtime.CompilerServices;
 using Lidarr.Plugin.Common.Services.Http;
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Common.Services.Deduplication;
+using Lidarr.Plugin.Common.Observability;
 using System.ComponentModel;
 
 namespace Lidarr.Plugin.Common.Utilities
@@ -113,7 +114,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 },
                 maxRetries,
                 initialDelayMs,
-                $"HTTP {request.Method} to {request.RequestUri}");
+                $"HTTP {request.Method} to {Scrub.Url(request.RequestUri?.ToString() ?? string.Empty)}");
         }
 
         public static Task<HttpResponseMessage> ExecuteWithResilienceAsync(
@@ -447,7 +448,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                                                !cancellationToken.IsCancellationRequested)
                     {
                         throw new TimeoutException(
-                            $"HTTP request to {request.RequestUri} exceeded the per-request timeout of {perRequestTimeout.Value}.",
+                            $"HTTP request to {Scrub.Url(request.RequestUri?.ToString() ?? string.Empty)} exceeded the per-request timeout of {perRequestTimeout.Value}.",
                             ex);
                     }
 
@@ -927,7 +928,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 var previewBytes = Encoding.UTF8.GetBytes(previewSegment);
                 var previewHex = previewLength > 0 ? BitConverter.ToString(previewBytes) : "<empty>";
                 var statusCode = (int)response.StatusCode;
-                throw new InvalidOperationException($"Expected JSON but got '{contentType ?? "none"}' from {response.RequestMessage?.RequestUri} (status {statusCode}) (first bytes: {previewHex}).");
+                throw new InvalidOperationException($"Expected JSON but got '{contentType ?? "none"}' from {Scrub.Url(response.RequestMessage?.RequestUri?.ToString() ?? "unknown")} (status {statusCode}) (first bytes: {previewHex}).");
             }
 
             options ??= DefaultCaseInsensitiveJsonOptions;
