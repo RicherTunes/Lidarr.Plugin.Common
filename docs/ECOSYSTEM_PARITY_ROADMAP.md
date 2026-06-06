@@ -1,5 +1,7 @@
 # Ecosystem Parity Roadmap
 
+<!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
+
 This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr, AppleMusicarr).
 <!-- cspell:ignore worktrees AppleMusiSharp -->
 

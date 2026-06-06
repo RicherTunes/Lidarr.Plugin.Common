@@ -1,5 +1,7 @@
 # 6-Month Takeover Roadmap
 
+<!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
+
 **Scope:** Feb 17 - Aug 31, 2026
 **Milestone:** v2.0 Plugin Ecosystem Maturity + Takeover (Phases 12-17)
 **Repositories:** Brainarr, Qobuzarr, Tidalarr, AppleMusicarr, Lidarr.Plugin.Common

@@ -14,15 +14,8 @@ Follow the harness in [How-to: Test `StreamingPlugin<TModule, TSettings>`](how-t
 ## What feeds do I need in `NuGet.config`?
 Only `nuget.org` (plus the TagLib feed used by the host). Build and CI succeed without preview feeds. If you must add previews for your own tooling, gate them behind CI-specific environment variables.
 
-## RS0016/RS0017 analyzers fail locally. What now?
-Use the public API baselining scripts:
-
-```powershell
-# Update shipped/unshipped baselines after intentional API changes
-./tools/Update-PublicApiBaselines.ps1 -Project src/Abstractions/Lidarr.Plugin.Abstractions.csproj
-```
-
-Run this under `net8.0` when you add or remove public surface area.
+## Public API analyzers (RS0016/RS0017) — removed
+The `Microsoft.CodeAnalysis.PublicApiAnalyzers` gate and its `PublicAPI.*.txt` baselines were removed 2026-06, so you will no longer see RS0016/RS0017 locally. Public-surface changes to Abstractions or Common are tracked through review and `CHANGELOG.md`; see [Public API baselines](reference/PUBLIC_API_BASELINES.md) for the rationale.
 
 ## Packaging script is noisy (warnings or unexpected DLLs). How do I diagnose it?
 Run `New-PluginPackage` with `-Verbose` to inspect each step. Verify the publish directory contains only plugin-owned assemblies before packaging, and confirm `ManifestCheck.ps1` passes to catch mismatched versions early.

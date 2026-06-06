@@ -15,7 +15,6 @@ This repository ships with a multi-stage GitHub Actions pipeline that keeps the 
 - `dotnet build -warnaserror`
 - `dotnet test` for all TFMs with XPlat coverage
 - `dotnet pack` (dry run) for `Lidarr.Plugin.Common` <!-- TODO(docval): TestKit pack not found in CI workflow as of 2026-05-31 -->
-- Public API analyzer baselines (`RS0016`, `RS0026`)
 - Snippet extraction via `dotnet run --project tools/DocTools/SnippetVerifier`
 
 ## Coverage details
@@ -65,7 +64,6 @@ jobs:
 ## Maintenance
 
 - Dependabot keeps Actions/NuGet dependencies current.
-- Update `PublicAPI.*.txt` whenever the public surface changes.
 - Keep docs automation in sync with [`docs/dev-guide/TESTING_DOCS.md`](TESTING_DOCS.md).
 
 
