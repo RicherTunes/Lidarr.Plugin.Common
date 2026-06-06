@@ -27,6 +27,11 @@ jobs:
         run: |
           ./scripts/lint-date-parsing.ps1 -SelfTest
           ./scripts/lint-date-parsing.ps1 -Path . -Mode ci
+      - name: Sync-over-async gate
+        shell: pwsh
+        run: |
+          ./scripts/lint-sync-over-async.ps1 -SelfTest
+          ./scripts/lint-sync-over-async.ps1 -Path . -Mode ci
   secret-scan:
     runs-on: ubuntu-latest
     steps:

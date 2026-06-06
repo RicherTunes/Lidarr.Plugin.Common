@@ -25,6 +25,7 @@ param(
     [string]$Mode = 'interactive',
     [string]$AllowlistPath,
     [string]$DiffBase,
+    [string]$SourceDir,
     [switch]$SelfTest
 )
 
@@ -97,19 +98,35 @@ function Get-DiffAddedLines {
 
 # ─── Core Scan ───────────────────────────────────────────────────────────────
 
+# Resolve the source directory to scan. Explicit -SourceDir wins; otherwise try 'src' (most plugins +
+# Common), then a '*.Plugin' directory (Brainarr's layout: Brainarr.Plugin/). Returns $null if none found.
+function Resolve-SourceDir {
+    param([string]$RepoRoot, [string]$Explicit)
+    if ($Explicit) {
+        $p = Join-Path $RepoRoot $Explicit
+        return (Test-Path $p) ? $p : $null
+    }
+    $src = Join-Path $RepoRoot 'src'
+    if (Test-Path $src) { return $src }
+    $plugin = Get-ChildItem -Path $RepoRoot -Directory -Filter '*.Plugin' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($plugin) { return $plugin.FullName }
+    return $null
+}
+
 function Invoke-Scan {
     param(
         [string]$RepoRoot,
         [array]$Allowlist,
-        [hashtable]$DiffLines
+        [hashtable]$DiffLines,
+        [string]$SourceDir
     )
 
     $violations = @()
     $suppressed = @()
-    $srcPath = Join-Path $RepoRoot 'src'
+    $srcPath = Resolve-SourceDir -RepoRoot $RepoRoot -Explicit $SourceDir
 
-    if (-not (Test-Path $srcPath)) {
-        Write-Warning "No src/ directory found at $RepoRoot"
+    if (-not $srcPath -or -not (Test-Path $srcPath)) {
+        Write-Warning "No source directory found at $RepoRoot (tried 'src' and '*.Plugin')"
         return @{ Violations = $violations; Suppressed = $suppressed }
     }
 
@@ -118,6 +135,11 @@ function Invoke-Scan {
         $relativePath = $file.FullName.Substring($RepoRoot.Length).TrimStart('\', '/')
         $lines = @(Get-Content $file.FullName)
         for ($i = 0; $i -lt $lines.Count; $i++) {
+            # Skip comment lines (doc-comments and block comments routinely *mention* the pattern,
+            # e.g. a "/// ... .GetAwaiter().GetResult() ..." note — those are not real call sites).
+            $trimmed = $lines[$i].TrimStart()
+            if ($trimmed.StartsWith('//') -or $trimmed.StartsWith('*') -or $trimmed.StartsWith('/*')) { continue }
+
             if ($lines[$i] -match $script:Pattern) {
                 $lineNum = $i + 1
                 $match = @{
@@ -258,7 +280,7 @@ if ($DiffBase) {
     $diffLines = Get-DiffAddedLines -Base $DiffBase -RepoRoot $resolvedPath
 }
 
-$result = Invoke-Scan -RepoRoot $resolvedPath -Allowlist $allowlist -DiffLines $diffLines
+$result = Invoke-Scan -RepoRoot $resolvedPath -Allowlist $allowlist -DiffLines $diffLines -SourceDir $SourceDir
 
 # ─── Output ──────────────────────────────────────────────────────────────────
 

@@ -35,6 +35,7 @@ param(
     [ValidateSet('interactive', 'ci')]
     [string]$Mode = 'interactive',
     [string]$AllowlistPath,
+    [string]$SourceDir,
     [switch]$SelfTest
 )
 
@@ -85,14 +86,29 @@ function Test-Allowlisted {
 
 # ─── Core Scan ───────────────────────────────────────────────────────────────
 
+# Resolve the source directory to scan. Explicit -SourceDir wins; otherwise try 'src' (most plugins +
+# Common), then a '*.Plugin' directory (Brainarr's layout: Brainarr.Plugin/). Returns $null if none found.
+function Resolve-SourceDir {
+    param([string]$RepoRoot, [string]$Explicit)
+    if ($Explicit) {
+        $p = Join-Path $RepoRoot $Explicit
+        return (Test-Path $p) ? $p : $null
+    }
+    $src = Join-Path $RepoRoot 'src'
+    if (Test-Path $src) { return $src }
+    $plugin = Get-ChildItem -Path $RepoRoot -Directory -Filter '*.Plugin' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($plugin) { return $plugin.FullName }
+    return $null
+}
+
 function Invoke-Scan {
-    param([string]$RepoRoot, [array]$Allowlist)
+    param([string]$RepoRoot, [array]$Allowlist, [string]$SourceDir)
 
     $violations = @()
     $suppressed = @()
-    $srcPath = Join-Path $RepoRoot 'src'
-    if (-not (Test-Path $srcPath)) {
-        Write-Warning "No src/ directory found at $RepoRoot"
+    $srcPath = Resolve-SourceDir -RepoRoot $RepoRoot -Explicit $SourceDir
+    if (-not $srcPath -or -not (Test-Path $srcPath)) {
+        Write-Warning "No source directory found at $RepoRoot (tried 'src' and '*.Plugin')"
         return @{ Violations = $violations; Suppressed = $suppressed }
     }
 
@@ -102,6 +118,10 @@ function Invoke-Scan {
         $lines = @(Get-Content $file.FullName)
         for ($i = 0; $i -lt $lines.Count; $i++) {
             $line = $lines[$i]
+
+            # Skip comment lines — doc/block comments routinely mention these APIs in prose.
+            $trimmed = $line.TrimStart()
+            if ($trimmed.StartsWith('//') -or $trimmed.StartsWith('*') -or $trimmed.StartsWith('/*')) { continue }
 
             $rule = $null
             if ($line -match $script:CulturePattern) {
@@ -213,7 +233,7 @@ if (-not $AllowlistPath) {
 }
 
 $allowlist = Read-Allowlist $AllowlistPath
-$result = Invoke-Scan -RepoRoot $resolvedPath -Allowlist $allowlist
+$result = Invoke-Scan -RepoRoot $resolvedPath -Allowlist $allowlist -SourceDir $SourceDir
 
 if ($result.Suppressed.Count -gt 0) {
     Write-Host "Suppressed (allowlisted) date-parsing sites: $($result.Suppressed.Count)" -ForegroundColor DarkGray
