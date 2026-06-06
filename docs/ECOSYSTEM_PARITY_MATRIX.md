@@ -1,5 +1,7 @@
 # RicherTunes Lidarr Plugin Ecosystem — Parity Matrix
 
+<!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
+
 **Generated**: 2026-05-25 (Wave 21 parity-mission session). **Refreshed**: 2026-05-25 (Wave-22 adversarial-review pass). **Refreshed again**: 2026-05-25 (Wave-23 adversarial-review pass — apple-drift correction + security hardening + parity convergence). **Refreshed again**: 2026-05-26 (Mission #52 stale-cell pass + Mission #53 rows 31-35 cross-cutting concerns).
 **Common pin**: `v1.17.0` (639d573 — restored lockstep Wave-23 after applemusicarr was discovered ahead by one tag; siblings brainarr/tidalarr/qobuzarr bumped to match).
 **Plugins covered**: `applemusicarr`, `tidalarr`, `qobuzarr`, `brainarr` + the shared `lidarr.plugin.common`

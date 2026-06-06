@@ -32,6 +32,11 @@ jobs:
         run: |
           ./scripts/lint-sync-over-async.ps1 -SelfTest
           ./scripts/lint-sync-over-async.ps1 -Path . -Mode ci
+      - name: Doc script-reference gate (no docs pointing at deleted scripts)
+        shell: pwsh
+        run: |
+          ./scripts/lint-doc-script-refs.ps1 -SelfTest
+          ./scripts/lint-doc-script-refs.ps1 -CI
       - name: Ecosystem parity harness self-test
         shell: pwsh
         run: ./scripts/tests/Test-EcosystemParityLint.ps1

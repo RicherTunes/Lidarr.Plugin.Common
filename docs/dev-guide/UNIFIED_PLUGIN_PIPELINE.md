@@ -1,5 +1,7 @@
 # Unified Plugin Pipeline
 
+<!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
+
 This document captures the governance model for versioning plugins that consume `Lidarr.Plugin.Common` alongside official Lidarr host binaries. The intent is to keep every plugin aligned to the same host assemblies, the same shared library commit, and the same packaging rules.
 
 This playbook applies to **plugin repositories**. The shared `Lidarr.Plugin.Common` package keeps its own semantic versioning and is not pinned to host assembly versions.

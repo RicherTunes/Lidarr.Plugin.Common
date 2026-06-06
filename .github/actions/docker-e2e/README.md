@@ -1,5 +1,7 @@
 # Docker E2E (Lidarr Plugin) — composite action
 
+<!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
+
 Runs the wave-21/22 Docker E2E smoke harness for any Lidarr plugin that uses
 `Lidarr.Plugin.Common.TestKit.Hosting.LidarrContainerFixture`. Boots the
 plugin inside a real Lidarr container (via the per-plugin fixture), runs the

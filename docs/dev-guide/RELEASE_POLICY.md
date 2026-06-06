@@ -9,7 +9,7 @@ This repository ships two NuGet packages:
 
 - **Semantic Versioning** with conservative evolution.
 - **AssemblyVersion** stays fixed for the entire major (1.0.0.0 for 1.x) to avoid binding redirect noise.
-- **CI Guardrails**: `Microsoft.CodeAnalysis.PublicApiAnalyzers` + checked-in `PublicAPI.*` baselines force intentional API changes.
+- **CI Guardrails**: the packaging-closure check (`ValidatePackageClosure`, run by the merged build) keeps the shipped DLL host-clean; public-surface changes are reviewed and recorded in `CHANGELOG.md`. (The `Microsoft.CodeAnalysis.PublicApiAnalyzers` baseline gate was retired 2026-06 — see [Public API baselines](../reference/PUBLIC_API_BASELINES.md).)
 - **Breaking changes** require:
   - Major version bump.
   - Migration notes for plugin authors.
@@ -37,7 +37,7 @@ This repository ships two NuGet packages:
 
 - [ ] CHANGELOG entry complete.
 - [ ] Docs updated (`README`, playbooks, migration guides).
-- [ ] Public API baselines (`src/Abstractions/PublicAPI.*`) refreshed when Abstractions changes.
+- [ ] `CHANGELOG.md` records any public-surface change to Abstractions or Common.
 - [ ] Tests green (`dotnet test`).
 - [ ] Sample loader (`examples/IsolationHostSample`) still compiles and loads generated plugins.
 - [ ] Packages pack locally (`dotnet pack`).
