@@ -134,6 +134,22 @@ useDefault = true
         Add-TestFile -RepoPath $repo -RelPath ".github/workflows/$wf" -Content "name: $wf"
     }
 
+    # plugin.json — required by the version-contract check. commonVersion is read from the real
+    # Common csproj so the golden fixture tracks the canonical version instead of drifting when it bumps.
+    $commonVer = '1.0.0'
+    $csproj = Join-Path $PSScriptRoot '../../src/Lidarr.Plugin.Common.csproj'
+    if (Test-Path $csproj) {
+        $vm = Select-String -Path $csproj -Pattern '<Version>([^<]+)</Version>' | Select-Object -First 1
+        if ($vm) { $commonVer = $vm.Matches[0].Groups[1].Value }
+    }
+    Add-TestFile -RepoPath $repo -RelPath 'plugin.json' -Content @"
+{
+  "commonVersion": "$commonVer",
+  "version": "1.0.0",
+  "targetFramework": "net8.0"
+}
+"@
+
     return $repo
 }
 
