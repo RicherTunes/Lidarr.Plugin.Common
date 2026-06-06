@@ -18,6 +18,15 @@ jobs:
         run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1
       - name: Test (full unit suite, excl. quarantined)
         run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined"
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Date-parsing gate (culture-safety + epoch guard)
+        shell: pwsh
+        run: |
+          ./scripts/lint-date-parsing.ps1 -SelfTest
+          ./scripts/lint-date-parsing.ps1 -Path . -Mode ci
   secret-scan:
     runs-on: ubuntu-latest
     steps:
