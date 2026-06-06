@@ -59,7 +59,7 @@ public static class Scrub
     ///
     /// Comparison is case-insensitive. The set of sensitive headers includes:
     /// <c>Authorization</c>, <c>X-API-Key</c>, <c>X-Auth-Token</c>,
-    /// <c>X-Access-Token</c>, <c>Cookie</c>, <c>Set-Cookie</c>, <c>Proxy-Authorization</c>.
+    /// <c>X-Access-Token</c>, <c>Music-User-Token</c>, <c>Cookie</c>, <c>Set-Cookie</c>, <c>Proxy-Authorization</c>.
     /// </summary>
     public static IDictionary<string, string> Headers(IDictionary<string, string> headers)
     {
@@ -139,6 +139,7 @@ public static class Scrub
         "X-API-Key",
         "X-Auth-Token",
         "X-Access-Token",
+        "Music-User-Token",
         "Cookie",
         "Set-Cookie",
         "Proxy-Authorization",

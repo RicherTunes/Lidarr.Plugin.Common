@@ -38,7 +38,7 @@ public static partial class LogRedactor
     /// <c>Basic dXNlcm5hbWU6cGFzc3dvcmQ=</c> are fully redacted, not partially.
     /// Stops at end-of-line or common log-line delimiters (<c>, ; |</c> and <c>}</c>).
     /// </summary>
-    [GeneratedRegex(@"(Authorization|X-Api-Key|api[_-]?key)\s*[:=]\s*[^\r\n,;|}]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(Authorization|X-Api-Key|api[_-]?key|X-Auth-Token|X-Access-Token|Music-User-Token)\s*[:=]\s*[^\r\n,;|}]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex AuthHeaderPattern();
 
     /// <summary>
@@ -53,6 +53,16 @@ public static partial class LogRedactor
     /// <summary>Matches generic long alphanumeric tokens (potential API keys).</summary>
     [GeneratedRegex(@"\b[A-Za-z0-9]{32,}\b", RegexOptions.Compiled)]
     private static partial Regex GenericTokenPattern();
+
+    /// <summary>
+    /// Matches a PEM-armored private-key block (<c>-----BEGIN [RSA|EC|…] PRIVATE KEY----- … -----END … PRIVATE KEY-----</c>)
+    /// and redacts the whole block. Amazon's device-registration bundle carries a
+    /// <c>devicePrivateKeyPem</c>; logging it verbatim leaks the device signing key. The base64 body
+    /// spans multiple lines, so the line-anchored generic catch-all only nibbles individual lines and
+    /// the structural <c>BEGIN/END</c> markers survive — this strips the entire armored block.
+    /// </summary>
+    [GeneratedRegex(@"-----BEGIN[^-]*PRIVATE KEY-----.*?-----END[^-]*PRIVATE KEY-----", RegexOptions.Compiled | RegexOptions.Singleline | RegexOptions.IgnoreCase)]
+    private static partial Regex PemPrivateKeyPattern();
 
     /// <summary>Matches RFC-ish email addresses (PII).</summary>
     [GeneratedRegex(@"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
@@ -71,7 +81,7 @@ public static partial class LogRedactor
     /// Catches nested credentials like <c>{"api_key":"sk-abc..."}</c> where the value alone may not
     /// match a structured token pattern (e.g., short opaque tokens, non-prefixed API keys).
     /// </summary>
-    [GeneratedRegex(@"""(api[_-]?key|access[_-]?token|refresh[_-]?token|secret|client[_-]?secret|password|authorization|bearer|token|session[_-]?id|x-api-key)""\s*:\s*""([^""\\]|\\.)*""", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"""(api[_-]?key|access[_-]?token|refresh[_-]?token|developer[_-]?token|music[_-]?user[_-]?token|user[_-]?auth[_-]?token|app[_-]?secret|device[_-]?private[_-]?key|secret|client[_-]?secret|password|authorization|bearer|token|session[_-]?id|x-api-key)""\s*:\s*""([^""\\]|\\.)*""", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex JsonSensitiveValuePattern();
 
     /// <summary>
@@ -88,7 +98,7 @@ public static partial class LogRedactor
     /// false positives on normal log content (<c>state=available</c>,
     /// <c>status code=ETIMEDOUT</c>, <c>method signature=...</c>).
     /// </remarks>
-    [GeneratedRegex(@"\b(access[_-]?token|id[_-]?token|refresh[_-]?token|client[_-]?secret|code[_-]?verifier|code[_-]?challenge|app[_-]?secret|api[_-]?key|password|pwd|bearer)=([^&\s,;|}""'\r\n]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"\b(access[_-]?token|id[_-]?token|refresh[_-]?token|developer[_-]?token|music[_-]?user[_-]?token|user[_-]?auth[_-]?token|client[_-]?secret|app[_-]?secret|device[_-]?private[_-]?key|code[_-]?verifier|code[_-]?challenge|api[_-]?key|password|pwd|bearer)=([^&\s,;|}""'\r\n]+)", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex KeyValuePairTokenPattern();
 
     /// <summary>
@@ -126,6 +136,9 @@ public static partial class LogRedactor
             return value ?? string.Empty;
 
         // Apply patterns in order of specificity (most specific first)
+        // PEM private-key blocks first: redact the whole armored block atomically before any
+        // line-oriented pattern can fragment it (Amazon devicePrivateKeyPem and friends).
+        value = PemPrivateKeyPattern().Replace(value, REDACTED);
         value = OpenAiKeyPattern().Replace(value, REDACTED);
         value = AnthropicKeyPattern().Replace(value, REDACTED);
         value = GoogleKeyPattern().Replace(value, REDACTED);
