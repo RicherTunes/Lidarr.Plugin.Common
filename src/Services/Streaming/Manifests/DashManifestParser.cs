@@ -1,8 +1,10 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Xml;
 using System.Xml.Linq;
 
 namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
@@ -75,7 +77,11 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
                 throw new ArgumentException("Manifest content is empty.", nameof(manifestContent));
             }
 
-            XDocument doc = XDocument.Parse(manifestContent);
+            // LOOP-012 (#24): a DASH manifest is remote CDN content (attacker-influenceable). XDocument.Parse
+            // processes internal DTD entities by default, so a hostile manifest could carry a billion-laughs
+            // expansion bomb (DoS) or, with a resolver, an external-entity XXE (SSRF / local-file read). Parse
+            // with DTDs prohibited and no resolver so any <!DOCTYPE> is rejected outright.
+            XDocument doc = LoadHardened(manifestContent);
             XElement mpd = doc.Root ?? throw new FormatException("DASH manifest has no root element.");
             XNamespace ns = mpd.GetDefaultNamespace();
 
@@ -136,6 +142,23 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
             bool isEncrypted = !string.IsNullOrWhiteSpace(pssh) || !string.IsNullOrWhiteSpace(keyId);
 
             return new StreamManifest(variants, segments, codec, fileExtension, isEncrypted, keyId, pssh);
+        }
+
+        // LOOP-012 (#24): load MPD XML with DTD processing prohibited and no external resolver. Any
+        // <!DOCTYPE> (the carrier for XXE/SSRF and billion-laughs entity bombs) is rejected with an
+        // XmlException; well-formed DOCTYPE-free manifests parse exactly as before.
+        private static XDocument LoadHardened(string manifestContent)
+        {
+            var settings = new XmlReaderSettings
+            {
+                DtdProcessing = DtdProcessing.Prohibit,
+                XmlResolver = null,
+                MaxCharactersFromEntities = 0,
+            };
+
+            using var reader = new StringReader(manifestContent);
+            using var xmlReader = XmlReader.Create(reader, settings);
+            return XDocument.Load(xmlReader);
         }
 
         private static bool IsAudio(XElement adaptationSet)
