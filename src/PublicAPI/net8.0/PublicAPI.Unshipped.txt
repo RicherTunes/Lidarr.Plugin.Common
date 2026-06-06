@@ -224,3 +224,7 @@ static Lidarr.Plugin.Common.Utilities.TimeParsing.TryFromUnixTimeMilliseconds(lo
 static Lidarr.Plugin.Common.Utilities.TimeParsing.TryParseIsoDateInvariant(string? text, out System.DateTimeOffset value) -> bool
 Lidarr.Plugin.Common.Services.Download.PartialFileReset
 static Lidarr.Plugin.Common.Services.Download.PartialFileReset.ResolveWriteMode(bool serverHonoredRange) -> System.IO.FileMode
+Lidarr.Plugin.Common.Utilities.StringSimilarity
+static Lidarr.Plugin.Common.Utilities.StringSimilarity.LevenshteinDistance(string? s1, string? s2) -> int
+static Lidarr.Plugin.Common.Utilities.StringSimilarity.Jaro(string? s1, string? s2) -> double
+static Lidarr.Plugin.Common.Utilities.StringSimilarity.JaroWinkler(string? s1, string? s2, double prefixScale = 0.1) -> double
