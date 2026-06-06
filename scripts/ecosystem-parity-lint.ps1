@@ -21,7 +21,8 @@ param(
     [string]$Mode = 'interactive',
     [ValidateSet('all', 'Structural', 'VersionContract')]
     [string]$Check = 'all',
-    [string]$CommonRoot
+    [string]$CommonRoot,
+    [string]$EmitMatrix
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,13 +47,14 @@ function Get-PluginRepos {
     param([string]$CommonRoot)
     $parent = Split-Path $CommonRoot -Parent
     $repos = @()
-    foreach ($name in @('qobuzarr', 'tidalarr', 'applemusicarr')) {
+    foreach ($name in @('amazonmusicarr', 'qobuzarr', 'tidalarr', 'applemusicarr', 'brainarr')) {
         $path = Join-Path $parent $name
         $capPath = Join-Path $parent ($name.Substring(0,1).ToUpper() + $name.Substring(1))
         if (Test-Path $path) { $repos += @{ Name = $name; Path = $path } }
         elseif (Test-Path $capPath) { $repos += @{ Name = $name; Path = $capPath } }
     }
-    return $repos
+    # Always return an array so callers can use .Count even with 0/1 matches.
+    return ,@($repos)
 }
 
 function Test-RequiredFiles {
@@ -479,10 +481,20 @@ if ($RepoPath) {
 }
 
 $totalViolations = @()
+$matrixRepos = [ordered]@{}
 
 foreach ($repo in $reposToScan) {
     Write-Host "Scanning: $($repo.Name)" -ForegroundColor Cyan
     $violations = @(Find-AllViolations -RepoPath $repo.Path -RepoName $repo.Name -CheckScope $Check -CanonicalCommonVersion $script:CanonicalCommonVersion)
+
+    # Machine-readable matrix row for this repo (-EmitMatrix).
+    $repoErrors = @($violations | Where-Object { $_.Severity -eq 'error' })
+    $matrixRepos[$repo.Name] = [ordered]@{
+        status        = if ($repoErrors.Count -eq 0) { 'pass' } else { 'fail' }
+        errorCount    = $repoErrors.Count
+        warningCount  = @($violations | Where-Object { $_.Severity -ne 'error' }).Count
+        violations    = @($violations | ForEach-Object { [ordered]@{ category = $_.Category; path = $_.Path; message = $_.Message; severity = $_.Severity } })
+    }
 
     if ($violations.Count -eq 0) {
         Write-Host "  [OK] No violations" -ForegroundColor Green
@@ -508,6 +520,23 @@ foreach ($repo in $reposToScan) {
 }
 
 $totalErrors = @($totalViolations | Where-Object { $_.Severity -eq 'error' })
+
+# Machine-readable matrix artifact (-EmitMatrix <path>): one greppable JSON of every repo's parity
+# status + violations against the canonical spec. CI can diff/gate this; humans get a single source
+# of truth that never drifts from reality (it is generated, not hand-maintained).
+if ($EmitMatrix) {
+    $matrix = [ordered]@{
+        schema                 = 'ecosystem-parity-matrix/v1'
+        canonicalCommonVersion = $script:CanonicalCommonVersion
+        checkScope             = $Check
+        repoCount              = $reposToScan.Count
+        errorCount             = $totalErrors.Count
+        allPass                = ($totalErrors.Count -eq 0)
+        repos                  = $matrixRepos
+    }
+    $matrix | ConvertTo-Json -Depth 8 | Set-Content -Path $EmitMatrix -Encoding utf8
+    Write-Host "Matrix written: $EmitMatrix" -ForegroundColor Cyan
+}
 
 Write-Host "=================================================" -ForegroundColor Cyan
 Write-Host "Summary: Repos=$($reposToScan.Count), Errors=$($totalErrors.Count), Total=$($totalViolations.Count)" -ForegroundColor Cyan
