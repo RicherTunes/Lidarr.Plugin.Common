@@ -108,6 +108,22 @@ function Test-RequiredWorkflows {
     param([string]$RepoPath, [string]$RepoName)
     $violations = @()
     $workflowDir = Join-Path $RepoPath '.github/workflows'
+    if (-not (Test-Path $workflowDir)) {
+        # Gitea-primary repos deliberately drop .github/workflows (GitHub Actions out of
+        # credits). Deleting GitHub CI must not be a free pass out of all CI requirements:
+        # the repo must then carry the Gitea CI workflow instead.
+        $giteaCi = Join-Path $RepoPath '.gitea/workflows/ci.yml'
+        if (-not (Test-Path $giteaCi)) {
+            $violations += [PSCustomObject]@{
+                Repo = $RepoName
+                Category = 'MissingWorkflow'
+                Path = '.gitea/workflows/ci.yml'
+                Message = "Repo has no CI workflows at all: .github/workflows is absent and .gitea/workflows/ci.yml is missing"
+                Severity = 'error'
+            }
+        }
+        return $violations
+    }
     foreach ($req in $spec.requiredWorkflows) {
         $wfPath = Join-Path $workflowDir $req.file
         if (-not (Test-Path $wfPath)) {
@@ -477,6 +493,9 @@ if ($RepoPath) {
     }
 } else {
     Write-Host "Usage: ecosystem-parity-lint.ps1 [-RepoPath <path>] [-AllRepos] [-Mode ci|interactive]"
+    # In CI mode a missing scan target is a misconfigured invocation, not a pass —
+    # exiting 0 here would let a broken workflow step silently green-light merges.
+    if ($Mode -eq 'ci') { exit 2 }
     exit 0
 }
 

@@ -252,6 +252,27 @@ try {
     $result = & $lintScript -RepoPath $repo10 -Mode interactive *>&1
     Assert-ExitCode -Expected 0 -Actual $LASTEXITCODE -TestName "Interactive mode non-blocking"
 
+    # ─── Test 11: Gitea-primary repo (no .github/workflows, has .gitea ci.yml) passes ───
+    Write-Host "`n[TEST 11] Gitea-primary repo (no GitHub workflows, has .gitea ci.yml) passes..." -ForegroundColor Cyan
+    $repo11 = New-GoldenRepo -Root $testRoot -Name 'gitea-primary'
+    Remove-Item (Join-Path $repo11 '.github/workflows') -Recurse -Force
+    Add-TestFile -RepoPath $repo11 -RelPath '.gitea/workflows/ci.yml' -Content 'name: CI'
+    $result = & $lintScript -RepoPath $repo11 -Mode ci *>&1
+    Assert-ExitCode -Expected 0 -Actual $LASTEXITCODE -TestName "Gitea-primary repo passes"
+
+    # ─── Test 12: repo with NO CI at all (neither GitHub nor Gitea workflows) fails ───
+    Write-Host "`n[TEST 12] Repo with no CI workflows at all fails..." -ForegroundColor Cyan
+    $repo12 = New-GoldenRepo -Root $testRoot -Name 'no-ci'
+    Remove-Item (Join-Path $repo12 '.github/workflows') -Recurse -Force
+    $result = & $lintScript -RepoPath $repo12 -Mode ci *>&1
+    Assert-ExitCode -Expected 1 -Actual $LASTEXITCODE -TestName "No-CI repo fails"
+    Assert-OutputContains -Output $result -Pattern 'no CI workflows' -TestName "No-CI violation message"
+
+    # ─── Test 13: CI mode with no scan target must not silently pass ───
+    Write-Host "`n[TEST 13] CI mode without -RepoPath/-AllRepos exits non-zero..." -ForegroundColor Cyan
+    $result = & $lintScript -Mode ci *>&1
+    Assert-ExitCode -Expected 2 -Actual $LASTEXITCODE -TestName "CI mode usage exit code"
+
     # ═══════════════════════════════════════════════════
     Write-Host "`n=================================================" -ForegroundColor Cyan
     $total = $script:passed + $script:failed
