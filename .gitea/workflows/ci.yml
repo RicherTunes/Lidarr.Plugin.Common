@@ -7,6 +7,7 @@ on:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -17,31 +18,29 @@ jobs:
       - name: Build (Release, warnings-as-errors)
         run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1
       - name: Test (full unit suite, excl. quarantined)
-        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined"
+        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" --blame-hang-timeout 10m
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      # && chaining: a failing self-test must fail the step. Sequential lines mask the
+      # first command's exit code (the step reports only the last command's).
       - name: Date-parsing gate (culture-safety + epoch guard)
         shell: pwsh
-        run: |
-          ./scripts/lint-date-parsing.ps1 -SelfTest
-          ./scripts/lint-date-parsing.ps1 -Path . -Mode ci
+        run: ./scripts/lint-date-parsing.ps1 -SelfTest && ./scripts/lint-date-parsing.ps1 -Path . -Mode ci
       - name: Sync-over-async gate
         shell: pwsh
-        run: |
-          ./scripts/lint-sync-over-async.ps1 -SelfTest
-          ./scripts/lint-sync-over-async.ps1 -Path . -Mode ci
+        run: ./scripts/lint-sync-over-async.ps1 -SelfTest && ./scripts/lint-sync-over-async.ps1 -Path . -Mode ci
       - name: Doc script-reference gate (no docs pointing at deleted scripts)
         shell: pwsh
-        run: |
-          ./scripts/lint-doc-script-refs.ps1 -SelfTest
-          ./scripts/lint-doc-script-refs.ps1 -CI
+        run: ./scripts/lint-doc-script-refs.ps1 -SelfTest -CI && ./scripts/lint-doc-script-refs.ps1 -CI
       - name: Ecosystem parity harness self-test
         shell: pwsh
         run: ./scripts/tests/Test-EcosystemParityLint.ps1
   secret-scan:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - name: gitleaks (secret scan)
