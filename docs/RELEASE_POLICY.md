@@ -35,7 +35,7 @@ NOT required for:
 
 Required when:
 
-- New bridge contracts shipped (Unshipped to Shipped)
+- New bridge contracts shipped (new public surface in Abstractions)
 - New default implementations registered in AddBridgeDefaults()
 - New testkit fixtures or compliance test infrastructure
 - Breaking behavioral changes in existing contracts

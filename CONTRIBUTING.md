@@ -123,7 +123,7 @@ dotnet restore src/Lidarr.Plugin.Common.csproj
 dotnet build src/Lidarr.Plugin.Common.csproj --configuration Debug
 dotnet test tests/ --verbosity normal
 
-> API compatibility runs in CI via the `apicompat` tool—no local PackageValidation packages required.
+> There is no automated API-compatibility gate. Public-surface changes are caught in code review and recorded in `CHANGELOG.md`; consumer plugins compile Common from a pinned source submodule, so breaking changes surface as compile errors when a plugin re-pins.
 
 # Run examples validation
 cd examples/
