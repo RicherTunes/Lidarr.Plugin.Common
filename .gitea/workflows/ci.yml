@@ -15,31 +15,34 @@ jobs:
           dotnet-version: '8.0.x'
       - name: Restore
         run: dotnet restore
-      # ContinuousIntegrationBuild=false: Microsoft.SourceLink.GitHub cannot resolve the
-      # Gitea origin (192.168.2.59), so under the default CI deterministic-source-paths the
-      # SourceLink targets hard-error ("source control information is not available") and
-      # -warnaserror fails the build. This Gitea job is a correctness gate, not a publish
-      # pipeline, so source-link determinism is not needed here.
+      # EnableSourceLink=false: Microsoft.SourceLink.GitHub cannot map the Gitea origin
+      # (192.168.2.59), so its target emits "source control information is not available"
+      # which -warnaserror promotes to a build failure. Verified against a gitea-origin
+      # clone: ContinuousIntegrationBuild=false does NOT skip the target; this flag does.
+      # This Gitea job is a correctness gate, not a publish pipeline, so no source link
+      # is needed here. GitHub-side builds keep SourceLink.
       - name: Build (Release, warnings-as-errors)
-        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -p:ContinuousIntegrationBuild=false -m:1
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -p:EnableSourceLink=false -m:1
       - name: Test (full unit suite, excl. quarantined)
-        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -p:ContinuousIntegrationBuild=false --blame-hang-timeout 10m
+        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -p:EnableSourceLink=false --blame-hang-timeout 10m
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
       # The bare runner image has no pwsh and the catthehacker container can't reach Gitea
-      # for checkout on this host (the #12 blocker). Installing PowerShell as a dotnet global
-      # tool gives pwsh on the runner the gates need, without a container or host config.
+      # for checkout on this host (the #12 blocker). `dotnet tool install PowerShell` also
+      # fails under act_runner (DotnetToolSettings.xml error), so fetch the self-contained
+      # release tarball directly — the same pattern the gitleaks job uses.
       - name: Install PowerShell
         shell: bash
         run: |
-          dotnet tool install --global PowerShell
-          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          set -e
+          curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /opt/pwsh
+          tar -xzf /tmp/pwsh.tgz -C /opt/pwsh
+          chmod +x /opt/pwsh/pwsh
+          echo "/opt/pwsh" >> "$GITHUB_PATH"
       # && chaining: a failing self-test must fail the step. Sequential lines mask the
       # first command's exit code (the step reports only the last command's).
       - name: Date-parsing gate (culture-safety + epoch guard)
