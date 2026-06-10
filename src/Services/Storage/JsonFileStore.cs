@@ -438,7 +438,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
 
         /// <summary>
         /// Gets or sets the time source used for TTL timestamps and expiry checks. Defaults to
-        /// <see cref="TimeProvider.System"/>. Tests can supply a fake provider to exercise TTL
+        /// <c>TimeProvider.System</c>. Tests can supply a fake provider to exercise TTL
         /// expiry deterministically without wall-clock <c>Task.Delay</c>.
         /// </summary>
         public TimeProvider? Clock { get; set; }
