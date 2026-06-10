@@ -48,6 +48,20 @@ public class LogRedactorVendorKeyContractTests
         Assert.DoesNotContain("appleMutHdr5", result);
     }
 
+    [Fact]
+    public void Redact_AmazonAdpToken_HeaderForm_Stripped()
+    {
+        var result = LogRedactor.Redact("x-adp-token: amzAdpHdr7");
+        Assert.DoesNotContain("amzAdpHdr7", result);
+    }
+
+    [Fact]
+    public void Redact_AmazonAdpSignature_HeaderForm_Stripped()
+    {
+        var result = LogRedactor.Redact("x-adp-signature: amzAdpSig9");
+        Assert.DoesNotContain("amzAdpSig9", result);
+    }
+
     // --- Amazon Music: appSecret (JSON form) + devicePrivateKey ---
 
     [Fact]

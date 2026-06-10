@@ -59,7 +59,8 @@ public static class Scrub
     ///
     /// Comparison is case-insensitive. The set of sensitive headers includes:
     /// <c>Authorization</c>, <c>X-API-Key</c>, <c>X-Auth-Token</c>,
-    /// <c>X-Access-Token</c>, <c>Music-User-Token</c>, <c>Cookie</c>, <c>Set-Cookie</c>, <c>Proxy-Authorization</c>.
+    /// <c>X-Access-Token</c>, <c>Music-User-Token</c>, <c>X-Adp-Token</c>, <c>X-Adp-Signature</c>,
+    /// <c>Cookie</c>, <c>Set-Cookie</c>, <c>Proxy-Authorization</c>.
     /// </summary>
     public static IDictionary<string, string> Headers(IDictionary<string, string> headers)
     {
@@ -85,7 +86,7 @@ public static class Scrub
     /// <c>api_key</c>, <c>apikey</c>, <c>api-key</c>, <c>token</c>,
     /// <c>access_token</c>, <c>refresh_token</c>, <c>key</c>, <c>secret</c>,
     /// <c>client_secret</c>, <c>password</c>, <c>pwd</c>, <c>authorization</c>,
-    /// <c>bearer</c>, <c>auth</c>.
+    /// <c>bearer</c>, <c>auth</c>, <c>sig</c>, <c>signature</c>, <c>request_sig</c>.
     ///
     /// The URL scheme, host, path, and non-sensitive parameters are preserved.
     /// </summary>
@@ -140,6 +141,8 @@ public static class Scrub
         "X-Auth-Token",
         "X-Access-Token",
         "Music-User-Token",
+        "X-Adp-Token",
+        "X-Adp-Signature",
         "Cookie",
         "Set-Cookie",
         "Proxy-Authorization",
@@ -150,6 +153,6 @@ public static class Scrub
 
     // Matches: (param_name=)(value) for known sensitive names, terminated by & ; # end-of-string.
     private static readonly Regex SensitiveQueryParamPattern = new(
-        @"(?i)((?:api[_-]?key|apikey|token|access[_-]?token|refresh[_-]?token|key|secret|client[_-]?secret|password|pwd|authorization|bearer|auth)=)([^&;#\s]*)",
+        @"(?i)((?:api[_-]?key|apikey|token|access[_-]?token|refresh[_-]?token|key|secret|client[_-]?secret|password|pwd|authorization|bearer|auth|request[_-]?sig|signature|sig)=)([^&;#\s]*)",
         RegexOptions.Compiled | RegexOptions.IgnoreCase);
 }

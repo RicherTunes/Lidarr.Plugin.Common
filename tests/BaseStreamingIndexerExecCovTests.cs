@@ -84,6 +84,39 @@ namespace Lidarr.Plugin.Common.Tests
             await Assert.ThrowsAsync<HttpRequestException>(() => indexer.ExecuteRequestAsyncPublic(request));
         }
 
+        [Fact]
+        public async Task ExecuteRequestAsync_Timeout_ExceptionMessageDoesNotLeakQuerySecrets()
+        {
+            // The wrapped HttpRequestException must scrub the request URI: streaming services
+            // (e.g. Qobuz) carry credentials like user_auth_token in query strings, and the host
+            // surfaces indexer exception messages unredacted.
+            var settings = new TestStreamingSettings { BaseUrl = "https://api.test.com" };
+            var client = new HttpClient(new ThrowingHttpMessageHandler(new TimeoutException("simulated timeout")));
+            var indexer = new TestStreamingIndexer(settings, null, () => client);
+            var request = new HttpRequestMessage(
+                HttpMethod.Get, "https://api.test.com/endpoint?user_auth_token=SENTINEL_SECRET");
+
+            var ex = await Assert.ThrowsAsync<HttpRequestException>(() => indexer.ExecuteRequestAsyncPublic(request));
+
+            Assert.DoesNotContain("SENTINEL_SECRET", ex.Message);
+            Assert.Contains("api.test.com", ex.Message); // host stays visible for diagnostics
+        }
+
+        [Fact]
+        public async Task ExecuteRequestAsync_Cancellation_ExceptionMessageDoesNotLeakQuerySecrets()
+        {
+            var settings = new TestStreamingSettings { BaseUrl = "https://api.test.com" };
+            var client = new HttpClient(new ThrowingHttpMessageHandler(new TaskCanceledException("simulated cancel")));
+            var indexer = new TestStreamingIndexer(settings, null, () => client);
+            var request = new HttpRequestMessage(
+                HttpMethod.Get, "https://api.test.com/endpoint?user_auth_token=SENTINEL_SECRET");
+
+            var ex = await Assert.ThrowsAsync<HttpRequestException>(() => indexer.ExecuteRequestAsyncPublic(request));
+
+            Assert.DoesNotContain("SENTINEL_SECRET", ex.Message);
+            Assert.Contains("api.test.com", ex.Message);
+        }
+
         #endregion
 
         #region GetHttpClient Override Tests
@@ -332,6 +365,19 @@ namespace Lidarr.Plugin.Common.Tests
 
         private sealed class TestStreamingSettings : BaseStreamingSettings
         {
+        }
+
+        private sealed class ThrowingHttpMessageHandler : HttpMessageHandler
+        {
+            private readonly Exception _exception;
+
+            public ThrowingHttpMessageHandler(Exception exception)
+            {
+                _exception = exception;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+                => Task.FromException<HttpResponseMessage>(_exception);
         }
 
         private sealed class MockHttpMessageHandler : HttpMessageHandler

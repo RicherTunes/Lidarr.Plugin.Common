@@ -38,7 +38,7 @@ public static partial class LogRedactor
     /// <c>Basic dXNlcm5hbWU6cGFzc3dvcmQ=</c> are fully redacted, not partially.
     /// Stops at end-of-line or common log-line delimiters (<c>, ; |</c> and <c>}</c>).
     /// </summary>
-    [GeneratedRegex(@"(Authorization|X-Api-Key|api[_-]?key|X-Auth-Token|X-Access-Token|Music-User-Token)\s*[:=]\s*[^\r\n,;|}]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"(Authorization|X-Api-Key|api[_-]?key|X-Auth-Token|X-Access-Token|Music-User-Token|X-Adp-Token|X-Adp-Signature)\s*[:=]\s*[^\r\n,;|}]+", RegexOptions.Compiled | RegexOptions.IgnoreCase)]
     private static partial Regex AuthHeaderPattern();
 
     /// <summary>
