@@ -81,14 +81,22 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 throw new InvalidOperationException("No valid session is available and no fallback credentials were provided.");
             }
 
-            await RefreshSessionAsync(fallbackCredentials).ConfigureAwait(false);
+            // onlyIfStillInvalid: concurrent callers that queued on the refresh gate while the
+            // first one authenticated must reuse its session, not re-authenticate serially
+            // (token stampede against the upstream provider).
+            await RefreshSessionCoreAsync(fallbackCredentials, onlyIfStillInvalid: true).ConfigureAwait(false);
             return _currentSession!;
         }
 
         /// <summary>
-        /// Forces a session refresh using the supplied credentials.
+        /// Forces a session refresh using the supplied credentials. Always re-authenticates,
+        /// even when the current session is still clock-valid — callers use this after the
+        /// provider rejects a token server-side.
         /// </summary>
-        public async Task RefreshSessionAsync(TCredentials credentials)
+        public Task RefreshSessionAsync(TCredentials credentials)
+            => RefreshSessionCoreAsync(credentials, onlyIfStillInvalid: false);
+
+        private async Task RefreshSessionCoreAsync(TCredentials credentials, bool onlyIfStillInvalid)
         {
             if (credentials == null)
             {
@@ -100,6 +108,17 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             await _refreshSemaphore.WaitAsync().ConfigureAwait(false);
             try
             {
+                if (onlyIfStillInvalid)
+                {
+                    lock (_tokenLock)
+                    {
+                        if (IsSessionValidUnsafe())
+                        {
+                            return;
+                        }
+                    }
+                }
+
                 _isRefreshing = true;
                 _refreshAttempts++;
 
