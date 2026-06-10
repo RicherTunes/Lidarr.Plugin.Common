@@ -135,29 +135,22 @@ public sealed class JsonFileStoreEdgeCaseTests : IDisposable
         Assert.Equal(0, store.Count);
     }
 
-    // Generous timing margin for both TTL tests below:
-    // - TTL = 300ms (was 75ms)
-    // - Wait = 600ms (was 150ms)
-    //
-    // The previous values intermittently failed on shared CI runners under load
-    // — the second SetAsync would occasionally land within the 75ms TTL window
-    // because Task.Delay isn't a hard floor (it's a "wait AT LEAST this long"
-    // contract, and the scheduler can return early under specific conditions).
-    // Doubling the margin gives ample buffer without making the test wall-clock
-    // expensive (~600ms each, ~1.2s total). A proper fix would inject a clock
-    // abstraction into JsonFileStore so tests advance time deterministically,
-    // but that's a bigger refactor than warranted for two tests.
-    private static readonly TimeSpan TtlTestWindow = TimeSpan.FromMilliseconds(300);
-    private static readonly TimeSpan TtlTestWait = TimeSpan.FromMilliseconds(600);
+    // TTL expiry is exercised against an injected FakeTimeProvider so time advances
+    // deterministically with zero wall-clock dependency. The prior versions used a real
+    // Task.Delay against a tight TTL window (75ms, then 300ms) and flaked on loaded CI
+    // runners — the reload+assert could slip past the window and expire the survivor too.
+    // The fake clock removes that fragility AND makes the tests instant.
+    private static readonly TimeSpan TtlTestWindow = TimeSpan.FromMinutes(5);
 
     [Fact]
     public async Task EnumerateAsync_ExpiredEntries_AreOmitted()
     {
-        var options = new JsonFileStoreOptions<string> { Ttl = TtlTestWindow };
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var options = new JsonFileStoreOptions<string> { Ttl = TtlTestWindow, Clock = clock };
         var store = new JsonFileStore<string, Entry>(PathFor(), options);
 
         await store.SetAsync("ephemeral", new Entry("e1"));
-        await Task.Delay(TtlTestWait);
+        clock.Advance(TtlTestWindow + TimeSpan.FromMinutes(1)); // ephemeral now expired
         await store.SetAsync("fresh", new Entry("f1"));
 
         // EnumerateAsync filters expired entries even before they're purged on save.
@@ -174,15 +167,16 @@ public sealed class JsonFileStoreEdgeCaseTests : IDisposable
     [Fact]
     public async Task SetAsync_PurgesExpiredEntriesOnSave()
     {
-        var options = new JsonFileStoreOptions<string> { Ttl = TtlTestWindow };
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var options = new JsonFileStoreOptions<string> { Ttl = TtlTestWindow, Clock = clock };
         var path = PathFor();
         var store = new JsonFileStore<string, Entry>(path, options);
 
         await store.SetAsync("expires", new Entry("e"));
-        await Task.Delay(TtlTestWait);
+        clock.Advance(TtlTestWindow + TimeSpan.FromMinutes(1)); // expires now past TTL
         await store.SetAsync("survivor", new Entry("s"));
 
-        // Re-load: only "survivor" should persist (expired purged on save).
+        // Re-load with the SAME clock: only "survivor" persists (expired purged on save).
         var reloaded = new JsonFileStore<string, Entry>(path, options);
         Assert.Equal(1, reloaded.Count);
         Assert.NotNull(await reloaded.GetAsync("survivor"));
