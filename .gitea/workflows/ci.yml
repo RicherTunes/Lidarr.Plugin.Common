@@ -75,7 +75,11 @@ jobs:
       - uses: actions/checkout@v4
       - name: gitleaks (secret scan)
         run: |
-          set -e
+          set -euo pipefail
+          # Integrity-pin the secret scanner itself: a moved tag or a tampered single
+          # asset would otherwise be trusted silently, defeating the scan it performs.
+          GITLEAKS_SHA256=ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d
           curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz -o /tmp/gl.tgz
+          echo "${GITLEAKS_SHA256}  /tmp/gl.tgz" | sha256sum -c -
           tar -xzf /tmp/gl.tgz -C /tmp gitleaks
           /tmp/gitleaks detect --source . --no-banner --redact --exit-code 1
