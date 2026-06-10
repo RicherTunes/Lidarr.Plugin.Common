@@ -153,7 +153,9 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
             {
                 DtdProcessing = DtdProcessing.Prohibit,
                 XmlResolver = null,
-                MaxCharactersFromEntities = 0,
+                // 0 would mean "unlimited" per XmlReaderSettings docs — keep a small explicit
+                // budget so a future relaxation of Prohibit doesn't inherit an unbounded one.
+                MaxCharactersFromEntities = 1024,
             };
 
             using var reader = new StringReader(manifestContent);
