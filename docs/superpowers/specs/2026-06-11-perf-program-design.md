@@ -1,117 +1,221 @@
-# qobuzarr / tidalarr Performance Program — Design
+# qobuzarr / tidalarr Performance Program — Design (rev 2, post-adversarial-review)
 
-**Date:** 2026-06-11
+**Date:** 2026-06-11 (rev 2 same day; rev 1 was rewritten after a 3-lens adversarial
+review refuted its Phase-2 premise — see "Review record" at the end)
 **Scope:** qobuzarr, tidalarr, Lidarr.Plugin.Common
 **Driver:** Proactive performance sweep, with rate-limit behavior under parallel load
 (heavy downloads + concurrent indexer searches) as the first-class concern.
 
-## Problem statement
+## Problem statement (corrected)
 
-Both plugins gate all upstream API traffic through a single shared
-`UniversalAdaptiveRateLimiter` (adaptive token bucket, per-service/per-endpoint).
-This correctly prevents search and download traffic from jointly overrunning the
-Qobuz/Tidal APIs, but the limiter has **no fairness or priority between caller
-paths**: under heavy download load (e.g. 10 parallel album grabs on tidalarr ≈ up
-to ~40 concurrent chunk/metadata fetches), bulk download traffic can monopolize
-the budget and starve RSS sync and interactive search until the queue drains.
+The shared `UniversalAdaptiveRateLimiter` paces **per-endpoint** (key =
+`host:firstPathSegment`), each endpoint with its own adaptive budget and slot
+chain; the per-service semaphore is held only for an O(1) slot computation.
+Consequently the rev-1 claim "downloads monopolize a single shared budget and
+starve search" is wrong as stated: tidal CDN chunk fetches and search live in
+**different buckets** and cannot contend inside the limiter.
 
-Separately, an exploration sweep surfaced perf-hotspot candidates (download-tracker
-materialization in `GetItems()`, O(n) substring-cache scans, sequential multi-tier
-search without early termination, sync-over-async plugin init). Historical
-defect-hunt false-positive rate in this ecosystem is ~50–60%, so **no hotspot is
-fixed without prior verification and a measured baseline implicating it**.
+The real, verified problems in this area are:
+
+1. **qobuzarr search is not rate-limit-gated at all.** `QobuzIndexer` executes
+   searches through Lidarr's host HTTP stack (`IHttpClient.ExecuteAsync`,
+   `QobuzIndexer.cs:236`), which never traverses `QobuzRateLimitingHandler` or
+   the limiter. The in-code comment claiming central rate limiting on that path
+   is false. Search 429s are also invisible to the limiter's adaptation.
+2. **Within-bucket contention is plausible only where search and download
+   metadata share an API host bucket** (e.g. `api.tidal.com:v1` serves search
+   AND the orchestrator's getAlbum/getTrack/playbackinfo calls). Whether this
+   produces user-visible search starvation is **unproven** and must be
+   demonstrated before any limiter redesign.
+3. **qobuzarr uses ≥3 inconsistent endpoint-keying schemes** for direct
+   `WaitIfNeededAsync` calls (full URL incl. query in `QobuzHttpClient.cs:71`;
+   literal `"/album/search"` in `LidarrAlbumRetriever.cs:172`; `host:firstSeg`
+   in the handler), splitting one logical endpoint across buckets that cannot
+   see each other and creating unbounded bucket cardinality.
+4. The limiter has **no observability**: zero logging, and its in-proc stats
+   surface (`GetServiceStats`/`GetGlobalStats`) is exposed nowhere.
+
+Separately, an exploration sweep surfaced perf-hotspot candidates; adversarial
+re-verification already culled them (one refuted, one hazardous-as-proposed,
+one remedy-misdirected, one confirmed — see Phase 3). Historical false-positive
+rate ~50–60%: **nothing is fixed without verification and a baseline implicating it.**
 
 ## Goals / success criteria
 
-1. Interactive search and RSS sync remain responsive (bounded added latency)
-   while the download queue is saturated — demonstrated on the live `lidarr-e2e`
-   instance with before/after numbers.
-2. No regression in API safety: total request rate to upstream APIs never exceeds
-   today's adaptive budget; 429 handling, Retry-After, and auth-gate behavior
-   unchanged.
-3. Each shipped perf fix carries a measured before/after delta from the same
-   harness scenario.
-4. All changes TDD'd, one concern per PR, landed on Gitea, adversarially reviewed.
+1. Search (interactive + RSS) remains responsive while the download queue is
+   saturated — demonstrated on a live instance with before/after numbers, with
+   the contention mechanism identified and named first.
+2. All upstream traffic from both plugins is actually gated by the limiter
+   (closing the qobuz search bypass), with consistent endpoint keying.
+3. No regression in API safety: total request rate never exceeds today's
+   adaptive budget; 429/Retry-After/auth-gate behavior unchanged.
+4. Each shipped fix carries a measured delta (live harness for second-scale
+   effects; micro-benchmarks for ms-scale effects).
+5. TDD, one concern per PR, landed on Gitea, adversarial review per wave.
 
 ## Non-goals
 
-- Newtonsoft→System.Text.Json migration in qobuzarr (large blast radius,
-  single-digit-ms expected gain) — deferred unless the baseline implicates it.
-- Sliding-expiration lock redesign in `StreamingResponseCache` — deferred, same rule.
-- amazonmusicarr / applemusicarr / brainarr (out of scope; QoS limiter lands in
-  Common so they inherit it on their next re-pin).
+- Newtonsoft→System.Text.Json migration in qobuzarr; sliding-expiration lock
+  redesign in `StreamingResponseCache` — deferred unless baselines implicate them.
+- amazonmusicarr / applemusicarr / brainarr feature work. (But: interface
+  changes to `IUniversalAdaptiveRateLimiter` MUST be source-compatible for
+  their test fakes — see Phase 2 — since they implement the interface.)
 
-## Phase 1 — Load harness + baseline
+## Phase 0 — Ground truth + unblocking (NEW; gates everything)
 
-A scripted harness at `C:\r\Alex\github\.perf-harness\` (sibling of `.glm-wave`,
-spans repos, not itself a git repo) driving the live `lidarr-e2e` container on
-`:8787` via Lidarr's API.
+1. **Canary push:** push this spec branch to Gitea — pushes were blocked
+   server-side as of 2026-06-10 (unpacker error); `gitea/main` tips dated
+   2026-06-10 17:51 suggest it's resolved, but unverified from this checkout.
+2. **Prior-art triage:** two unmerged Common branches sit on the exact files
+   this program touches — `perf/ratelimiter-lane` (9d1e8f3, same fairness
+   topic) and `refactor/adaptive-ratelimit-dedup` (5d82071, edits
+   `AdaptiveRateLimitingHandler`). Land, supersede, or close each explicitly
+   before any Phase-2 PR.
+3. **In-flight plugin branches:** land-or-park qobuzarr
+   `fix/response-cache-endpoint-matching` (changes search-path cache
+   effectiveness → corrupts baselines), tidalarr `feat/adopt-query-optimizer`
+   and `fix/tidal-snapshot-field-drop`. Record baseline SHAs in every report.
+4. **Contention localization:** demonstrate (or refute) search-vs-download
+   contention deterministically: identify which buckets tidal search/metadata
+   actually share, whether qobuz search delay even involves the limiter
+   (per §1 it doesn't), and whether the contended resource is the limiter at
+   all vs. connection pool / `GenericResilienceExecutor` gates / ThreadPool /
+   Lidarr task queues. Fake-clock unit-level repro preferred over live load.
+5. **Instrumentation pre-step (Common PR):** periodic stats logging (or a
+   diagnostics dump hook) over the existing `GetServiceStats` surface, plus
+   adaptation-event log lines (currently computed and discarded). Ships before
+   baselines so before/after run on identical instrumented code.
 
-**Load generator:** queue N parallel album grabs (default 10) while concurrently
-firing RSS sync and interactive artist/album searches on a fixed cadence.
+**Gate:** Phase 2's limiter redesign proceeds only if Phase 0/1 demonstrates
+user-visible search degradation attributable to a shared bucket. The qobuz
+search-gating fix (Phase 2a) and keying consolidation (Phase 2b) proceed
+regardless — they are correctness fixes, not perf speculation.
 
-**Metrics per run:**
-- interactive search latency p50/p95, idle vs under load
-- RSS sync wall time, idle vs under load
-- time-to-first-search-result while downloads saturate
-- grab-to-import wall time per album
-- queue endpoint (`GetItems`) response time distribution
-- 429 count + limiter adaptation events (parsed from Lidarr logs)
-- container CPU/memory over the run
+## Phase 1 — Load harness + baseline (descoped to what live runs can prove)
 
-**Scenarios:** one per plugin; tidalarr additionally at elevated
-`MaxConcurrentTrackDownloads` to provoke the starvation case.
+Harness at `C:\r\Alex\github\.perf-harness\`, reusing the existing e2e
+substrate (Common `LidarrContainerFixture` TestKit + `e2e-local-runner.ps1`
+per-plugin shims; dedicated containers, ports 8690/8692 — NOT the shared
+`:8787` instance, which other programs use concurrently).
 
-**Output:** timestamped markdown report per run. Every later fix re-runs the same
-scenario for its delta.
+**Live scenarios are for second-scale effects only** (search-under-load,
+starvation observation). Ms-scale claims are measured by micro-benchmarks.
 
-## Phase 2 — QoS priority lanes in Common's rate limiter
+- **Scale cap:** 2–3 fixed albums at lowest quality per run (real accounts;
+  ToS/volume exposure capped). One 10-album one-shot validation at the end,
+  not per-iteration.
+- **Repeatability:** scripted reset between runs (delete trackfiles, clear
+  queue + blocklist, container restart to reset in-memory limiter state);
+  fixed pre-validated corpus that imports cleanly; first warm-up sample
+  discarded; ≥5 repetitions per condition; report median + IQR; accept a delta
+  only if it exceeds run-to-run spread.
+- **Isolation:** the non-measured plugin's indexer + download client disabled
+  per scenario (search and queue polls fan out to all enabled ones).
+- **Pin manifest per run:** plugin SHAs, Common pin, image tag, log level,
+  concurrency settings.
+- **Metrics:** search latency p50/p95 idle-vs-load **plus per-sample
+  success/empty/timeout counts** (starvation may present as failures, not
+  latency); RSS sync wall; queue endpoint response time; 429 + adaptation
+  counts via Phase-0 instrumentation; observed peak concurrent in-flight
+  tracks (run fails if below threshold — proves the load existed);
+  grab→download-complete (plugin-attributable) split from
+  download-complete→import (Lidarr-attributable, report-only).
 
-Extend `UniversalAdaptiveRateLimiter` with priority lanes **sharing the existing
-single per-service budget** (no second bucket — joint-overrun protection intact).
+## Phase 2 — Rate-limit correctness + (gated) QoS lanes
 
-- **Priorities:** `Interactive` (manual search) > `Sync` (RSS) > `Bulk`
-  (downloads). `WaitIfNeededAsync` gains a priority parameter defaulting to
-  `Bulk`, so existing callers compile and behave unchanged.
-- **Allocation rule:** when pacing slots free, higher-priority waiters are served
-  first, with a **reserved minimum share for search lanes** (initially 20% of the
-  budget whenever search has waiters). Bulk may use 100% of idle capacity; aging
-  prevents bulk starvation in the inverse direction.
-- **Wiring:** indexer request paths tag requests via `HttpRequestMessage.Options`;
-  `AdaptiveRateLimitingHandler` reads the tag and forwards the priority. Download
-  clients require no changes (default = `Bulk`).
-- **Unchanged:** 429 tighten-on-hit, Retry-After waits, retry budgets, auth-gate.
-  Priorities only reorder who waits, never how much total is sent.
-- **Testing:** deterministic unit tests against a fake `TimeProvider` proving
-  "saturating bulk traffic + arriving Interactive request ⇒ served within bounded
-  delay" and "no bulk starvation under sustained search load." A parity test
-  guards that both plugins tag their indexer paths.
-- **Landing:** Common PR on this dedicated branch (committed immediately, per the
-  Common-volatility rule), then both plugins re-pinned per the documented
-  submodule re-pin mechanics.
+Realistically 4 concerns, each its own PR:
 
-## Phase 3 — Verified hotspot fixes (gated on baseline evidence)
+- **2a. qobuz search gating (correctness, ungated by Phase 1):** route
+  `QobuzIndexer` search traffic through the limiter — either via the bridge
+  client or direct `WaitIfNeededAsync` at the call site — and fix the false
+  "handled centrally" comment. Without this, no limiter-side QoS can ever
+  protect qobuz search.
+- **2b. Endpoint-key consolidation in qobuzarr (correctness):** one canonical
+  key builder shared by handler and direct call sites.
+- **2c. TimeProvider seam in the limiter (prerequisite refactor):** the
+  limiter uses raw `DateTime.UtcNow` + `Task.Delay`; deterministic tests
+  require injecting `TimeProvider`. Separate, behavior-preserving PR.
+- **2d. QoS priority lanes (gated on Phase-0 evidence):** this is a
+  **queuing-structure redesign, not a parameter addition**. The current
+  implementation irrevocably claims future timestamp slots
+  (`limit.LastRequest = nextSlot` under the semaphore,
+  `UniversalAdaptiveRateLimiter.cs:308-315`); already-sleeping waiters cannot
+  be reordered. Design: parked-waiter dispatcher per bucket — waiters enqueue
+  (priority, arrival) and a dispatcher assigns each next slot to the
+  highest-priority waiter, with aging and a reserve defined as "≥1 slot per N
+  dispatches to search lanes when they have waiters" (a percentage is
+  ill-defined when the adaptive budget tightens to its floor). Also unify the
+  limiter's two sync primitives (semaphore for slot state; `lock(_lock)` for
+  budget mutation, which currently races the unsynchronized read).
+  - **API:** new overload as a **default interface method** forwarding to the
+    3-arg version (precedent: `RecordAuthFailure`), so external implementors
+    (`TidalRateLimiter` override, apple/brainarr test fakes, qobuz
+    `CommonStubs.cs`) keep compiling. Thread the priority through
+    `NamedServiceRateLimiter` in the same PR + a test asserting priority
+    survives an adapter-wrapped limiter (it would otherwise be silently
+    dropped — the override delegates 3-arg to Inner).
+  - **Priority plumbing:** `HttpRequestMessage.Options` works only for traffic
+    that traverses the handler. tidalarr's `TidalApiClient` serves both search
+    and download metadata, so the entry points (indexer vs orchestrator) set an
+    **AsyncLocal ambient priority scope**; the handler and direct call sites
+    read it. qobuzarr's direct `WaitIfNeededAsync` call sites pass priority
+    explicitly. Parity test: per-plugin (mechanisms differ), asserting
+    indexer-entry traffic carries Interactive/Sync and download-entry Bulk.
+  - **Unchanged:** 429 tighten, Retry-After, retry budgets, auth-gate.
+    Already-dispatched slots are exempt from re-pricing on budget change.
+- **Landing:** Common PRs on dedicated branches; re-pins to both plugins are
+  **source-changing PRs** (tidalarr override update, qobuz stub sync), not
+  mechanical bumps; re-pin will also carry ~5 unrelated Common commits — note
+  in PR body. amazonmusicarr/applemusicarr/brainarr re-pin later; DIM keeps
+  them green.
 
-Candidates in rank order; each gets claim verification + baseline implication
-before any fix, then TDD, then its own PR:
+## Phase 3 — Verified hotspot fixes (corrected list)
 
-1. `GetItems()` materializes the full download tracker per poll → versioned/cached
-   snapshot invalidated on tracker mutation.
-2. qobuzarr substring cache O(n) full scans per lookup → expiry index
-   (sorted expiry queue, walk only entries due).
-3. Multi-tier search chains run all tiers sequentially → early termination when a
-   tier yields sufficient confident results.
-4. tidalarr indexer/download-client sync-over-async init
-   (`GetAwaiter().GetResult()` at construction) → lazy async init on first call.
+1. **Multi-tier search early termination (CONFIRMED):**
+   `QobuzIndexer.cs:226-273` executes every request in every tier sequentially
+   with no early break even when an earlier tier yielded releases. Fix with
+   TDD; micro-benchmark + live search-latency delta. Coordinate with tidalarr
+   `feat/adopt-query-optimizer` (Phase 0.3).
+2. **qobuz substring cache (RE-SCOPED):** the O(n) expiry filter is real
+   (`QobuzSubstringCache.cs:656-659`, up to 3 scans/miss) but fused with
+   matching that scans all entries anyway, and n is bounded by
+   `_maxCacheSize` eviction. Measure n and per-lookup cost first; fix only if
+   implicated.
+3. **GetItems() snapshot (DEMOTED, hazard noted):** materialization is
+   O(active-downloads) — small. Both plugins' `GetSnapshot()` runs the
+   retention/eviction sweep **as a side-effect**; naive snapshot caching would
+   suppress eviction → unbounded growth. Only touch with the sweep explicitly
+   decoupled, and only if baselines implicate queue polling.
+4. ~~tidalarr sync-over-async init~~ **(REFUTED):** the
+   `GetAwaiter().GetResult()` in `TidalLidarrIndexer`/`TidalLidarrDownloadClient`
+   is a per-call sync bridge over an already-lazy cached runtime, required by
+   Lidarr's sync host contracts. WONTFIX.
 
 ## Phase 4 — Re-measure + report
 
-Re-run Phase-1 scenarios, publish before/after table, document the limiter's
-priority semantics in Common docs. Adversarial review before each phase lands.
+Re-run Phase-1 scenarios with the same instrumented substrate; the "after"
+build differs from baseline **only by the change under test** (build from a
+branch, not from a drifted main). Publish before/after table (median + IQR);
+document limiter priority semantics in Common docs.
 
 ## Process constraints
 
-- Gitea is primary (192.168.2.59:3001); branch off `gitea/main`; no `gh` CLI.
+- Gitea primary (192.168.2.59:3001); every wave starts `git fetch gitea` and
+  branches off `gitea/main`; no `gh` CLI.
 - Common edits committed immediately on a dedicated branch.
-- TDD-first for all substantive changes; no wave labels in code comments.
-- One concern per PR; adversarial review every wave.
+- TDD-first; no wave labels in code comments; one concern per PR; adversarial
+  review every wave.
+
+## Review record (rev 1 → rev 2)
+
+3-lens adversarial review (limiter design / measurement methodology /
+process+integration). Accepted, all independently verified against code:
+per-endpoint not per-service budgets; qobuz search bypasses limiter; slot-claim
+structure can't take priorities without a dispatcher rewrite; TidalRateLimiter
+override breaks naive interface change (→ DIM); no limiter observability;
+real-account volume caps; reset/repeatability/isolation requirements;
+prior-art branch collisions; Phase-3 list corrections (1 confirmed, 1
+re-scoped, 1 demoted, 1 refuted). Rejected: none — every BLOCKER/MAJOR
+withstood spot verification (`QobuzIndexer.cs:236`,
+`UniversalAdaptiveRateLimiter.cs:308-315`, `TidalRateLimiter.cs:22`,
+`ls-remote` branch evidence).
