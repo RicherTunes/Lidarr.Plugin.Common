@@ -1,8 +1,10 @@
-# qobuzarr / tidalarr Performance Program — Design (rev 2, post-adversarial-review)
+# Ecosystem Performance Program — Design (rev 3)
 
-**Date:** 2026-06-11 (rev 2 same day; rev 1 was rewritten after a 3-lens adversarial
-review refuted its Phase-2 premise — see "Review record" at the end)
-**Scope:** qobuzarr, tidalarr, Lidarr.Plugin.Common
+**Date:** 2026-06-11 (rev 2 same day after a 3-lens adversarial review refuted
+rev 1's Phase-2 premise — see "Review record"; rev 3 same day: user expanded
+scope to 20 phases covering Lidarr.Plugin.Common extensively and brainarr —
+see "Roadmap" at the end, which renumbers the phases below)
+**Scope:** qobuzarr, tidalarr, Lidarr.Plugin.Common, brainarr
 **Driver:** Proactive performance sweep, with rate-limit behavior under parallel load
 (heavy downloads + concurrent indexer searches) as the first-class concern.
 
@@ -205,6 +207,58 @@ document limiter priority semantics in Common docs.
 - Common edits committed immediately on a dedicated branch.
 - TDD-first; no wave labels in code comments; one concern per PR; adversarial
   review every wave.
+
+## Roadmap (rev 3) — 20 phases
+
+The detailed sections above are authoritative for P0–P9; the old labels map as
+noted. P10+ get one-paragraph charters here and a full spec/plan only when
+reached (same gate discipline: verify → measure → fix → re-measure). Every
+phase: TDD, one concern per PR, adversarial review, lands on Gitea.
+
+**Arc A — qobuzarr/tidalarr rate limiting + hot paths (P0–P9)**
+
+| P | Charter | Maps to |
+|---|---|---|
+| 0 | Ground truth + unblocking (canary push, prior-art triage, bucket map, characterization tests, limiter observability). **DONE except canary (Gitea disk) + Phase-1 plan doc.** | old Phase 0 |
+| 1 | Load harness + baselines on dedicated e2e containers; live = second-scale effects only | old Phase 1 |
+| 2 | qobuz search gating — route `QobuzIndexer` traffic through the limiter | old 2a |
+| 3 | qobuz endpoint-key consolidation — one canonical key builder | old 2b |
+| 4 | TimeProvider seam in the limiter (behavior-preserving) | old 2c |
+| 5 | QoS per-bucket parked-waiter dispatcher + DIM overload | old 2d |
+| 6 | Plugin priority wiring (tidal AsyncLocal scope; qobuz explicit) + source-changing re-pins | old 2d wiring |
+| 7 | Multi-tier search early termination (CONFIRMED hotspot) | old Phase 3.1 |
+| 8 | Conditional hotspots: substring-cache + GetItems, only if baselines implicate; eviction decoupling hazard applies | old Phase 3.2–3.3 |
+| 9 | qobuzarr/tidalarr re-measure + before/after report | old Phase 4 |
+
+**Arc B — Lidarr.Plugin.Common deep perf (P10–P15)**
+
+| P | Charter |
+|---|---|
+| 10 | Micro-benchmark substrate: stand up BenchmarkDotNet suites in Common's `bench/` for the hot subsystems (cache key-gen, limiter slot math, retry paths); CI-runnable, baseline numbers committed. This is the measuring stick for all of Arc B. |
+| 11 | Caching subsystem: `StreamingResponseCache` key-generation allocations, sliding-expiration per-entry lock contention, cleanup sweeps; fix what P10 benchmarks implicate. |
+| 12 | HTTP/resilience stack: `HttpClientExtensions` retry/jitter budgets, `GenericResilienceExecutor` per-host gates, handler-chain overhead per request; verify no sync-over-async on hot paths. |
+| 13 | Download orchestration + telemetry: `SimpleDownloadOrchestrator` semaphore patterns, `DownloadTelemetryService` hot-path cost, tracker snapshot/eviction costs at scale. |
+| 14 | Allocation/GC pass: top allocators from P10–P13 evidence (pooling, Span, cached delegates) — strictly evidence-gated, no speculative micro-optimization. |
+| 15 | Test-suite performance + determinism: Common's suite wall time (4m10s today), TimeProvider adoption across time-coupled tests, eliminate residual real-delay tests (the P0 characterization tests get migrated onto the P4 seam). |
+
+**Arc C — brainarr (P16–P18)**
+
+| P | Charter |
+|---|---|
+| 16 | brainarr perf baseline: recommendation-pipeline wall time, AI-provider call latency/counts, cache effectiveness (RecommendationCache), library-scan cost on the live lidarr-e2e GLM setup. COORDINATE: a concurrent brainarr quality /loop exists — fence zones, no overlapping files. |
+| 17 | Provider rate-limit/throttle correctness: brainarr's per-provider limiter semantics (history: AIService rate-limit key-shape bug), retry storms on provider 429/5xx, token-budget behavior under batch recommendation load — same verify-first discipline as P0's bucket map. |
+| 18 | brainarr evidenced hotspot fixes (one concern per PR, micro-benchmarks where ms-scale). |
+
+**Arc D — close-out (P19)**
+
+| P | Charter |
+|---|---|
+| 19 | Ecosystem re-measure: re-run all baselines on final SHAs; publish the consolidated before/after report; document limiter QoS + perf invariants in Common docs and per-plugin wikis; file follow-ups that didn't make the bar. |
+
+Sequencing: arcs are largely serial (A → B → C → D) but P10 (bench substrate)
+can start as soon as P4 lands, and Arc C is independent of Arc A after P5/P6.
+Re-pin waves propagate Common changes to amazonmusicarr/applemusicarr/brainarr
+at arc boundaries, kept green by the DIM rule.
 
 ## Review record (rev 1 → rev 2)
 
