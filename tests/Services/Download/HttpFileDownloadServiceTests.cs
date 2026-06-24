@@ -60,7 +60,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
     public async Task DownloadToFileAsync_FlacContent_DownloadsAndValidates()
     {
         var flacBytes = MakeMinimalFlacFile(payloadSize: 4096);
-        var svc = new HttpFileDownloadService(MakeFakeHttpClient(flacBytes, "audio/flac"));
+        var svc = CreateService(MakeFakeHttpClient(flacBytes, "audio/flac"));
         var dest = Path.Combine(_tempDir, "track.flac");
 
         var written = await svc.DownloadToFileAsync("https://93.184.216.34/track.flac", dest, CancellationToken.None);
@@ -82,7 +82,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
         // auth token expired and the CDN returned an error page — surface a clear
         // error rather than write the HTML to disk and pass it to the audio validator.
         var html = Encoding.UTF8.GetBytes("<html><body>auth required</body></html>");
-        var svc = new HttpFileDownloadService(MakeFakeHttpClient(html, "text/html"));
+        var svc = CreateService(MakeFakeHttpClient(html, "text/html"));
         var dest = Path.Combine(_tempDir, "track.flac");
 
         var ex = await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -94,7 +94,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
     [Fact]
     public async Task DownloadToFileAsync_NoContent_ThrowsWithDiagnostic()
     {
-        var svc = new HttpFileDownloadService(MakeFakeHttpClient(Array.Empty<byte>(), "audio/flac",
+        var svc = CreateService(MakeFakeHttpClient(Array.Empty<byte>(), "audio/flac",
             statusCode: HttpStatusCode.NoContent));
         var dest = Path.Combine(_tempDir, "track.flac");
 
@@ -106,7 +106,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
     [Fact]
     public async Task DownloadToFileAsync_HttpError_PropagatesAsException()
     {
-        var svc = new HttpFileDownloadService(MakeFakeHttpClient(Encoding.UTF8.GetBytes("Not Found"),
+        var svc = CreateService(MakeFakeHttpClient(Encoding.UTF8.GetBytes("Not Found"),
             "text/plain", statusCode: HttpStatusCode.NotFound));
         var dest = Path.Combine(_tempDir, "track.flac");
 
@@ -122,7 +122,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
         // Server returns binary bytes that aren't a recognized audio format. The download
         // completes but AudioMagicBytesValidator rejects the file.
         var bogus = new byte[] { 0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09 };
-        var svc = new HttpFileDownloadService(MakeFakeHttpClient(bogus, "application/octet-stream"));
+        var svc = CreateService(MakeFakeHttpClient(bogus, "application/octet-stream"));
         var dest = Path.Combine(_tempDir, "track.flac");
 
         await Assert.ThrowsAsync<InvalidOperationException>(async () =>
@@ -136,7 +136,7 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
         Assert.False(Directory.Exists(Path.GetDirectoryName(nested)!));
 
         var flac = MakeMinimalFlacFile(payloadSize: 1024);
-        var svc = new HttpFileDownloadService(MakeFakeHttpClient(flac, "audio/flac"));
+        var svc = CreateService(MakeFakeHttpClient(flac, "audio/flac"));
 
         await svc.DownloadToFileAsync("https://93.184.216.34/track.flac", nested, CancellationToken.None);
 
@@ -161,6 +161,16 @@ public sealed class HttpFileDownloadServiceTests : IDisposable
         for (var i = 4; i < buf.Length; i++) buf[i] = (byte)((i * 7) & 0xFF);
         return buf;
     }
+
+    private static HttpFileDownloadService CreateService(HttpClient httpClient)
+    {
+        return new HttpFileDownloadService(httpClient, mediaUriPolicy: TestMediaUriPolicy);
+    }
+
+    private static RemoteMediaUriPolicy TestMediaUriPolicy { get; } = new()
+    {
+        ResolveDns = false,
+    };
 
     private static HttpClient MakeFakeHttpClient(byte[] body, string contentType, HttpStatusCode statusCode = HttpStatusCode.OK)
     {
