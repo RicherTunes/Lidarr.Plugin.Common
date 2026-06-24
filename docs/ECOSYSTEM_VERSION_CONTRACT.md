@@ -101,7 +101,7 @@ Today the propagation is a manual, repo-by-repo process. The steps are:
    e. Run `bash ext/Lidarr.Plugin.Common/scripts/repin-common-submodule.sh --verify-only --path ext/Lidarr.Plugin.Common` and confirm exit code `0`.
    f. Run `pwsh ext/Lidarr.Plugin.Common/scripts/ecosystem-parity-lint.ps1 -Check VersionContract -Mode ci` and confirm exit code `0`.
    g. Confirm `.github/workflows/submodule-pin.yml`, `.github/workflows/ci.yml`, and `.gitea/workflows/ci.yml` all run the same verify-only submodule guard.
-   h. Run `pwsh scripts/update-expected-contents.ps1 -Check` and confirm the package contents match the plugin's `packaging/expected-contents.txt`.
+   h. Run `pwsh ext/Lidarr.Plugin.Common/scripts/update-plugin-expected-contents.ps1 -RepoPath . -Check` and confirm the package contents match the plugin's `packaging/expected-contents.txt`.
    i. Open a PR with the submodule bump and manifest updates.
 
 Future automation (planned for the cross-cutting infrastructure layer) will add a GitHub Actions workflow that opens coordinated submodule-bump PRs across all plugin repos automatically when a new Common version is published. Until that workflow exists, the manual steps above are the required procedure.
