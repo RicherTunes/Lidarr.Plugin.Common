@@ -1,5 +1,6 @@
 using System;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Common.Services.Authentication;
@@ -41,6 +42,58 @@ namespace Lidarr.Plugin.Common.Tests
 
             await manager.ClearSessionAsync();
             Assert.Null(await store.LoadAsync());
+        }
+
+        [Fact]
+        public async Task Dispose_DoesNotClearPersistedSession()
+        {
+            var store = new MemoryTokenStore<TestSession>();
+            await store.SaveAsync(new TokenEnvelope<TestSession>(new TestSession("persisted"), DateTime.UtcNow.AddMinutes(30)));
+
+            var authService = new FakeAuthService();
+            using (var manager = CreateManager(authService, store))
+            {
+                var session = await manager.GetValidSessionAsync();
+                Assert.Equal("persisted", session.Id);
+            }
+
+            var envelope = await store.LoadAsync();
+            Assert.NotNull(envelope);
+            Assert.Equal("persisted", envelope!.Session.Id);
+        }
+
+        [Fact]
+        public async Task GetValidSessionAsync_ConcurrentCallersWithInvalidSession_AuthenticateExactlyOnce()
+        {
+            // Token-stampede guard: one caller authenticates, queued callers reuse its result.
+            var store = new MemoryTokenStore<TestSession>();
+            var authService = new FakeAuthService { AuthDelay = TimeSpan.FromMilliseconds(50) };
+            using var manager = CreateManager(authService, store);
+            var fallback = new TestCredentials("fallback");
+
+            var tasks = Enumerable.Range(0, 10)
+                .Select(_ => Task.Run(() => manager.GetValidSessionAsync(fallback)))
+                .ToArray();
+            var sessions = await Task.WhenAll(tasks);
+
+            Assert.Equal(1, authService.AuthenticateCalls);
+            Assert.All(sessions, session => Assert.Equal(sessions[0].Id, session.Id));
+        }
+
+        [Fact]
+        public async Task RefreshSessionAsync_ForcesNewSession_EvenWhenCurrentSessionStillValid()
+        {
+            // Force-refresh is used after server-side token rejection; validity-based
+            // deduplication only applies to GetValidSessionAsync.
+            var store = new MemoryTokenStore<TestSession>();
+            var authService = new FakeAuthService();
+            using var manager = CreateManager(authService, store);
+
+            await manager.RefreshSessionAsync(new TestCredentials("first"));
+            await manager.RefreshSessionAsync(new TestCredentials("second"));
+
+            Assert.Equal(2, authService.AuthenticateCalls);
+            Assert.Equal(new TestCredentials("second"), authService.LastCredentials);
         }
 
         [Fact]
@@ -122,39 +175,88 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
-        public async Task GetValidSessionAsync_ConcurrentCallersWithInvalidSession_AuthenticateExactlyOnce()
+        public async Task ProactiveRefresh_RefreshesSession_WhenTimerMissesWindowAndSessionAlreadyExpired()
         {
-            // Token-stampede guard: when N callers race GetValidSessionAsync with no valid
-            // session, the first performs the refresh and the rest must reuse its result —
-            // not serially re-authenticate N times against the upstream provider.
+            var fakeTime = new FakeTimeProvider();
             var store = new MemoryTokenStore<TestSession>();
-            var authService = new FakeAuthService { AuthDelay = TimeSpan.FromMilliseconds(50) };
-            using var manager = CreateManager(authService, store);
-            var fallback = new TestCredentials("fallback");
+            var sessionExpiry = fakeTime.GetUtcNow().UtcDateTime.AddSeconds(10);
+            await store.SaveAsync(new TokenEnvelope<TestSession>(
+                new TestSession("persisted"),
+                sessionExpiry));
 
-            var tasks = System.Linq.Enumerable.Range(0, 10)
-                .Select(_ => Task.Run(() => manager.GetValidSessionAsync(fallback)))
-                .ToArray();
-            var sessions = await Task.WhenAll(tasks);
+            var authService = new FakeAuthService();
+            using var manager = CreateManager(
+                authService,
+                store,
+                proactiveCredentialsProvider: () => new TestCredentials("proactive"),
+                refreshBuffer: TimeSpan.FromSeconds(5),
+                timeProvider: fakeTime);
 
-            Assert.Equal(1, authService.AuthenticateCalls);
-            Assert.All(sessions, s => Assert.Equal(sessions[0].Id, s.Id));
+            _ = await manager.GetValidSessionAsync();
+
+            fakeTime.Advance(TimeSpan.FromSeconds(20));
+            manager.TriggerRefreshCheck();
+
+            bool refreshed = await WaitUntilAsync(() => authService.AuthenticateCalls >= 1);
+
+            Assert.True(refreshed, "Expected proactive refresh to recover even after the original expiry was missed.");
+            Assert.Equal(new TestCredentials("proactive"), authService.LastCredentials);
         }
 
         [Fact]
-        public async Task RefreshSessionAsync_ForcesNewSession_EvenWhenCurrentSessionStillValid()
+        public async Task ProactiveRefresh_ConcurrentChecks_AuthenticateExactlyOnce()
         {
-            // Pins the public force-refresh contract: callers invoke RefreshSessionAsync after
-            // server-side rejections of clock-valid tokens, so it must always re-authenticate
-            // (the stampede dedup applies only to the validity-driven GetValidSessionAsync path).
+            var fakeTime = new FakeTimeProvider();
             var store = new MemoryTokenStore<TestSession>();
-            var authService = new FakeAuthService();
-            using var manager = CreateManager(authService, store);
+            var sessionExpiry = fakeTime.GetUtcNow().UtcDateTime.AddSeconds(10);
+            await store.SaveAsync(new TokenEnvelope<TestSession>(
+                new TestSession("persisted"),
+                sessionExpiry));
 
-            await manager.RefreshSessionAsync(new TestCredentials("first"));
-            await manager.RefreshSessionAsync(new TestCredentials("second"));
+            var authService = new FakeAuthService { AuthDelay = TimeSpan.FromMilliseconds(50) };
+            using var manager = CreateManager(
+                authService,
+                store,
+                proactiveCredentialsProvider: () => new TestCredentials("proactive"),
+                refreshBuffer: TimeSpan.FromSeconds(5),
+                timeProvider: fakeTime);
 
-            Assert.Equal(2, authService.AuthenticateCalls);
+            _ = await manager.GetValidSessionAsync();
+            fakeTime.Advance(TimeSpan.FromSeconds(6));
+
+            using ManualResetEventSlim start = new(false);
+            Task[] triggers = Enumerable.Range(0, 50)
+                .Select(_ => Task.Run(() =>
+                {
+                    start.Wait();
+                    manager.TriggerRefreshCheck();
+                }))
+                .ToArray();
+
+            start.Set();
+            await Task.WhenAll(triggers);
+            bool refreshed = await WaitUntilAsync(() => authService.AuthenticateCalls >= 1);
+            Assert.True(refreshed, "Expected at least one proactive refresh.");
+
+            await Task.Delay(200);
+
+            Assert.Equal(1, authService.AuthenticateCalls);
+        }
+
+        private static async Task<bool> WaitUntilAsync(Func<bool> condition)
+        {
+            var deadline = DateTime.UtcNow.AddSeconds(2);
+            while (DateTime.UtcNow < deadline)
+            {
+                if (condition())
+                {
+                    return true;
+                }
+
+                await Task.Delay(20);
+            }
+
+            return condition();
         }
 
         private static StreamingTokenManager<TestSession, TestCredentials> CreateManager(
@@ -189,9 +291,9 @@ namespace Lidarr.Plugin.Common.Tests
 
         private sealed class FakeAuthService : IStreamingTokenAuthenticationService<TestSession, TestCredentials>
         {
-            private int _authenticateCalls;
+            private int authenticateCalls;
 
-            public int AuthenticateCalls => System.Threading.Volatile.Read(ref _authenticateCalls);
+            public int AuthenticateCalls => Volatile.Read(ref this.authenticateCalls);
 
             public TestSession? LastIssuedSession { get; private set; }
 
@@ -201,10 +303,10 @@ namespace Lidarr.Plugin.Common.Tests
 
             public async Task<TestSession> AuthenticateAsync(TestCredentials credentials)
             {
-                var call = System.Threading.Interlocked.Increment(ref _authenticateCalls);
-                if (AuthDelay > TimeSpan.Zero)
+                int call = Interlocked.Increment(ref this.authenticateCalls);
+                if (this.AuthDelay > TimeSpan.Zero)
                 {
-                    await Task.Delay(AuthDelay);
+                    await Task.Delay(this.AuthDelay);
                 }
 
                 LastCredentials = credentials;

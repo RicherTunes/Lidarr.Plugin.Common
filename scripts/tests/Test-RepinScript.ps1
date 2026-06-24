@@ -67,7 +67,12 @@ try {
 
     Push-Location $SubmodulePath
     git init --quiet 2>$null
+    git config user.email "repin-test@example.invalid" 2>$null
+    git config user.name "Repin Test" 2>$null
     git commit --allow-empty -m "init" --quiet 2>$null
+    if ($LASTEXITCODE -ne 0) {
+        throw "Failed to create fake submodule HEAD for repin tests."
+    }
     Pop-Location
 
     $TestSha = "da58f3ef5064cf832d3d6a9eed13eb7d4d3d392f"
@@ -211,6 +216,23 @@ try {
         $scriptText = [IO.File]::ReadAllText($RepinPs1)
         ($scriptText -match 'Get-ChildItem -Path \$workflowDir -File -Filter "\*\.yml"') -and
         ($scriptText -match 'Get-ChildItem -Path \$workflowDir -File -Filter "\*\.yaml"')
+    }
+
+    # Test 17: VerifyOnly fails on stale reusable Common workflow pins
+    Test-Assertion "VerifyOnly fails on stale workflow SHA pins" {
+        $actualSha = (git -C $SubmodulePath rev-parse HEAD).Trim()
+        $shaBytes = [System.Text.Encoding]::ASCII.GetBytes($actualSha + "`n")
+        [System.IO.File]::WriteAllBytes((Join-Path $TempDir "ext-common-sha.txt"), $shaBytes)
+
+        Push-Location $TempDir
+        try {
+            $output = & $RepinPs1 -VerifyOnly -SubmodulePath "ext/Lidarr.Plugin.Common" *>&1
+            $exitCode = $LASTEXITCODE
+        } finally {
+            Pop-Location
+        }
+
+        ($exitCode -ne 0) -and (($output -join "`n") -match 'stale')
     }
 
 } finally {

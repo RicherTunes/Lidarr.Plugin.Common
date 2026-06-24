@@ -13,7 +13,7 @@
 #   --sha-from-submodule   Read SHA from submodule HEAD (no manual SHA needed)
 #   --stage                Stage submodule + ext-common-sha.txt for commit
 #   --verify               Check submodule is clean before/after
-#   --verify-only          CI mode: fail if gitlink != ext-common-sha.txt; warn on stale workflow pins
+#   --verify-only          CI mode: fail if gitlink != ext-common-sha.txt or workflow pins are stale
 #   --update-pins          Rewrite workflow SHA pins in .github/workflows/*.yml
 #                          MANUAL ONLY — requires a PAT with 'workflows' scope to push.
 #                          CI bump workflows should NOT use this flag (GITHUB_TOKEN cannot
@@ -161,7 +161,7 @@ if [[ "$VERIFY_ONLY" == true ]]; then
 
     echo -e "${GREEN}Submodule verification passed.${NC}"
 
-    # Advisory: check for stale workflow SHA pins (warning only, not a failure).
+    # Guard: fail on stale reusable Common workflow SHA pins.
     # Suppressed when the repo has no Common reusable-workflow references at all.
     WORKFLOW_DIR=".github/workflows"
     if [[ -d "$WORKFLOW_DIR" ]]; then
@@ -177,17 +177,18 @@ if [[ "$VERIFY_ONLY" == true ]]; then
                     PIN_SHA=$(echo "$line" | grep -oE '@[0-9a-f]{40}' | tr -d '@')
                     if [[ -n "$PIN_SHA" && "$PIN_SHA" != "$EXPECTED_SHA" ]]; then
                         ((STALE++)) || true
-                        echo -e "${YELLOW}WARNING: Stale pin in $(basename "$f"):$LINENO_CTR${NC}"
-                        echo -e "  ${YELLOW}$(echo "$line" | sed 's/^[[:space:]]*//')${NC}"
-                        echo -e "  ${YELLOW}pinned: ${PIN_SHA:0:12}...  expected: ${EXPECTED_SHA:0:12}...${NC}"
+                        echo -e "${RED}ERROR: Stale pin in $(basename "$f"):$LINENO_CTR${NC}"
+                        echo -e "  ${RED}$(echo "$line" | sed 's/^[[:space:]]*//')${NC}"
+                        echo -e "  ${RED}pinned: ${PIN_SHA:0:12}...  expected: ${EXPECTED_SHA:0:12}...${NC}"
                     fi
                 fi
             done < "$f"
         done
         shopt -u nullglob
         if [[ "$STALE" -gt 0 ]]; then
-            echo -e "${YELLOW}${STALE}/${TOTAL_PINS} workflow pin(s) are stale.${NC}"
+            echo -e "${RED}ERROR: ${STALE}/${TOTAL_PINS} workflow pin(s) are stale.${NC}"
             echo -e "${CYAN}Fix: ./scripts/repin-common-submodule.sh $EXPECTED_SHA --update-pins --stage${NC}"
+            exit 1
         fi
     fi
 

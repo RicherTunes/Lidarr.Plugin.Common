@@ -1,21 +1,22 @@
 <#
 .SYNOPSIS
-    Plugin Abstractions validation for multi-plugin E2E testing.
+    Legacy Abstractions sidecar validation for multi-plugin E2E testing.
 
 .DESCRIPTION
-    Validates that all plugins ship identical Lidarr.Plugin.Abstractions.dll
-    to prevent type identity conflicts at runtime.
+    Merged-DLL packages should not ship Lidarr.Plugin.Abstractions.dll as a
+    sidecar. When legacy sidecars are present, validates that they are
+    byte-identical to avoid runtime type identity conflicts.
 #>
 
 function Normalize-PluginAbstractions {
     <#
     .SYNOPSIS
-        Validates Lidarr.Plugin.Abstractions.dll consistency across plugins.
+        Validates legacy Lidarr.Plugin.Abstractions.dll sidecar consistency across plugins.
 
     .DESCRIPTION
-        Ensures all plugins ship byte-identical Abstractions.dll to prevent
-        type identity conflicts at runtime. Fails with E2E_ABSTRACTIONS_SHA_MISMATCH
-        if SHA256 hashes differ.
+        Merged-DLL packages with no sidecar are compliant. If legacy sidecars
+        are present, ensures they are byte-identical. Fails with
+        E2E_ABSTRACTIONS_SHA_MISMATCH if SHA256 hashes differ.
 
     .PARAMETER PluginsRoot
         Root directory containing plugin folders.
@@ -76,10 +77,10 @@ function Normalize-PluginAbstractions {
         $errorMsg = @"
 E2E_ABSTRACTIONS_SHA_MISMATCH: Multiple Lidarr.Plugin.Abstractions.dll copies with DIFFERENT SHA256 hashes detected.
 
-All plugins must ship byte-identical Abstractions.dll to avoid type identity conflicts at runtime.
-This typically happens when plugins are built from different Lidarr.Plugin.Common commits.
+Legacy sidecar packages must ship byte-identical Abstractions.dll to avoid type identity conflicts at runtime.
+This typically happens when legacy packages are built from different Lidarr.Plugin.Common commits.
 
-FIX: Rebuild all plugins from the same Common submodule SHA.
+FIX: Rebuild with merged/internalized Abstractions and no sidecar, or rebuild all legacy sidecar packages from the same Common submodule SHA.
 
 Details:
 $details

@@ -6,7 +6,7 @@
 
 .DESCRIPTION
     Phase 0.3 of the stabilization program: the parity spec must encode a
-    canonical commonVersion (derived from Common's own csproj at runtime)
+    canonical commonVersion (derived from Common's Directory.Build.props at runtime)
     and the lint must catch four classes of drift in plugin repos:
 
       1. plugin.json.commonVersion != Common's canonical <Version>
@@ -22,13 +22,13 @@ BeforeAll {
     $script:CommonRoot = Resolve-Path (Join-Path $PSScriptRoot '..' '..')
     $script:LintScript = Join-Path $script:CommonRoot 'scripts' 'ecosystem-parity-lint.ps1'
     $script:SpecFile   = Join-Path $script:CommonRoot 'scripts' 'parity-spec.json'
-    $script:CommonCsproj = Join-Path $script:CommonRoot 'src' 'Lidarr.Plugin.Common.csproj'
+    $script:CommonVersionProps = Join-Path $script:CommonRoot 'Directory.Build.props'
 
-    # Resolve canonical version from Common's csproj at test time — this is
+    # Resolve canonical version from Directory.Build.props at test time; this is
     # the single source of truth the lint must consult.
-    $csprojContent = Get-Content $script:CommonCsproj -Raw
-    if ($csprojContent -notmatch '<Version>([^<]+)</Version>') {
-        throw "Could not parse <Version> from $script:CommonCsproj"
+    $propsContent = Get-Content $script:CommonVersionProps -Raw
+    if ($propsContent -notmatch '<Version>([^<]+)</Version>') {
+        throw "Could not parse <Version> from $script:CommonVersionProps"
     }
     $script:CanonicalCommonVersion = $matches[1]
 
@@ -93,9 +93,9 @@ Describe 'parity-spec.json — version contract section' {
         $spec.PSObject.Properties.Name | Should -Contain 'versionContract'
     }
 
-    It 'versionContract.commonVersionSource points to Common csproj' {
+    It 'versionContract.commonVersionSource points to Directory.Build.props' {
         $spec = Get-Content $script:SpecFile -Raw | ConvertFrom-Json
-        $spec.versionContract.commonVersionSource | Should -Be 'src/Lidarr.Plugin.Common.csproj'
+        $spec.versionContract.commonVersionSource | Should -Be 'Directory.Build.props'
     }
 
     It 'versionContract.targetFramework is net8.0' {
@@ -109,6 +109,8 @@ Describe 'parity-spec.json — version contract section' {
         $forbidden | Should -Contain 'FluentValidation.dll'
         $forbidden | Should -Contain 'NLog.dll'
         $forbidden | Should -Contain 'System.Text.Json.dll'
+        $forbidden | Should -Contain 'Lidarr.Plugin.Abstractions.dll'
+        $forbidden | Should -Contain 'Lidarr.Plugin.Common.dll'
     }
 }
 
@@ -124,7 +126,7 @@ Describe 'ecosystem-parity-lint.ps1 — version-contract violations' {
         }
     }
 
-    It 'flags plugin.json.commonVersion that lags Common csproj' {
+    It 'flags plugin.json.commonVersion that lags Common version props' {
         $repo = New-PluginFixture -PluginJsonCommonVersion '1.5.0'
         try {
             $result = Invoke-Lint -RepoPath $repo

@@ -191,12 +191,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// </summary>
         public void ClearSession()
         {
-            lock (_tokenLock)
-            {
-                _currentSession = null;
-                _sessionExpiryTime = DateTime.MinValue;
-                _refreshAttempts = 0;
-            }
+            ClearInMemorySession();
 
             // Fire-and-forget: best-effort clear of persisted state.
             // Callers needing to await persistence should use ClearSessionAsync().
@@ -213,12 +208,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// </summary>
         public async Task ClearSessionAsync(CancellationToken cancellationToken = default)
         {
-            lock (_tokenLock)
-            {
-                _currentSession = null;
-                _sessionExpiryTime = DateTime.MinValue;
-                _refreshAttempts = 0;
-            }
+            ClearInMemorySession();
 
             // Always clear any persisted session when a store is configured, even if no
             // in-memory session has been loaded yet. This ensures an explicit clear truly
@@ -348,7 +338,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
 
                 try
                 {
-                    await RefreshSessionAsync(credentials).ConfigureAwait(false);
+                    await RefreshSessionCoreAsync(credentials, onlyIfStillInvalid: true).ConfigureAwait(false);
                     _logger.LogDebug("Proactive token refresh completed successfully");
                 }
                 catch (Exception refreshEx)
@@ -437,13 +427,23 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             }
         }
 
+        private void ClearInMemorySession()
+        {
+            lock (_tokenLock)
+            {
+                _currentSession = null;
+                _sessionExpiryTime = DateTime.MinValue;
+                _refreshAttempts = 0;
+            }
+        }
+
         public void Dispose()
         {
             try
             {
                 _refreshTimer.Dispose();
                 _refreshSemaphore.Dispose();
-                ClearSession();
+                ClearInMemorySession();
             }
             catch (Exception ex)
             {

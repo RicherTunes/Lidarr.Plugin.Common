@@ -13,7 +13,7 @@ Make the GitHub Actions workflow `E2E Bootstrap (Headless)` deterministic and gr
 > **Note:** These observations are point-in-time snapshots. The **canary job** (`override=never` against
 > `pr-plugins`) is the authoritative source for current host behavior.
 
-1. **File-based plugin discovery works on** `ghcr.io/hotio/lidarr:pr-plugins-3.1.1.4884`
+1. **File-based plugin discovery works on** `ghcr.io/hotio/lidarr:nightly-3.1.3.4970`
    - Plugins placed at `/config/plugins/<Vendor>/<PluginName>/` are loaded.
    - *Observed: 2025-01-02, Run #20669121388*
 2. **File-based plugin discovery does not work on** `ghcr.io/hotio/lidarr:pr-plugins` (moving tag, observed `3.1.1.4901`)
@@ -25,7 +25,7 @@ Make the GitHub Actions workflow `E2E Bootstrap (Headless)` deterministic and gr
 
 ## Current Blocker (P0) — RESOLVED
 
-**Multi-plugin load failure on `3.1.1.4884`** (now mitigated via host override):
+**Multi-plugin load failure on `3.1.3.4970`** (now mitigated via host override):
 
 - Logs included: `Bootstrap: Error starting with plugins enabled`
 - `ReflectionTypeLoadException` / `FileLoadException` for `Lidarr.Plugin.Abstractions`
@@ -39,7 +39,7 @@ Make the GitHub Actions workflow `E2E Bootstrap (Headless)` deterministic and gr
 
 ## Verified Workaround
 
-Mounting a patched `Lidarr.Common.dll` fixes multi-plugin plugin load on `3.1.1.4884`.
+Mounting a patched `Lidarr.Common.dll` fixes multi-plugin plugin load on `3.1.3.4970`.
 
 - Patched host source exists locally at `_upstream/Lidarr` on branch `fix/pluginloader-keep-load-context`
 - Commit: `1e741479fad766584e196187c61bea302085704a`
