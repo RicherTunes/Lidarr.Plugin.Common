@@ -45,8 +45,8 @@ dotnet test brainarr/Brainarr.Tests/
 # Use the unified PluginPack tooling
 Import-Module lidarr.plugin.common/tools/PluginPack.psm1
 
-# Package with canonical Abstractions (recommended)
-New-PluginPackage -Csproj qobuzarr/Qobuzarr.csproj -Manifest qobuzarr/plugin.json -RequireCanonicalAbstractions
+# Package with merged/internalized Common + Abstractions
+New-PluginPackage -Csproj qobuzarr/Qobuzarr.csproj -Manifest qobuzarr/plugin.json
 ```
 
 ## Current Work Streams
@@ -60,13 +60,15 @@ Check these repos for open PRs:
 - `gh pr list -R RicherTunes/Brainarr`
 - `gh pr list -R RicherTunes/AppleMusicarr`
 
-### Canonical Abstractions (Completed)
+### Merged Abstractions Packaging (Completed)
 
-All plugins now use `canonical-abstractions.json` to ensure identical Abstractions.dll:
-- Version: 1.5.0
-- SHA256: `251bf049c28737ac1912074733adf04f099f54c801c914ac9c0e056b2a8232db`
+Plugins that import Common's `build/PluginPackaging.targets` merge and internalize
+`Lidarr.Plugin.Abstractions.dll` and `Lidarr.Plugin.Common.dll` into the main plugin
+DLL. Packages must not ship either DLL as a sidecar.
 
-Verification: `lidarr.plugin.common/scripts/Verify-CanonicalAbstractions.ps1`
+Legacy sidecar packages are still checked by
+`lidarr.plugin.common/scripts/Verify-CanonicalAbstractions.ps1`; when no sidecars
+are present, the package is compliant.
 
 ### Manifest Entrypoint Validation (Completed)
 
@@ -77,15 +79,15 @@ Verification: `lidarr.plugin.common/scripts/Verify-CanonicalAbstractions.ps1`
 
 ## Architecture Decisions
 
-### Why Canonical Abstractions?
+### Why Merged Abstractions?
 
-**Problem**: Plugins built at different times had byte-different Abstractions.dll, causing potential type identity issues.
+**Problem**: Plugins built at different times had byte-different Abstractions.dll sidecars, causing type identity issues.
 
-**Solution**: Pin Abstractions to a specific release with SHA256 verification:
-1. `canonical-abstractions.json` stores version + SHA256
-2. `Install-CanonicalAbstractions` downloads/caches the DLL
-3. `New-PluginPackage -RequireCanonicalAbstractions` enforces injection
-4. `Assert-CanonicalAbstractions` verifies post-package
+**Solution**: Merge/internalize Abstractions and Common into the plugin DLL:
+1. `PluginPackaging.targets` includes both DLLs in the ILRepack input.
+2. `PluginPack.psm1` removes and rejects Abstractions/Common sidecars.
+3. Packaging preflight fails if either sidecar is present.
+4. The legacy canonical verifier only compares hashes when old sidecars are present.
 
 ### Why Manifest Entrypoint Validation?
 
@@ -102,7 +104,7 @@ Verification: `lidarr.plugin.common/scripts/Verify-CanonicalAbstractions.ps1`
 |-----------|-------|-------|
 | `tools/PluginPack.psm1` | Common | Core packaging logic |
 | `tools/ManifestCheck.ps1` | Common | Manifest validation |
-| `tools/canonical-abstractions.json` | Common | Pinned Abstractions config |
+| `tools/canonical-abstractions.json` | Common | Legacy sidecar hash config |
 | `scripts/e2e-runner.ps1` | Common | E2E test orchestration |
 | `docs/reference/plugin.schema.json` | Common | Manifest JSON schema |
 | `plugin.json` | Each plugin | Plugin-specific manifest |
@@ -126,7 +128,7 @@ The Lidarr host has an AssemblyLoadContext lifecycle bug that affects multi-plug
 
 ## Merge Order (When CI Unblocks)
 
-1. Common PRs first (e.g., canonical Abstractions, entrypoint validation)
+1. Common PRs first (e.g., packaging policy, entrypoint validation)
 2. Bump Common submodule in each plugin
 3. Merge plugin PRs (verify locally first)
 

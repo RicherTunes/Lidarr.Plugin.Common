@@ -19,7 +19,7 @@ public sealed class LidarrContainerFixtureTests
         string containerName = "test-e2e",
         int port = 18686)
         => new(
-            DockerImage: "ghcr.io/hotio/lidarr:pr-plugins-3.1.2.4913",
+            DockerImage: "ghcr.io/hotio/lidarr:nightly-3.1.3.4970",
             ContainerName: containerName,
             LidarrPort: port,
             PluginMountPath: "/config/plugins/Test/Plugin",
