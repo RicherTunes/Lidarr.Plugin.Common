@@ -1,5 +1,7 @@
 # Plugin Hardening Wave 2 Implementation Plan
 
+<!-- docval:ignore-script-refs -->
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Pay the next layer of technical debt across Brainarr, Qobuzarr, Tidalarr, and Lidarr.Plugin.Common without destabilizing the already-verified Tidal token-renewal fix.
