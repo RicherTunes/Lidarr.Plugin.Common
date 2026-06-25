@@ -35,7 +35,7 @@ Schema (v2, instance-namespaced):
     "i-abc123def456": {
       "lidarrUrl": "http://localhost:8691",
       "containerName": "lidarr-multi-plugin-persist",
-      "lidarrVersion": "3.1.1.4884",
+      "lidarrVersion": "3.1.3.4970",
       "updatedAt": "2026-01-01T15:00:00.000Z",
       "plugins": {
         "Qobuzarr": { "indexerId": 101, "downloadClientId": 201 },

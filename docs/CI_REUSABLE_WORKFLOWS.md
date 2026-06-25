@@ -170,7 +170,7 @@ on:
 **Pattern identified in**: ci.yml, docker-e2e.yml, nightly.yml, test-and-coverage.yml
 
 ### Current pattern (brainarr ci.yml, `prepare-lidarr` job):
-Large block pulling `ghcr.io/hotio/lidarr:pr-plugins-3.1.2.4913`, extracting DLLs,
+Large block pulling `ghcr.io/hotio/lidarr:nightly-3.1.3.4970`, extracting DLLs,
 uploading as artifact. This pattern is copy-pasted across ~20+ workflow files.
 
 ### Proposed reusable workflow: `.github/workflows/prepare-lidarr-assemblies.yml`
@@ -181,7 +181,7 @@ on:
     inputs:
       lidarr-docker-version:
         type: string
-        default: 'pr-plugins-3.1.2.4913'
+        default: 'nightly-3.1.3.4970'
       output-path:
         type: string
         default: 'ext/Lidarr-docker/_output/net8.0'

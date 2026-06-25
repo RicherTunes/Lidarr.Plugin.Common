@@ -85,8 +85,8 @@
   },
 
   "versionContract": {
-    "description": "Ecosystem version contract (Phase 0.3). Lint resolves canonical commonVersion from commonVersionSource at runtime — this is the single source of truth. Plugins must declare a matching commonVersion in plugin.json; intra-repo plugin.json/manifest.json version drift is forbidden.",
-    "commonVersionSource": "src/Lidarr.Plugin.Common.csproj",
+    "description": "Ecosystem version contract (Phase 0.3). Lint resolves canonical commonVersion from commonVersionSource at runtime. Directory.Build.props is the single source of truth for Common and Abstractions package versions. Plugins must declare a matching commonVersion in plugin.json; intra-repo plugin.json/manifest.json version drift is forbidden.",
+    "commonVersionSource": "Directory.Build.props",
     "targetFramework": "net8.0",
     "forbiddenTargetFrameworks": ["net6.0", "net7.0", "netstandard2.0", "netstandard2.1"],
     "allowedHostAssemblies": [
@@ -106,6 +106,8 @@
       "Microsoft.Extensions.Configuration.dll",
       "Microsoft.Extensions.Caching.Memory.dll",
       "Microsoft.Extensions.Http.dll",
+      "Lidarr.Plugin.Abstractions.dll",
+      "Lidarr.Plugin.Common.dll",
       "Lidarr.Core.dll",
       "Lidarr.Common.dll",
       "Lidarr.Http.dll",

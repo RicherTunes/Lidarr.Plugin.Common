@@ -75,7 +75,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       lidarr:
-        image: ghcr.io/hotio/lidarr:pr-plugins-2.14.2.4786
+        image: ghcr.io/hotio/lidarr:nightly-3.1.3.4970
         ports:
           - 8686:8686
         env:

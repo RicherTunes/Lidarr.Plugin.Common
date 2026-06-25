@@ -23,7 +23,7 @@
 
 .PARAMETER VerifyOnly
     CI mode: Verify that ext-common-sha.txt matches the submodule gitlink. Exits non-zero on
-    mismatch. Also warns (non-fatal) about stale workflow SHA pins.
+    mismatch or stale reusable Common workflow SHA pins.
 
 .PARAMETER ShaFromSubmoduleHead
     Read SHA from submodule HEAD instead of requiring an explicit -SHA parameter.
@@ -138,7 +138,7 @@ if ($VerifyOnly) {
 
     Write-Host "Submodule verification passed." -ForegroundColor Green
 
-    # Advisory: check for stale workflow SHA pins (warning only, not a failure).
+    # Guard: fail on stale reusable Common workflow SHA pins.
     # Suppressed when the repo has no Common reusable-workflow references at all.
     $workflowDir = ".github/workflows"
     if (Test-Path $workflowDir) {
@@ -159,16 +159,17 @@ if ($VerifyOnly) {
                     if ($pinSha -ne $expectedSha) {
                         $stale++
                         $lineNum = $i + 1
-                        Write-Host "WARNING: Stale pin in $($_.Name):$lineNum" -ForegroundColor Yellow
-                        Write-Host "  $($lines[$i].Trim())" -ForegroundColor Yellow
-                        Write-Host "  pinned: $($pinSha.Substring(0,12))...  expected: $($expectedSha.Substring(0,12))..." -ForegroundColor Yellow
+                        Write-Host "ERROR: Stale pin in $($_.Name):$lineNum" -ForegroundColor Red
+                        Write-Host "  $($lines[$i].Trim())" -ForegroundColor Red
+                        Write-Host "  pinned: $($pinSha.Substring(0,12))...  expected: $($expectedSha.Substring(0,12))..." -ForegroundColor Red
                     }
                 }
             }
         }
         if ($stale -gt 0) {
-            Write-Host "$stale/$totalPins workflow pin(s) are stale." -ForegroundColor Yellow
+            Write-Host "ERROR: $stale/$totalPins workflow pin(s) are stale." -ForegroundColor Red
             Write-Host "Fix: .\scripts\repin-common-submodule.ps1 -SHA $expectedSha -UpdatePins -Stage" -ForegroundColor Cyan
+            exit 1
         }
     }
 

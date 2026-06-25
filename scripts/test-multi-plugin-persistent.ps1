@@ -29,7 +29,7 @@
     Delete persistent state (config, plugins, downloads) and start fresh.
 
 .PARAMETER LidarrTag
-    Lidarr Docker tag. Default: pr-plugins-3.1.1.4884
+    Lidarr Docker tag. Default: nightly-3.1.3.4970
 
 .PARAMETER Port
     Host port to bind Lidarr to. Default: 8691
@@ -51,7 +51,7 @@ param(
     [switch]$IncludeBrainarr,
     [switch]$RebuildBrainarr,
     [switch]$Clean,
-    [string]$LidarrTag = "pr-plugins-3.1.1.4884",
+    [string]$LidarrTag = "nightly-3.1.3.4970",
     [int]$Port = 8691,
     [string]$ContainerName = "lidarr-multi-plugin-persist",
     [string]$WorkRoot = ".persistent-multi",

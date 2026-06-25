@@ -16,7 +16,7 @@
       CommonPath, LidarrDockerVersion, ExpectedContentsFile
     Optional keys:
       SolutionFile, BuildFlags, TestProjects, PackageParams,
-      WarningBudget, WarningBudgetEnforce
+      WarningBudget, WarningBudgetEnforce, RequireHermeticTests
 
 .PARAMETER SkipExtract
     Reuse previously extracted host assemblies (fast rerun).
@@ -54,6 +54,11 @@ $script:TotalStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $script:BuildWarningCount = 0
 $script:TestBuildWarningCount = 0
 $script:TestRunWarningCount = 0
+$script:DotnetNoServerArgs = @('--disable-build-servers')
+$script:SerializedMsbuildArgs = @('-m:1', '-p:BuildInParallel=false', '-p:UseSharedCompilation=false')
+
+$env:DOTNET_CLI_DISABLE_BUILD_SERVERS = '1'
+$env:MSBUILDDISABLENODEREUSE = '1'
 
 function Write-Stage {
     param([string]$Name, [string]$Status, [string]$Detail = '', [int]$Seconds = 0)
@@ -161,6 +166,7 @@ $testProjects   = $Config['TestProjects']
 $packageParams  = $Config['PackageParams']
 $warningBudget  = if ($Config.ContainsKey('WarningBudget') -and $Config.WarningBudget -ne $null -and "$($Config.WarningBudget)".Trim()) { [int]$Config.WarningBudget } else { $null }
 $warningBudgetEnforce = [bool]$Config['WarningBudgetEnforce']
+$requireHermeticTests = [bool]$Config['RequireHermeticTests']
 
 # Validate Common submodule
 if (-not (Test-Path -LiteralPath $commonPath)) {
@@ -340,7 +346,7 @@ $buildOk = Invoke-Stage -Name 'BUILD' -Number "$currentStage/5" -Required -Actio
     # PackageReferences (e.g., FluentValidation with SkipHostBridge) resolve correctly.
     if (-not $NoRestore) {
         $restoreTarget = $pluginCsproj
-        $restoreArgs = @($restoreTarget)
+        $restoreArgs = @($restoreTarget) + $script:DotnetNoServerArgs + $script:SerializedMsbuildArgs
         if ($buildFlags) {
             $resolvedFlags = $buildFlags | ForEach-Object {
                 $_ -replace '\{HOST_PATH\}', $hostPathAbsolute
@@ -355,7 +361,7 @@ $buildOk = Invoke-Stage -Name 'BUILD' -Number "$currentStage/5" -Required -Actio
     }
 
     # Build with repo-specific flags
-    $buildArgs = @($pluginCsproj, '-c', $Configuration, '--no-restore')
+    $buildArgs = @($pluginCsproj, '-c', $Configuration, '--no-restore') + $script:DotnetNoServerArgs + $script:SerializedMsbuildArgs
 
     if ($buildFlags) {
         $resolvedFlags = $buildFlags | ForEach-Object {
@@ -407,7 +413,7 @@ if (-not $buildOk) {
             Manifest       = $manifestPath
             Framework      = 'net8.0'
             Configuration  = $Configuration
-            ExtraBuildArgs = $resolvedBuildFlags
+            ExtraBuildArgs = $script:DotnetNoServerArgs + $script:SerializedMsbuildArgs + $resolvedBuildFlags
         }
 
         # Merge extra packaging params from config
@@ -479,6 +485,9 @@ if ($SkipTests) {
 } else {
     $e2eOk = Invoke-Stage -Name 'HERMETIC E2E' -Number "$currentStage/5" -Action {
         if (-not $testProjects -or $testProjects.Count -eq 0) {
+            if ($requireHermeticTests) {
+                throw "No test projects configured while RequireHermeticTests is enabled"
+            }
             return "No test projects configured"
         }
 
@@ -493,7 +502,7 @@ if ($SkipTests) {
             Write-Host "  Running tests in $testProj ..."
 
             # Restore test project with build flags (separate from plugin csproj restore)
-            $testRestoreArgs = @($testProj)
+            $testRestoreArgs = @($testProj) + $script:DotnetNoServerArgs + $script:SerializedMsbuildArgs
             $resolvedFlags = @()
             if ($buildFlags) {
                 $resolvedFlags = $buildFlags | ForEach-Object {
@@ -507,7 +516,7 @@ if ($SkipTests) {
             $trOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
 
             # Build test project (disable plugin packaging, exclude host bridge tests)
-            $testBuildArgs = @($testProj, '-c', $Configuration, '--no-restore')
+            $testBuildArgs = @($testProj, '-c', $Configuration, '--no-restore') + $script:DotnetNoServerArgs + $script:SerializedMsbuildArgs
             if ($resolvedFlags) { $testBuildArgs += $resolvedFlags }
             $testBuildArgs += '-p:PluginPackagingDisable=true'
             $testBuildArgs += '-p:ExcludeHostBridge=true'
@@ -522,8 +531,7 @@ if ($SkipTests) {
             $resultsDir = Join-Path ([System.IO.Path]::GetTempPath()) "local-ci-trx-$([guid]::NewGuid().ToString('N').Substring(0,8))"
             New-Item -ItemType Directory -Path $resultsDir -Force | Out-Null
 
-            $testArgs = @(
-                $testProj, '--no-build', '-c', $Configuration,
+            $testArgs = @($testProj, '--no-build', '-c', $Configuration) + $script:DotnetNoServerArgs + @(
                 '--filter', 'Area=E2E/Hermetic',
                 '--logger', 'trx',
                 '--results-directory', $resultsDir
@@ -557,6 +565,11 @@ if ($SkipTests) {
 
         if ($totalFailed -gt 0) {
             throw "$totalFailed test(s) failed"
+        }
+
+        $totalMatched = $totalPassed + $totalFailed + $totalSkipped
+        if ($requireHermeticTests -and $totalMatched -eq 0) {
+            throw "No tests matched hermetic filter Area=E2E/Hermetic"
         }
 
         $stageWarningTotal = $script:TestBuildWarningCount + $script:TestRunWarningCount

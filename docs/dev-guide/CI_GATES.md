@@ -36,7 +36,7 @@ jobs:
 - **Packaging** via `tools/PluginPack.psm1` (`New-PluginPackage`)
 - **Manifest validation** + `-ResolveEntryPoints` (includes `MAN002`/`MAN003` errors)
 - **Legacy key warnings** (`MAN004`) escalated from warning → error after `man004-cutoff`
-- **Canonical Abstractions**: package must contain the pinned `Lidarr.Plugin.Abstractions.dll` bytes (`tools/canonical-abstractions.json`)
+- **Merged sidecar policy**: packages must not contain `Lidarr.Plugin.Common.dll` or `Lidarr.Plugin.Abstractions.dll` sidecars
 - **Parity lint** (optional): blocks reintroducing known clones and forbidden patterns
 
 ## Local equivalents (pre-flight)
@@ -44,7 +44,7 @@ jobs:
 From a plugin repo root (with Common submodule available):
 
 ```powershell
-# Package with canonical Abstractions + entrypoint validation
+# Package with merged sidecar policy + entrypoint validation
 ./build.ps1 Release -Package
 ```
 
@@ -56,9 +56,8 @@ $common = "ext/lidarr.plugin.common"
 # Manifest validation (includes -ResolveEntryPoints)
 & "$common/tools/ManifestCheck.ps1" -ProjectPath "src/Your.Plugin/Your.Plugin.csproj" -ManifestPath "src/Your.Plugin/plugin.json" -PublishPath "src/Your.Plugin/artifacts/publish/net8.0/Release" -ResolveEntryPoints
 
-# Canonical Abstractions check
-$expected = (Get-Content "$common/tools/canonical-abstractions.json" -Raw | ConvertFrom-Json).abstractionsSha256
-& "$common/scripts/Verify-CanonicalAbstractions.ps1" -PackagePaths @("src/Your.Plugin/artifacts/packages/*.zip") -ExpectedSha256 $expected
+# Legacy sidecar check (passes when packages have no Abstractions sidecar)
+& "$common/scripts/Verify-CanonicalAbstractions.ps1" -PackagePaths @("src/Your.Plugin/artifacts/packages/*.zip")
 
 # Parity lint (strict CI mode)
 & "$common/scripts/parity-lint.ps1" -RepoPath . -Mode ci
@@ -70,5 +69,5 @@ If you can’t call the reusable workflow (forks or debugging), the equivalent C
 
 - Package: `./build.ps1 Release -Package`
 - Manifest: `tools/ManifestCheck.ps1 ... -ResolveEntryPoints`
-- Canonical Abstractions: `scripts/Verify-CanonicalAbstractions.ps1 ...`
+- Merged sidecar policy: `scripts/Verify-CanonicalAbstractions.ps1 ...` plus package closure checks
 - Parity lint: `scripts/parity-lint.ps1 -Mode ci`

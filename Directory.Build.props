@@ -1,10 +1,12 @@
 <Project>
   <!--
-    SINGLE SOURCE OF TRUTH for Common + Abstractions package version.
+    CANONICAL MSBUILD VERSION for Common + Abstractions packages.
     Both Lidarr.Plugin.Common.csproj and Lidarr.Plugin.Abstractions.csproj inherit
     this <Version> property.  Do NOT hardcode <Version> in either csproj — any value
     set there overrides this one and the two packages drift silently.
-    To bump: change the value here only.
+    The repository VERSION file is the release/scripting sentinel; bump VERSION and
+    this <Version> value together. scripts/tests/Test-VersionSourceContract.ps1
+    enforces that they stay in lockstep.
   -->
   <PropertyGroup>
     <!-- Next-release marker for the chore/wave-23-parity-refresh-and-pin-fixes branch.

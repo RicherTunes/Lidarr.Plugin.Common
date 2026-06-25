@@ -1,4 +1,6 @@
 using System;
+using System.Net;
+using System.Net.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Lidarr.Plugin.Common.Services.Http;
 using Lidarr.Plugin.Common.Services.Caching;
@@ -13,7 +15,12 @@ public static class MyPluginModule
     {
         // Configure HttpClient and defaults
         services.AddHttpClient("myplugin")
-            .ConfigureHttpClient(c => c.BaseAddress = new Uri(settings.BaseUrl));
+            .ConfigureHttpClient(c => c.BaseAddress = new Uri(settings.BaseUrl))
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AutomaticDecompression = DecompressionMethods.All,
+                AllowAutoRedirect = false
+            });
 
         // Cache policy provider (used by StreamingResponseCache implementations)
         services.AddSingleton<ICachePolicyProvider, PolicyProvider>();
