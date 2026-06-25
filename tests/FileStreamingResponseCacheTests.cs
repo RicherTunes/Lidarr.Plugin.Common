@@ -789,19 +789,38 @@ namespace Lidarr.Plugin.Common.Tests
             var customFolder = Path.Combine(Path.GetTempPath(), "cache-limits-test-" + Guid.NewGuid().ToString("N"));
             Environment.SetEnvironmentVariable("ARR_RESP_CACHE_MAX_ENTRIES", "5");
             var cache = new FileStreamingResponseCache(customFolder, TimeSpan.FromHours(1));
+            var baseWriteTime = DateTime.UtcNow.AddMinutes(-10);
 
             try
             {
-                // Act - Add more entries than max
+                // Act - Add more entries than max. Force monotonic file timestamps after each
+                // write so eviction order is deterministic across filesystems/CI hosts with coarse
+                // timestamp resolution.
                 for (int i = 0; i < 10; i++)
                 {
-                    cache.Set($"/api/item-{i}", new Dictionary<string, string>(),
+                    var endpoint = $"/api/item-{i}";
+                    var parameters = new Dictionary<string, string>();
+
+                    cache.Set(endpoint, parameters,
                         new CachedHttpResponse { Body = Encoding.UTF8.GetBytes($"data-{i}") });
+
+                    var key = cache.GenerateCacheKey(endpoint, parameters);
+                    var path = Path.Combine(customFolder, key[..2], key + ".json");
+                    File.SetLastWriteTimeUtc(path, baseWriteTime.AddSeconds(i));
                 }
 
-                // Assert - Should still work without throwing
-                var result = cache.Get<CachedHttpResponse>("/api/item-9", new Dictionary<string, string>());
-                Assert.NotNull(result);
+                // Assert - oldest entries were trimmed and the newest five remain.
+                for (int i = 0; i < 5; i++)
+                {
+                    Assert.Null(cache.Get<CachedHttpResponse>($"/api/item-{i}", new Dictionary<string, string>()));
+                }
+
+                for (int i = 5; i < 10; i++)
+                {
+                    var result = cache.Get<CachedHttpResponse>($"/api/item-{i}", new Dictionary<string, string>());
+                    Assert.NotNull(result);
+                    Assert.Equal($"data-{i}", Encoding.UTF8.GetString(result.Body));
+                }
             }
             finally
             {

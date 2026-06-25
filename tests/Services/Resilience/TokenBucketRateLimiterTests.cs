@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Resilience;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -385,23 +386,27 @@ namespace Lidarr.Plugin.Common.Tests.Services.Resilience
         public async Task Refill_LinearWithTime(int capacity, int periodSeconds, int waitSeconds)
         {
             // Arrange
+            var fakeTime = new FakeTimeProvider(DateTimeOffset.UtcNow);
+            var limiter = new TokenBucketRateLimiter(NullLogger.Instance, fakeTime);
             var resource = $"refill-{capacity}-{periodSeconds}";
             var period = TimeSpan.FromSeconds(periodSeconds);
-            _limiter.Configure(resource, capacity, period);
+            limiter.Configure(resource, capacity, period);
 
             // Consume all tokens
             for (int i = 0; i < capacity; i++)
             {
-                await _limiter.ExecuteAsync(resource, () => Task.FromResult(i));
+                await limiter.ExecuteAsync(resource, () => Task.FromResult(i));
             }
 
-            Assert.Equal(0, _limiter.GetAvailableTokens(resource));
+            Assert.Equal(0, limiter.GetAvailableTokens(resource));
 
-            // Act: wait for partial refill
-            Thread.Sleep(TimeSpan.FromSeconds(waitSeconds));
+            // Act: deterministically advance time for partial refill. Real Thread.Sleep can wake
+            // just before the whole-token boundary on a busy CI host, and GetAvailableTokens()
+            // truncates fractional tokens to int.
+            fakeTime.Advance(TimeSpan.FromSeconds(waitSeconds));
 
             // Assert: should have at least some tokens
-            var available = _limiter.GetAvailableTokens(resource);
+            var available = limiter.GetAvailableTokens(resource);
             Assert.True(available > 0, $"Expected tokens after {waitSeconds}s, got {available}");
         }
 
