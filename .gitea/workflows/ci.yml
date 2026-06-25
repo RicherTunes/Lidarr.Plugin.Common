@@ -34,6 +34,19 @@ jobs:
       # is needed here. GitHub-side builds keep SourceLink.
       - name: Build (Release, warnings-as-errors)
         run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -p:EnableSourceLink=false -m:1
+      # act_runner executes ubuntu-latest jobs inside the configured Docker image.
+      # The Docker socket is mounted by the runner, but node:20-bookworm does not
+      # ship the docker CLI that LidarrContainerFixture invokes.
+      - name: Install Docker CLI
+        shell: bash
+        run: |
+          set -e
+          if ! command -v docker >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends docker.io
+            rm -rf /var/lib/apt/lists/*
+          fi
+          docker version --client
       - name: Test (full unit suite, excl. quarantined)
         run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -p:EnableSourceLink=false --blame-hang-timeout 10m
   lint:
