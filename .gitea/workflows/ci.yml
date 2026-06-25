@@ -46,7 +46,8 @@ jobs:
             apt-get install -y --no-install-recommends docker.io
             rm -rf /var/lib/apt/lists/*
           fi
-          docker version --client
+          docker --version
+          docker ps >/dev/null
       - name: Test (full unit suite, excl. quarantined)
         run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -p:EnableSourceLink=false --blame-hang-timeout 10m
   lint:
