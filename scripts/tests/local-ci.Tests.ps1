@@ -67,8 +67,10 @@ Describe 'PREFLIGHT: Host path auto-detection' {
         $fakeCommon = Join-Path $tempDir 'common'
         New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'tools') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'scripts/lib') -Force | Out-Null
         Set-Content -Path (Join-Path $fakeCommon 'tools/PluginPack.psm1') -Value '# stub'
         Set-Content -Path (Join-Path $fakeCommon 'scripts/generate-expected-contents.ps1') -Value '# stub'
+        Set-Content -Path (Join-Path $fakeCommon 'scripts/lib/test-trait-policy.psm1') -Value 'function Get-LocalCiDeterministicFilter { "State!=Quarantined" }; Export-ModuleMember -Function Get-LocalCiDeterministicFilter'
 
         try {
             $output = & pwsh -NoProfile -Command "
@@ -105,9 +107,11 @@ Describe 'Config contract: all required keys' {
         $fakeHost = Join-Path $tempDir 'host'
         New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'tools') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'scripts/lib') -Force | Out-Null
         New-Item -ItemType Directory -Path $fakeHost -Force | Out-Null
         Set-Content -Path (Join-Path $fakeCommon 'tools/PluginPack.psm1') -Value '# stub'
         Set-Content -Path (Join-Path $fakeCommon 'scripts/generate-expected-contents.ps1') -Value '# stub'
+        Set-Content -Path (Join-Path $fakeCommon 'scripts/lib/test-trait-policy.psm1') -Value 'function Get-LocalCiDeterministicFilter { "State!=Quarantined" }; Export-ModuleMember -Function Get-LocalCiDeterministicFilter'
 
         try {
             $output = & pwsh -NoProfile -Command "
@@ -196,15 +200,17 @@ Describe 'Deterministic MSBuild invocation' {
     }
 }
 
-Describe 'Hermetic coverage guard' {
+Describe 'Deterministic coverage guard' {
 
-    It 'Can require the hermetic filter to match at least one test' {
+    It 'Can require the deterministic filter to match at least one test' {
         $content = Get-Content -LiteralPath $script:LocalCiScript -Raw
 
         $content | Should -Match 'RequireHermeticTests'
-        $content | Should -Match '\$requireHermeticTests\s*=\s*\[bool\]\$Config\[''RequireHermeticTests''\]'
-        $content | Should -Match 'No test projects configured while RequireHermeticTests is enabled'
+        $content | Should -Match 'RequireDeterministicTests'
+        $content | Should -Match '\$requireDeterministicTests\s*=\s*\[bool\]\(\$Config\[''RequireDeterministicTests''\]\s*-or\s*\$Config\[''RequireHermeticTests''\]\)'
+        $content | Should -Match 'No test projects configured while RequireDeterministicTests is enabled'
+        $content | Should -Match 'Get-LocalCiDeterministicFilter'
         $content | Should -Match '\$totalMatched\s*=\s*\$totalPassed\s*\+\s*\$totalFailed\s*\+\s*\$totalSkipped'
-        $content | Should -Match 'No tests matched hermetic filter'
+        $content | Should -Match 'No tests matched deterministic CI filter'
     }
 }

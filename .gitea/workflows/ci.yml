@@ -79,9 +79,18 @@ jobs:
       - name: Doc script-reference gate (no docs pointing at deleted scripts)
         shell: pwsh
         run: ./scripts/lint-doc-script-refs.ps1 -SelfTest -CI && ./scripts/lint-doc-script-refs.ps1 -CI
+      - name: Test trait policy gate
+        shell: pwsh
+        run: ./scripts/lint-test-traits.ps1 -Path . -CI
+      - name: Test trait policy self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-TestTraitPolicy.ps1
       - name: Ecosystem parity harness self-test
         shell: pwsh
         run: ./scripts/tests/Test-EcosystemParityLint.ps1
+      - name: Shared plugin lint runner self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-RunPluginLintGates.ps1
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
