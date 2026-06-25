@@ -8,6 +8,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $lintScript = Join-Path $PSScriptRoot '../ecosystem-parity-lint.ps1'
+$commonRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+$commonVersionProps = Join-Path $commonRoot 'Directory.Build.props'
+$commonVersionPropsContent = Get-Content -LiteralPath $commonVersionProps -Raw
+if ($commonVersionPropsContent -notmatch '<Version>([^<]+)</Version>') {
+    throw "Could not parse Common <Version> from $commonVersionProps"
+}
+$canonicalCommonVersion = $Matches[1]
 $testRoot = $null
 $failed = 0
 $passed = 0
@@ -72,6 +79,39 @@ function New-GoldenRepo {
     # VERSION
     Add-TestFile -RepoPath $repo -RelPath 'VERSION' -Content '1.0.0'
 
+    # plugin.json and manifest.json for VersionContract checks.
+    Add-TestFile -RepoPath $repo -RelPath 'plugin.json' -Content @"
+{
+  "id": "golden",
+  "apiVersion": "1.x",
+  "name": "Golden",
+  "version": "1.0.0",
+  "author": "test",
+  "description": "test plugin",
+  "homepage": "https://example.com",
+  "license": "MIT",
+  "tags": ["test"],
+  "commonVersion": "$canonicalCommonVersion",
+  "minHostVersion": "2.14.2.4786",
+  "targetFramework": "net8.0",
+  "main": "Lidarr.Plugin.Golden.dll",
+  "rootNamespace": "Golden"
+}
+"@
+
+    Add-TestFile -RepoPath $repo -RelPath 'manifest.json' -Content @"
+{
+  "id": "golden",
+  "name": "Golden",
+  "version": "1.0.0",
+  "apiVersion": "1.x",
+  "minHostVersion": "2.14.2.4786",
+  "assemblies": ["Lidarr.Plugin.Golden.dll"],
+  "targetFrameworks": ["net8.0"],
+  "commonVersion": "$canonicalCommonVersion"
+}
+"@
+
     # Directory.Build.props (full template)
     Add-TestFile -RepoPath $repo -RelPath 'Directory.Build.props' -Content @'
 <Project>
@@ -133,22 +173,6 @@ useDefault = true
     foreach ($wf in @('codeql.yml', 'test-and-coverage.yml', 'notify-failure.yml', 'packaging-gates.yml', 'submodule-pin.yml')) {
         Add-TestFile -RepoPath $repo -RelPath ".github/workflows/$wf" -Content "name: $wf"
     }
-
-    # plugin.json — required by the version-contract check. commonVersion is read from the real
-    # Common csproj so the golden fixture tracks the canonical version instead of drifting when it bumps.
-    $commonVer = '1.0.0'
-    $csproj = Join-Path $PSScriptRoot '../../src/Lidarr.Plugin.Common.csproj'
-    if (Test-Path $csproj) {
-        $vm = Select-String -Path $csproj -Pattern '<Version>([^<]+)</Version>' | Select-Object -First 1
-        if ($vm) { $commonVer = $vm.Matches[0].Groups[1].Value }
-    }
-    Add-TestFile -RepoPath $repo -RelPath 'plugin.json' -Content @"
-{
-  "commonVersion": "$commonVer",
-  "version": "1.0.0",
-  "targetFramework": "net8.0"
-}
-"@
 
     return $repo
 }

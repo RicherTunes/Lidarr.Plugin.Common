@@ -89,7 +89,7 @@ $script:E2EErrorCodes = [ordered]@{
     }
 
     'E2E_ABSTRACTIONS_SHA_MISMATCH' = @{
-        Description = 'Plugins ship non-identical Lidarr.Plugin.Abstractions.dll bytes'
+        Description = 'Legacy Abstractions sidecars have non-identical bytes'
         Severity = 'blocking'
         Category = 'packaging'
     }

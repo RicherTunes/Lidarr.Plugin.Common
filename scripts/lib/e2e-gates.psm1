@@ -90,6 +90,8 @@ function Test-PackagingPreflight {
         conflicts like "Method 'Test' does not have an implementation".
 
         FORBIDDEN DLLs (host-provided / cross-boundary type identity risk):
+          - Lidarr.Plugin.Abstractions.dll
+          - Lidarr.Plugin.Common.dll
           - FluentValidation.dll
           - Microsoft.Extensions.DependencyInjection.Abstractions.dll
           - Microsoft.Extensions.Logging.Abstractions.dll
@@ -100,7 +102,6 @@ function Test-PackagingPreflight {
 
         REQUIRED DLLs:
           - Lidarr.Plugin.<Name>.dll (merged plugin)
-          - Lidarr.Plugin.Abstractions.dll (host does NOT provide this)
           - plugin.json
           - Any plugin-specific additional assemblies
 
@@ -130,7 +131,9 @@ function Test-PackagingPreflight {
         'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
         'Microsoft.Extensions.Logging.Abstractions.dll',
         'NLog.dll',
-        'System.Text.Json.dll'
+        'System.Text.Json.dll',
+        'Lidarr.Plugin.Abstractions.dll',
+        'Lidarr.Plugin.Common.dll'
     )
 
     # Host assemblies that must never be shipped in plugin packages
@@ -139,9 +142,7 @@ function Test-PackagingPreflight {
         'NzbDrone.*.dll'
     )
 
-    $requiredExactDlls = @(
-        'Lidarr.Plugin.Abstractions.dll'
-    )
+    $requiredExactDlls = @()
 
     try {
         $dlls = @()
@@ -179,15 +180,15 @@ function Test-PackagingPreflight {
         foreach ($dll in $dlls) {
             $isForbidden = $false
 
-            # Plugin assemblies (Lidarr.Plugin.*.dll) are ALLOWED - skip forbidden check for these
-            if ($dll -like 'Lidarr.Plugin.*.dll') {
+            if ($forbiddenExactDlls -contains $dll) {
+                $isForbidden = $true
+            } elseif ($dll -like 'Lidarr.Plugin.*.dll') {
+                # Main plugin assemblies are allowed. Common/Abstractions sidecars
+                # are caught above by the exact forbidden list.
                 $result.AllowedDlls += $dll
                 continue
             }
-
-            if ($forbiddenExactDlls -contains $dll) {
-                $isForbidden = $true
-            } else {
+            else {
                 foreach ($pattern in $forbiddenDllWildcards) {
                     if ($dll -like $pattern) {
                         $isForbidden = $true

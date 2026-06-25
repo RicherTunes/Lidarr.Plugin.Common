@@ -38,12 +38,12 @@
 .EXAMPLE
   pwsh scripts/multi-plugin-coexistence-proof.ps1
   pwsh scripts/multi-plugin-coexistence-proof.ps1 -SkipBuild
-  pwsh scripts/multi-plugin-coexistence-proof.ps1 -LidarrTag pr-plugins-3.1.2.4913
+  pwsh scripts/multi-plugin-coexistence-proof.ps1 -LidarrTag nightly-3.1.3.4970
 #>
 [CmdletBinding()]
 param(
     [string]$PluginsDir,
-    [string]$LidarrTag = 'pr-plugins-3.1.2.4913',
+    [string]$LidarrTag = 'nightly-3.1.3.4970',
     [string]$ContainerName = 'multi-plugin-coexistence',
     [int]$HostPort = 8688,
     [int]$StartupTimeoutSeconds = 120,

@@ -323,7 +323,7 @@ jobs:
         shell: pwsh
         run: |
           ./scripts/multi-plugin-docker-smoke-test.ps1 `
-            -LidarrTag "pr-plugins-3.1.1.4884" `
+            -LidarrTag "nightly-3.1.3.4970" `
             -PluginZip @("plugin=./artifacts/packages/Plugin.zip")
 ```
 

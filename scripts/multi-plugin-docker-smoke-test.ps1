@@ -14,11 +14,11 @@
     mismatches when multiple plugins co-exist in the same Lidarr instance.
 
 .PARAMETER LidarrTag
-    Lidarr Docker image tag to run (plugins branch). Default: pr-plugins-3.1.1.4884
+    Lidarr Docker image tag to run (plugins branch). Default: nightly-3.1.3.4970
 
 .PARAMETER LidarrImage
     Full Lidarr Docker image name (overrides LidarrTag).
-    Example: ghcr.io/hotio/lidarr:pr-plugins-3.1.1.4884
+    Example: ghcr.io/hotio/lidarr:nightly-3.1.3.4970
 
 .PARAMETER ContainerName
     Docker container name. Default: lidarr-multi-plugin-smoke
@@ -175,7 +175,7 @@
 
 [CmdletBinding()]
 param(
-    [string]$LidarrTag = "pr-plugins-3.1.1.4884",
+    [string]$LidarrTag = "nightly-3.1.3.4970",
     [string]$LidarrImage,
     [string]$ContainerName = "lidarr-multi-plugin-smoke",
     [int]$Port = 8689,
@@ -436,7 +436,7 @@ function Assert-HostSupportsPlugins {
 
     $requiredMajor = ($pluginMajors | Measure-Object -Maximum).Maximum
     if ($hostMajor -lt $requiredMajor) {
-        throw "TFM mismatch: Lidarr host '$LidarrTag' targets '$hostTfm' but plugin(s) require net$requiredMajor.0 ($($pluginTfms -join ', ')). Use a net$requiredMajor host tag (e.g. pr-plugins-3.1.1.4884 for net8) or build net$hostMajor plugins."
+        throw "TFM mismatch: Lidarr host '$LidarrTag' targets '$hostTfm' but plugin(s) require net$requiredMajor.0 ($($pluginTfms -join ', ')). Use a net$requiredMajor host tag (e.g. nightly-3.1.3.4970 for net8) or build net$hostMajor plugins."
     }
 }
 

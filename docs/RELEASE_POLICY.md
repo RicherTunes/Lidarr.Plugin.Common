@@ -107,5 +107,5 @@ Once `NUGET_API_KEY` secret is set, the release workflow automatically publishes
 ## Current Baseline
 
 - Common: v1.7.1 (2026-03-27)
-- Host target: pr-plugins-3.1.2.4913 (net8.0)
+- Host target: nightly-3.1.3.4970 (net8.0)
 - All plugins on SHA `aae92da`
