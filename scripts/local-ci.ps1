@@ -16,13 +16,13 @@
       CommonPath, LidarrDockerVersion, ExpectedContentsFile
     Optional keys:
       SolutionFile, BuildFlags, TestProjects, PackageParams,
-      WarningBudget, WarningBudgetEnforce, RequireHermeticTests
+      WarningBudget, WarningBudgetEnforce, RequireHermeticTests, RequireDeterministicTests
 
 .PARAMETER SkipExtract
     Reuse previously extracted host assemblies (fast rerun).
 
 .PARAMETER SkipTests
-    Skip hermetic E2E tests (build + package + closure only).
+    Skip deterministic test sweep (build + package + closure only).
 
 .PARAMETER NoRestore
     Skip dotnet restore (fast iteration after first run).
@@ -166,7 +166,7 @@ $testProjects   = $Config['TestProjects']
 $packageParams  = $Config['PackageParams']
 $warningBudget  = if ($Config.ContainsKey('WarningBudget') -and $Config.WarningBudget -ne $null -and "$($Config.WarningBudget)".Trim()) { [int]$Config.WarningBudget } else { $null }
 $warningBudgetEnforce = [bool]$Config['WarningBudgetEnforce']
-$requireHermeticTests = [bool]$Config['RequireHermeticTests']
+$requireDeterministicTests = [bool]($Config['RequireDeterministicTests'] -or $Config['RequireHermeticTests'])
 
 # Validate Common submodule
 if (-not (Test-Path -LiteralPath $commonPath)) {
@@ -178,6 +178,7 @@ if (-not (Test-Path -LiteralPath $commonPath)) {
 # Validate tools exist and resolve to absolute paths (Import-Module requires absolute)
 $pluginPackModule = Join-Path $commonPath 'tools/PluginPack.psm1'
 $genExpectedScript = Join-Path $commonPath 'scripts/generate-expected-contents.ps1'
+$testTraitPolicyModule = Join-Path $commonPath 'scripts/lib/test-trait-policy.psm1'
 if (-not (Test-Path -LiteralPath $pluginPackModule)) {
     Write-Host "PREFLIGHT FAIL: PluginPack.psm1 not found at: $pluginPackModule" -ForegroundColor Red
     exit 1
@@ -186,8 +187,16 @@ if (-not (Test-Path -LiteralPath $genExpectedScript)) {
     Write-Host "PREFLIGHT FAIL: generate-expected-contents.ps1 not found at: $genExpectedScript" -ForegroundColor Red
     exit 1
 }
+if (-not (Test-Path -LiteralPath $testTraitPolicyModule)) {
+    Write-Host "PREFLIGHT FAIL: test-trait-policy.psm1 not found at: $testTraitPolicyModule" -ForegroundColor Red
+    exit 1
+}
 $pluginPackModule = (Resolve-Path -LiteralPath $pluginPackModule).Path
 $genExpectedScript = (Resolve-Path -LiteralPath $genExpectedScript).Path
+$testTraitPolicyModule = (Resolve-Path -LiteralPath $testTraitPolicyModule).Path
+
+Import-Module $testTraitPolicyModule -Force
+$deterministicTestFilter = Get-LocalCiDeterministicFilter
 
 # Check .NET SDK
 Write-Host "Checking .NET SDK..."
@@ -473,20 +482,20 @@ if (-not $zipPath) {
     } | Out-Null
 }
 
-# ── Stage 5: HERMETIC E2E ──────────────────────────────────────────────
+# ── Stage 5: DETERMINISTIC TESTS ───────────────────────────────────────
 
 $currentStage++
 
 if ($SkipTests) {
-    $script:StageResults["[$currentStage/5] HERMETIC E2E"] = @{
+    $script:StageResults["[$currentStage/5] DETERMINISTIC TESTS"] = @{
         Status = 'SKIP'; Seconds = 0; Detail = 'Skipped (--SkipTests or upstream failure)'
     }
-    Write-Host "`n--- [$currentStage/5] HERMETIC E2E (skipped) ---" -ForegroundColor DarkGray
+    Write-Host "`n--- [$currentStage/5] DETERMINISTIC TESTS (skipped) ---" -ForegroundColor DarkGray
 } else {
-    $e2eOk = Invoke-Stage -Name 'HERMETIC E2E' -Number "$currentStage/5" -Action {
+    $e2eOk = Invoke-Stage -Name 'DETERMINISTIC TESTS' -Number "$currentStage/5" -Action {
         if (-not $testProjects -or $testProjects.Count -eq 0) {
-            if ($requireHermeticTests) {
-                throw "No test projects configured while RequireHermeticTests is enabled"
+            if ($requireDeterministicTests) {
+                throw "No test projects configured while RequireDeterministicTests is enabled"
             }
             return "No test projects configured"
         }
@@ -527,12 +536,12 @@ if ($SkipTests) {
             if ($tbExit -ne 0) { throw "Test project build failed: $testProj" }
             $script:TestBuildWarningCount += Get-WarningCountFromOutput -OutputLines $tbOutput
 
-            # Run tests with hermetic E2E filter
+            # Run tests with the Common-owned deterministic CI filter.
             $resultsDir = Join-Path ([System.IO.Path]::GetTempPath()) "local-ci-trx-$([guid]::NewGuid().ToString('N').Substring(0,8))"
             New-Item -ItemType Directory -Path $resultsDir -Force | Out-Null
 
             $testArgs = @($testProj, '--no-build', '-c', $Configuration) + $script:DotnetNoServerArgs + @(
-                '--filter', 'Area=E2E/Hermetic',
+                '--filter', $deterministicTestFilter,
                 '--logger', 'trx',
                 '--results-directory', $resultsDir
             )
@@ -568,8 +577,8 @@ if ($SkipTests) {
         }
 
         $totalMatched = $totalPassed + $totalFailed + $totalSkipped
-        if ($requireHermeticTests -and $totalMatched -eq 0) {
-            throw "No tests matched hermetic filter Area=E2E/Hermetic"
+        if ($requireDeterministicTests -and $totalMatched -eq 0) {
+            throw "No tests matched deterministic CI filter $deterministicTestFilter"
         }
 
         $stageWarningTotal = $script:TestBuildWarningCount + $script:TestRunWarningCount

@@ -17,6 +17,7 @@ param(
     [string]$Mode = 'ci',
     [switch]$SkipDateParsing,
     [switch]$SkipSyncOverAsync,
+    [switch]$SkipTestTraits,
     [switch]$SkipVersionContract,
     [switch]$SkipPluginContractTests
 )
@@ -140,6 +141,13 @@ try {
             -Name 'Sync-over-async' `
             -ScriptPath (Join-Path $resolvedCommonRoot 'scripts/lint-sync-over-async.ps1') `
             -Arguments @('-Path', $resolvedRepoPath, '-Mode', $Mode)
+    }
+
+    if (-not $SkipTestTraits) {
+        Invoke-LintGate `
+            -Name 'Test trait policy' `
+            -ScriptPath (Join-Path $resolvedCommonRoot 'scripts/lint-test-traits.ps1') `
+            -Arguments @('-Path', $resolvedRepoPath, '-CI')
     }
 
     if (-not $SkipVersionContract) {

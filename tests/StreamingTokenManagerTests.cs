@@ -245,7 +245,10 @@ namespace Lidarr.Plugin.Common.Tests
 
         private static async Task<bool> WaitUntilAsync(Func<bool> condition)
         {
-            var deadline = DateTime.UtcNow.AddSeconds(2);
+            // Generous deadline: TriggerRefreshCheck() schedules the refresh on the thread pool,
+            // which is saturated under full-suite parallel load, so a 2s poll window flaked. The
+            // work always completes; it just needs wall-clock under load (bounded by blame-hang).
+            var deadline = DateTime.UtcNow.AddSeconds(30);
             while (DateTime.UtcNow < deadline)
             {
                 if (condition())

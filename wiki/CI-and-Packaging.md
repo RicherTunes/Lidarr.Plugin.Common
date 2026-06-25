@@ -38,4 +38,8 @@ Full inventory of pinned actions and the allowlist mechanism → [**CI SHA Pins*
 
 ## CI lane strategy
 
-Workflows are split into fast PR-required lanes and expensive nightly-only lanes to optimise CI billing. The lane definitions and rationale → [**CI Lane Strategy**](../docs/CI_LANE_STRATEGY.md).
+Gitea is the primary CI target for plugin PRs. Plugin verify jobs should call the repo-local verify-local wrapper, which delegates to Common's `scripts/local-ci.ps1` for host extraction, build, packaging closure, and the deterministic test sweep.
+
+The deterministic test sweep is defined in Common by `scripts/lib/test-trait-policy.psm1`. It always excludes `State=Quarantined`, explicitly keeps `Area=E2E/Hermetic`, and excludes opt-in lanes that need live services, Docker, release artifacts, runtime sandbox host resolution, or benchmark timing. The companion gate `scripts/lint-test-traits.ps1 -CI` validates the CI lane trait vocabulary so new opt-in lanes cannot silently drift away from CI.
+
+Workflows are split into PR-required deterministic lanes and expensive opt-in/nightly lanes to optimise CI billing. The lane definitions and rationale → [**CI Lane Strategy**](../docs/CI_LANE_STRATEGY.md).
