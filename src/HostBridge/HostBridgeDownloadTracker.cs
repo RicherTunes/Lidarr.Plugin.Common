@@ -9,7 +9,7 @@ namespace Lidarr.Plugin.Common.HostBridge;
 
 /// <summary>
 /// Status enum for <see cref="HostBridgeDownloadItem"/>. Matches the conceptual states
-/// every Lidarr download client passes through: Queued → Downloading → Completed/Failed.
+/// every Lidarr download client passes through: Queued → Downloading → Completed/Failed/Cancelled.
 ///
 /// <para>This enum lives in Common so the per-plugin tracker doesn't need to import
 /// <c>NzbDrone.Core.Download.DownloadItemStatus</c> in code paths that only need the
@@ -22,6 +22,7 @@ public enum HostBridgeDownloadItemStatus
     Downloading = 1,
     Completed = 2,
     Failed = 3,
+    Cancelled = 4,
 }
 
 /// <summary>
@@ -55,7 +56,7 @@ public class HostBridgeDownloadItem
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
 
     /// <summary>
-    /// Time the download reached a terminal state (Completed / Failed). Backed by an
+    /// Time the download reached a terminal state (Completed / Failed / Cancelled). Backed by an
     /// <c>Interlocked</c>-protected ticks field — safe under concurrent observation from
     /// the retention sweep.
     /// </summary>
@@ -107,7 +108,7 @@ public class HostBridgeDownloadItem
 /// field on their <c>DownloadClientBase</c> subclass — Lidarr can re-construct the client
 /// between queue polls, but the store survives.</para>
 ///
-/// <para>Retention: completed/failed items are evicted from <see cref="GetSnapshot"/> after
+/// <para>Retention: completed/failed/cancelled items are evicted from <see cref="GetSnapshot"/> after
 /// the configured retention window. In-progress items are NEVER evicted (no upper bound on
 /// download duration — a stuck job stays in the queue until the operator removes it).</para>
 ///
@@ -198,7 +199,8 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             var status = item.GetStatus();
 
             if ((status == HostBridgeDownloadItemStatus.Completed ||
-                 status == HostBridgeDownloadItemStatus.Failed) &&
+                 status == HostBridgeDownloadItemStatus.Failed ||
+                 status == HostBridgeDownloadItemStatus.Cancelled) &&
                 item.CompletedAt.HasValue &&
                 now - item.CompletedAt.Value > _completedRetention)
             {

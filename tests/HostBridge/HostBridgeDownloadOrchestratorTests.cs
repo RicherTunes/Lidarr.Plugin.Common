@@ -242,4 +242,217 @@ public class HostBridgeDownloadOrchestratorTests
         bool doWorkSawCancellation = await doWorkCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(doWorkSawCancellation, "doWork should observe OperationCanceledException when token is cancelled");
     }
+
+    [Fact]
+    public async Task StartTrackedDownloadAsync_CancellationOptions_LinksCallerCancellation()
+    {
+        var orchestrator = MakeOrchestrator();
+        var tracker = MakeTracker();
+        var settings = new TestSettings();
+        using var callerCts = new CancellationTokenSource();
+        using var downloadCts = new CancellationTokenSource();
+
+        var doWorkStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var doWorkCancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var options = new HostBridgeDownloadStartOptions<HostBridgeDownloadItem>
+        {
+            RegisterCancellation = (_, __) =>
+                new HostBridgeDownloadCancellationRegistration(downloadCts.Token)
+        };
+
+        _ = await orchestrator.StartTrackedDownloadAsync(
+            settings,
+            tracker,
+            Snapshotter(),
+            ItemFactory(),
+            doWork: async (_, __, ___, ct) =>
+            {
+                doWorkStarted.TrySetResult(true);
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    doWorkCancelled.TrySetResult(true);
+                    throw;
+                }
+            },
+            options,
+            cancellationToken: callerCts.Token);
+
+        await doWorkStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        try
+        {
+            callerCts.Cancel();
+            bool sawCancellation = await doWorkCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(sawCancellation, "caller cancellation must not be masked by a per-download token factory");
+        }
+        finally
+        {
+            downloadCts.Cancel();
+        }
+    }
+
+    [Fact]
+    public async Task StartTrackedDownloadAsync_CancellationOptions_RegisteredTokenCancelsWork()
+    {
+        var orchestrator = MakeOrchestrator();
+        var tracker = MakeTracker();
+        var settings = new TestSettings();
+        using var downloadCts = new CancellationTokenSource();
+
+        var doWorkStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var doWorkCancelled = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var options = new HostBridgeDownloadStartOptions<HostBridgeDownloadItem>
+        {
+            RegisterCancellation = (_, __) =>
+                new HostBridgeDownloadCancellationRegistration(downloadCts.Token)
+        };
+
+        _ = await orchestrator.StartTrackedDownloadAsync(
+            settings,
+            tracker,
+            Snapshotter(),
+            ItemFactory(),
+            doWork: async (_, __, ___, ct) =>
+            {
+                doWorkStarted.TrySetResult(true);
+                try
+                {
+                    await Task.Delay(Timeout.Infinite, ct);
+                }
+                catch (OperationCanceledException) when (ct.IsCancellationRequested)
+                {
+                    doWorkCancelled.TrySetResult(true);
+                    throw;
+                }
+            },
+            options);
+
+        await doWorkStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        downloadCts.Cancel();
+
+        bool sawCancellation = await doWorkCancelled.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(sawCancellation, "the per-download token must cancel work");
+    }
+
+    [Fact]
+    public async Task StartTrackedDownloadAsync_CancellationOptions_DisposesRegistrationWhenWorkEnds()
+    {
+        var orchestrator = MakeOrchestrator();
+        var tracker = MakeTracker();
+        var settings = new TestSettings();
+
+        var registrationDisposed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new HostBridgeDownloadStartOptions<HostBridgeDownloadItem>
+        {
+            RegisterCancellation = (_, __) =>
+                new HostBridgeDownloadCancellationRegistration(
+                    CancellationToken.None,
+                    () => registrationDisposed.TrySetResult(true))
+        };
+
+        _ = await orchestrator.StartTrackedDownloadAsync(
+            settings,
+            tracker,
+            Snapshotter(),
+            ItemFactory(),
+            doWork: (_, __, ___, ____) => Task.CompletedTask,
+            options);
+
+        bool disposed = await registrationDisposed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(disposed, "Common must dispose the per-download cancellation registration after work exits");
+    }
+
+    [Fact]
+    public async Task StartTrackedDownloadAsync_CancellationOptions_DisposesRegistrationWhenWorkCancels()
+    {
+        var orchestrator = MakeOrchestrator();
+        var tracker = MakeTracker();
+        var settings = new TestSettings();
+        using var downloadCts = new CancellationTokenSource();
+
+        var doWorkStarted = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var registrationDisposed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new HostBridgeDownloadStartOptions<HostBridgeDownloadItem>
+        {
+            RegisterCancellation = (_, __) =>
+                new HostBridgeDownloadCancellationRegistration(
+                    downloadCts.Token,
+                    () => registrationDisposed.TrySetResult(true))
+        };
+
+        _ = await orchestrator.StartTrackedDownloadAsync(
+            settings,
+            tracker,
+            Snapshotter(),
+            ItemFactory(),
+            doWork: async (_, __, ___, ct) =>
+            {
+                doWorkStarted.TrySetResult(true);
+                await Task.Delay(Timeout.Infinite, ct);
+            },
+            options);
+
+        await doWorkStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        downloadCts.Cancel();
+
+        bool disposed = await registrationDisposed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(disposed, "Common must dispose the registration after cancellation exits doWork");
+    }
+
+    [Fact]
+    public async Task StartTrackedDownloadAsync_CancellationOptions_DisposesRegistrationWhenWorkFaults()
+    {
+        var orchestrator = MakeOrchestrator();
+        var tracker = MakeTracker();
+        var settings = new TestSettings();
+
+        var registrationDisposed = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var options = new HostBridgeDownloadStartOptions<HostBridgeDownloadItem>
+        {
+            RegisterCancellation = (_, __) =>
+                new HostBridgeDownloadCancellationRegistration(
+                    CancellationToken.None,
+                    () => registrationDisposed.TrySetResult(true))
+        };
+
+        _ = await orchestrator.StartTrackedDownloadAsync(
+            settings,
+            tracker,
+            Snapshotter(),
+            ItemFactory(),
+            doWork: (_, __, ___, ____) => throw new InvalidOperationException("boom"),
+            options);
+
+        bool disposed = await registrationDisposed.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(disposed, "Common must dispose the registration after faulted work exits");
+    }
+
+    [Fact]
+    public async Task StartTrackedDownloadAsync_CancellationOptions_RegisterFailureRemovesTrackerItem()
+    {
+        var orchestrator = MakeOrchestrator();
+        var tracker = MakeTracker();
+        var settings = new TestSettings();
+        var options = new HostBridgeDownloadStartOptions<HostBridgeDownloadItem>
+        {
+            RegisterCancellation = (_, __) => throw new InvalidOperationException("registration failed")
+        };
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            orchestrator.StartTrackedDownloadAsync(
+                settings,
+                tracker,
+                Snapshotter(),
+                ItemFactory(),
+                doWork: (_, __, ___, ____) => Task.CompletedTask,
+                options));
+
+        Assert.Empty(tracker.GetSnapshot());
+    }
 }
