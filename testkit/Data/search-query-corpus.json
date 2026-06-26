@@ -1798,5 +1798,134 @@
     "trickyProperty": "Ethiopic (Geez) syllabary; caseless, no ASCII fold; ASCII strip empties it.",
     "expectedHandling": "Preserve Ethiopic; supply Latin alias; fall back to native, never emptiness.",
     "realExample": false
+  },
+  {
+    "raw": "Beethoven: Symphony No. 9 in D minor, Op. 125",
+    "kind": "album",
+    "category": "classical-catalog-number",
+    "trickyProperty": "Classical title carries a colon subtitle, a 'No. N' work number, and an 'Op. N' opus catalog number. A period/colon stripper that does not glue tokens leaves stray punctuation; the opus number is load-bearing for disambiguation, not droppable.",
+    "expectedHandling": "Strip the colon/comma/period to a clean spaced variant while preserving the catalog tokens (No 9, Op 125); emit {raw, punctuation-stripped}.",
+    "realExample": true,
+    "expectedVariantPresent": "Beethoven Symphony No 9 in D minor Op 125",
+    "expectedTierShape": "combined-plus-field-fallback"
+  },
+  {
+    "raw": "Bach: Goldberg Variations, BWV 988",
+    "kind": "album",
+    "category": "classical-catalog-number",
+    "trickyProperty": "BWV (Bach-Werke-Verzeichnis) catalog number; the 'BWV 988' token is the canonical identifier and must survive sanitization intact (never split on the digit boundary).",
+    "expectedHandling": "Emit a punctuation-stripped variant 'Bach Goldberg Variations BWV 988' keeping the BWV catalog token whole.",
+    "realExample": true,
+    "expectedVariantPresent": "Bach Goldberg Variations BWV 988"
+  },
+  {
+    "raw": "Mozart: Piano Sonata No. 11 in A major, K. 331",
+    "kind": "album",
+    "category": "classical-catalog-number",
+    "trickyProperty": "Köchel (K.) catalog number with a single-letter abbreviation followed by digits; a stripper that drops 'K.' to 'K' must keep it glued to the following number context for catalog matching.",
+    "expectedHandling": "Punctuation-stripped variant 'Mozart Piano Sonata No 11 in A major K 331'; never delete the K/No catalog tokens.",
+    "realExample": true,
+    "expectedVariantPresent": "Mozart Piano Sonata No 11 in A major K 331"
+  },
+  {
+    "raw": "Allegro con brio",
+    "kind": "track",
+    "category": "classical-movement-title",
+    "trickyProperty": "A movement title that is a generic Italian tempo marking; it is highly ambiguous catalog-wide and only meaningful when artist/work-scoped, but it is NOT a 1-2 char / pure-digit / dictionary-word title so it is not auto-artist-scoped.",
+    "expectedHandling": "Pass through unchanged as a usable multi-token query; rely on the combined artist+work tier for disambiguation.",
+    "realExample": true,
+    "expectedVariantPresent": "Allegro con brio"
+  },
+  {
+    "raw": "Glenn Gould",
+    "kind": "artist",
+    "category": "classical-composer-vs-performer",
+    "trickyProperty": "Performer name distinct from the composer the recording is filed under; the artist field must be searchable on its own so a performer-only fallback tier can recover works mis-attributed to the composer.",
+    "expectedHandling": "Plain two-token name passes through; BuildPlan must keep a full, non-truncated artist-only fallback tier.",
+    "realExample": true,
+    "expectedVariantPresent": "Glenn Gould"
+  },
+  {
+    "raw": "Maître Gims",
+    "kind": "artist",
+    "category": "provider-catalog-slug-divergence",
+    "trickyProperty": "Provider catalog slug folds the circumflex away (raw 'Maître Gims' -> slug 'maitre-gims'); an accented-only query never matches the ASCII-slug index.",
+    "expectedHandling": "Emit the accent-folded ASCII variant 'Maitre Gims' alongside the accented original so the slug-derived index is reachable.",
+    "realExample": true,
+    "expectedVariantPresent": "Maitre Gims"
+  },
+  {
+    "raw": "Œuvres du Roi",
+    "kind": "album",
+    "category": "provider-catalog-slug-divergence",
+    "trickyProperty": "Non-decomposable ligature Œ at the head of a title; provider slug expands it (raw 'Œuvres' -> slug 'oeuvres-du-roi'). NFD alone leaves Œ intact, missing the slug.",
+    "expectedHandling": "Expand the ligature via the special-letter table (Œ->Oe) to emit 'Oeuvres du Roi'; keep the original too.",
+    "realExample": true,
+    "expectedVariantPresent": "Oeuvres du Roi"
+  },
+  {
+    "raw": "夢を見る",
+    "kind": "album",
+    "category": "mixed-script-combined",
+    "trickyProperty": "CJK album title that would be paired with a Latin artist in BuildPlan; the combined tier must carry BOTH the Latin artist and the CJK title without down-mapping the ideographs to whitespace, and a CJK-only album fallback tier must remain.",
+    "expectedHandling": "Pass the CJK run through intact; combined tier = 'Latin Artist 夢を見る', and a standalone album fallback tier preserves the CJK title.",
+    "realExample": true,
+    "expectedVariantPresent": "夢を見る",
+    "expectedTierShape": "combined-plus-field-fallback"
+  },
+  {
+    "raw": "Greatest Hits (Fleetwood Mac)",
+    "kind": "album",
+    "category": "artist-disambiguation-bracket",
+    "trickyProperty": "A generic compilation title disambiguated by a trailing parenthetical naming the artist; the parenthetical is title-integral (not a droppable edition clause) so it must be preserved, and a paren-stripped glued variant should also be offered.",
+    "expectedHandling": "Keep the original with parens AND emit 'Greatest Hits Fleetwood Mac' (symbols stripped); never drop the disambiguating artist parenthetical.",
+    "realExample": true,
+    "expectedVariantPresent": "Greatest Hits Fleetwood Mac",
+    "expectedTierShape": "combined-plus-field-fallback"
+  },
+  {
+    "raw": "The Wall [Disc 2]",
+    "kind": "album",
+    "category": "disc-designation",
+    "trickyProperty": "Multi-disc designation in square brackets; the '[Disc 2]' marker should be reachable both as a bracket-stripped spaced variant and preserved verbatim so a per-disc catalog edition can still match.",
+    "expectedHandling": "Emit 'The Wall Disc 2' (brackets stripped to space) alongside the original; never split the disc number off as a bare token.",
+    "realExample": true,
+    "expectedVariantPresent": "The Wall Disc 2"
+  },
+  {
+    "raw": "क्‍ष",
+    "kind": "album",
+    "category": "zwj-round-trip-indic",
+    "trickyProperty": "Devanagari conjunct using an explicit ZWJ (U+200D) between virama and the following consonant to force the half-form; the ZWJ is semantic (not emoji-presentation noise) and the verbatim ZWJ form must round-trip as the leading variant.",
+    "expectedHandling": "Preserve the ZWJ joiner in the canonical/original variant (do NOT delete it as a format char); additional joiner-stripped fallbacks may follow.",
+    "realExample": true,
+    "expectedVariantPresent": "क्‍ष"
+  },
+  {
+    "raw": "ЖШЩ",
+    "kind": "artist",
+    "category": "extended-cyrillic-non-homoglyph",
+    "trickyProperty": "Cyrillic letters Ж/Ш/Щ that have NO Latin look-alike in the homoglyph table; a naive confusable folder that blanks unmapped Cyrillic would empty the query. They must pass through as native Cyrillic.",
+    "expectedHandling": "Leave the wholly-Cyrillic run native (Variants[0] == NFC original); the confusable fold is gated off when residual non-ASCII letters survive.",
+    "realExample": true,
+    "expectedVariantPresent": "ЖШЩ"
+  },
+  {
+    "raw": "Жуки",
+    "kind": "artist",
+    "category": "extended-cyrillic-non-homoglyph",
+    "trickyProperty": "Mostly-Cyrillic band name where exactly one letter (у, U+0443) IS in the homoglyph table; folding only that letter would corrupt the word, so the gate must discard the partial fold and keep the native form.",
+    "expectedHandling": "Confusable fold is discarded because residual Cyrillic letters remain; pass through as 'Жуки'.",
+    "realExample": true,
+    "expectedVariantPresent": "Жуки"
+  },
+  {
+    "raw": "Taylor's Version",
+    "kind": "album",
+    "category": "bare-taylors-version",
+    "trickyProperty": "The re-recording marker WITHOUT the usual parentheses ('1989 (Taylor's Version)'); as a bare title the possessive apostrophe must canonicalize and a glued variant 'Taylors Version' must be present for slug matching.",
+    "expectedHandling": "Canonicalize the apostrophe then emit 'Taylors Version' (deleted) alongside the original; never leave a leading space or stray apostrophe.",
+    "realExample": true,
+    "expectedVariantPresent": "Taylors Version"
   }
 ]
