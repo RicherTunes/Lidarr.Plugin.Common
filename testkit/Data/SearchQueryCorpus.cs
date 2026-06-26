@@ -11,6 +11,10 @@ namespace Lidarr.Plugin.Common.TestKit.Data;
 /// assert against the SAME data (parity-as-tests). The executable expectations live in the
 /// test methods (the behavior contracts); <see cref="TrickyProperty"/> / <see cref="ExpectedHandling"/>
 /// carry the human-readable invariant, and <see cref="Category"/> lets each behavior subscribe to its slice.
+///
+/// <para>The optional <see cref="ExpectedVariantPresent"/> / <see cref="ExpectedTierShape"/> fields make a
+/// case's expectation EXECUTABLE: when non-null the shared parity base enforces them against the plugin's
+/// sanitizer/plan path, and skips them when null.</para>
 /// </summary>
 public sealed record SearchQueryCase(
     string Raw,
@@ -18,7 +22,9 @@ public sealed record SearchQueryCase(
     string Category,
     string TrickyProperty,
     string ExpectedHandling,
-    bool RealExample)
+    bool RealExample,
+    string? ExpectedVariantPresent = null,
+    string? ExpectedTierShape = null)
 {
     // Drives readable xUnit test-explorer names ("category: raw").
     public override string ToString() => $"{Category}: {Raw}";
