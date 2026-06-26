@@ -2,13 +2,10 @@
 
 Shared utilities, resilience policies, and packaging helpers for Lidarr streaming plugins. `Lidarr.Plugin.Abstractions` stays host-owned; each plugin ships its own copy of `Lidarr.Plugin.Common` inside a private AssemblyLoadContext.
 
-[![Build Status](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/ci.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions)
-[![Docs Status](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/docs.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/docs.yml)
-[![Release CI](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/release.yml/badge.svg)](https://github.com/RicherTunes/Lidarr.Plugin.Common/actions/workflows/release.yml)
 [![NuGet (Common)](https://img.shields.io/nuget/v/Lidarr.Plugin.Common?logo=nuget)](https://www.nuget.org/packages/Lidarr.Plugin.Common)
 [![NuGet (Abstractions)](https://img.shields.io/nuget/v/Lidarr.Plugin.Abstractions?logo=nuget)](https://www.nuget.org/packages/Lidarr.Plugin.Abstractions)
 
-> **CI:** The primary CI target is the self-hosted **Gitea** instance (`.gitea/workflows/ci.yml`); GitHub Actions is a mirror kept at parity (the badges above point at the GitHub mirror). Plugin re-pins to a new Common SHA adopt the Common-owned deterministic test policy automatically.
+> **CI:** The primary CI target is the self-hosted **Gitea** instance (`.gitea/workflows/ci.yml`); GitHub Actions hosts peripheral workflows. Plugin re-pins to a new Common SHA adopt the Common-owned deterministic test policy automatically.
 
 ## Quick start
 
@@ -98,13 +95,13 @@ Orientation pages that map what exists and where to find it — full details liv
 - Run the docs toolchain locally:
 
   ```bash
-  # lint + spell check + links + snippets
-  gh workflow run docs.yml --ref <branch>
-  # or run manually
-  dotnet run --project tools/DocTools/SnippetVerifier
+  # Run docs tooling locally
+  pwsh -File tools/DocTools/lint-docs.ps1
+  # Or run snippet verifier only
+  dotnet run --project tools/DocTools/SnippetVerifier/SnippetVerifier.csproj
   ```
 
-- GitHub Actions `docs.yml` enforces markdownlint, cspell, and link checking on every documentation PR; Vale prose-linting and snippet compilation also run but are non-blocking (`continue-on-error`).
+- Documentation linting (markdownlint, cspell, link checks) runs via `tools/DocTools/lint-docs.ps1`; snippet compilation is available but non-blocking.
 
 ## Repository layout
 
