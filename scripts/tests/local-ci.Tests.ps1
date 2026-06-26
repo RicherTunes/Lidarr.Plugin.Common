@@ -214,3 +214,17 @@ Describe 'Deterministic coverage guard' {
         $content | Should -Match 'No tests matched deterministic CI filter'
     }
 }
+
+Describe 'Packaging test path wiring' {
+
+    It 'Exports the built package zip path so Category=Packaging tests can find it' {
+        # PluginPackagingPolicyTests resolve the zip via the shared TestKit's
+        # PackagingTestPaths, which reads PLUGIN_PACKAGE_PATH first. The deterministic
+        # tests stage must export that env var from the PACKAGE stage's $script:zipPath
+        # before running tests, or the policy tests throw "package not found".
+        $content = Get-Content -LiteralPath $script:LocalCiScript -Raw
+
+        $content | Should -Match '\$env:PLUGIN_PACKAGE_PATH\s*=\s*\(Resolve-Path -LiteralPath \$script:zipPath\)\.Path'
+        $content | Should -Match 'if\s*\(\$script:zipPath\s*-and\s*\(Test-Path -LiteralPath \$script:zipPath\)\)'
+    }
+}
