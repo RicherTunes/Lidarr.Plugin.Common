@@ -207,7 +207,7 @@ public abstract partial class EcosystemParityTestBase : IDisposable
             ["Microsoft.Extensions.Logging.Abstractions"] = "8.0.3",
             ["Microsoft.Extensions.Http"] = "8.0.1",
             ["FluentValidation"] = "9.5.4",
-            ["NLog"] = "5.4.0",
+            ["NLog"] = "5.5.1",
         };
 
         var doc = LoadXml("Directory.Packages.props");

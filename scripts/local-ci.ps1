@@ -507,6 +507,15 @@ if ($SkipTests) {
         $totalFailed = 0
         $totalSkipped = 0
 
+        # Expose the package zip built in the PACKAGE stage so Category=Packaging
+        # tests (PluginPackagingPolicyTests) validate the freshly-built zip instead of
+        # throwing "package not found". The shared TestKit's PackagingTestPaths reads
+        # PLUGIN_PACKAGE_PATH first (testkit/Packaging/PackagingTestPaths.cs).
+        if ($script:zipPath -and (Test-Path -LiteralPath $script:zipPath)) {
+            $env:PLUGIN_PACKAGE_PATH = (Resolve-Path -LiteralPath $script:zipPath).Path
+            Write-Host "  PLUGIN_PACKAGE_PATH = $env:PLUGIN_PACKAGE_PATH (Category=Packaging tests validate the built zip)"
+        }
+
         foreach ($testProj in $testProjects) {
             Write-Host "  Running tests in $testProj ..."
 
