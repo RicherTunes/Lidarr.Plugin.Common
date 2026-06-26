@@ -34,6 +34,13 @@ public abstract class SearchQuerySanitizerParityTestBase
 
     public static IEnumerable<object[]> Corpus => SearchQueryCorpus.AllCases;
 
+    private static bool IsWithinBudget(string original)
+    {
+        var defaults = SanitizerOptions.Default;
+        return original.Length <= defaults.MaxLength
+            && original.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length <= defaults.MaxTokens;
+    }
+
     [Theory]
     [MemberData(nameof(Corpus))]
     public void NeverThrows_AndReturnsNonNull(SearchQueryCase c)
@@ -58,9 +65,13 @@ public abstract class SearchQuerySanitizerParityTestBase
             Assert.All(result.Variants, v => Assert.False(string.IsNullOrWhiteSpace(v)));
             Assert.False(result.NeedsAlias, $"HasSignal but NeedsAlias for '{c.Raw}'");
 
-            // Distinct (case-insensitive) and best-first (Original leads).
+            // Distinct (case-insensitive) and best-first (Original leads, unless the Original is
+            // over the length/token budget — then Variants[0] is the budgeted prefix by design).
             Assert.Equal(result.Variants.Count, result.Variants.Distinct(StringComparer.OrdinalIgnoreCase).Count());
-            Assert.Equal(result.Original, result.Variants[0]);
+            if (IsWithinBudget(result.Original))
+            {
+                Assert.Equal(result.Original, result.Variants[0]);
+            }
         }
         else
         {
