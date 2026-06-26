@@ -172,9 +172,11 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
             var glued = StripSymbols(canonical);
             ComputeSignalShape(glued, out var longestToken, out var isPureNumber, out var allAscii, out var singleToken, out var soleToken);
 
-            // A single residual ASCII-Latin letter (or zero letters) is not a usable query — route to
-            // alias. A single ideographic/syllabic char (훗) or a bare number (7) IS usable.
-            var singleLatinResidue = longestToken < 2 && !isPureNumber && allAscii;
+            // A single residual ASCII-Latin letter left over after SYMBOLS were stripped away ("O(+>"
+            // → "O", slash-art → "Y") is not a usable query — route to alias. A clean single-letter
+            // input (× → "x"), a single ideographic/syllabic char (훗), or a bare number (7) is usable.
+            var hadSymbolNoise = !string.Equals(glued, canonical, StringComparison.Ordinal);
+            var singleLatinResidue = hadSymbolNoise && longestToken < 2 && !isPureNumber && allAscii;
             var needsAlias = !hasAlnum || singleLatinResidue;
             var hasSignal = hasAlnum && !needsAlias;
 
@@ -429,7 +431,16 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
             // Typographic → ASCII (quotes, dashes, ellipsis, apostrophe family, fraction slash).
             scrubbed = CanonicalizeTypographic(scrubbed);
 
-            return CollapseWhitespace(scrubbed);
+            var collapsed = CollapseWhitespace(scrubbed);
+
+            // A LEADING elision apostrophe ('Round, 'Til) is stripped + trimmed; mid/trailing
+            // apostrophes (Guns N' Roses, Creepin') are preserved.
+            if (collapsed.Length > 0 && collapsed[0] == '\'')
+            {
+                collapsed = collapsed.TrimStart('\'').TrimStart();
+            }
+
+            return collapsed;
         }
 
         private static string ScrubSurrogates(string value)
@@ -483,7 +494,21 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
                 }
 
                 var cat = Rune.GetUnicodeCategory(rune);
-                if (cat == UnicodeCategory.Control || cat == UnicodeCategory.Format)
+
+                // Whitespace controls (TAB/LF/CR/VT/FF, U+0085) are normalized to a space later — keep
+                // them here so neighbours don't fuse; all OTHER control/format chars are deleted so a
+                // zero-width/NUL never spaces or splits a token.
+                if (cat == UnicodeCategory.Control)
+                {
+                    if (Rune.IsWhiteSpace(rune))
+                    {
+                        sb.Append(rune.ToString());
+                    }
+
+                    continue;
+                }
+
+                if (cat == UnicodeCategory.Format)
                 {
                     continue;
                 }
