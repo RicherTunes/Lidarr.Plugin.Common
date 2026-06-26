@@ -8,6 +8,8 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 [![NuGet (Common)](https://img.shields.io/nuget/v/Lidarr.Plugin.Common?logo=nuget)](https://www.nuget.org/packages/Lidarr.Plugin.Common)
 [![NuGet (Abstractions)](https://img.shields.io/nuget/v/Lidarr.Plugin.Abstractions?logo=nuget)](https://www.nuget.org/packages/Lidarr.Plugin.Abstractions)
 
+> **CI:** The primary CI target is the self-hosted **Gitea** instance (`.gitea/workflows/ci.yml`); GitHub Actions is a mirror kept at parity (the badges above point at the GitHub mirror). Plugin re-pins to a new Common SHA adopt the Common-owned deterministic test policy automatically.
+
 ## Quick start
 
 | Role | Start here |
