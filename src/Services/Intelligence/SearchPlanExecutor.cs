@@ -51,6 +51,18 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
                 throw new ArgumentNullException(nameof(queryAsync));
             }
 
+            // Reject Unknown (the uninitialized default) and any undefined value. Without this, a caller
+            // that forgot to pass a policy — or a future enum value the loop below doesn't handle — would
+            // fall through to the accumulate-all branch silently. Fail loudly instead.
+            if (stopPolicy == SearchStopPolicy.Unknown || !Enum.IsDefined(typeof(SearchStopPolicy), stopPolicy))
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(stopPolicy), stopPolicy,
+                    "A concrete SearchStopPolicy is required (AccumulateAll / StopAfterFirstTierWithResults / " +
+                    "StopAfterFirstVariantWithResults). SearchStopPolicy.Unknown (the uninitialized default) and " +
+                    "undefined values are rejected so a forgotten policy cannot silently accumulate-all.");
+            }
+
             var results = new List<TResult>();
             var attempted = 0;
             var succeeded = 0;
