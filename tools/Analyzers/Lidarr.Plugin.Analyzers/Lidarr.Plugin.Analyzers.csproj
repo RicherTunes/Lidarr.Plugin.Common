@@ -6,7 +6,14 @@
     <AssemblyName>Lidarr.Plugin.Analyzers</AssemblyName>
     <PackageId>Lidarr.Plugin.Analyzers</PackageId>
     <IsPackable>true</IsPackable>
-    <IncludeBuildOutput>true</IncludeBuildOutput>
+    <!-- Roslyn analyzer packaging: the assembly must ship under analyzers/dotnet/cs (see the
+         <None> item below), NOT under lib/. IncludeBuildOutput=false keeps the default build
+         output out of lib/ so NuGet loads the DLL as an analyzer, not a runtime reference.
+         SuppressDependenciesWhenPacking drops the (PrivateAssets) Roslyn package deps from the
+         nuspec so consumers don't drag CodeAnalysis into their graph. Pinned by
+         tests/Packaging/AnalyzerPackagingTests.cs (inspects the real .nupkg layout). -->
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
     <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
     <Authors>RicherTunes Community</Authors>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
@@ -24,6 +31,9 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="README.md" Pack="true" PackagePath="/" />
+    <!-- Ship the built analyzer assembly where NuGet looks for analyzers. $(OutputPath) ends
+         with a directory separator, so no manual slash is needed (cross-platform safe). -->
+    <None Include="$(OutputPath)$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
   </ItemGroup>
 </Project>
 
