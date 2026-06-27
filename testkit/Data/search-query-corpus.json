@@ -1357,6 +1357,7 @@
     "category": "musical-sharp-flat-ascii-homoglyph",
     "trickyProperty": "gap-fill",
     "expectedHandling": "Stripping '#'/'♯' to 'F' loses the musical key (huge in classical/jazz catalogs). Need a glued variant that keeps F#→Fsharp-ish or preserves '#', not just removal.",
+    "expectedVariantPresent": "F# Minor / Bb / Bb",
     "realExample": false
   },
   {
@@ -1645,6 +1646,7 @@
     "category": "musical-sharp-flat-ascii-homoglyph",
     "trickyProperty": "MUSIC SHARP SIGN (U+266F) vs ASCII '#'; stripping it to 'F' loses the key. Classical/jazz catalogs store either glyph.",
     "expectedHandling": "Confusable-fold sharp<->'#' and emit a 'sharp'-spelled variant ('F sharp Minor'); keep '#'/sharp rather than deleting.",
+    "expectedVariantPresent": "Sonata in F# Minor",
     "realExample": true
   },
   {
@@ -1653,6 +1655,7 @@
     "category": "musical-sharp-flat-ascii-homoglyph",
     "trickyProperty": "MUSIC FLAT SIGN (U+266D) homoglyph of ASCII 'b'; some catalogs store 'Bb Major'.",
     "expectedHandling": "Fold flat and emit both a 'Bb'-style glued form and a 'B flat' spelled form.",
+    "expectedVariantPresent": "Bb Major",
     "realExample": true
   },
   {

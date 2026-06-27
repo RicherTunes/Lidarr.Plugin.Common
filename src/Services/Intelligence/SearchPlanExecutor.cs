@@ -86,7 +86,17 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
                     catch (Exception ex)
                     {
                         lastError = ex;
-                        onError?.Invoke(variant, ex);
+                        try
+                        {
+                            onError?.Invoke(variant, ex);
+                        }
+                        catch
+                        {
+                            // A buggy onError callback (logging / auth side-effect) must never turn a
+                            // single failed variant into an aborted fallback chain. Swallow and continue;
+                            // the original failure is preserved in lastError for the all-failed throw.
+                        }
+
                         continue;
                     }
 

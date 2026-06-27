@@ -51,6 +51,34 @@ public sealed class SearchPlanExecutorTests
     }
 
     [Fact]
+    public async Task OnErrorThatThrows_DoesNotAbortFallback()
+    {
+        // A buggy onError callback (logging/auth side-effect) must never turn one failed
+        // variant into an aborted fallback chain that loses the recoverable later variant.
+        var called = new List<string>();
+        var tiers = Tiers(new[] { "boom", "good" });
+
+        var results = await SearchPlanExecutor.ExecuteAsync<Album>(
+            tiers,
+            (q, ct) =>
+            {
+                called.Add(q);
+                if (q == "boom")
+                {
+                    throw new InvalidOperationException("query failed");
+                }
+
+                return Task.FromResult(WithAlbums("a1"));
+            },
+            SearchStopPolicy.AccumulateAll,
+            onError: (q, ex) => throw new Exception("buggy onError callback"));
+
+        Assert.Equal(new[] { "boom", "good" }, called); // "good" still attempted
+        Assert.Single(results);
+        Assert.Equal("a1", results[0].Id);
+    }
+
+    [Fact]
     public async Task EmptyFirstTier_FallsBackToArtistOnlyTier()
     {
         var called = new List<string>();
