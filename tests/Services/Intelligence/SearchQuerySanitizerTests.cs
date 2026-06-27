@@ -223,7 +223,7 @@ public sealed class SearchQuerySanitizerTests
         Assert.Equal(S("Beyoncé").Original, S("Be​yoncé").Original);
         Assert.Equal("Radiohead", S("﻿Radiohead").Original);
         Assert.Equal("Radiohead", S("Radio﻿head").Original);
-        Assert.Equal("Kind of Blue", S("Kind of Blue ").Original);
+        Assert.Equal("Kind of Blue", S("Kind of Blue\0").Original);
     }
 
     // ===== B11: WhitespaceNormalized_CollapsedTrimmedIdempotent =====
