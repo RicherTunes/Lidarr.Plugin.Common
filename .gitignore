@@ -101,3 +101,8 @@ coverage*/
 *.coverage
 *.cobertura.xml
 dist/
+
+# Local CI / review scratch artifacts (never committed — see external-audit branch-hygiene note)
+testResults.xml
+_pkgcheck/
+.glm-delegate-diff/
