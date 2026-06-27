@@ -42,6 +42,11 @@
     </ProjectReference>
     <ProjectReference Include="..\src\Abstractions\Lidarr.Plugin.Abstractions.csproj" />
     <ProjectReference Include="..\testkit\Lidarr.Plugin.Common.TestKit.csproj" />
+    <!-- Referenced as a plain assembly (NOT OutputItemType=Analyzer) so the Roslyn rules can be
+         unit-tested via CompilationWithAnalyzers without running on this test project's own build. -->
+    <ProjectReference Include="..\tools\Analyzers\Lidarr.Plugin.Analyzers\Lidarr.Plugin.Analyzers.csproj">
+      <ReferenceOutputAssembly>true</ReferenceOutputAssembly>
+    </ProjectReference>
   </ItemGroup>
 
   <!-- Exclude CLI-specific tests unless the CLI framework is included -->
