@@ -87,4 +87,43 @@ namespace App { class C {
 
         Assert.Empty(diags.Where(d => d.Id == "LPC0003"));
     }
+
+    // ===== Scope guards (round-3): the rule is precise, not "any HtmlEncode" — so a plugin's legitimate
+    // HTML-output rendering (e.g. brainarr) is not falsely flagged, and the rule stays a non-fatal warning.
+
+    [Fact]
+    public async Task DoesNotFlag_HtmlEncode_OnUnrelatedType()
+    {
+        // A plugin's OWN HTML-output helper is NOT a search-term encoder and must NOT be flagged — the rule
+        // is scoped to System.Net.WebUtility / System.Web.HttpUtility, never an arbitrary HtmlEncode method.
+        var diags = await AnalyzeAsync(@"
+namespace App {
+    static class HtmlRenderer { public static string HtmlEncode(string s) => s; }
+    class C { string Render(string s) => HtmlRenderer.HtmlEncode(s); }
+}");
+
+        Assert.Empty(diags.Where(d => d.Id == "LPC0003"));
+    }
+
+    [Fact]
+    public async Task DoesNotFlag_DisplayText_OnNonSanitizeType()
+    {
+        var diags = await AnalyzeAsync(@"
+namespace App {
+    static class Formatter { public static string DisplayText(string s) => s; }
+    class C { string M(string s) => Formatter.DisplayText(s); }
+}");
+
+        Assert.Empty(diags.Where(d => d.Id == "LPC0003"));
+    }
+
+    [Fact]
+    public async Task LPC0003_IsWarning_SoLegitHtmlRenderingStaysNonFatal()
+    {
+        var diags = await AnalyzeAsync(Stubs + @"
+namespace App { class C { string M(string q) => System.Net.WebUtility.HtmlEncode(q); } }");
+
+        var lpc = Assert.Single(diags.Where(d => d.Id == "LPC0003"));
+        Assert.Equal(DiagnosticSeverity.Warning, lpc.Severity);
+    }
 }
