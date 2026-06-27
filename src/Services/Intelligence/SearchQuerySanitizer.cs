@@ -545,7 +545,10 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
         {
             var v = rune.Value;
             return (v >= 0x1F000 && v <= 0x1FAFF)
-                || (v >= 0x2600 && v <= 0x27BF)   // misc symbols + dingbats (incl. ★ U+2605, ✝ U+271D)
+                // misc symbols + dingbats (incl. ★ U+2605, ✝ U+271D) — but NOT the musical
+                // accidentals ♭♮♯ (U+266D–F): those carry catalog meaning and are folded to
+                // ASCII in CanonicalizeTypographic, so they must survive emoji stripping.
+                || (v >= 0x2600 && v <= 0x27BF && !(v >= 0x266D && v <= 0x266F))
                 || (v >= 0x2B00 && v <= 0x2BFF)   // misc symbols and arrows (incl. ⭐ U+2B50)
                 || (v >= 0x1F1E6 && v <= 0x1F1FF) // regional indicators (flags)
                 || v == 0x2764;                   // heavy black heart
@@ -602,6 +605,20 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
                     // Fraction slash (NFKC injects this for ½) → "/" so it is treated as a separator.
                     case 0x2044:
                         sb.Append('/');
+                        break;
+
+                    // Musical accidentals → the ASCII the catalog stores: ♯→'#', ♭→'b'.
+                    // ("Sonata in F♯ Minor" → "F# Minor"; "B♭ Major" → "Bb Major" — the key is
+                    // meaning-bearing in classical/jazz catalogs.) ♮ (natural) has no catalog
+                    // spelling, so it is dropped. '#' survives because Original keeps symbols
+                    // (StripSymbols feeds signal detection only, never the canonical variant).
+                    case 0x266D: // ♭ MUSIC FLAT SIGN
+                        sb.Append('b');
+                        break;
+                    case 0x266F: // ♯ MUSIC SHARP SIGN
+                        sb.Append('#');
+                        break;
+                    case 0x266E: // ♮ MUSIC NATURAL SIGN
                         break;
 
                     default:
