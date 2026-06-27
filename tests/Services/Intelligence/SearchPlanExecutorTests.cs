@@ -415,4 +415,44 @@ public sealed class SearchPlanExecutorTests
         Assert.Empty(called);
         Assert.Empty(results);
     }
+
+    // ===== SearchStopPolicy validation (round-3): no silent accumulate-all on default/undefined =====
+
+    [Fact]
+    public void Unknown_IsTheZeroDefault()
+    {
+        // The uninitialized default must be Unknown (not a real policy), so a forgotten policy is caught.
+        Assert.Equal(SearchStopPolicy.Unknown, default(SearchStopPolicy));
+        Assert.Equal(0, (int)SearchStopPolicy.Unknown);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UnknownPolicy_Throws()
+    {
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            SearchPlanExecutor.ExecuteAsync<Album>(
+                Tiers(new[] { "q" }),
+                (q, ct) => Task.FromResult(WithAlbums("a1")),
+                SearchStopPolicy.Unknown));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_UndefinedPolicyValue_Throws()
+    {
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            SearchPlanExecutor.ExecuteAsync<Album>(
+                Tiers(new[] { "q" }),
+                (q, ct) => Task.FromResult(WithAlbums("a1")),
+                (SearchStopPolicy)999));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_PlanOverload_UnknownPolicy_Throws()
+    {
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            SearchPlanExecutor.ExecuteAsync<Album>(
+                SearchPlan.Empty,
+                (q, ct) => Task.FromResult(WithAlbums("a1")),
+                SearchStopPolicy.Unknown));
+    }
 }
