@@ -9,6 +9,8 @@
     - --update-pins rewrites real uses: lines but not comments
     - Invalid SHAs are rejected
     - Uppercase SHAs are normalized to lowercase
+    - Sentinel file is always written to repo root regardless of cwd
+    - -VerifyOnly correctly detects sentinel-submodule mismatch from any cwd
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -61,6 +63,12 @@ $TempDir = Join-Path ([System.IO.Path]::GetTempPath()) "repin-test-$([System.Gui
 New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
 
 try {
+    # Initialize $TempDir as a git repo (required: repin script calls git rev-parse --show-toplevel)
+    git init $TempDir --quiet 2>$null | Out-Null
+    git -C $TempDir config user.email "repin-test@example.invalid" 2>$null | Out-Null
+    git -C $TempDir config user.name "Repin Test" 2>$null | Out-Null
+    git -C $TempDir commit --allow-empty -m "init" --quiet 2>$null | Out-Null
+
     # Create a fake submodule directory with a git repo so rev-parse works
     $SubmodulePath = Join-Path $TempDir "ext/Lidarr.Plugin.Common"
     New-Item -ItemType Directory -Path $SubmodulePath -Force | Out-Null
@@ -233,6 +241,73 @@ try {
         }
 
         ($exitCode -ne 0) -and (($output -join "`n") -match 'stale')
+    }
+
+    # =====================================================================
+    Write-Host "" 
+    Write-Host "CWD-Independence Tests:" -ForegroundColor White
+    # =====================================================================
+
+    # Test 18: Sentinel file is always written to repo root, not to non-root cwd
+    Test-Assertion "Sentinel written to repo root, not to the non-root cwd" {
+        $FakePlug = Join-Path ([IO.Path]::GetTempPath()) "repin-cwd-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
+        try {
+            New-Item -ItemType Directory $FakePlug -Force | Out-Null
+            git init $FakePlug --quiet 2>$null | Out-Null
+            git -C $FakePlug config user.email "t@t.invalid" 2>$null | Out-Null
+            git -C $FakePlug config user.name "T" 2>$null | Out-Null
+            git -C $FakePlug commit --allow-empty -m "init" --quiet 2>$null | Out-Null
+            $FakeCommonAbs = Join-Path $FakePlug "ext/Lidarr.Plugin.Common"
+            New-Item -ItemType Directory $FakeCommonAbs -Force | Out-Null
+            git init $FakeCommonAbs --quiet 2>$null | Out-Null
+            git -C $FakeCommonAbs config user.email "t@t.invalid" 2>$null | Out-Null
+            git -C $FakeCommonAbs config user.name "T" 2>$null | Out-Null
+            git -C $FakeCommonAbs commit --allow-empty -m "init" --quiet 2>$null | Out-Null
+            git -C $FakeCommonAbs remote add origin $FakeCommonAbs 2>$null | Out-Null
+            $TargetSha = (git -C $FakeCommonAbs rev-parse HEAD 2>$null).Trim()
+            $NonRootCwd = Join-Path $FakePlug "subdir"
+            New-Item -ItemType Directory $NonRootCwd -Force | Out-Null
+            Push-Location $NonRootCwd
+            try {
+                & $RepinPs1 -SHA $TargetSha -SubmodulePath $FakeCommonAbs *>&1 | Out-Null
+            } finally { Pop-Location }
+            $sentinelAtRoot = Test-Path (Join-Path $FakePlug "ext-common-sha.txt")
+            $strayAtCwd     = Test-Path (Join-Path $NonRootCwd "ext-common-sha.txt")
+            $sentinelAtRoot -and (-not $strayAtCwd)
+        } finally { Remove-Item -Recurse -Force $FakePlug -ErrorAction SilentlyContinue }
+    }
+
+    # Test 19: VerifyOnly detects mismatch (not "not found") when invoked from non-root cwd
+    Test-Assertion "VerifyOnly detects sentinel-submodule mismatch when invoked from non-root cwd" {
+        $FakePlug2 = Join-Path ([IO.Path]::GetTempPath()) "repin-vo-cwd-$([Guid]::NewGuid().ToString('N').Substring(0,8))"
+        try {
+            New-Item -ItemType Directory $FakePlug2 -Force | Out-Null
+            git init $FakePlug2 --quiet 2>$null | Out-Null
+            git -C $FakePlug2 config user.email "t@t.invalid" 2>$null | Out-Null
+            git -C $FakePlug2 config user.name "T" 2>$null | Out-Null
+            git -C $FakePlug2 commit --allow-empty -m "init" --quiet 2>$null | Out-Null
+            $FakeCommonAbs2 = Join-Path $FakePlug2 "ext/Lidarr.Plugin.Common"
+            New-Item -ItemType Directory $FakeCommonAbs2 -Force | Out-Null
+            git init $FakeCommonAbs2 --quiet 2>$null | Out-Null
+            git -C $FakeCommonAbs2 config user.email "t@t.invalid" 2>$null | Out-Null
+            git -C $FakeCommonAbs2 config user.name "T" 2>$null | Out-Null
+            git -C $FakeCommonAbs2 commit --allow-empty -m "init" --quiet 2>$null | Out-Null
+            # Write WRONG SHA to sentinel at plugin root -- mismatch, not missing
+            $WrongSha = "0000000000000000000000000000000000000000"
+            $wrongBytes = [System.Text.Encoding]::ASCII.GetBytes($WrongSha + "`n")
+            [System.IO.File]::WriteAllBytes((Join-Path $FakePlug2 "ext-common-sha.txt"), $wrongBytes)
+            $NonRootCwd2 = Join-Path $FakePlug2 "subdir"
+            New-Item -ItemType Directory $NonRootCwd2 -Force | Out-Null
+            Push-Location $NonRootCwd2
+            try {
+                $output   = & $RepinPs1 -VerifyOnly -SubmodulePath $FakeCommonAbs2 *>&1
+                $exitCode = $LASTEXITCODE
+            } finally { Pop-Location }
+            # Pre-fix: "not found" error (script looked in $NonRootCwd2)
+            # Post-fix: "mismatch" error (script finds sentinel at $FakePlug2)
+            $outputStr = ($output | ForEach-Object { "$_" }) -join "`n"
+            ($exitCode -ne 0) -and ($outputStr -match 'mismatch')
+        } finally { Remove-Item -Recurse -Force $FakePlug2 -ErrorAction SilentlyContinue }
     }
 
 } finally {

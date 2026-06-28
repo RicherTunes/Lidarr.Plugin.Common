@@ -1,4 +1,4 @@
-<#
+﻿<#
 .SYNOPSIS
     Re-pins ext/Lidarr.Plugin.Common (or ext/lidarr.plugin.common) submodule to a specific SHA.
 
@@ -9,14 +9,21 @@
     CI bump workflows should use: -ShaFromSubmoduleHead -Stage
     Maintainers can also use -UpdatePins to rewrite workflow SHA pins (requires PAT).
 
+    Note on flag style: this PowerShell script uses -PascalCase parameters
+    (-ShaFromSubmoduleHead, -Stage, -VerifyOnly, -UpdatePins).
+    The companion .sh script uses GNU-style flags (--sha-from-submodule, --stage,
+    --verify-only, --update-pins). The semantics are identical; only the syntax differs.
+
 .PARAMETER SHA
     The Common commit SHA to pin to. Required unless -VerifyOnly or -ShaFromSubmoduleHead is specified.
 
 .PARAMETER SubmodulePath
     Path to the submodule (default: auto-detect ext/Lidarr.Plugin.Common or ext/lidarr.plugin.common).
+    Accepts both absolute and relative paths; relative paths are resolved from the git repo root.
 
 .PARAMETER Stage
-    If specified, stages the submodule and ext-common-sha.txt changes.
+    If specified, stages the submodule and ext-common-sha.txt changes, then self-verifies that the
+    staged gitlink, sentinel file, and submodule HEAD all match the target SHA.
 
 .PARAMETER Verify
     If specified, verifies the submodule is clean before and after the operation.
@@ -70,18 +77,32 @@ param(
 
 $ErrorActionPreference = "Stop"
 
-# Auto-detect submodule path if not specified
+# Anchor all path operations to the git repo root so the script is cwd-independent.
+$RepoRoot = (git rev-parse --show-toplevel 2>$null)
+if (-not $RepoRoot -or $LASTEXITCODE -ne 0) {
+    throw "Not inside a git repository. Run this script from within the plugin repo."
+}
+$RepoRoot = $RepoRoot.Trim()
+
+# Auto-detect submodule path if not specified (uses $RepoRoot, not $PWD)
 if (-not $SubmodulePath) {
-    if (Test-Path "ext/Lidarr.Plugin.Common") {
-        $SubmodulePath = "ext/Lidarr.Plugin.Common"
-    } elseif (Test-Path "ext/lidarr.plugin.common") {
-        $SubmodulePath = "ext/lidarr.plugin.common"
+    if (Test-Path (Join-Path $RepoRoot "ext/Lidarr.Plugin.Common")) {
+        $SubmodulePath = Join-Path $RepoRoot "ext/Lidarr.Plugin.Common"
+    } elseif (Test-Path (Join-Path $RepoRoot "ext/lidarr.plugin.common")) {
+        $SubmodulePath = Join-Path $RepoRoot "ext/lidarr.plugin.common"
     } else {
         throw "Could not find Common submodule. Specify -SubmodulePath explicitly."
     }
 }
 
+# Normalize SubmodulePath: relative paths are resolved from the repo root
+if (-not [System.IO.Path]::IsPathRooted($SubmodulePath)) {
+    $SubmodulePath = Join-Path $RepoRoot $SubmodulePath
+}
+$SubmoduleRelPath = [System.IO.Path]::GetRelativePath($RepoRoot, $SubmodulePath)
+
 $shaFile = "ext-common-sha.txt"
+$absPath = Join-Path $RepoRoot $shaFile
 
 # --sha-from-submodule mode: read SHA from submodule gitlink (eliminates "passed wrong SHA" bugs)
 if ($ShaFromSubmoduleHead) {
@@ -93,13 +114,13 @@ if ($ShaFromSubmoduleHead) {
 if ($VerifyOnly) {
     Write-Host "Verifying submodule gitlink matches $shaFile..." -ForegroundColor Cyan
 
-    if (-not (Test-Path $shaFile)) {
+    if (-not (Test-Path $absPath)) {
         Write-Host "ERROR: $shaFile not found" -ForegroundColor Red
         exit 1
     }
 
     # Validate file format: exactly 40 lowercase hex + LF (41 bytes, no BOM, no CRLF)
-    $rawBytes = [System.IO.File]::ReadAllBytes((Join-Path $PWD.Path $shaFile))
+    $rawBytes = [System.IO.File]::ReadAllBytes($absPath)
     $byteLen = $rawBytes.Length
     if ($byteLen -ne 41) {
         Write-Host "ERROR: $shaFile must be exactly 41 bytes (40 hex + LF), got $byteLen" -ForegroundColor Red
@@ -140,7 +161,7 @@ if ($VerifyOnly) {
 
     # Guard: fail on stale reusable Common workflow SHA pins.
     # Suppressed when the repo has no Common reusable-workflow references at all.
-    $workflowDir = ".github/workflows"
+    $workflowDir = Join-Path $RepoRoot ".github/workflows"
     if (Test-Path $workflowDir) {
         $workflowFiles = @(
             Get-ChildItem -Path $workflowDir -File -Filter "*.yml" -ErrorAction SilentlyContinue
@@ -217,10 +238,9 @@ if ($LASTEXITCODE -ne 0) {
     throw "Failed to checkout SHA: $SHA"
 }
 
-# Update ext-common-sha.txt
+# Update ext-common-sha.txt (anchored to repo root, not $PWD)
 Write-Host "`nUpdating $shaFile..." -ForegroundColor Yellow
 # Write SHA + LF (Unix line ending, no BOM, satisfies end-of-file-fixer)
-$absPath = Join-Path $PWD.Path $shaFile
 $bytes = [System.Text.Encoding]::ASCII.GetBytes($SHA + "`n")
 [System.IO.File]::WriteAllBytes($absPath, $bytes)
 
@@ -233,7 +253,7 @@ if ($currentSha -ne $SHA) {
 Write-Host "Checkout verified: $currentSha" -ForegroundColor Green
 
 if ($UpdatePins) {
-    $workflowDir = ".github/workflows"
+    $workflowDir = Join-Path $RepoRoot ".github/workflows"
     if (Test-Path $workflowDir) {
         $workflowFiles = @(
             Get-ChildItem -Path $workflowDir -File -Filter "*.yml" -ErrorAction SilentlyContinue
@@ -271,18 +291,36 @@ if ($Verify) {
 # Stage changes if requested
 if ($Stage) {
     Write-Host "`nStaging changes..." -ForegroundColor Yellow
-    $filesToStage = @($SubmodulePath, $shaFile)
-    if ($UpdatePins -and (Test-Path ".github/workflows")) {
-        $filesToStage += ".github/workflows"
+    $filesToStage = @($SubmodulePath, $absPath)
+    if ($UpdatePins -and (Test-Path (Join-Path $RepoRoot ".github/workflows"))) {
+        $filesToStage += Join-Path $RepoRoot ".github/workflows"
     }
-    git add @filesToStage
+    git -C $RepoRoot add @filesToStage
     Write-Host "`nStaged changes:" -ForegroundColor Green
-    git status --short @filesToStage
+    git -C $RepoRoot status --short @filesToStage
+
+    # Self-verify: sentinel file, submodule HEAD, and staged gitlink must all equal $SHA.
+    # This catches silent drift (e.g. checkout failed silently, git add picked up wrong state).
+    $sentinelBytes = [System.IO.File]::ReadAllBytes($absPath)
+    $sentinelSha   = [System.Text.Encoding]::ASCII.GetString($sentinelBytes, 0, [Math]::Min(40, $sentinelBytes.Length))
+    $submoduleHead = (git -C $SubmodulePath rev-parse HEAD 2>$null).Trim()
+    $lsOutput      = (git -C $RepoRoot ls-files -s $SubmoduleRelPath 2>$null).Trim()
+    $stagedSha     = if ($lsOutput -match '^\d+\s+([0-9a-f]{40})\s+\d+') { $Matches[1] } else { "" }
+    $failures = @()
+    if ($sentinelSha -ne $SHA) { $failures += "ext-common-sha.txt contains '$sentinelSha', expected '$SHA'" }
+    if ($submoduleHead -ne $SHA) { $failures += "submodule HEAD is '$submoduleHead', expected '$SHA'" }
+    if ($stagedSha -ne $SHA) { $failures += "staged gitlink is '$stagedSha', expected '$SHA' (was git add run?)" }
+    if ($failures.Count -gt 0) {
+        Write-Host "ERROR: Self-verify FAILED — silent pin drift detected:" -ForegroundColor Red
+        $failures | ForEach-Object { Write-Host "  - $_" -ForegroundColor Red }
+        exit 1
+    }
+    Write-Host "Self-verify passed: sentinel, submodule HEAD, and staged gitlink all = $SHA" -ForegroundColor Green
 }
 
 Write-Host "`nDone! Submodule pinned to: $SHA" -ForegroundColor Green
 Write-Host "ext-common-sha.txt updated." -ForegroundColor Green
 
 if (-not $Stage) {
-    Write-Host "`nTo stage: git add $SubmodulePath $shaFile" -ForegroundColor Cyan
+    Write-Host "`nTo stage: git -C '$RepoRoot' add '$SubmodulePath' '$absPath'" -ForegroundColor Cyan
 }
