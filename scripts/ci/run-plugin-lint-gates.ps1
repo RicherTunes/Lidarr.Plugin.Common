@@ -19,7 +19,8 @@ param(
     [switch]$SkipSyncOverAsync,
     [switch]$SkipTestTraits,
     [switch]$SkipVersionContract,
-    [switch]$SkipPluginContractTests
+    [switch]$SkipPluginContractTests,
+    [switch]$SkipDocRefs
 )
 
 $ErrorActionPreference = 'Stop'
@@ -155,6 +156,13 @@ try {
             -Name 'Ecosystem parity version contract' `
             -ScriptPath (Join-Path $resolvedCommonRoot 'scripts/ecosystem-parity-lint.ps1') `
             -Arguments @('-RepoPath', $resolvedRepoPath, '-CommonRoot', $resolvedCommonRoot, '-Check', 'VersionContract', '-Mode', $Mode)
+    }
+
+    if (-not $SkipDocRefs) {
+        Invoke-LintGate `
+            -Name 'Doc refs' `
+            -ScriptPath (Join-Path $resolvedCommonRoot 'scripts/lint-doc-script-refs.ps1') `
+            -Arguments @('-RepoRoot', $resolvedRepoPath, '-CI')
     }
 
     if (-not $SkipPluginContractTests) {
