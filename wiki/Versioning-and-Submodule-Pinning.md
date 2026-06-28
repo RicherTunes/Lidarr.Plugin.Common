@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 # Versioning and Submodule Pinning
 
 How Common releases are versioned, how plugin repos pin the submodule, and how the ecosystem stays in lockstep.

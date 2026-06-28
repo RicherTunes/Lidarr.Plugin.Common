@@ -1,4 +1,4 @@
-# Release & Versioning Policy
+﻿# Release & Versioning Policy
 
 This repository ships two NuGet packages:
 
@@ -28,7 +28,7 @@ This repository ships two NuGet packages:
 3. **Run tests** (`dotnet test`). Isolation/manifest suites must pass.
 4. **Tagging**:
    - Tag combined releases with `vX.Y.Z`. Reference the release template in [docs/UPGRADING.md](../UPGRADING.md).
-5. **Publishing**: use `.github/workflows/release.yml`, which packs Abstractions and Common and runs API compatibility against the previous tag before pushing to NuGet.
+5. **Publishing**: pack Abstractions and Common, run API compatibility against the previous tag, then push to NuGet (handled by the release CI job).
 6. **Communicate**:
    - Announce Abstractions bumps to plugin authors with the migration checklist (`../migration/FROM_LEGACY.md`).
    - For Common updates, highlight notable changes but remind authors they can upgrade at their own pace.

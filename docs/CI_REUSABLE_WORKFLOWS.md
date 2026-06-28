@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 # Reusable Workflow Proposals
 
 **Generated**: 2026-05-23
