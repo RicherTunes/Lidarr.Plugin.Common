@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 # Ecosystem Version Contract
 
 ## Why the contract exists

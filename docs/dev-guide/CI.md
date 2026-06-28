@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 # Continuous Integration
 
 This repository ships with a multi-stage GitHub Actions pipeline that keeps the shared library healthy and releasable.

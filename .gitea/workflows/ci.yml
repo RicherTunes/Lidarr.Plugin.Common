@@ -1,4 +1,4 @@
-name: CI
+﻿name: CI
 on:
   workflow_dispatch:
   push:
@@ -76,7 +76,7 @@ jobs:
       - name: Sync-over-async gate
         shell: pwsh
         run: ./scripts/lint-sync-over-async.ps1 -SelfTest && ./scripts/lint-sync-over-async.ps1 -Path . -Mode ci
-      - name: Doc script-reference gate (no docs pointing at deleted scripts)
+      - name: Doc script/workflow-reference gate (no docs pointing at deleted scripts or workflows)
         shell: pwsh
         run: ./scripts/lint-doc-script-refs.ps1 -SelfTest -CI && ./scripts/lint-doc-script-refs.ps1 -CI
       - name: Test trait policy gate
@@ -88,6 +88,9 @@ jobs:
       - name: Ecosystem parity harness self-test
         shell: pwsh
         run: ./scripts/tests/Test-EcosystemParityLint.ps1
+      - name: Doc workflow-ref gate self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-LintDocWorkflowRefs.ps1
       - name: Shared plugin lint runner self-test
         shell: pwsh
         run: ./scripts/tests/Test-RunPluginLintGates.ps1
