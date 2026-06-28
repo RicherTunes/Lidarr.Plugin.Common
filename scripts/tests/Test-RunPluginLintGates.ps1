@@ -135,6 +135,7 @@ function New-FakeCommonRoot {
     Add-GateStub -CommonRoot $Path -RelativePath 'scripts/lint-sync-over-async.ps1' -GateName 'sync'
     Add-GateStub -CommonRoot $Path -RelativePath 'scripts/lint-test-traits.ps1' -GateName 'traits'
     Add-GateStub -CommonRoot $Path -RelativePath 'scripts/ecosystem-parity-lint.ps1' -GateName 'parity'
+    Add-GateStub -CommonRoot $Path -RelativePath 'scripts/lint-doc-script-refs.ps1' -GateName 'doc-refs'
     return $Path
 }
 
@@ -171,11 +172,15 @@ try {
 
     Assert-True 'Runner exits successfully when every gate passes' ($result.ExitCode -eq 0) $result.Output
     $lines = @(if (Test-Path $log) { Get-Content $log } else { @() })
-    Assert-True 'Exactly four lint gates and one plugin contract test are invoked' (@($lines).Count -eq 5) ($lines -join "`n")
+    Assert-True 'Exactly five lint gates and one plugin contract test are invoked' (@($lines).Count -eq 6) ($lines -join "
+")
     Assert-True 'Date parsing gate receives repo path and CI mode' (($lines -join "`n") -match 'date\|.*-Path .*fake-plugin.* -Mode ci') ($lines -join "`n")
     Assert-True 'Sync-over-async gate receives repo path and CI mode' (($lines -join "`n") -match 'sync\|.*-Path .*fake-plugin.* -Mode ci') ($lines -join "`n")
     Assert-True 'Trait policy gate receives repo path and CI flag' (($lines -join "`n") -match 'traits\|.*-Path .*fake-plugin.* -CI') ($lines -join "`n")
     Assert-True 'Parity gate receives version-contract check' (($lines -join "`n") -match 'parity\|.*-RepoPath .*fake-plugin.* -CommonRoot .*Lidarr\.Plugin\.Common.* -Check VersionContract\s+-Mode ci') ($lines -join "`n")
+    Assert-True 'Doc-refs gate receives plugin repo root and CI flag' (($lines -join "
+") -match 'doc-refs\|.*-RepoRoot .*fake-plugin.* -CI') ($lines -join "
+")
     Assert-True 'Plugin contract test under scripts/tests is invoked' (($lines -join "`n") -match 'contract\|FakeContract\.Tests\.ps1') ($lines -join "`n")
 
     Write-Host "`n[TEST 2] Propagates gate failures..." -ForegroundColor Cyan
@@ -224,6 +229,21 @@ try {
     Assert-True 'Pester failure output names the failing contract file' ($result.Output -match 'FailingPester\.Tests\.ps1') $result.Output
 
     Write-Host "`n=================================================" -ForegroundColor Cyan
+
+    Write-Host "`n[TEST 6] -SkipDocRefs suppresses the doc-refs gate..." -ForegroundColor Cyan
+    $env:LINT_GATE_FAIL = ''
+    Remove-Item $log -Force -ErrorAction SilentlyContinue
+    $result = Invoke-Runner -RunnerArgs @(
+        '-RepoPath', $repo,
+        '-CommonRoot', $common,
+        '-Mode', 'ci',
+        '-SkipDocRefs',
+        '-SkipPluginContractTests'
+    )
+    $skipLines = @(if (Test-Path $log) { Get-Content $log } else { @() })
+    Assert-True '-SkipDocRefs causes runner to exit successfully' ($result.ExitCode -eq 0) $result.Output
+    Assert-True '-SkipDocRefs omits doc-refs gate from invocation log' (-not (($skipLines -join "`n") -match 'doc-refs\|')) ($skipLines -join "`n")
+
     $total = $passed + $failed
     Write-Host "Results: $passed/$total passed, $failed failed" -ForegroundColor $(if ($failed -eq 0) { 'Green' } else { 'Red' })
     Write-Host '=================================================' -ForegroundColor Cyan
