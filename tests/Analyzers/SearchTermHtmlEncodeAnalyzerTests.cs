@@ -88,14 +88,35 @@ namespace App { class C {
         Assert.Empty(diags.Where(d => d.Id == "LPC0003"));
     }
 
-    // ===== Scope guards (round-3): the rule is precise, not "any HtmlEncode" — so a plugin's legitimate
-    // HTML-output rendering (e.g. brainarr) is not falsely flagged, and the rule stays a non-fatal warning.
+    // ===== Scope guards. IMPORTANT — the rule is deliberately BROAD for the two framework encoders, NOT
+    // context-aware: it flags EVERY System.Net.WebUtility / System.Web.HttpUtility.HtmlEncode call (and
+    // Sanitize.DisplayText). A syntactic analyzer cannot tell a search term from legitimate HTML output, so
+    // a plugin that renders real HTML with the framework encoder (e.g. brainarr's
+    // ObservabilityService.GetObservabilityHtml dashboard) IS flagged and MUST suppress LPC0003 narrowly
+    // with justification — that is by design (warning severity, suppression-based; see the characterization
+    // test below). The only "precision" the rule offers is TYPE-scoping: it does not flag an arbitrary
+    // custom-named HtmlEncode/DisplayText method on an unrelated type (the two tests immediately following).
+
+    [Fact]
+    public async Task Flags_FrameworkHtmlEncode_EvenInHtmlRenderingContext_RequiringSuppression()
+    {
+        // Characterization: the rule does NOT exempt legitimate HTML rendering — a method that emits an HTML
+        // fragment via the FRAMEWORK encoder is still flagged. This is intentional (the syntactic heuristic
+        // can't distinguish it from search-term encoding), so such call sites must suppress LPC0003 narrowly
+        // and justified — exactly what brainarr's ObservabilityService.GetObservabilityHtml does. Pinned so
+        // the "is LPC0003 precise?" claim stays honest: it is broad-by-type, not intent-aware.
+        var diags = await AnalyzeAsync(Stubs + @"
+namespace App { class Dashboard { string RenderHtml(string userText) => ""<td>"" + System.Net.WebUtility.HtmlEncode(userText) + ""</td>""; } }");
+
+        Assert.Single(diags.Where(d => d.Id == "LPC0003"));
+    }
 
     [Fact]
     public async Task DoesNotFlag_HtmlEncode_OnUnrelatedType()
     {
-        // A plugin's OWN HTML-output helper is NOT a search-term encoder and must NOT be flagged — the rule
-        // is scoped to System.Net.WebUtility / System.Web.HttpUtility, never an arbitrary HtmlEncode method.
+        // A plugin's OWN custom-named HTML-output helper is NOT one of the two framework encoders and must
+        // NOT be flagged — the rule is scoped to System.Net.WebUtility / System.Web.HttpUtility, never an
+        // arbitrary HtmlEncode method. (This is the ONLY sense in which the rule is "precise" — see above.)
         var diags = await AnalyzeAsync(@"
 namespace App {
     static class HtmlRenderer { public static string HtmlEncode(string s) => s; }
