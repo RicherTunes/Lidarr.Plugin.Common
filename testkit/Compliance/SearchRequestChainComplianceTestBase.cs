@@ -97,6 +97,25 @@ public abstract class SearchRequestChainComplianceTestBase
         return queries;
     }
 
+    /// <summary>
+    /// Opt-in flag for full-chain adopters (e.g. tidal, amazon, apple) that emit EVERY
+    /// <see cref="SearchQuerySanitizer.BuildPlan"/> variant in exact plan order.
+    ///
+    /// <para>When <c>true</c>, <see cref="Chain_MatchesExactPlanSequence"/> runs as an additional
+    /// [Fact] that asserts the emitted chain equals the flat plan list with no duplicates and no
+    /// reordering. This catches two regressions the default set-based checks miss:</para>
+    /// <list type="bullet">
+    ///   <item>duplicate planned variants — emitting the same query twice;</item>
+    ///   <item>reordering variants after the first request — which matters for
+    ///     <see cref="SearchStopPolicy.StopAfterFirstVariantWithResults"/> (the variant the
+    ///     executor tries first determines which result set the user gets).</item>
+    /// </list>
+    ///
+    /// <para>Defaults to <c>false</c> so existing adopters (including qobuz's capped-chain
+    /// subclass) are not broken — their chain is intentionally a SUBSET of the plan.</para>
+    /// </summary>
+    protected virtual bool RequiresExactPlanSequence => false;
+
     /// <summary>Every request the generator emits must be a decodable placeholder URI.</summary>
     [Fact]
     public void EveryRequest_IsAWellFormedPlaceholderUri()
@@ -182,5 +201,42 @@ public abstract class SearchRequestChainComplianceTestBase
             "the special-character chain has no fully-sanitized variant (every query still carries a raw " +
             $"{string.Join("/", ForbiddenRawChars)}). GetSearchRequests must run SearchQuerySanitizer so a clean " +
             "fallback query (e.g. 'Record nV') is issued — its absence is the Record-n°V zero-results bug.");
+    }
+
+    /// <summary>
+    /// Full-chain guard: the emitted chain must equal the
+    /// <see cref="SearchQuerySanitizer.BuildPlan"/> flat variant list in exact order, with no
+    /// duplicates and no reordering.
+    ///
+    /// <para>Only active when <see cref="RequiresExactPlanSequence"/> is <c>true</c>. When
+    /// <c>false</c> (the default), the test passes trivially so existing capped-chain adopters
+    /// (e.g. qobuz) are not broken.</para>
+    ///
+    /// <para>This guard catches two regressions that the default set-based assertions miss:</para>
+    /// <list type="bullet">
+    ///   <item><b>Duplicate variants</b> — emitting the same query twice (the set-based presence
+    ///     check in <see cref="Chain_PreservesEveryBuildPlanVariant_IncludingArtistOnlyFallback"/>
+    ///     collapses the chain to a set and therefore cannot see duplicates).</item>
+    ///   <item><b>Reordering after position 0</b> — swapping or shuffling variants at positions
+    ///     1..N (only <see cref="FirstRequest_IsTheCombinedTierFirstVariant"/> checks the first
+    ///     element; everything after it is invisible to the order-sensitive stop policies
+    ///     <see cref="SearchStopPolicy.StopAfterFirstTierWithResults"/> and
+    ///     <see cref="SearchStopPolicy.StopAfterFirstVariantWithResults"/>).</item>
+    /// </list>
+    /// </summary>
+    [Fact]
+    public void Chain_MatchesExactPlanSequence()
+    {
+        if (!RequiresExactPlanSequence)
+        {
+            return; // opt-in — capped-chain adopters skip this assertion
+        }
+
+        var chain = DecodeChainOrThrow(SampleArtist, SampleAlbum);
+        var expected = SearchQuerySanitizer.BuildPlan(SampleArtist, SampleAlbum).Tiers
+            .SelectMany(t => t)
+            .ToList();
+
+        Assert.Equal(expected, chain, StringComparer.OrdinalIgnoreCase);
     }
 }
