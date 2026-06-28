@@ -323,6 +323,37 @@ namespace Lidarr.Plugin.Common.Tests.Services.Resilience
             await Assert.ThrowsAsync<TaskCanceledException>(async () => await task);
         }
 
+        [Fact]
+        public async Task ExecuteAsync_WhenThrottled_WaitHonorsInjectedTimeProvider()
+        {
+            // Arrange: 1 request per 100 seconds so the second call must wait ~100s
+            var fakeTime = new FakeTimeProvider(DateTimeOffset.UtcNow);
+            var limiter = new TokenBucketRateLimiter(NullLogger.Instance, fakeTime);
+            const string resource = "timeprovider-delay-test";
+            var period = TimeSpan.FromSeconds(100);
+            limiter.Configure(resource, 1, period);
+
+            // Consume the single token immediately (no wait)
+            await limiter.ExecuteAsync(resource, () => Task.FromResult(0));
+
+            // Start a second request - it must wait ~100s for refill
+            var secondTask = limiter.ExecuteAsync(resource, () => Task.FromResult(1));
+
+            // Give the real scheduler a moment; the task must NOT have completed yet
+            // (it should be blocked on Task.Delay ~100s)
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
+            Assert.False(secondTask.IsCompleted,
+                "Second request should still be waiting for rate-limit delay");
+
+            // Advance fake clock by the full period - this should release the wait
+            fakeTime.Advance(period);
+
+            // Now it must complete quickly (well within a second of real time)
+            var completed = await Task.WhenAny(secondTask, Task.Delay(TimeSpan.FromSeconds(5)));
+            Assert.Same(secondTask, completed);
+            Assert.Equal(1, await secondTask);
+        }
+
         #endregion
 
         #region Token Capacity Limits
