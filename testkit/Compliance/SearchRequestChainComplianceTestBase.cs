@@ -9,14 +9,14 @@ namespace Lidarr.Plugin.Common.TestKit.Compliance;
 
 /// <summary>
 /// Behavioral compliance axis: proves a plugin's <c>GetSearchRequests</c> emits the COMPLETE, sanitized
-/// request chain — every <see cref="SearchQuerySanitizer.BuildPlan(string, string, SanitizerOptions)"/>
+/// request chain -- every <see cref="SearchQuerySanitizer.BuildPlan(string, string, SanitizerOptions)"/>
 /// variant, as a well-formed <see cref="PlaceholderSearchUri"/>, and nothing else.
 ///
 /// <para>This closes the gap the weaker <see cref="SearchTermProvenanceComplianceTestBase"/> leaves open.
 /// That base asks the plugin for the queries its transport <i>issued</i> at runtime (which a plugin can
 /// satisfy by hand-reconstructing the plan, and which a stop-policy can legitimately truncate). This base
 /// instead drives the host-free plan entry point and decodes its output through the same
-/// <see cref="PlaceholderSearchUri"/> seam the host round-trips — so it cannot be faked with arbitrary
+/// <see cref="PlaceholderSearchUri"/> seam the host round-trips -- so it cannot be faked with arbitrary
 /// strings, and it is deterministic (the chain is built before any result-dependent stop-policy runs).</para>
 ///
 /// <para>It catches two shipped finding-classes by default:</para>
@@ -24,7 +24,7 @@ namespace Lidarr.Plugin.Common.TestKit.Compliance;
 ///   <item>a <c>Take(N)</c>/truncation that DROPS the artist-only fallback tier (the "Bleu Jeans Bleu /
 ///   Record n°V returned 0 results" bug);</item>
 ///   <item>a special-character query that reaches the API UN-sanitized (raw <c>°</c>, <c>©</c>, curly
-///   quotes, ♯/♭) because the generator skipped <see cref="SearchQuerySanitizer"/>.</item>
+///   quotes, sharp/flat) because the generator skipped <see cref="SearchQuerySanitizer"/>.</item>
 /// </list>
 ///
 /// <para>A plugin adopts it by driving its real generator and returning the placeholder URLs (the host
@@ -44,7 +44,7 @@ namespace Lidarr.Plugin.Common.TestKit.Compliance;
 /// </summary>
 public abstract class SearchRequestChainComplianceTestBase
 {
-    /// <summary>Artist used to drive the chain (both fields carry signal ⇒ a fallback tier exists).</summary>
+    /// <summary>Artist used to drive the chain (both fields carry signal => a fallback tier exists).</summary>
     protected virtual string SampleArtist => "Daft Punk";
 
     /// <summary>Album used to drive the chain.</summary>
@@ -53,19 +53,19 @@ public abstract class SearchRequestChainComplianceTestBase
     /// <summary>A special-character artist whose sanitized plan is known-clean (canonical audit case).</summary>
     protected virtual string SpecialArtist => "Bleu Jeans Bleu";
 
-    /// <summary>A special-character album (degree sign) — sanitizer drops "n°V" → "nV".</summary>
+    /// <summary>A special-character album (degree sign) -- sanitizer drops "n°V" to "nV".</summary>
     protected virtual string SpecialAlbum => "Record n°V";
 
     /// <summary>Raw characters that must never survive sanitization onto an outbound query.</summary>
     private static readonly char[] ForbiddenRawChars =
     {
-        '°', // ° degree
-        '©', // © copyright
-        '’', // ’ right single quote
-        '“', // “ left double quote
-        '”', // ” right double quote
-        '♯', // ♯ sharp
-        '♭', // ♭ flat
+        '°', // degree sign
+        '©', // copyright sign
+        '’', // right single quotation mark
+        '“', // left double quotation mark
+        '”', // right double quotation mark
+        '♯', // music sharp sign
+        '♭', // music flat sign
     };
 
     /// <summary>The plugin's <see cref="PlaceholderSearchUri"/> scheme (e.g. "tidal", "qobuz").</summary>
@@ -73,8 +73,8 @@ public abstract class SearchRequestChainComplianceTestBase
 
     /// <summary>
     /// Drive the plugin's host-free plan entry point for (artist, album) and return the placeholder
-    /// search URLs it produced, in chain order. This is the canonical host-free plan seam — the plan
-    /// the host generator is contractually built from — not the Lidarr host's actual <c>GetSearchRequests</c>.
+    /// search URLs it produced, in chain order. This is the canonical host-free plan seam -- the plan
+    /// the host generator is contractually built from -- not the Lidarr host's actual <c>GetSearchRequests</c>.
     /// </summary>
     protected abstract IReadOnlyList<string> GetSearchRequestUrls(string artist, string album);
 
@@ -83,7 +83,7 @@ public abstract class SearchRequestChainComplianceTestBase
         var urls = GetSearchRequestUrls(artist, album);
         Assert.True(
             urls is { Count: > 0 },
-            "GetSearchRequests produced no requests — the chain must issue at least the combined query.");
+            "GetSearchRequests produced no requests -- the chain must issue at least the combined query.");
 
         var queries = new List<string>(urls.Count);
         foreach (var url in urls)
@@ -99,23 +99,25 @@ public abstract class SearchRequestChainComplianceTestBase
     }
 
     /// <summary>
-    /// Opt-in flag for full-chain adopters (e.g. tidal, amazon, apple) that emit EVERY
-    /// <see cref="SearchQuerySanitizer.BuildPlan"/> variant in exact plan order.
+    /// Whether this subclass emits EVERY <see cref="SearchQuerySanitizer.BuildPlan"/> variant in exact
+    /// plan order (no duplicates, no reordering).
     ///
-    /// <para>When <c>true</c>, <see cref="Chain_MatchesExactPlanSequence"/> runs as an additional
-    /// [Fact] that asserts the emitted chain equals the flat plan list with no duplicates and no
-    /// reordering. This catches two regressions the default set-based checks miss:</para>
+    /// <para>Defaults to <c>true</c> (fail-safe: a fresh adopter that does not override this property
+    /// gets the strictest guard automatically). When <c>true</c>,
+    /// <see cref="Chain_MatchesExactPlanSequence"/> asserts the emitted chain equals the flat plan list
+    /// with no duplicates and no reordering. This catches two regressions the set-based checks miss:</para>
     /// <list type="bullet">
-    ///   <item>duplicate planned variants — emitting the same query twice;</item>
-    ///   <item>reordering variants after the first request — which matters for
+    ///   <item>duplicate planned variants -- emitting the same query twice;</item>
+    ///   <item>reordering variants after the first request -- which matters for
     ///     <see cref="SearchStopPolicy.StopAfterFirstVariantWithResults"/> (the variant the
     ///     executor tries first determines which result set the user gets).</item>
     /// </list>
     ///
-    /// <para>Defaults to <c>false</c> so existing adopters (including qobuz's capped-chain
-    /// subclass) are not broken — their chain is intentionally a SUBSET of the plan.</para>
+    /// <para>Capped-chain adopters (e.g. qobuz via <see cref="CappedSearchChainComplianceTestBase"/>)
+    /// whose chain is intentionally a SUBSET of the plan must explicitly override with
+    /// <c>=&gt; false</c> to opt out of the exact-sequence assertion.</para>
     /// </summary>
-    protected virtual bool RequiresExactPlanSequence => false;
+    protected virtual bool RequiresExactPlanSequence => true;
 
     /// <summary>Every request the generator emits must be a decodable placeholder URI.</summary>
     [Fact]
@@ -145,11 +147,11 @@ public abstract class SearchRequestChainComplianceTestBase
 
         Assert.All(chain, q => Assert.True(
             planned.Contains(q),
-            $"request chain issues '{q}', which is NOT a BuildPlan variant — search terms must come only from BuildPlan."));
+            $"request chain issues '{q}', which is NOT a BuildPlan variant -- search terms must come only from BuildPlan."));
     }
 
     /// <summary>
-    /// The chain must issue EVERY BuildPlan variant, including the full artist-only fallback tier — a
+    /// The chain must issue EVERY BuildPlan variant, including the full artist-only fallback tier -- a
     /// Take(N)/truncation that drops the fallback is the Bleu-Jeans/Record-n°V zero-results bug.
     /// </summary>
     [Fact]
@@ -170,7 +172,7 @@ public abstract class SearchRequestChainComplianceTestBase
 
         Assert.True(
             missing.Count == 0,
-            "request chain DROPS BuildPlan variant(s) — the full plan (including the artist-only fallback " +
+            "request chain DROPS BuildPlan variant(s) -- the full plan (including the artist-only fallback " +
             "tier) must be issued; a Take(N)/truncation that drops the fallback is the Bleu-Jeans/Record-n°V " +
             "zero-results bug. Missing: " + string.Join(", ", missing.Select(m => "'" + m + "'")));
     }
@@ -178,9 +180,9 @@ public abstract class SearchRequestChainComplianceTestBase
     /// <summary>
     /// A special-character search must run through the sanitizer before the placeholder URI is built:
     /// every chain query must be a sanitized BuildPlan variant, AND the chain must include at least one
-    /// fully-cleaned variant (no raw <c>°</c>/<c>©</c>/curly-quote/accidental). The sanitizer deliberately
+    /// fully-cleaned variant (no raw degree/copyright/curly-quote/accidental). The sanitizer deliberately
     /// also emits a raw-preserving variant (so an exact-match service can still hit), so we do NOT require
-    /// every variant to be clean — we require the clean fallback to be PRESENT (it is what made
+    /// every variant to be clean -- we require the clean fallback to be PRESENT (it is what made
     /// "Record n°V" stop returning zero), and nothing outside the plan to be issued.
     /// </summary>
     [Fact]
@@ -191,17 +193,17 @@ public abstract class SearchRequestChainComplianceTestBase
             SearchQuerySanitizer.BuildPlan(SpecialArtist, SpecialAlbum).Tiers.SelectMany(t => t),
             StringComparer.OrdinalIgnoreCase);
 
-        // (a) the real sanitizer ran — no query outside the sanitized plan reaches the API.
+        // (a) the real sanitizer ran -- no query outside the sanitized plan reaches the API.
         Assert.All(chain, q => Assert.True(
             planned.Contains(q),
-            $"special-char chain issues '{q}', which is not a BuildPlan variant — the real sanitizer must run on the chain."));
+            $"special-char chain issues '{q}', which is not a BuildPlan variant -- the real sanitizer must run on the chain."));
 
-        // (b) a fully-cleaned fallback variant exists — the query that makes special-char searches succeed.
+        // (b) a fully-cleaned fallback variant exists -- the query that makes special-char searches succeed.
         Assert.True(
             chain.Any(q => !q.Any(c => ForbiddenRawChars.Contains(c))),
             "the special-character chain has no fully-sanitized variant (every query still carries a raw " +
-            $"{string.Join("/", ForbiddenRawChars)}). GetSearchRequests must run SearchQuerySanitizer so a clean " +
-            "fallback query (e.g. 'Record nV') is issued — its absence is the Record-n°V zero-results bug.");
+            $"forbidden character). GetSearchRequests must run SearchQuerySanitizer so a clean " +
+            "fallback query (e.g. 'Record nV') is issued -- its absence is the Record-n+V zero-results bug.");
     }
 
     /// <summary>
@@ -209,16 +211,16 @@ public abstract class SearchRequestChainComplianceTestBase
     /// <see cref="SearchQuerySanitizer.BuildPlan"/> flat variant list in exact order, with no
     /// duplicates and no reordering.
     ///
-    /// <para>Only active when <see cref="RequiresExactPlanSequence"/> is <c>true</c>. When
-    /// <c>false</c> (the default), the test passes trivially so existing capped-chain adopters
-    /// (e.g. qobuz) are not broken.</para>
+    /// <para>Active by default (<see cref="RequiresExactPlanSequence"/> defaults to <c>true</c>).
+    /// Capped-chain adopters whose chain is intentionally a SUBSET of the plan must override
+    /// <see cref="RequiresExactPlanSequence"/> with <c>=&gt; false</c> to opt out.</para>
     ///
     /// <para>This guard catches two regressions that the default set-based assertions miss:</para>
     /// <list type="bullet">
-    ///   <item><b>Duplicate variants</b> — emitting the same query twice (the set-based presence
+    ///   <item><b>Duplicate variants</b> -- emitting the same query twice (the set-based presence
     ///     check in <see cref="Chain_PreservesEveryBuildPlanVariant_IncludingArtistOnlyFallback"/>
     ///     collapses the chain to a set and therefore cannot see duplicates).</item>
-    ///   <item><b>Reordering after position 0</b> — swapping or shuffling variants at positions
+    ///   <item><b>Reordering after position 0</b> -- swapping or shuffling variants at positions
     ///     1..N (only <see cref="FirstRequest_IsTheCombinedTierFirstVariant"/> checks the first
     ///     element; everything after it is invisible to the order-sensitive stop policies
     ///     <see cref="SearchStopPolicy.StopAfterFirstTierWithResults"/> and
@@ -230,7 +232,7 @@ public abstract class SearchRequestChainComplianceTestBase
     {
         if (!RequiresExactPlanSequence)
         {
-            return; // opt-in — capped-chain adopters skip this assertion
+            return; // opt-out -- capped-chain adopters must explicitly set RequiresExactPlanSequence => false
         }
 
         var chain = DecodeChainOrThrow(SampleArtist, SampleAlbum);
