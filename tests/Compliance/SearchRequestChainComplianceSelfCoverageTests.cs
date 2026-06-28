@@ -26,6 +26,7 @@ public class SearchRequestChainComplianceSelfCoverageTests
             .ToList();
 
     // A faithful generator: every plan variant, as a placeholder URI, in plan order.
+    // Does not override RequiresExactPlanSequence — picks up the strict default (=> true).
     private sealed class GoodChain : SearchRequestChainComplianceTestBase
     {
         protected override string PlaceholderScheme => Scheme;
@@ -75,7 +76,7 @@ public class SearchRequestChainComplianceSelfCoverageTests
         }
     }
 
-    // Skips the sanitizer for the special-character sample (raw ° reaches the placeholder URI).
+    // Skips the sanitizer for the special-character sample (raw degrees sign reaches the placeholder URI).
     private sealed class UnsanitizedSpecial : SearchRequestChainComplianceTestBase
     {
         protected override string PlaceholderScheme => Scheme;
@@ -99,6 +100,9 @@ public class SearchRequestChainComplianceSelfCoverageTests
         good.Chain_ContainsOnlyBuildPlanVariants();
         good.Chain_PreservesEveryBuildPlanVariant_IncludingArtistOnlyFallback();
         good.SpecialCharInput_IsSanitizedThroughoutTheChain();
+        // GoodChain does not override RequiresExactPlanSequence; the strict default (=> true) runs
+        // the exact-sequence assertion — it must pass because GoodChain emits a correct ordered chain.
+        good.Chain_MatchesExactPlanSequence();
     }
 
     [Fact]
@@ -126,24 +130,23 @@ public class SearchRequestChainComplianceSelfCoverageTests
         => Assert.ThrowsAny<Exception>(() =>
             new UnsanitizedSpecial().SpecialCharInput_IsSanitizedThroughoutTheChain());
 
-    // ── F03: RequiresExactPlanSequence strict-mode self-coverage ──────────────────────────────
+    // -- RequiresExactPlanSequence default-on + opt-out self-coverage -------------------------
 
-    // Full-chain subclass — opts in to exact sequence enforcement.
-    private sealed class StrictGoodChain : SearchRequestChainComplianceTestBase
+    // Full-chain subclass -- does NOT override RequiresExactPlanSequence; relies on the strict default.
+    private sealed class DefaultGoodChain : SearchRequestChainComplianceTestBase
     {
         protected override string PlaceholderScheme => Scheme;
-        protected override bool RequiresExactPlanSequence => true;
         protected override IReadOnlyList<string> GetSearchRequestUrls(string artist, string album) =>
             CompleteChain(artist, album);
     }
 
     // Duplicates the first planned variant (emits it twice in sequence).
+    // Does NOT override RequiresExactPlanSequence -- relies on the strict default (=> true).
     // The default set-based checks PASS (all chain queries are in the plan; all plan variants are
     // in the chain set). Only the exact-sequence assertion can see the duplicate.
     private sealed class DuplicatesFirstVariant : SearchRequestChainComplianceTestBase
     {
         protected override string PlaceholderScheme => Scheme;
-        protected override bool RequiresExactPlanSequence => true;
         protected override IReadOnlyList<string> GetSearchRequestUrls(string artist, string album)
         {
             var list = CompleteChain(artist, album);
@@ -157,13 +160,13 @@ public class SearchRequestChainComplianceSelfCoverageTests
     }
 
     // Swaps the two variants after position 0, leaving position 0 intact.
+    // Does NOT override RequiresExactPlanSequence -- relies on the strict default (=> true).
     // The default set-based checks PASS: FirstRequest_IsTheCombinedTierFirstVariant sees chain[0]
     // which is still the correct leading variant; the set-based presence check sees all plan
     // variants present. Only the exact-sequence assertion detects the reordering.
     private sealed class ReordersAfterFirst : SearchRequestChainComplianceTestBase
     {
         protected override string PlaceholderScheme => Scheme;
-        protected override bool RequiresExactPlanSequence => true;
         protected override IReadOnlyList<string> GetSearchRequestUrls(string artist, string album)
         {
             var list = CompleteChain(artist, album);
@@ -177,21 +180,41 @@ public class SearchRequestChainComplianceSelfCoverageTests
         }
     }
 
-    /// <summary>Strict mode passes on a correct complete ordered chain.</summary>
-    [Fact]
-    public void StrictMode_passes_on_a_complete_ordered_chain()
+    // Opt-out: explicitly sets RequiresExactPlanSequence => false so the exact-sequence assertion
+    // is skipped. Models a capped-chain adopter whose emitted chain is intentionally a SUBSET of
+    // the plan and whose variant order cannot match the full flat plan list.
+    private sealed class LooseOptOut : SearchRequestChainComplianceTestBase
     {
-        var strict = new StrictGoodChain();
-        strict.EveryRequest_IsAWellFormedPlaceholderUri();
-        strict.FirstRequest_IsTheCombinedTierFirstVariant();
-        strict.Chain_ContainsOnlyBuildPlanVariants();
-        strict.Chain_PreservesEveryBuildPlanVariant_IncludingArtistOnlyFallback();
-        strict.Chain_MatchesExactPlanSequence();
+        protected override string PlaceholderScheme => Scheme;
+        protected override bool RequiresExactPlanSequence => false;
+        protected override IReadOnlyList<string> GetSearchRequestUrls(string artist, string album)
+        {
+            // Emits the chain with a duplicate -- deliberate violation that the opt-out exempts.
+            var list = CompleteChain(artist, album);
+            if (list.Count > 0)
+            {
+                list.Insert(1, list[0]); // emit the first variant twice
+            }
+
+            return list;
+        }
+    }
+
+    /// <summary>Default strict mode passes on a correct complete ordered chain.</summary>
+    [Fact]
+    public void DefaultStrictMode_passes_on_a_complete_ordered_chain()
+    {
+        var good = new DefaultGoodChain();
+        good.EveryRequest_IsAWellFormedPlaceholderUri();
+        good.FirstRequest_IsTheCombinedTierFirstVariant();
+        good.Chain_ContainsOnlyBuildPlanVariants();
+        good.Chain_PreservesEveryBuildPlanVariant_IncludingArtistOnlyFallback();
+        good.Chain_MatchesExactPlanSequence();
     }
 
     /// <summary>
     /// Old set-based checks PASS on a chain with a duplicate variant;
-    /// the new exact-sequence assertion FAILS.
+    /// the exact-sequence assertion FAILS (strict is the default -- no opt-in needed).
     /// </summary>
     [Fact]
     public void StrictMode_catches_duplicate_planned_variant()
@@ -204,13 +227,13 @@ public class SearchRequestChainComplianceSelfCoverageTests
         dup.Chain_ContainsOnlyBuildPlanVariants();
         dup.Chain_PreservesEveryBuildPlanVariant_IncludingArtistOnlyFallback();
 
-        // The NEW exact-sequence check MUST reject it.
+        // The exact-sequence check MUST reject it -- active by default, no opt-in required.
         Assert.ThrowsAny<Exception>(() => dup.Chain_MatchesExactPlanSequence());
     }
 
     /// <summary>
     /// Old set-based checks PASS on a chain with variants reordered after position 0;
-    /// the new exact-sequence assertion FAILS.
+    /// the exact-sequence assertion FAILS (strict is the default -- no opt-in needed).
     /// </summary>
     [Fact]
     public void StrictMode_catches_reordered_variants_after_first()
@@ -223,7 +246,25 @@ public class SearchRequestChainComplianceSelfCoverageTests
         reordered.Chain_ContainsOnlyBuildPlanVariants();
         reordered.Chain_PreservesEveryBuildPlanVariant_IncludingArtistOnlyFallback();
 
-        // The NEW exact-sequence check MUST reject it.
+        // The exact-sequence check MUST reject it -- active by default, no opt-in required.
         Assert.ThrowsAny<Exception>(() => reordered.Chain_MatchesExactPlanSequence());
+    }
+
+    /// <summary>
+    /// A subclass that explicitly opts out with <c>RequiresExactPlanSequence =&gt; false</c>
+    /// skips the exact-sequence assertion -- <see cref="SearchRequestChainComplianceTestBase.Chain_MatchesExactPlanSequence"/>
+    /// passes trivially even when the chain contains a duplicate.
+    ///
+    /// <para>This models capped-chain adopters (e.g. qobuz) whose emitted chain is intentionally a
+    /// SUBSET of the plan; they must opt out explicitly now that strict is the default.</para>
+    /// </summary>
+    [Fact]
+    public void OptOut_explicit_false_skips_exact_sequence_check()
+    {
+        var loose = new LooseOptOut();
+
+        // The exact-sequence assertion must not throw for an explicit opt-out subclass.
+        var ex = Record.Exception(() => loose.Chain_MatchesExactPlanSequence());
+        Assert.Null(ex);
     }
 }
