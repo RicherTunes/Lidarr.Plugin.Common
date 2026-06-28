@@ -15,7 +15,7 @@ namespace Lidarr.Plugin.Common.TestKit.Compliance;
 /// <para>This closes the gap the weaker <see cref="SearchTermProvenanceComplianceTestBase"/> leaves open.
 /// That base asks the plugin for the queries its transport <i>issued</i> at runtime (which a plugin can
 /// satisfy by hand-reconstructing the plan, and which a stop-policy can legitimately truncate). This base
-/// instead drives the REAL request-generator entry point and decodes its output through the same
+/// instead drives the host-free plan entry point and decodes its output through the same
 /// <see cref="PlaceholderSearchUri"/> seam the host round-trips — so it cannot be faked with arbitrary
 /// strings, and it is deterministic (the chain is built before any result-dependent stop-policy runs).</para>
 ///
@@ -72,8 +72,9 @@ public abstract class SearchRequestChainComplianceTestBase
     protected abstract string PlaceholderScheme { get; }
 
     /// <summary>
-    /// Drive the plugin's REAL <c>GetSearchRequests</c> for (artist, album) and return the placeholder
-    /// search URLs it produced, in chain order. Do NOT hand-rebuild — call the actual request generator.
+    /// Drive the plugin's host-free plan entry point for (artist, album) and return the placeholder
+    /// search URLs it produced, in chain order. This is the canonical host-free plan seam — the plan
+    /// the host generator is contractually built from — not the Lidarr host's actual <c>GetSearchRequests</c>.
     /// </summary>
     protected abstract IReadOnlyList<string> GetSearchRequestUrls(string artist, string album);
 
