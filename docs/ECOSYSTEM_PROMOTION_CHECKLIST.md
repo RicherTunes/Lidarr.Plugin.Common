@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 # Ecosystem Promotion Checklist
 
 ## When to use

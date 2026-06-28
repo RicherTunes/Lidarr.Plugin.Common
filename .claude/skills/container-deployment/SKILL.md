@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 ---
 name: container-deployment
 description: Container strategies for .NET libraries and test environments. Use when working with Docker test environments, container-based integration testing, or NuGet package container builds. Not typically for production deployment of libraries.

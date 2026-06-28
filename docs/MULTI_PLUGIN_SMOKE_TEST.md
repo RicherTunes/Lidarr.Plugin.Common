@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 # Multi-Plugin Smoke Test
 
 The multi-plugin smoke test workflow verifies that multiple plugins (Qobuzarr and Tidalarr) can load and function correctly together in a Lidarr instance.
