@@ -125,4 +125,105 @@ public class SearchRequestChainComplianceSelfCoverageTests
     public void Base_catches_unsanitized_special_char_query()
         => Assert.ThrowsAny<Exception>(() =>
             new UnsanitizedSpecial().SpecialCharInput_IsSanitizedThroughoutTheChain());
+
+    // ── F03: RequiresExactPlanSequence strict-mode self-coverage ──────────────────────────────
+
+    // Full-chain subclass — opts in to exact sequence enforcement.
+    private sealed class StrictGoodChain : SearchRequestChainComplianceTestBase
+    {
+        protected override string PlaceholderScheme => Scheme;
+        protected override bool RequiresExactPlanSequence => true;
+        protected override IReadOnlyList<string> GetSearchRequestUrls(string artist, string album) =>
+            CompleteChain(artist, album);
+    }
+
+    // Duplicates the first planned variant (emits it twice in sequence).
+    // The default set-based checks PASS (all chain queries are in the plan; all plan variants are
+    // in the chain set). Only the exact-sequence assertion can see the duplicate.
+    private sealed class DuplicatesFirstVariant : SearchRequestChainComplianceTestBase
+    {
+        protected override string PlaceholderScheme => Scheme;
+        protected override bool RequiresExactPlanSequence => true;
+        protected override IReadOnlyList<string> GetSearchRequestUrls(string artist, string album)
+        {
+            var list = CompleteChain(artist, album);
+            if (list.Count > 0)
+            {
+                list.Insert(1, list[0]); // emit the first variant twice
+            }
+
+            return list;
+        }
+    }
+
+    // Swaps the two variants after position 0, leaving position 0 intact.
+    // The default set-based checks PASS: FirstRequest_IsTheCombinedTierFirstVariant sees chain[0]
+    // which is still the correct leading variant; the set-based presence check sees all plan
+    // variants present. Only the exact-sequence assertion detects the reordering.
+    private sealed class ReordersAfterFirst : SearchRequestChainComplianceTestBase
+    {
+        protected override string PlaceholderScheme => Scheme;
+        protected override bool RequiresExactPlanSequence => true;
+        protected override IReadOnlyList<string> GetSearchRequestUrls(string artist, string album)
+        {
+            var list = CompleteChain(artist, album);
+            if (list.Count >= 3)
+            {
+                // Swap positions 1 and 2: keeps position 0 correct, reorders the rest.
+                (list[1], list[2]) = (list[2], list[1]);
+            }
+
+            return list;
+        }
+    }
+
+    /// <summary>Strict mode passes on a correct complete ordered chain.</summary>
+    [Fact]
+    public void StrictMode_passes_on_a_complete_ordered_chain()
+    {
+        var strict = new StrictGoodChain();
+        strict.EveryRequest_IsAWellFormedPlaceholderUri();
+        strict.FirstRequest_IsTheCombinedTierFirstVariant();
+        strict.Chain_ContainsOnlyBuildPlanVariants();
+        strict.Chain_PreservesEveryBuildPlanVariant_IncludingArtistOnlyFallback();
+        strict.Chain_MatchesExactPlanSequence();
+    }
+
+    /// <summary>
+    /// Old set-based checks PASS on a chain with a duplicate variant;
+    /// the new exact-sequence assertion FAILS.
+    /// </summary>
+    [Fact]
+    public void StrictMode_catches_duplicate_planned_variant()
+    {
+        var dup = new DuplicatesFirstVariant();
+
+        // Verify the OLD checks are blind to the duplicate (they must not throw).
+        dup.EveryRequest_IsAWellFormedPlaceholderUri();
+        dup.FirstRequest_IsTheCombinedTierFirstVariant();
+        dup.Chain_ContainsOnlyBuildPlanVariants();
+        dup.Chain_PreservesEveryBuildPlanVariant_IncludingArtistOnlyFallback();
+
+        // The NEW exact-sequence check MUST reject it.
+        Assert.ThrowsAny<Exception>(() => dup.Chain_MatchesExactPlanSequence());
+    }
+
+    /// <summary>
+    /// Old set-based checks PASS on a chain with variants reordered after position 0;
+    /// the new exact-sequence assertion FAILS.
+    /// </summary>
+    [Fact]
+    public void StrictMode_catches_reordered_variants_after_first()
+    {
+        var reordered = new ReordersAfterFirst();
+
+        // Verify the OLD checks are blind to the reordering (they must not throw).
+        reordered.EveryRequest_IsAWellFormedPlaceholderUri();
+        reordered.FirstRequest_IsTheCombinedTierFirstVariant();
+        reordered.Chain_ContainsOnlyBuildPlanVariants();
+        reordered.Chain_PreservesEveryBuildPlanVariant_IncludingArtistOnlyFallback();
+
+        // The NEW exact-sequence check MUST reject it.
+        Assert.ThrowsAny<Exception>(() => reordered.Chain_MatchesExactPlanSequence());
+    }
 }
