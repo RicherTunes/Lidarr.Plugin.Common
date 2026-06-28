@@ -153,7 +153,7 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             if (waitTime > TimeSpan.Zero)
             {
                 _logger?.LogDebug("Rate limit for {Resource}: waiting {WaitMs:F0}ms", resource, waitTime.TotalMilliseconds);
-                await Task.Delay(waitTime, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(waitTime, _timeProvider, cancellationToken).ConfigureAwait(false);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
