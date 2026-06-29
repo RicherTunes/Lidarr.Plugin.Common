@@ -1,6 +1,8 @@
+<!-- docval:ignore-script-refs: references plugin-local verify wrappers as part of the ecosystem contract -->
+
 # CI and Packaging
 
-Plugin builds are packaged by **PluginPack.psm1** and driven through reusable GitHub Actions workflows. This page points you to the right tools and docs.
+Plugin builds are packaged by **PluginPack.psm1** and validated by a Gitea-primary CI contract. GitHub Actions workflows, where a plugin still carries them, are mirror/peripheral automation and are not the merge gate.
 
 ## Packaging module
 
@@ -10,31 +12,32 @@ Downstream plugins vendor Common as a git submodule, so the module is available 
 
 Full usage details and the recommended folder-based flow → [**Packaging Plugins**](../docs/PACKAGING.md).
 
-## Reusable workflows
+## Shared CI contract
 
-Common ships several reusable workflow definitions under `.github/workflows/`:
+Every active plugin repo should expose the same two Gitea jobs in `.gitea/workflows/ci.yml`:
 
-| Workflow | Purpose |
+| Job | Required shape |
 |---|---|
-| `release-plugin.yml` | Build, package, and publish a plugin release |
-| `codeql-reusable.yml` | CodeQL security analysis |
-| `quarantine-review-reusable.yml` | Quarantine-gate review |
-| `multi-plugin-smoke-test.yml` | Multi-plugin integration smoke test |
+| `CI / lint` | Calls `ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoPath . -CommonRoot ext/Lidarr.Plugin.Common -Mode ci`. |
+| `CI / verify` | Calls the plugin's `scripts/verify-local.ps1`, which delegates to Common's `scripts/local-ci.ps1` for host extraction, build, packaging closure, and deterministic tests. |
 
-Plugin repos call these via `uses: ./.github/workflows/<name>.yml` after initialising the Common submodule.
+The ecosystem-level contract is checked by [`scripts/ci/verify-ecosystem-ci-contract.ps1`](../scripts/ci/verify-ecosystem-ci-contract.ps1) against [`scripts/ci/ecosystem-repos.json`](../scripts/ci/ecosystem-repos.json). That manifest is the current source of truth for which plugin repos are Gitea-primary and whether any GitHub workflow mirrors are expected.
 
-Proposal details and calling conventions → [**CI Reusable Workflows**](../docs/CI_REUSABLE_WORKFLOWS.md).
+The shared lint runner calls `ecosystem-parity-lint.ps1 -Check all`, so plugins get both structural parity checks and version-contract checks through one required CI command.
 
-## SHA-pinning policy
+Common still carries older reusable GitHub workflow definitions and documentation for repos that choose to mirror or manually publish through GitHub, but plugin PR gating should not depend on those workflows unless a repo explicitly restores and verifies them.
 
-All references to Common workflows **must** use a pinned commit SHA, not a branch tag. Enforcement is automated:
+## Pinning policy
 
-- [`verify-common-pins.yml`](../.github/workflows/verify-common-pins.yml) — CI check that fails on unpinned references.
-- [`lint-workflow-sha-pins.ps1`](../scripts/lint-workflow-sha-pins.ps1) — local linter for the same rule.
-- [`repin-common-submodule.ps1`](../scripts/repin-common-submodule.ps1) — updates the submodule and rewrites all workflow pins in one step.
-- [`ecosystem-pin-drift.yml`](../.github/workflows/ecosystem-pin-drift.yml) — cross-repo monitor ensuring all plugins share the same pinned SHA.
+The mandatory pin is the Common submodule itself:
 
-Full inventory of pinned actions and the allowlist mechanism → [**CI SHA Pins**](../docs/CI_SHA_PINS.md).
+- plugin gitlink: `ext/Lidarr.Plugin.Common`
+- sentinel file: `ext-common-sha.txt`
+- manifest version: `commonVersion` in `plugin.json` / `manifest.json`
+
+The submodule gitlink and sentinel must match exactly. Re-pin with [`scripts/repin-common-submodule.ps1`](../scripts/repin-common-submodule.ps1) or [`scripts/repin-common-submodule.sh`](../scripts/repin-common-submodule.sh), then run the plugin lint gate and local verify wrapper.
+
+Workflow SHA pinning only applies to repos that still carry GitHub workflow mirrors that call Common-owned reusable workflows. Repos with no `.github/workflows/*.yml` have no workflow pins to validate.
 
 ## CI lane strategy
 
@@ -42,4 +45,4 @@ Gitea is the primary CI target for plugin PRs. Plugin verify jobs should call th
 
 The deterministic test sweep is defined in Common by `scripts/lib/test-trait-policy.psm1`. It always excludes `State=Quarantined`, explicitly keeps `Area=E2E/Hermetic`, and excludes opt-in lanes that need live services, Docker, release artifacts, runtime sandbox host resolution, or benchmark timing. The companion gate `scripts/lint-test-traits.ps1 -CI` validates the CI lane trait vocabulary so new opt-in lanes cannot silently drift away from CI.
 
-Workflows are split into PR-required deterministic lanes and expensive opt-in/nightly lanes to optimise CI billing. The lane definitions and rationale → [**CI Lane Strategy**](../docs/CI_LANE_STRATEGY.md).
+Workflows are split into PR-required deterministic lanes and expensive opt-in lanes to keep the self-hosted runner predictable. The lane definitions and rationale → [**CI Lane Strategy**](../docs/CI_LANE_STRATEGY.md).

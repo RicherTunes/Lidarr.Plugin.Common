@@ -3,9 +3,9 @@
 
 ## Why the contract exists
 
-As the plugin ecosystem grew from a single shared helper into a library that four active plugins depend on simultaneously, version drift became a recurring source of build and runtime failures. Early coordination relied on informal conventions: each plugin author pinned the Common submodule manually, updated `plugin.json`'s `commonVersion` field by hand, and relied on code review to catch mismatches. In practice this meant that after every Common release at least one plugin would ship with a stale `commonVersion`, an outdated `targetFramework`, or a forbidden manifest field that the host silently ignored — until a new Lidarr build started enforcing it and broke loading.
+As the plugin ecosystem grew from a single shared helper into a library that five active plugins depend on simultaneously, version drift became a recurring source of build and runtime failures. Early coordination relied on informal conventions: each plugin author pinned the Common submodule manually, updated `plugin.json`'s `commonVersion` field by hand, and relied on code review to catch mismatches. In practice this meant that after every Common release at least one plugin would ship with a stale `commonVersion`, an outdated `targetFramework`, or a forbidden manifest field that the host silently ignored — until a new Lidarr build started enforcing it and broke loading.
 
-A reviewer audit (completed May 2026) catalogued these coordination failures across all four plugin repos. The audit found repeated instances of:
+A reviewer audit (completed May 2026) catalogued these coordination failures across the original four plugin repos; Amazonmusicarr now follows the same contract as the fifth plugin. The audit found repeated instances of:
 
 - `commonVersion` in `plugin.json` lagging behind the submodule SHA by one or more releases.
 - `manifest.json` and `plugin.json` disagreeing on the version field after a patch release.
@@ -52,7 +52,16 @@ This list is consumed by packaging gates such as `PluginPackaging.targets`, `Tes
 
 ## How a plugin author validates compliance
 
-Run the parity lint locally before opening a PR:
+Run the shared lint gate locally before opening a PR:
+
+```powershell
+pwsh ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 `
+  -RepoPath . `
+  -CommonRoot ext/Lidarr.Plugin.Common `
+  -Mode ci
+```
+
+That runner calls `ecosystem-parity-lint.ps1 -Check all`, so it covers both structural parity and version-contract parity. To debug only the version-contract subset:
 
 ```powershell
 pwsh ext/Lidarr.Plugin.Common/scripts/ecosystem-parity-lint.ps1 `
@@ -62,7 +71,7 @@ pwsh ext/Lidarr.Plugin.Common/scripts/ecosystem-parity-lint.ps1 `
   -CommonRoot ext/Lidarr.Plugin.Common
 ```
 
-To run all checks at once (recommended before a release):
+To run all parity checks directly:
 
 ```powershell
 pwsh ext/Lidarr.Plugin.Common/scripts/ecosystem-parity-lint.ps1 `
@@ -94,15 +103,15 @@ Today the propagation is a manual, repo-by-repo process. The steps are:
 
 1. **In Common**: update both `VERSION` and `Directory.Build.props` with the same new version value, run `pwsh scripts/tests/Test-VersionSourceContract.ps1`, update `CHANGELOG.md`, tag the release, and push.
 
-2. **In each plugin repo** (brainarr, qobuzarr, tidalarr, applemusicarr):
+2. **In each plugin repo** (amazonmusicarr, applemusicarr, brainarr, qobuzarr, tidalarr):
    a. Check out the intended Common tag or SHA under `ext/Lidarr.Plugin.Common`.
    b. Run `bash ext/Lidarr.Plugin.Common/scripts/repin-common-submodule.sh --sha-from-submodule --stage --verify --path ext/Lidarr.Plugin.Common` to update the gitlink and `ext-common-sha.txt` together.
    c. Update the `commonVersion` field in `plugin.json` to match the new Common `<Version>`.
    d. Update the `version` field in `manifest.json` if the plugin version itself is also being bumped.
    e. Run `bash ext/Lidarr.Plugin.Common/scripts/repin-common-submodule.sh --verify-only --path ext/Lidarr.Plugin.Common` and confirm exit code `0`.
-   f. Run `pwsh ext/Lidarr.Plugin.Common/scripts/ecosystem-parity-lint.ps1 -Check VersionContract -Mode ci` and confirm exit code `0`.
-   g. Confirm `.github/workflows/submodule-pin.yml`, `.github/workflows/ci.yml`, and `.gitea/workflows/ci.yml` all run the same verify-only submodule guard.
+   f. Run `pwsh ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoPath . -CommonRoot ext/Lidarr.Plugin.Common -Mode ci` and confirm exit code `0`.
+   g. Confirm `.gitea/workflows/ci.yml` runs the verify-only submodule guard. If the repo also carries `.github/workflows/*.yml` mirrors, confirm they either run the same guard or are documented as non-gating mirrors.
    h. Run `pwsh ext/Lidarr.Plugin.Common/scripts/update-plugin-expected-contents.ps1 -RepoPath . -Check` and confirm the package contents match the plugin's `packaging/expected-contents.txt`.
    i. Open a PR with the submodule bump and manifest updates.
 
-Future automation (planned for the cross-cutting infrastructure layer) will add a GitHub Actions workflow that opens coordinated submodule-bump PRs across all plugin repos automatically when a new Common version is published. Until that workflow exists, the manual steps above are the required procedure.
+Future automation may open coordinated submodule-bump PRs across all plugin repos automatically when a new Common version is published. Until that exists on the Gitea-primary path, the manual steps above are the required procedure.
