@@ -207,7 +207,8 @@ public sealed class HostBridgeDownloadItemDto
 ///
 /// <para><strong>Retention</strong>: completed/failed/cancelled items are evicted from
 /// <see cref="GetSnapshot"/> after the configured retention window. In-progress items are
-/// NEVER evicted.</para>
+/// process-local only; persisted queued/downloading entries are dropped on construction
+/// because the worker task that could complete them does not survive a process restart.</para>
 ///
 /// <para>Lifted from apple's <c>AppleMusicLidarrDownloadClient.ActiveDownloads</c> +
 /// retention sweep (Wave A item 1 of the May 2026 unification plan).</para>
@@ -397,9 +398,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             var item   = kv.Value;
             var status = item.GetStatus();
 
-            if ((status == HostBridgeDownloadItemStatus.Completed ||
-                 status == HostBridgeDownloadItemStatus.Failed ||
-                 status == HostBridgeDownloadItemStatus.Cancelled) &&
+            if (IsTerminalStatus(status) &&
                 item.CompletedAt.HasValue &&
                 now - item.CompletedAt.Value > _completedRetention)
             {
@@ -488,6 +487,11 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         return (TItem)dto.ToItem();
     }
 
+    private static bool IsTerminalStatus(HostBridgeDownloadItemStatus status)
+        => status is HostBridgeDownloadItemStatus.Completed
+            or HostBridgeDownloadItemStatus.Failed
+            or HostBridgeDownloadItemStatus.Cancelled;
+
     private void LoadFromDisk()
     {
         if (_persistencePath == null)
@@ -512,6 +516,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             }
 
             var now = DateTime.UtcNow;
+            var shouldPersistCleanedSnapshot = false;
             foreach (var element in document.RootElement.EnumerateArray())
             {
                 HostBridgeDownloadItemDto? dto;
@@ -537,13 +542,19 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                     continue;
                 }
 
+                if (!IsTerminalStatus(dto.Status))
+                {
+                    shouldPersistCleanedSnapshot = true;
+                    _onWarn?.Invoke(
+                        $"HostBridgeDownloadTrackerStore: dropping non-terminal entry '{dto.DownloadId}' with status '{dto.Status}' — no resumable worker survives process restart.");
+                    continue;
+                }
+
                 // Skip entries already past retention window — no need to resurrect stale data.
-                if ((dto.Status == HostBridgeDownloadItemStatus.Completed ||
-                     dto.Status == HostBridgeDownloadItemStatus.Failed ||
-                     dto.Status == HostBridgeDownloadItemStatus.Cancelled) &&
-                    dto.CompletedAt.HasValue &&
+                if (dto.CompletedAt.HasValue &&
                     now - dto.CompletedAt.Value > _completedRetention)
                 {
+                    shouldPersistCleanedSnapshot = true;
                     continue;
                 }
 
@@ -571,6 +582,9 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                         $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — itemFactory threw: {ex.Message}");
                 }
             }
+
+            if (shouldPersistCleanedSnapshot)
+                PersistToDisk();
         }
         catch (Exception ex)
         {
