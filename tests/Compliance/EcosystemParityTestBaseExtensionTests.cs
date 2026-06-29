@@ -942,7 +942,7 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         File.WriteAllText(Path.Combine(_tempRepo, "Directory.Packages.props"),
             "<Project><ItemGroup>"
-            + "<PackageVersion Include=\"NLog\" Version=\"5.5.1\" />"
+            + "<PackageVersion Include=\"NLog\" Version=\"5.4.0\" />"
             + "<PackageVersion Include=\"FluentValidation\" Version=\"9.5.4\" />"
             + "<PackageVersion Include=\"Microsoft.Extensions.Http\" Version=\"8.0.1\" />"
             + "<PackageVersion Include=\"Newtonsoft.Json\" Version=\"13.0.3\" />" // not host-coupled — ignored
@@ -961,7 +961,7 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         var h = new Harness(_tempRepo);
         var r = h.DirectoryPackagesProps_HostVersionsMatchCanonical();
         Assert.False(r.Passed);
-        Assert.Contains(r.Errors, e => e.Contains("NLog") && e.Contains("5.5.1"));
+        Assert.Contains(r.Errors, e => e.Contains("NLog") && e.Contains("5.4.0"));
     }
 
     [Fact]
@@ -976,7 +976,7 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
             + "<PackageVersion Include=\"Microsoft.Extensions.Logging.Abstractions\" Version=\"8.0.3\" />"
             + "<PackageVersion Include=\"Microsoft.Extensions.Http\" Version=\"8.0.1\" />"
             + "<PackageVersion Include=\"FluentValidation\" Version=\"9.5.4\" />"
-            + "<PackageVersion Include=\"NLog\" Version=\"5.5.1\" />"
+            + "<PackageVersion Include=\"NLog\" Version=\"5.4.0\" />"
             + "</ItemGroup></Project>");
         var h = new Harness(_tempRepo);
         var r = h.DirectoryPackagesProps_HostVersionsMatchCanonical();
