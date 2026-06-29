@@ -383,73 +383,107 @@ namespace Lidarr.Plugin.Common.Services.Download
 
                 var tempPath = outputPath + ".partial";
                 var resumePath = tempPath + ".resume.json";
+                var maxAttempts = Math.Max(1, MaxDownloadAttempts);
 
-                long existingBytes = 0;
-                string? etag = null;
-                DateTimeOffset? lastModified = null;
-                if (File.Exists(tempPath))
+                // Retry-with-resume. A mid-body truncation (HttpIOException "response ended prematurely"
+                // / ResponseEnded, or a transport reset) throws DURING the body copy below — AFTER
+                // ExecuteWithResilienceAsync has already returned the response headers — so the resilience
+                // layer (which only retries the header fetch) never sees it. Without a retry, one truncated
+                // track fails the whole album and the host re-grabs into an infinite loop (observed live on
+                // Qobuz). Each attempt re-reads the preserved ".partial" and issues a Range request, so the
+                // download resumes from where it broke instead of restarting. The atomic move + validation
+                // run only after a complete copy (outside the loop).
+                for (var attempt = 1; ; attempt++)
                 {
-                    try { existingBytes = new FileInfo(tempPath).Length; } catch { existingBytes = 0; }
                     try
                     {
-                        if (File.Exists(resumePath))
+                        long existingBytes = 0;
+                        string? etag = null;
+                        DateTimeOffset? lastModified = null;
+                        if (File.Exists(tempPath))
                         {
-                            var json = File.ReadAllText(resumePath);
-                            var state = System.Text.Json.JsonSerializer.Deserialize<ResumeState>(json);
-                            if (state != null)
+                            try { existingBytes = new FileInfo(tempPath).Length; } catch { existingBytes = 0; }
+                            try
                             {
-                                etag = state.ETag;
-                                if (state.LastModifiedUtc.HasValue) lastModified = new DateTimeOffset(state.LastModifiedUtc.Value, TimeSpan.Zero);
+                                if (File.Exists(resumePath))
+                                {
+                                    var json = File.ReadAllText(resumePath);
+                                    var state = System.Text.Json.JsonSerializer.Deserialize<ResumeState>(json);
+                                    if (state != null)
+                                    {
+                                        etag = state.ETag;
+                                        if (state.LastModifiedUtc.HasValue) lastModified = new DateTimeOffset(state.LastModifiedUtc.Value, TimeSpan.Zero);
+                                    }
+                                }
                             }
+                            catch { }
+                        }
+
+                        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                        if (existingBytes > 0)
+                        {
+                            req.Headers.Range = new RangeHeaderValue(existingBytes, null);
+                            if (!string.IsNullOrEmpty(etag)) req.Headers.TryAddWithoutValidation("If-Range", etag);
+                            else if (lastModified.HasValue) req.Headers.TryAddWithoutValidation("If-Range", lastModified.Value.ToString("R"));
+                        }
+
+                        // LOOP-004: keep the SSRF policy in force across the resilience layer's redirect-following — the
+                        // initial URL is validated above, but a 3xx could otherwise bounce to an internal host.
+                        using var resp = await _httpClient.ExecuteWithResilienceAsync(
+                            req,
+                            ResiliencePolicy.Streaming,
+                            cancellationToken,
+                            validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
+                        resp.EnsureSuccessStatusCode();
+
+                        var totalHeader = resp.Content.Headers.ContentLength;
+                        var isPartial = resp.StatusCode == System.Net.HttpStatusCode.PartialContent;
+                        try
+                        {
+                            if (resp.Headers.ETag != null) etag = resp.Headers.ETag.Tag;
+                            if (resp.Content?.Headers?.LastModified.HasValue == true) lastModified = resp.Content.Headers.LastModified;
+                        }
+                        catch { }
+
+                        var totalExpected = isPartial && totalHeader.HasValue ? existingBytes + totalHeader.Value : (totalHeader ?? 0);
+                        if (existingBytes > 0 && !isPartial)
+                        {
+                            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                            try { if (File.Exists(resumePath)) File.Delete(resumePath); } catch { }
+                            existingBytes = 0;
+                        }
+
+                        var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
+                        using (var content = await HttpContentLightUp.ReadAsStreamAsync(resp.Content, cancellationToken).ConfigureAwait(false))
+                        using (var fs = new FileStream(tempPath, fileMode, FileAccess.Write, FileShare.None, 8192, useAsync: true))
+                        {
+                            long startBytes = existingBytes;
+                            await CopyWithProgressAsync(content, fs, totalExpected, cancellationToken, (fraction, bps, eta) =>
+                            {
+                                ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
+                                TryWriteResumeCheckpoint(resumePath, (long)(startBytes + fraction * Math.Max(1, totalExpected)), totalExpected, etag, lastModified?.UtcDateTime);
+                            }).ConfigureAwait(false);
+                        }
+
+                        break;
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        throw;
+                    }
+                    catch (Exception ex) when (attempt < maxAttempts && IsTransientDownloadException(ex, cancellationToken))
+                    {
+                        // Telemetry: count the resume-retry (non-429 so it doesn't inflate the 429 counter).
+                        DownloadTelemetryContext.RecordRetry(System.Net.HttpStatusCode.ServiceUnavailable);
+                        _logger.LogWarning(ex,
+                            "[{ServiceName}] Transient download failure for track {TrackId} (attempt {Attempt}/{MaxAttempts}); resuming from partial after backoff",
+                            ServiceName, trackId, attempt, maxAttempts);
+                        var delay = GetRetryDelay(attempt);
+                        if (delay > TimeSpan.Zero)
+                        {
+                            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
                         }
                     }
-                    catch { }
-                }
-
-                using var req = new HttpRequestMessage(HttpMethod.Get, url);
-                if (existingBytes > 0)
-                {
-                    req.Headers.Range = new RangeHeaderValue(existingBytes, null);
-                    if (!string.IsNullOrEmpty(etag)) req.Headers.TryAddWithoutValidation("If-Range", etag);
-                    else if (lastModified.HasValue) req.Headers.TryAddWithoutValidation("If-Range", lastModified.Value.ToString("R"));
-                }
-
-                // LOOP-004: keep the SSRF policy in force across the resilience layer's redirect-following — the
-                // initial URL is validated above, but a 3xx could otherwise bounce to an internal host.
-                using var resp = await _httpClient.ExecuteWithResilienceAsync(
-                    req,
-                    ResiliencePolicy.Streaming,
-                    cancellationToken,
-                    validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
-                resp.EnsureSuccessStatusCode();
-
-                var totalHeader = resp.Content.Headers.ContentLength;
-                var isPartial = resp.StatusCode == System.Net.HttpStatusCode.PartialContent;
-                try
-                {
-                    if (resp.Headers.ETag != null) etag = resp.Headers.ETag.Tag;
-                    if (resp.Content?.Headers?.LastModified.HasValue == true) lastModified = resp.Content.Headers.LastModified;
-                }
-                catch { }
-
-                var totalExpected = isPartial && totalHeader.HasValue ? existingBytes + totalHeader.Value : (totalHeader ?? 0);
-                if (existingBytes > 0 && !isPartial)
-                {
-                    try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
-                    try { if (File.Exists(resumePath)) File.Delete(resumePath); } catch { }
-                    existingBytes = 0;
-                }
-
-                var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
-                using (var content = await HttpContentLightUp.ReadAsStreamAsync(resp.Content, cancellationToken).ConfigureAwait(false))
-                using (var fs = new FileStream(tempPath, fileMode, FileAccess.Write, FileShare.None, 8192, useAsync: true))
-                {
-                    long startBytes = existingBytes;
-                    await CopyWithProgressAsync(content, fs, totalExpected, cancellationToken, (fraction, bps, eta) =>
-                    {
-                        ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
-                        TryWriteResumeCheckpoint(resumePath, (long)(startBytes + fraction * Math.Max(1, totalExpected)), totalExpected, etag, lastModified?.UtcDateTime);
-                    }).ConfigureAwait(false);
                 }
 
                 try { FileSystemUtilities.MoveFile(tempPath, outputPath, true); }
@@ -480,6 +514,36 @@ namespace Lidarr.Plugin.Common.Services.Download
             {
                 return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
             }
+        }
+
+        /// <summary>Max attempts for a single track's URL download before giving up. Overridable for tests.</summary>
+        internal virtual int MaxDownloadAttempts => 4;
+
+        /// <summary>Backoff between resume-retries (1s, 2s, 4s, capped at 8s). Overridable to zero in tests.</summary>
+        internal virtual TimeSpan GetRetryDelay(int attempt) =>
+            TimeSpan.FromSeconds(Math.Min(8, Math.Pow(2, Math.Max(0, attempt - 1))));
+
+        /// <summary>
+        /// Classifies an exception thrown during a URL download attempt as transient (worth a resume-retry).
+        /// A requested cancellation is never transient. Covers mid-body truncations (HttpIOException
+        /// "ResponseEnded"), connection resets, DNS blips, and per-request timeouts.
+        /// </summary>
+        private static bool IsTransientDownloadException(Exception ex, CancellationToken cancellationToken)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            return ex switch
+            {
+                HttpIOException => true,                       // e.g. ResponseEnded (truncated body)
+                HttpRequestException => true,                  // connection reset / DNS / 5xx surfaced by EnsureSuccess
+                System.Net.Sockets.SocketException => true,    // transport-level reset
+                TaskCanceledException => true,                 // per-request HttpClient timeout (token not cancelled — checked above)
+                IOException => true,                           // stream copy interrupted
+                _ => false,
+            };
         }
 
         private async Task<string> PostProcessAsync(string filePath, StreamingTrack track, StreamingQuality? quality, CancellationToken cancellationToken)
