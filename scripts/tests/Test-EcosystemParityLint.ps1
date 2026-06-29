@@ -168,8 +168,9 @@ useDefault = true
     Add-TestFile -RepoPath $repo -RelPath '.github/sha-pin-allowlist.json' -Content '{"entries":[]}'
     Add-TestFile -RepoPath $repo -RelPath '.github/ISSUE_TEMPLATE/bug_report.yml' -Content 'name: Bug Report'
     Add-TestFile -RepoPath $repo -RelPath '.github/ISSUE_TEMPLATE/feature_request.yml' -Content 'name: Feature Request'
+    Add-TestFile -RepoPath $repo -RelPath '.gitea/workflows/ci.yml' -Content 'name: CI'
 
-    # Workflows
+    # Optional GitHub mirror workflows.
     foreach ($wf in @('codeql.yml', 'test-and-coverage.yml', 'notify-failure.yml', 'packaging-gates.yml', 'submodule-pin.yml')) {
         Add-TestFile -RepoPath $repo -RelPath ".github/workflows/$wf" -Content "name: $wf"
     }
@@ -206,13 +207,12 @@ try {
     $result = & $lintScript -RepoPath $repo3 -Mode ci *>&1
     Assert-ExitCode -Expected 1 -Actual $LASTEXITCODE -TestName "Missing Directory.Packages.props fails"
 
-    # ─── Test 4: Missing workflow detected ───
-    Write-Host "`n[TEST 4] Missing workflow detected..." -ForegroundColor Cyan
-    $repo4 = New-GoldenRepo -Root $testRoot -Name 'no-codeql'
+    # ─── Test 4: GitHub mirror workflow gaps are optional when Gitea CI exists ───
+    Write-Host "`n[TEST 4] Missing GitHub mirror workflow does not fail Gitea-primary structural parity..." -ForegroundColor Cyan
+    $repo4 = New-GoldenRepo -Root $testRoot -Name 'partial-github-mirror'
     Remove-Item (Join-Path $repo4 '.github/workflows/codeql.yml') -Force
     $result = & $lintScript -RepoPath $repo4 -Mode ci *>&1
-    Assert-ExitCode -Expected 1 -Actual $LASTEXITCODE -TestName "Missing codeql.yml fails"
-    Assert-OutputContains -Output $result -Pattern 'codeql\.yml' -TestName "Output mentions codeql.yml"
+    Assert-ExitCode -Expected 0 -Actual $LASTEXITCODE -TestName "Missing codeql.yml mirror does not fail"
 
     # ─── Test 5: Missing issue templates detected ───
     Write-Host "`n[TEST 5] Missing issue templates detected..." -ForegroundColor Cyan
@@ -284,13 +284,13 @@ try {
     $result = & $lintScript -RepoPath $repo11 -Mode ci *>&1
     Assert-ExitCode -Expected 0 -Actual $LASTEXITCODE -TestName "Gitea-primary repo passes"
 
-    # ─── Test 12: repo with NO CI at all (neither GitHub nor Gitea workflows) fails ───
-    Write-Host "`n[TEST 12] Repo with no CI workflows at all fails..." -ForegroundColor Cyan
+    # ─── Test 12: repo with no Gitea CI workflow fails ───
+    Write-Host "`n[TEST 12] Repo with no Gitea CI workflow fails..." -ForegroundColor Cyan
     $repo12 = New-GoldenRepo -Root $testRoot -Name 'no-ci'
-    Remove-Item (Join-Path $repo12 '.github/workflows') -Recurse -Force
+    Remove-Item (Join-Path $repo12 '.gitea/workflows') -Recurse -Force
     $result = & $lintScript -RepoPath $repo12 -Mode ci *>&1
-    Assert-ExitCode -Expected 1 -Actual $LASTEXITCODE -TestName "No-CI repo fails"
-    Assert-OutputContains -Output $result -Pattern 'no CI workflows' -TestName "No-CI violation message"
+    Assert-ExitCode -Expected 1 -Actual $LASTEXITCODE -TestName "Missing Gitea CI repo fails"
+    Assert-OutputContains -Output $result -Pattern '\.gitea/workflows/ci\.yml' -TestName "Missing Gitea CI violation message"
 
     # ─── Test 13: CI mode with no scan target must not silently pass ───
     Write-Host "`n[TEST 13] CI mode without -RepoPath/-AllRepos exits non-zero..." -ForegroundColor Cyan

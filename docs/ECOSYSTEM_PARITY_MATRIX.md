@@ -3,8 +3,10 @@
 <!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
 
 **Generated**: 2026-05-25 (Wave 21 parity-mission session). **Refreshed**: 2026-05-25 (Wave-22 adversarial-review pass). **Refreshed again**: 2026-05-25 (Wave-23 adversarial-review pass — apple-drift correction + security hardening + parity convergence). **Refreshed again**: 2026-05-26 (Mission #52 stale-cell pass + Mission #53 rows 31-35 cross-cutting concerns).
-**Common pin**: `v1.17.0` (639d573 — restored lockstep Wave-23 after applemusicarr was discovered ahead by one tag; siblings brainarr/tidalarr/qobuzarr bumped to match).
-**Plugins covered**: `applemusicarr`, `tidalarr`, `qobuzarr`, `brainarr` + the shared `lidarr.plugin.common`
+> **Scope note (2026-06-29):** This matrix is a historical four-plugin evidence set. The current active ecosystem also includes `amazonmusicarr`; do not treat missing Amazon cells as N/A. Current CI repo coverage is enforced by `scripts/ci/ecosystem-repos.json` + `scripts/ci/verify-ecosystem-ci-contract.ps1`.
+
+**Current Common dev version**: `1.18.0-dev`. **Current five-plugin sentinel pin**: `3c34a5ade2ff99b81f78462474b06e1df49afc14` (verified 2026-06-29 from `ext-common-sha.txt` in amazonmusicarr, applemusicarr, brainarr, qobuzarr, and tidalarr).
+**Plugins covered by the historical matrix below**: `applemusicarr`, `tidalarr`, `qobuzarr`, `brainarr` + the shared `lidarr.plugin.common`
 
 This document is the single source of truth for "does every plugin follow the same canonical pattern, or does the divergence have a documented architectural reason?" Each row is a cross-cutting concern; each column is a plugin; each cell is a status + evidence pointer.
 
@@ -243,7 +245,7 @@ Per the user's mission contract:
 
 > Common extensions are tested, versioned, and pinned consistently.
 
-✓ Common v1.15.0 is the current pin across all 4 plugins (`git submodule status` consistent).
+✓ Historical Wave-21/31 verification used Common v1.15.0 across the original 4-plugin set. Current five-plugin pin/version truth is recorded in the scope note at the top of this document and enforced by `scripts/ci/ecosystem-repos.json` + `scripts/ci/verify-ecosystem-ci-contract.ps1`.
 
 > No plugin remains on an older/divergent Common version.
 

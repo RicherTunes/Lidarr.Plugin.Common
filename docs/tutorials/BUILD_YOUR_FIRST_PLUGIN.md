@@ -122,9 +122,9 @@ Edit `MyStreamingPlugin/MyStreamingPlugin.csproj`:
 
 | Setting | Purpose |
 |---------|---------|
-| `CopyLocalLockFileAssemblies` | Ensures Common.dll and dependencies are in your output folder |
-| `PrivateAssets="all"` | Prevents shipping duplicate Abstractions assembly |
-| `ExcludeAssets="runtime"` | Host provides Abstractions at runtime |
+| `CopyLocalLockFileAssemblies` | Makes build-time dependencies available for packaging/merge steps |
+| `PrivateAssets="all"` | Prevents transitive package exposure to consumers |
+| `ExcludeAssets="runtime"` | Host-provided or merged assemblies must not ship as sidecars |
 
 ---
 
@@ -648,10 +648,11 @@ Your `bin/Debug/net8.0/` folder should contain:
 
 ```
 MyStreamingPlugin.dll          # Your plugin
-Lidarr.Plugin.Common.dll       # Common library (MUST be present)
 plugin.json                    # Manifest
 [other dependencies]
 ```
+
+For RicherTunes-style packages, `Lidarr.Plugin.Common.dll` and `Lidarr.Plugin.Abstractions.dll` are ILRepack-merged and internalized into the main plugin DLL. They must be absent from the final ZIP as sidecars.
 
 ### Manual testing
 
@@ -747,10 +748,10 @@ zip -r ../MyStreamingPlugin-1.0.0.zip .
 ### Distribution checklist
 
 - [ ] `MyStreamingPlugin.dll` present
-- [ ] `Lidarr.Plugin.Common.dll` present
+- [ ] `Lidarr.Plugin.Common.dll` absent from the ZIP (merged/internalized into the main plugin DLL)
 - [ ] `plugin.json` present and valid
 - [ ] All third-party dependencies included
-- [ ] No Abstractions DLL in package (host provides it)
+- [ ] No `Lidarr.Plugin.Abstractions.dll` sidecar in package
 - [ ] README.md with setup instructions
 
 ---
@@ -763,7 +764,7 @@ zip -r ../MyStreamingPlugin-1.0.0.zip .
 |---------|-------|----------|
 | Plugin not listed | Missing `plugin.json` | Ensure `plugin.json` is in output (check `.csproj` Copy setting) |
 | Plugin not loaded | Version mismatch | Check `minHostVersion` matches your Lidarr version |
-| Startup error in logs | Missing Common.dll | Ensure `CopyLocalLockFileAssemblies=true` in `.csproj` |
+| Startup error in logs | Missing merged dependency or package-closure failure | Run the Common packaging closure check and verify Common/Abstractions were merged into the main plugin DLL |
 
 ### Build errors
 

@@ -19,13 +19,10 @@
     { "path": ".github/ISSUE_TEMPLATE", "minFiles": 2, "description": "Issue templates (bug + feature minimum)" }
   ],
 
-  "requiredWorkflows": [
-    { "file": "codeql.yml", "description": "CodeQL security analysis" },
-    { "file": "test-and-coverage.yml", "description": "Unit tests + coverage" },
-    { "file": "notify-failure.yml", "description": "CI failure notifications" },
-    { "file": "packaging-gates.yml", "description": "Plugin packaging validation" },
-    { "file": "submodule-pin.yml", "description": "Common submodule SHA verification" }
-  ],
+  "requiredCiWorkflow": {
+    "path": ".gitea/workflows/ci.yml",
+    "description": "Primary Gitea CI workflow"
+  },
 
   "globalJson": {
     "sdk": {

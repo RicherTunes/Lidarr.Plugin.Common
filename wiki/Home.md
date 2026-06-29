@@ -1,8 +1,8 @@
 # Lidarr.Plugin.Common — Wiki
 
-**Lidarr.Plugin.Common** is the shared library that underpins the RicherTunes Lidarr streaming/AI plugins — Qobuzarr, Tidalarr, Applemusicarr, and Brainarr.
+**Lidarr.Plugin.Common** is the shared library that underpins the RicherTunes Lidarr streaming/AI plugins — Amazonmusicarr, Applemusicarr, Brainarr, Qobuzarr, and Tidalarr.
 It ships resilience policies, HTTP helpers, bridge contracts, packaging tooling, and a TestKit so every plugin follows the same canonical patterns.
-Each plugin carries its own copy of Common inside a private AssemblyLoadContext; the host-owned ABI lives in `Lidarr.Plugin.Abstractions`.
+Each plugin vendors Common as `ext/Lidarr.Plugin.Common`, then ILRepack-merges and internalizes Common into the packaged plugin DLL loaded by Lidarr. The host-owned ABI lives in `Lidarr.Plugin.Abstractions`.
 
 This wiki is for **plugin authors** building on Common.
 Its job is orientation — what exists, where to find it, and where the canonical docs live.
@@ -17,7 +17,7 @@ Its job is orientation — what exists, where to find it, and where the canonica
 | [Ecosystem Parity and Guards](./Ecosystem-Parity-and-Guards.md) | Parity matrix, promotion checklist, drift enforcement |
 | [Versioning and Submodule Pinning](./Versioning-and-Submodule-Pinning.md) | Version contract, submodule workflow, upgrade checklist |
 | [Testing with the TestKit](./Testing-with-the-TestKit.md) | TestKit fixtures, HTTP handlers, ALC harness |
-| [CI and Packaging](./CI-and-Packaging.md) | `PluginPack.psm1`, reusable workflows, SHA pins |
+| [CI and Packaging](./CI-and-Packaging.md) | `PluginPack.psm1`, Gitea-primary CI, shared lint/verify gates |
 
 ## Key references
 
