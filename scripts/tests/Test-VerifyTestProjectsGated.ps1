@@ -186,8 +186,8 @@ try {
     Write-Host 'Unit tests: Resolve-ProjectKey' -ForegroundColor White
 
     Test-Assertion 'Absolute path becomes relative, lower-case, forward-slash' {
-        $root = 'C:\repos\myplugin'
-        $k = Resolve-ProjectKey 'C:\repos\myplugin\tests\Foo.Tests\Foo.Tests.csproj' $root
+        # Use real OS paths (Join-Path) so IsPathRooted works on both Windows and Linux
+        $k = Resolve-ProjectKey $absPath $DirF
         $k -eq 'tests/foo.tests/foo.tests.csproj'
     }
 
