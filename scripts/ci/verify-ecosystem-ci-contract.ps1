@@ -246,7 +246,8 @@ function Test-CommonPinAgreement {
 function Test-WorkflowFileValid {
     <#
     .SYNOPSIS
-        Assert a single workflow file is parseable, non-corrupt YAML.
+        Assert a single workflow file is non-corrupt and structurally plausible, with full YAML
+        parsing when the powershell-yaml module is available.
 
     .DESCRIPTION
         Attempts real YAML parsing via ConvertFrom-Yaml (powershell-yaml module)
@@ -260,8 +261,9 @@ function Test-WorkflowFileValid {
           - A 40-hex string does NOT appear 5+ times (corruption threshold)
           - Top-level 'on:' trigger and 'jobs:' keys are present (line-start match)
 
-        When powershell-yaml is installed, the parser replaces the heuristic
-        key-presence check with a real structural parse.
+        When powershell-yaml is installed, the parser replaces the heuristic key-presence check with
+        a real structural parse. Without that module this intentionally stays a corruption and
+        workflow-shape guard, not a complete YAML parser.
 
     .OUTPUTS
         PSCustomObject { Ok, Reason }
@@ -363,8 +365,9 @@ function Test-WorkflowFileValid {
 function Test-WorkflowFilesValid {
     <#
     .SYNOPSIS
-        Assert ALL .github/workflows and .gitea/workflows yml/yaml files in a
-        plugin repo are parseable, non-corrupt YAML.
+        Assert ALL .github/workflows and .gitea/workflows yml/yaml files in a plugin repo are
+        non-corrupt and structurally plausible, with full YAML parsing when powershell-yaml is
+        available.
     .OUTPUTS
         PSCustomObject { Ok, BadFiles, Reason }
     #>
