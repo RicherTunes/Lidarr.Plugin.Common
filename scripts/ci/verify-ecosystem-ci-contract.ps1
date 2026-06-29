@@ -243,6 +243,166 @@ function Test-CommonPinAgreement {
     }
 }
 
+function Test-WorkflowFileValid {
+    <#
+    .SYNOPSIS
+        Assert a single workflow file is parseable, non-corrupt YAML.
+
+    .DESCRIPTION
+        Attempts real YAML parsing via ConvertFrom-Yaml (powershell-yaml module)
+        when available; falls back to a robust heuristic otherwise.
+
+        The heuristic catches the known corruption class where a broken sed
+        interleaves a 40-hex Common SHA between every character of the original
+        file, producing 40-60 KB of garbage.  Detection criteria:
+          - Valid UTF-8
+          - Non-empty, <= 512 KB (any real workflow is well under this)
+          - A 40-hex string does NOT appear 5+ times (corruption threshold)
+          - Top-level 'on:' trigger and 'jobs:' keys are present (line-start match)
+
+        When powershell-yaml is installed, the parser replaces the heuristic
+        key-presence check with a real structural parse.
+
+    .OUTPUTS
+        PSCustomObject { Ok, Reason }
+    #>
+    param(
+        [string]$FilePath
+    )
+
+    if (-not (Test-Path -LiteralPath $FilePath)) {
+        return [PSCustomObject]@{ Ok = $false; Reason = 'file not found' }
+    }
+
+    $bytes = [System.IO.File]::ReadAllBytes($FilePath)
+
+    if ($bytes.Length -eq 0) {
+        return [PSCustomObject]@{ Ok = $false; Reason = 'empty file' }
+    }
+
+    # 512 KB is far above any real workflow; corrupt interleaved files hit 40-60 KB
+    # from a ~1 KB source. Setting the ceiling high avoids false positives on
+    # legitimately verbose workflows while still catching gross corruption.
+    if ($bytes.Length -gt 524288) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = "file too large ($($bytes.Length) bytes; > 512 KB — corrupt workflow suspected)"
+        }
+    }
+
+    # Valid UTF-8 (strict; reject bytes that are invalid in UTF-8)
+    $content = $null
+    try {
+        $strictUtf8 = [System.Text.Encoding]::GetEncoding(
+            'utf-8',
+            [System.Text.EncoderFallback]::ExceptionFallback,
+            [System.Text.DecoderFallback]::ExceptionFallback
+        )
+        $content = $strictUtf8.GetString($bytes)
+    }
+    catch {
+        return [PSCustomObject]@{ Ok = $false; Reason = 'not valid UTF-8' }
+    }
+
+    # Corruption guard: the per-character-SHA-interleaving bug inserts the full
+    # 40-hex SHA between every character of the original file, so a ~1 KB source
+    # produces ~100 SHA occurrences.  Five or more occurrences is already far beyond
+    # any legitimate workflow (git SHAs in comments/pins appear 1-3 times at most).
+    $shaHits = ([regex]::Matches($content, '[0-9a-f]{40}')).Count
+    if ($shaHits -ge 5) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = "corruption detected: 40-hex pattern appears $shaHits times (per-character SHA interleaving suspected)"
+        }
+    }
+
+    # Try real YAML parser when powershell-yaml is available
+    $psYamlModule = Get-Module -Name 'powershell-yaml' -ListAvailable -ErrorAction SilentlyContinue
+    if ($psYamlModule) {
+        try {
+            Import-Module 'powershell-yaml' -ErrorAction Stop
+            $parsed = $content | ConvertFrom-Yaml -ErrorAction Stop
+            if ($null -eq $parsed) {
+                return [PSCustomObject]@{ Ok = $false; Reason = 'YAML parse returned null (empty document)' }
+            }
+            if ($parsed -is [System.Collections.IDictionary]) {
+                # YAML 1.1: bare 'on' is parsed as boolean $true by most parsers
+                $hasJobs = $parsed.Contains('jobs')
+                $hasOn   = $parsed.Contains('on') -or $parsed.Contains($true) -or $parsed.Contains('true')
+                if (-not $hasJobs) {
+                    return [PSCustomObject]@{ Ok = $false; Reason = "missing top-level 'jobs' key" }
+                }
+                if (-not $hasOn) {
+                    return [PSCustomObject]@{ Ok = $false; Reason = "missing top-level 'on' trigger key" }
+                }
+            }
+            return [PSCustomObject]@{ Ok = $true; Reason = $null }
+        }
+        catch {
+            return [PSCustomObject]@{ Ok = $false; Reason = "YAML parse failed: $_" }
+        }
+    }
+
+    # Heuristic key-presence check (no real parser available)
+    # 'on:' may be written bare or quoted; match at line start to avoid false positives.
+    $hasOn   = $content -match '(?m)^on\s*:' -or
+               $content -match "(?m)^'on'\s*:" -or
+               $content -match '(?m)^"on"\s*:'
+    $hasJobs = $content -match '(?m)^jobs\s*:'
+
+    if (-not $hasOn) {
+        return [PSCustomObject]@{ Ok = $false; Reason = "missing top-level 'on:' trigger key (heuristic)" }
+    }
+    if (-not $hasJobs) {
+        return [PSCustomObject]@{ Ok = $false; Reason = "missing top-level 'jobs:' key (heuristic)" }
+    }
+
+    return [PSCustomObject]@{ Ok = $true; Reason = $null }
+}
+
+function Test-WorkflowFilesValid {
+    <#
+    .SYNOPSIS
+        Assert ALL .github/workflows and .gitea/workflows yml/yaml files in a
+        plugin repo are parseable, non-corrupt YAML.
+    .OUTPUTS
+        PSCustomObject { Ok, BadFiles, Reason }
+    #>
+    param(
+        [string]$PluginDir,
+        [string]$PluginName
+    )
+
+    $badFiles = [System.Collections.Generic.List[string]]::new()
+
+    foreach ($subdir in @('.github/workflows', '.gitea/workflows')) {
+        $wfDir = Join-Path $PluginDir $subdir
+        if (-not (Test-Path -LiteralPath $wfDir)) { continue }
+
+        $files = @(Get-ChildItem -LiteralPath $wfDir -Filter '*.yml'  -File -ErrorAction SilentlyContinue) +
+                 @(Get-ChildItem -LiteralPath $wfDir -Filter '*.yaml' -File -ErrorAction SilentlyContinue)
+
+        foreach ($file in $files) {
+            $relPath = $file.FullName.Substring($PluginDir.TrimEnd('\', '/').Length).TrimStart([char]'\', [char]'/')
+            $check   = Test-WorkflowFileValid -FilePath $file.FullName
+            if (-not $check.Ok) {
+                $badFiles.Add("$relPath : $($check.Reason)")
+            }
+        }
+    }
+
+    if ($badFiles.Count -gt 0) {
+        $detail = ($badFiles | ForEach-Object { "`n  $_" }) -join ''
+        return [PSCustomObject]@{
+            Ok       = $false
+            BadFiles = @($badFiles)
+            Reason   = "$($badFiles.Count) invalid workflow file(s):$detail"
+        }
+    }
+
+    return [PSCustomObject]@{ Ok = $true; BadFiles = @(); Reason = $null }
+}
+
 # ============================================================
 # Early return when invoked for unit-test dot-sourcing
 # ============================================================
@@ -318,8 +478,9 @@ foreach ($plugin in $plugins) {
     $pinResult  = Test-CommonPinIntegrity  -PluginDir $pluginDir -PluginName $repoDir
     $docResult  = Test-DocRefsLintWired    -PluginDir $pluginDir -PluginName $repoDir
     $wfResult   = Test-WorkflowMirrorCount -PluginDir $pluginDir -Expected $expected
+    $wfvResult  = Test-WorkflowFilesValid  -PluginDir $pluginDir -PluginName $repoDir
 
-    $allOk = $pinResult.Ok -and $docResult.Ok -and $wfResult.Ok
+    $allOk = $pinResult.Ok -and $docResult.Ok -and $wfResult.Ok -and $wfvResult.Ok
     if (-not $allOk) { $script:anyFail = $true }
     if ($pinResult.Ok -and $pinResult.Sha) { $passingShas.Add($pinResult.Sha) | Out-Null }
 
@@ -328,9 +489,10 @@ foreach ($plugin in $plugins) {
 
     if ($CI) {
         Write-Host "$repoDir $statusLabel" -ForegroundColor $statusColor
-        if (-not $pinResult.Ok)  { Write-Host "  pin: $($pinResult.Reason)"  -ForegroundColor DarkGray }
-        if (-not $docResult.Ok)  { Write-Host "  doc: $($docResult.Reason)"  -ForegroundColor DarkGray }
-        if (-not $wfResult.Ok)   { Write-Host "  wf:  $($wfResult.Reason)"   -ForegroundColor DarkGray }
+        if (-not $pinResult.Ok)  { Write-Host "  pin: $($pinResult.Reason)"    -ForegroundColor DarkGray }
+        if (-not $docResult.Ok)  { Write-Host "  doc: $($docResult.Reason)"    -ForegroundColor DarkGray }
+        if (-not $wfResult.Ok)   { Write-Host "  wf:  $($wfResult.Reason)"     -ForegroundColor DarkGray }
+        if (-not $wfvResult.Ok)  { Write-Host "  wfv: $($wfvResult.Reason)"    -ForegroundColor DarkGray }
     }
     else {
         Write-Host "  [$statusLabel] $repoDir" -ForegroundColor $statusColor
@@ -358,19 +520,30 @@ foreach ($plugin in $plugins) {
         else {
             Write-Host "         wf  : FAIL — $($wfResult.Reason)" -ForegroundColor Red
         }
+
+        # Verbose: workflow content validity (F2)
+        if ($wfvResult.Ok) {
+            Write-Host "         wfv : OK (all workflow files valid)" -ForegroundColor DarkGreen
+        }
+        else {
+            Write-Host "         wfv : FAIL — $($wfvResult.Reason)" -ForegroundColor Red
+        }
     }
 
     $results.Add([PSCustomObject]@{
-        RepoDir   = $repoDir
-        Ok        = $allOk
-        PinOk     = $pinResult.Ok
-        PinSha    = $pinResult.Sha
-        PinReason = $pinResult.Reason
-        DocOk     = $docResult.Ok
-        DocReason = $docResult.Reason
-        WfOk      = $wfResult.Ok
-        WfCount   = $wfResult.ActualCount
-        WfReason  = $wfResult.Reason
+        RepoDir    = $repoDir
+        Ok         = $allOk
+        PinOk      = $pinResult.Ok
+        PinSha     = $pinResult.Sha
+        PinReason  = $pinResult.Reason
+        DocOk      = $docResult.Ok
+        DocReason  = $docResult.Reason
+        WfOk       = $wfResult.Ok
+        WfCount    = $wfResult.ActualCount
+        WfReason   = $wfResult.Reason
+        WfvOk      = $wfvResult.Ok
+        WfvBadFiles= $wfvResult.BadFiles
+        WfvReason  = $wfvResult.Reason
     })
 }
 
