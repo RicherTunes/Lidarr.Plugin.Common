@@ -21,7 +21,8 @@ param(
     [Alias('SkipVersionContract')]
     [switch]$SkipEcosystemParity,
     [switch]$SkipPluginContractTests,
-    [switch]$SkipDocRefs
+    [switch]$SkipDocRefs,
+    [switch]$SkipGiteaSecretScan
 )
 
 $ErrorActionPreference = 'Stop'
@@ -164,6 +165,13 @@ try {
             -Name 'Doc refs' `
             -ScriptPath (Join-Path $resolvedCommonRoot 'scripts/lint-doc-script-refs.ps1') `
             -Arguments @('-RepoRoot', $resolvedRepoPath, '-CI')
+    }
+
+    if (-not $SkipGiteaSecretScan) {
+        Invoke-LintGate `
+            -Name 'Gitea secret-scan workflow' `
+            -ScriptPath (Join-Path $resolvedCommonRoot 'scripts/lint-gitea-secret-scan.ps1') `
+            -Arguments @('-RepoPath', $resolvedRepoPath, '-CI')
     }
 
     if (-not $SkipPluginContractTests) {

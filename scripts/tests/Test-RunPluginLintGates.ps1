@@ -136,6 +136,7 @@ function New-FakeCommonRoot {
     Add-GateStub -CommonRoot $Path -RelativePath 'scripts/lint-test-traits.ps1' -GateName 'traits'
     Add-GateStub -CommonRoot $Path -RelativePath 'scripts/ecosystem-parity-lint.ps1' -GateName 'parity'
     Add-GateStub -CommonRoot $Path -RelativePath 'scripts/lint-doc-script-refs.ps1' -GateName 'doc-refs'
+    Add-GateStub -CommonRoot $Path -RelativePath 'scripts/lint-gitea-secret-scan.ps1' -GateName 'secret-scan'
     return $Path
 }
 
@@ -172,7 +173,7 @@ try {
 
     Assert-True 'Runner exits successfully when every gate passes' ($result.ExitCode -eq 0) $result.Output
     $lines = @(if (Test-Path $log) { Get-Content $log } else { @() })
-    Assert-True 'Exactly five lint gates and one plugin contract test are invoked' (@($lines).Count -eq 6) ($lines -join "
+    Assert-True 'Exactly six lint gates and one plugin contract test are invoked' (@($lines).Count -eq 7) ($lines -join "
 ")
     Assert-True 'Date parsing gate receives repo path and CI mode' (($lines -join "`n") -match 'date\|.*-Path .*fake-plugin.* -Mode ci') ($lines -join "`n")
     Assert-True 'Sync-over-async gate receives repo path and CI mode' (($lines -join "`n") -match 'sync\|.*-Path .*fake-plugin.* -Mode ci') ($lines -join "`n")
@@ -180,6 +181,9 @@ try {
     Assert-True 'Parity gate receives full ecosystem check' (($lines -join "`n") -match 'parity\|.*-RepoPath .*fake-plugin.* -CommonRoot .*Lidarr\.Plugin\.Common.* -Check all\s+-Mode ci') ($lines -join "`n")
     Assert-True 'Doc-refs gate receives plugin repo root and CI flag' (($lines -join "
 ") -match 'doc-refs\|.*-RepoRoot .*fake-plugin.* -CI') ($lines -join "
+")
+    Assert-True 'Secret-scan gate receives plugin repo root and CI flag' (($lines -join "
+") -match 'secret-scan\|.*-RepoPath .*fake-plugin.* -CI') ($lines -join "
 ")
     Assert-True 'Plugin contract test under scripts/tests is invoked' (($lines -join "`n") -match 'contract\|FakeContract\.Tests\.ps1') ($lines -join "`n")
 
