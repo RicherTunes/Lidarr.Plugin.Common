@@ -10,7 +10,7 @@ namespace Lidarr.Plugin.Common.TestKit.Compliance;
 /// Behavioral compliance axis for capped-chain search plugins: proves the plugin's search plan
 /// produced via <see cref="CappedSearchChain.Build"/> obeys two invariants -- (a) over-specific
 /// queries are bounded by <see cref="MaxOverSpecificQueries"/>, and (b) the artist-only catalogue
-/// fallback is always present in the final chain, never truncated by the cap.
+/// fallback tier is always present in the final chain, never truncated by the cap.
 ///
 /// <para>Capped-chain plugins intentionally emit a SUBSET of the full
 /// <see cref="SearchQuerySanitizer.BuildPlan"/> variants (to keep API calls bounded), so they
@@ -64,6 +64,15 @@ public abstract class CappedSearchChainComplianceTestBase
     /// </summary>
     protected abstract string GetExpectedArtistOnlyFallbackQuery(string artist, string album);
 
+    /// <summary>
+    /// The expected artist-only fallback tier for the given (artist, album) input. Capped plugins that
+    /// pass multiple artist-only sanitizer variants to <see cref="CappedSearchChain.Build"/> should
+    /// override this; single-fallback adopters can keep implementing
+    /// <see cref="GetExpectedArtistOnlyFallbackQuery"/>.
+    /// </summary>
+    protected virtual IReadOnlyList<string> GetExpectedArtistOnlyFallbackQueries(string artist, string album)
+        => new[] { GetExpectedArtistOnlyFallbackQuery(artist, album) };
+
     private IReadOnlyList<string> DecodeChainOrThrow(string artist, string album)
     {
         var urls = GetSearchRequestUrls(artist, album);
@@ -91,10 +100,12 @@ public abstract class CappedSearchChainComplianceTestBase
     public void OverSpecificQueryCount_DoesNotExceedCap()
     {
         var chain = DecodeChainOrThrow(SampleArtist, SampleAlbum);
-        var fallback = GetExpectedArtistOnlyFallbackQuery(SampleArtist, SampleAlbum);
+        var fallbacks = GetExpectedArtistOnlyFallbackQueries(SampleArtist, SampleAlbum)
+            .Where(q => !string.IsNullOrWhiteSpace(q))
+            .ToList();
 
         var overSpecific = chain
-            .Where(q => !string.Equals(q, fallback, StringComparison.OrdinalIgnoreCase))
+            .Where(q => !fallbacks.Contains(q, StringComparer.OrdinalIgnoreCase))
             .ToList();
 
         Assert.True(
@@ -111,16 +122,21 @@ public abstract class CappedSearchChainComplianceTestBase
     public void ArtistOnlyFallback_IsAlwaysPresent()
     {
         var chain = DecodeChainOrThrow(SampleArtist, SampleAlbum);
-        var fallback = GetExpectedArtistOnlyFallbackQuery(SampleArtist, SampleAlbum);
+        var fallbacks = GetExpectedArtistOnlyFallbackQueries(SampleArtist, SampleAlbum)
+            .Where(q => !string.IsNullOrWhiteSpace(q))
+            .ToList();
 
         Assert.True(
-            !string.IsNullOrWhiteSpace(fallback),
-            "GetExpectedArtistOnlyFallbackQuery returned null/blank -- the hook must return the plugin's artist-only fallback query.");
+            fallbacks.Count > 0,
+            "GetExpectedArtistOnlyFallbackQueries returned no non-blank values -- the hook must return the plugin's artist-only fallback query/tier.");
 
-        Assert.True(
-            chain.Contains(fallback, StringComparer.OrdinalIgnoreCase),
-            $"artist-only fallback '{fallback}' is NOT present in the capped chain. The cap must append the " +
-            "artist-only fallback unconditionally -- truncating it is the Bleu-Jeans/Record-n+V zero-results bug. " +
-            $"Chain: {string.Join(", ", chain.Select(q => "'" + q + "'"))}");
+        foreach (var fallback in fallbacks)
+        {
+            Assert.True(
+                chain.Contains(fallback, StringComparer.OrdinalIgnoreCase),
+                $"artist-only fallback '{fallback}' is NOT present in the capped chain. The cap must append the " +
+                "artist-only fallback tier unconditionally -- truncating it is the Bleu-Jeans/Record-n+V zero-results bug. " +
+                $"Chain: {string.Join(", ", chain.Select(q => "'" + q + "'"))}");
+        }
     }
 }
