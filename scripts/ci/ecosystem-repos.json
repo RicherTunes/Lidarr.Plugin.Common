@@ -1,5 +1,5 @@
 {
-  "$comment": "Ecosystem CI-contract manifest. mirrorWorkflows = expected .github/workflows/*.yml count. Verified 2026-06-28 against live sibling layout. tidalarr intentionally carries 2 mirrors (ci.yml + submodule-pin.yml); amazonmusicarr carries 19 dormant mirrors.",
+  "$comment": "Ecosystem CI-contract manifest. mirrorWorkflows = expected .github/workflows/*.yml count. Verified 2026-06-29 against live sibling layout. tidalarr intentionally carries 2 mirrors (ci.yml + submodule-pin.yml); amazonmusicarr set to 0 (dormant .github/workflows deleted in parallel PR).",
   "plugins": [
     {
       "repoDir": "qobuzarr",
@@ -34,7 +34,7 @@
       "giteaOwner": "RicherTunes",
       "giteaRepo": "AmazonMusicarr",
       "giteaPrimary": true,
-      "mirrorWorkflows": 19
+      "mirrorWorkflows": 0
     }
   ]
 }

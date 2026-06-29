@@ -113,31 +113,47 @@ try {
         $shaBytes = [System.Text.Encoding]::ASCII.GetBytes($SentinelSha + "`n")
         [System.IO.File]::WriteAllBytes((Join-Path $Dir 'ext-common-sha.txt'), $shaBytes)
 
-        # Create .gitea/workflows/ci.yml
+        # Create .gitea/workflows/ci.yml — must include 'on:' + 'jobs:' for F2 validity check
         New-Item -Path (Join-Path $Dir '.gitea/workflows') -ItemType Directory -Force | Out-Null
         $ciYmlPath = Join-Path $Dir '.gitea/workflows/ci.yml'
         if ($WireDocRefs) {
             Set-Content $ciYmlPath 'name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
 jobs:
   lint:
+    runs-on: ubuntu-latest
     steps:
       - name: Doc-refs lint
         run: pwsh ./ext/Lidarr.Plugin.Common/scripts/lint-doc-script-refs.ps1 -RepoRoot . -CI'
         }
         else {
             Set-Content $ciYmlPath 'name: CI
+on:
+  push:
+    branches: [main]
 jobs:
-  lint:
+  build:
+    runs-on: ubuntu-latest
     steps:
       - name: Build
         run: pwsh ./scripts/some-other-script.ps1'
         }
 
-        # Create GitHub workflows if needed
+        # Create GitHub workflows if needed (valid YAML with on: + jobs: for F2 check)
         if ($GithubWorkflowCount -gt 0) {
             New-Item -Path (Join-Path $Dir '.github/workflows') -ItemType Directory -Force | Out-Null
             for ($i = 0; $i -lt $GithubWorkflowCount; $i++) {
-                Set-Content (Join-Path $Dir ".github/workflows/extra$i.yml") "name: Extra$i"
+                Set-Content (Join-Path $Dir ".github/workflows/extra$i.yml") "name: Extra$i
+on:
+  push:
+jobs:
+  extra:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo placeholder"
             }
         }
 
@@ -163,14 +179,28 @@ jobs:
     $DirD = Join-Path $TempDir 'plugin-extra-wf'
     New-FakePlugin -Dir $DirD -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 1
 
+    # --- Plugin E: corrupt .github/workflows file (FAIL) -----------------
+    # Simulates the amazon bug: a Common SHA interleaved between every character
+    # of the original YAML by a broken sed, producing 40-60 KB of garbage.
+    $DirE = Join-Path $TempDir 'plugin-corrupt-wf'
+    New-FakePlugin -Dir $DirE -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+    # manifest expects 1 for DirE so we can add the corrupt file without triggering
+    # the count check — we want ONLY the content check to fire
+    New-Item -Path (Join-Path $DirE '.github/workflows') -ItemType Directory -Force | Out-Null
+    $corruptSha  = 'aabbccddee1122334455aabbccddee1122334455'
+    $origContent = "name: CI`non:`n  push:`n    branches: [main]`njobs:`n  build:`n    runs-on: ubuntu-latest`n"
+    $corruptContent = ($origContent.ToCharArray() | ForEach-Object { "$corruptSha$_" }) -join ''
+    [System.IO.File]::WriteAllText((Join-Path $DirE '.github/workflows/bump-common.yml'), $corruptContent)
+
     # --- Write a fake manifest for the fake ecosystem --------------------
     $FakeManifestPath = Join-Path $TempDir 'fake-manifest.json'
     @{
         plugins = @(
-            @{ repoDir = 'plugin-pass';      giteaOwner = 'Test'; giteaRepo = 'PluginPass';    giteaPrimary = $true; mirrorWorkflows = 0 }
-            @{ repoDir = 'plugin-bad-pin';   giteaOwner = 'Test'; giteaRepo = 'PluginBadPin';  giteaPrimary = $true; mirrorWorkflows = 0 }
-            @{ repoDir = 'plugin-no-docref'; giteaOwner = 'Test'; giteaRepo = 'PluginNoDocRef'; giteaPrimary = $true; mirrorWorkflows = 0 }
-            @{ repoDir = 'plugin-extra-wf';  giteaOwner = 'Test'; giteaRepo = 'PluginExtraWf'; giteaPrimary = $true; mirrorWorkflows = 0 }
+            @{ repoDir = 'plugin-pass';        giteaOwner = 'Test'; giteaRepo = 'PluginPass';       giteaPrimary = $true; mirrorWorkflows = 0 }
+            @{ repoDir = 'plugin-bad-pin';     giteaOwner = 'Test'; giteaRepo = 'PluginBadPin';     giteaPrimary = $true; mirrorWorkflows = 0 }
+            @{ repoDir = 'plugin-no-docref';   giteaOwner = 'Test'; giteaRepo = 'PluginNoDocRef';   giteaPrimary = $true; mirrorWorkflows = 0 }
+            @{ repoDir = 'plugin-extra-wf';    giteaOwner = 'Test'; giteaRepo = 'PluginExtraWf';    giteaPrimary = $true; mirrorWorkflows = 0 }
+            @{ repoDir = 'plugin-corrupt-wf';  giteaOwner = 'Test'; giteaRepo = 'PluginCorruptWf';  giteaPrimary = $true; mirrorWorkflows = 1 }
         )
     } | ConvertTo-Json -Depth 5 | Set-Content $FakeManifestPath
 
@@ -254,6 +284,78 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
     }
 
     # ============================================================
+    # Unit tests: Test-WorkflowFileValid (F2 — content integrity)
+    # ============================================================
+
+    Write-Host ''
+    Write-Host 'Unit tests: Test-WorkflowFileValid (F2)' -ForegroundColor White
+
+    Test-Assertion 'WorkflowFileValid: valid .gitea/workflows/ci.yml returns Ok=$true' {
+        $r = Test-WorkflowFileValid -FilePath (Join-Path $DirA '.gitea/workflows/ci.yml')
+        $r.Ok -eq $true
+    }
+
+    Test-Assertion 'WorkflowFileValid: corrupt file (SHA interleaved) returns Ok=$false' {
+        $tmpFile = Join-Path $TempDir 'corrupt-workflow.yml'
+        $sha  = 'aabbccddee1122334455aabbccddee1122334455'
+        $orig = "name: CI`non:`n  push:`njobs:`n  build:`n    runs-on: ubuntu-latest`n"
+        $corrupt = ($orig.ToCharArray() | ForEach-Object { "$sha$_" }) -join ''
+        [System.IO.File]::WriteAllText($tmpFile, $corrupt)
+        $r = Test-WorkflowFileValid -FilePath $tmpFile
+        $r.Ok -eq $false -and $r.Reason -match 'corruption|corrupt|SHA|sha'
+    }
+
+    Test-Assertion 'WorkflowFileValid: empty file returns Ok=$false' {
+        $tmpFile = Join-Path $TempDir 'empty-workflow.yml'
+        [System.IO.File]::WriteAllBytes($tmpFile, [byte[]]@())
+        $r = Test-WorkflowFileValid -FilePath $tmpFile
+        $r.Ok -eq $false
+    }
+
+    Test-Assertion 'WorkflowFileValid: file missing on: key returns Ok=$false' {
+        $tmpFile = Join-Path $TempDir 'no-on-workflow.yml'
+        [System.IO.File]::WriteAllText($tmpFile, "name: CI`njobs:`n  build:`n    runs-on: ubuntu-latest`n")
+        $r = Test-WorkflowFileValid -FilePath $tmpFile
+        $r.Ok -eq $false -and $r.Reason -match 'on'
+    }
+
+    Test-Assertion 'WorkflowFileValid: file missing jobs: key returns Ok=$false' {
+        $tmpFile = Join-Path $TempDir 'no-jobs-workflow.yml'
+        [System.IO.File]::WriteAllText($tmpFile, "name: CI`non:`n  push:`n    branches: [main]`n")
+        $r = Test-WorkflowFileValid -FilePath $tmpFile
+        $r.Ok -eq $false -and $r.Reason -match 'jobs'
+    }
+
+    Test-Assertion 'WorkflowFileValid: non-existent file returns Ok=$false' {
+        $r = Test-WorkflowFileValid -FilePath (Join-Path $TempDir 'nonexistent.yml')
+        $r.Ok -eq $false
+    }
+
+    # ============================================================
+    # Unit tests: Test-WorkflowFilesValid (F2 — per-plugin scan)
+    # ============================================================
+
+    Write-Host ''
+    Write-Host 'Unit tests: Test-WorkflowFilesValid (F2)' -ForegroundColor White
+
+    Test-Assertion 'WorkflowFilesValid: clean plugin returns Ok=$true' {
+        $r = Test-WorkflowFilesValid -PluginDir $DirA -PluginName 'plugin-pass'
+        $r.Ok -eq $true -and $r.BadFiles.Count -eq 0
+    }
+
+    Test-Assertion 'WorkflowFilesValid: plugin with corrupt .github/workflows file returns Ok=$false' {
+        $r = Test-WorkflowFilesValid -PluginDir $DirE -PluginName 'plugin-corrupt-wf'
+        $r.Ok -eq $false -and $r.BadFiles.Count -ge 1
+    }
+
+    Test-Assertion 'WorkflowFilesValid: plugin with no workflow dirs returns Ok=$true (vacuously)' {
+        $emptyDir = Join-Path $TempDir 'plugin-no-wf-dirs'
+        New-Item -ItemType Directory -Path $emptyDir -Force | Out-Null
+        $r = Test-WorkflowFilesValid -PluginDir $emptyDir -PluginName 'no-wf-dirs'
+        $r.Ok -eq $true
+    }
+
+    # ============================================================
     # End-to-end: run full verifier against fake ecosystem
     # ============================================================
 
@@ -283,6 +385,11 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
     Test-Assertion 'Full verifier reports plugin-extra-wf as FAIL' {
         $output = (& pwsh -NoProfile -File $Verifier -EcosystemRoot $TempDir -ManifestPath $FakeManifestPath -CI *>&1) -join "`n"
         $output -match 'plugin-extra-wf.*FAIL|FAIL.*plugin-extra-wf'
+    }
+
+    Test-Assertion 'Full verifier reports plugin-corrupt-wf as FAIL (F2)' {
+        $output = (& pwsh -NoProfile -File $Verifier -EcosystemRoot $TempDir -ManifestPath $FakeManifestPath -CI *>&1) -join "`n"
+        $output -match 'plugin-corrupt-wf.*FAIL|FAIL.*plugin-corrupt-wf'
     }
 
     # ============================================================
