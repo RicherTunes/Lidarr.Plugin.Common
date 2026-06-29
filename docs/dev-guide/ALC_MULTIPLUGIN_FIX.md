@@ -102,6 +102,7 @@ The Abstractions cross-ALC bug was the dominant failure but not the only one blo
 | `M.E.Logging.Abstractions v9.0.0` | `v8.0.0` | Pin plugin to 8.0.3 |
 | `System.Security.Cryptography.ProtectedData v9.0.0` | `v8.0.0` | Pin Common to 8.0.0 (this PR) |
 | `FluentValidation v11.0.0` | `v9.0.0` | Per-plugin: don't bring transitively |
+| `NLog v5.x / v6.x` | `v5.4.0` | Pin plugin to 5.4.0 for host file/API parity; never cross the host boundary with NLog 6.x |
 | `Lidarr.Plugin.Common v1.7.1` | (not shipped) | Triggered by `plugin.json`'s `commonVersion` field — ensure Common is internalized into the merged DLL (already the case) |
 
 Each version mismatch produces a `Could not load <X>, Version=<plugin's version>` error during plugin discovery and prevents the plugin from being registered.

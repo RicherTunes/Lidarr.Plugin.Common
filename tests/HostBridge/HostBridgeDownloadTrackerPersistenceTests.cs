@@ -96,7 +96,7 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
     }
 
     [Fact]
-    public void PersistentStore_SurvivesRestart_InProgressItem()
+    public void PersistentStore_DropsNonTerminalItemsAfterRestart()
     {
         var path   = TempFile();
         var storeA = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
@@ -114,13 +114,20 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
         item.SetProgress(42.5);
         storeA.AddOrReplace(item);
 
+        var warnings = new List<string>();
         var storeB = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+            persistencePath: path,
+            onWarn: warnings.Add);
+
+        Assert.False(storeB.TryGet("dl-inprogress", out _));
+        Assert.Empty(storeB.GetSnapshot());
+        Assert.Contains(warnings, warning => warning.Contains("non-terminal", StringComparison.Ordinal));
+
+        var storeC = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
             persistencePath: path);
 
-        Assert.True(storeB.TryGet("dl-inprogress", out var loaded));
-        Assert.NotNull(loaded);
-        Assert.Equal(HostBridgeDownloadItemStatus.Downloading, loaded!.GetStatus());
-        Assert.Equal(42.5, loaded.GetProgress(), precision: 6);
+        Assert.False(storeC.TryGet("dl-inprogress", out _));
+        Assert.Empty(storeC.GetSnapshot());
     }
 
     [Fact]
@@ -266,9 +273,10 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
     public void InvalidStringStatus_SkipsOnlyMalformedEntryAndWarns()
     {
         var path = TempFile();
-        File.WriteAllText(path, """
+        var completedAt = DateTime.UtcNow.ToString("O");
+        File.WriteAllText(path, $$"""
 [
-  {"downloadId":"good","title":"Good","artist":"Artist","status":"Queued"},
+  {"downloadId":"good","title":"Good","artist":"Artist","status":"Completed","completedAt":"{{completedAt}}"},
   {"downloadId":"bad","title":"Bad","artist":"Artist","status":"NotAStatus"}
 ]
 """);
@@ -425,8 +433,12 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
         var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
             persistencePath: path);
 
-        store.AddOrReplace(new HostBridgeDownloadItem { DownloadId = "a", Title = "T", Artist = "A" });
-        store.AddOrReplace(new HostBridgeDownloadItem { DownloadId = "b", Title = "T", Artist = "A" });
+        var itemA = new HostBridgeDownloadItem { DownloadId = "a", Title = "T", Artist = "A", CompletedAt = DateTime.UtcNow };
+        itemA.SetStatus(HostBridgeDownloadItemStatus.Completed);
+        var itemB = new HostBridgeDownloadItem { DownloadId = "b", Title = "T", Artist = "A", CompletedAt = DateTime.UtcNow };
+        itemB.SetStatus(HostBridgeDownloadItemStatus.Completed);
+        store.AddOrReplace(itemA);
+        store.AddOrReplace(itemB);
         store.Remove("a", deleteData: false, out _);
 
         var store2 = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
@@ -485,7 +497,11 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
             Title           = "Custom Album",
             Artist          = "Custom Artist",
             ProviderAlbumId = "provider:before-restart",
+            CompletedAt     = DateTime.UtcNow,
         });
+        storeA.TryGet("custom-missing-factory", out var persistedWithoutFactory);
+        persistedWithoutFactory!.SetStatus(HostBridgeDownloadItemStatus.Completed);
+        storeA.PersistSnapshot();
 
         var warnings = new List<string>();
         var storeB = new HostBridgeDownloadTrackerStore<CustomDownloadItem>(
@@ -508,7 +524,11 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
             AlbumId    = "album-custom",
             Title      = "Custom Album",
             Artist     = "Custom Artist",
+            CompletedAt = DateTime.UtcNow,
         });
+        storeA.TryGet("custom-blank-id", out var persistedBlankId);
+        persistedBlankId!.SetStatus(HostBridgeDownloadItemStatus.Completed);
+        storeA.PersistSnapshot();
 
         var warnings = new List<string>();
         var storeB = new HostBridgeDownloadTrackerStore<CustomDownloadItem>(
@@ -532,7 +552,11 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
             AlbumId    = "album-custom",
             Title      = "Custom Album",
             Artist     = "Custom Artist",
+            CompletedAt = DateTime.UtcNow,
         });
+        storeA.TryGet("custom-original-id", out var persistedChangedId);
+        persistedChangedId!.SetStatus(HostBridgeDownloadItemStatus.Completed);
+        storeA.PersistSnapshot();
 
         var warnings = new List<string>();
         var storeB = new HostBridgeDownloadTrackerStore<CustomDownloadItem>(

@@ -18,8 +18,11 @@ If you write one of these inline, you're forking the algorithm — when the next
 ```csharp
 public sealed class MyDownloadClient : DownloadClientBase<MySettings>
 {
-    // ONE store per process. ForPlugin() persists queue state under the plugin config
-    // directory so completed-pending-import items survive a Lidarr restart.
+    // ONE store per process. ForPlugin() persists terminal queue state under the
+    // plugin config directory so completed/failed/cancelled items survive a
+    // Lidarr restart long enough for host import, blocklist, or removal.
+    // Queued/downloading entries remain process-local until a plugin implements
+    // a real resumable worker seam.
     private static readonly HostBridgeDownloadTrackerStore<HostBridgeDownloadItem> _tracker =
         HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>.ForPlugin("MyPlugin");
 
@@ -115,11 +118,13 @@ public sealed class MyIndexer : HttpIndexerBase<MySettings>
 |---|---|---|
 | `PathTraversalGuard` | `SanitizeSegment` + `IsPathWithinRoot` for defense-in-depth path containment | apple `AppleMusicLidarrDownloadClient` (May 2026) |
 | `PrefixedReleaseGuidParser` | `{indexerId}_{scheme}:album:{id}[:extra]` GUID + InfoUrl path extraction | apple + tidalarr (identical algorithm modulo scheme literal) |
-| `HostBridgeDownloadItem` + `HostBridgeDownloadTrackerStore<T>` | Thread-safe per-download tracker + optional write-through JSON persistence with retention sweep | apple + tidalarr (byte-for-byte same pattern) |
+| `HostBridgeDownloadItem` + `HostBridgeDownloadTrackerStore<T>` | Thread-safe per-download tracker + optional write-through JSON persistence for terminal items with retention sweep | apple + tidalarr (byte-for-byte same pattern) |
 | `HostBridgeDownloadItemStatus` | Status enum for the tracker (Queued/Downloading/Completed/Failed/Cancelled) | new |
 | `PlaceholderSearchUri` | `{scheme}://search?query={encoded}` roundtrip | apple + tidalarr |
 
 `HostBridgeDownloadTrackerStore<T>.ForPlugin("PluginName")` is the canonical adoption path for plugins that use `HostBridgeDownloadItem` directly. Common's `HostBridgeDownloadOrchestrator` flushes the final in-place item mutations after `doWork` exits. If a plugin mutates tracked items outside that orchestrator path, call `_tracker.PersistSnapshot()` after status/progress/completion changes that must survive restart.
+
+Persistence is intentionally terminal-state-only. Completed, failed, and cancelled entries are reloaded until retention expiry so the Lidarr host can import, blocklist, or remove them. Queued and downloading entries are dropped during startup and the cleaned snapshot is written back, because the background worker task does not survive process restart. A future resumable-download feature needs an explicit plugin worker seam instead of pretending stale in-progress JSON can finish itself.
 
 Subclass stores need an `itemFactory` so persisted base fields can be restored into the intended runtime type. The Common DTO does not persist arbitrary subclass-only fields; derive those fields from base data in the factory, or keep restart-critical state on `HostBridgeDownloadItem`.
 

@@ -179,12 +179,12 @@ public abstract partial class EcosystemParityTestBase : IDisposable
     }
 
     /// <summary>
-    /// Host-coupled dependency versions must match the Lidarr host's shipped assemblies (the version
-    /// table in each plugin's CLAUDE.md). A merged plugin DLL that references a version the host
-    /// doesn't ship causes AssemblyLoadContext / load failures in multi-plugin co-existence — the
-    /// class of bug behind the historical "ALC lifecycle" red herring. This is the deterministic,
-    /// host-DLL-free counterpart to plugin-local HostVersionCouplingTests (which reads ext/Lidarr DLLs
-    /// and is Docker-flaky). A package is only checked when the plugin references it (absence is fine).
+    /// Host-coupled dependency versions must match the Lidarr host contract (the version table in
+    /// each plugin's CLAUDE.md). A merged plugin DLL that crosses the host boundary with a different
+    /// assembly identity or API surface can fail during multi-plugin discovery. This is the
+    /// deterministic, host-DLL-free counterpart to plugin-local HostVersionCouplingTests (which reads
+    /// ext/Lidarr DLLs and is Docker-flaky). A package is only checked when the plugin references it
+    /// (absence is fine).
     ///
     /// Two complementary layers, not duplicates: this is the DECLARED-PINS layer (what
     /// Directory.Packages.props says), HostVersionCouplingTests is the RESOLVED-VERSION layer (what the
