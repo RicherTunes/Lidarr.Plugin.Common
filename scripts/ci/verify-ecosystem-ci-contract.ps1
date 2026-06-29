@@ -192,6 +192,35 @@ function Test-DocRefsLintWired {
     return [PSCustomObject]@{ Ok = $true; Reason = $null }
 }
 
+function Test-SharedPluginLintRunnerWired {
+    <#
+    .SYNOPSIS
+        Assert the plugin's .gitea/workflows/ci.yml invokes the shared Common
+        plugin lint runner, not a hand-maintained subset of today's gates.
+    .OUTPUTS
+        PSCustomObject { Ok, Reason }
+    #>
+    param(
+        [string]$PluginDir,
+        [string]$PluginName
+    )
+
+    $ciYml = Join-Path $PluginDir '.gitea/workflows/ci.yml'
+    if (-not (Test-Path -LiteralPath $ciYml)) {
+        return [PSCustomObject]@{ Ok = $false; Reason = '.gitea/workflows/ci.yml not found' }
+    }
+
+    $content = [System.IO.File]::ReadAllText($ciYml)
+    if ($content -notmatch 'run-plugin-lint-gates\.ps1') {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = '.gitea/workflows/ci.yml does not invoke run-plugin-lint-gates.ps1; hand-wired lint subsets can miss new Common gates'
+        }
+    }
+
+    return [PSCustomObject]@{ Ok = $true; Reason = $null }
+}
+
 function Test-WorkflowMirrorCount {
     <#
     .SYNOPSIS
@@ -479,11 +508,12 @@ foreach ($plugin in $plugins) {
     }
 
     $pinResult  = Test-CommonPinIntegrity  -PluginDir $pluginDir -PluginName $repoDir
-    $docResult  = Test-DocRefsLintWired    -PluginDir $pluginDir -PluginName $repoDir
-    $wfResult   = Test-WorkflowMirrorCount -PluginDir $pluginDir -Expected $expected
-    $wfvResult  = Test-WorkflowFilesValid  -PluginDir $pluginDir -PluginName $repoDir
+    $docResult  = Test-DocRefsLintWired           -PluginDir $pluginDir -PluginName $repoDir
+    $lintResult = Test-SharedPluginLintRunnerWired -PluginDir $pluginDir -PluginName $repoDir
+    $wfResult   = Test-WorkflowMirrorCount        -PluginDir $pluginDir -Expected $expected
+    $wfvResult  = Test-WorkflowFilesValid         -PluginDir $pluginDir -PluginName $repoDir
 
-    $allOk = $pinResult.Ok -and $docResult.Ok -and $wfResult.Ok -and $wfvResult.Ok
+    $allOk = $pinResult.Ok -and $docResult.Ok -and $lintResult.Ok -and $wfResult.Ok -and $wfvResult.Ok
     if (-not $allOk) { $script:anyFail = $true }
     if ($pinResult.Ok -and $pinResult.Sha) { $passingShas.Add($pinResult.Sha) | Out-Null }
 
@@ -494,6 +524,7 @@ foreach ($plugin in $plugins) {
         Write-Host "$repoDir $statusLabel" -ForegroundColor $statusColor
         if (-not $pinResult.Ok)  { Write-Host "  pin: $($pinResult.Reason)"    -ForegroundColor DarkGray }
         if (-not $docResult.Ok)  { Write-Host "  doc: $($docResult.Reason)"    -ForegroundColor DarkGray }
+        if (-not $lintResult.Ok) { Write-Host "  lint: $($lintResult.Reason)"  -ForegroundColor DarkGray }
         if (-not $wfResult.Ok)   { Write-Host "  wf:  $($wfResult.Reason)"     -ForegroundColor DarkGray }
         if (-not $wfvResult.Ok)  { Write-Host "  wfv: $($wfvResult.Reason)"    -ForegroundColor DarkGray }
     }
@@ -514,6 +545,14 @@ foreach ($plugin in $plugins) {
         }
         else {
             Write-Host "         doc : FAIL — $($docResult.Reason)" -ForegroundColor Red
+        }
+
+        # Verbose: shared lint runner
+        if ($lintResult.Ok) {
+            Write-Host "         lint: OK (shared runner)" -ForegroundColor DarkGreen
+        }
+        else {
+            Write-Host "         lint: FAIL — $($lintResult.Reason)" -ForegroundColor Red
         }
 
         # Verbose: workflow count
@@ -541,6 +580,8 @@ foreach ($plugin in $plugins) {
         PinReason  = $pinResult.Reason
         DocOk      = $docResult.Ok
         DocReason  = $docResult.Reason
+        LintOk     = $lintResult.Ok
+        LintReason = $lintResult.Reason
         WfOk       = $wfResult.Ok
         WfCount    = $wfResult.ActualCount
         WfReason   = $wfResult.Reason
