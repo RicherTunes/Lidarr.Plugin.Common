@@ -24,6 +24,8 @@ public readonly record struct HostDownloadItemView(
 /// <item><b>CanMoveFiles / CanBeRemoved on a completed download</b> — host defaults are <c>false</c>;
 /// leaving them unset makes Lidarr import copy-only and never emit a remove event (downloads pile up).
 /// tidal/apple shipped without these.</item>
+/// <item><b>CanBeRemoved on terminal failures/cancellations</b> — failed terminal entries must be
+/// user-removable, otherwise the queue has no recovery path after a provider or download error.</item>
 /// <item><b>DownloadClientInfo.Id == the client's Definition.Id (never 0)</b> — a zero id makes
 /// <c>DownloadClientProvider.Get(id)</c> throw and wedges every completed download at import.</item>
 /// <item><b>Cancelled is not reported as in-progress</b> — mapping Cancelled to Queued/Downloading
@@ -62,6 +64,27 @@ public abstract class DownloadClientHostContractTestBase
             "a completed download must set CanMoveFiles or Lidarr imports copy-only and never cleans up the source");
         Assert.True(item.CanBeRemoved,
             "a completed download must set CanBeRemoved or Lidarr never emits the post-import remove event");
+    }
+
+    [Fact]
+    public void FailedDownload_CanBeRemoved()
+    {
+        var item = Failed();
+        Assert.True(item.CanBeRemoved,
+            "a failed terminal download must set CanBeRemoved so users and Lidarr can clear the queue item");
+    }
+
+    [Fact]
+    public void CancelledDownload_CanBeRemoved_WhenSupported()
+    {
+        var cancelled = Cancelled();
+        if (cancelled is null)
+        {
+            return; // plugin has no Cancelled state — nothing to assert
+        }
+
+        Assert.True(cancelled.Value.CanBeRemoved,
+            "a cancelled terminal download must set CanBeRemoved so users and Lidarr can clear the queue item");
     }
 
     [Fact]

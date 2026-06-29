@@ -8,7 +8,7 @@ namespace Lidarr.Plugin.Common.Tests.Compliance;
 /// <summary>
 /// Self-coverage for <see cref="DownloadClientHostContractTestBase"/>: proves the shared guard PASSES on
 /// a correct projection and CATCHES each real-world violation (the tidal/apple copy-only + amazon/apple
-/// Cancelled-to-Queued + id=0 + duplicate-id bugs) — before any plugin adopts the axis. The fakes are
+/// terminal-not-removable + Cancelled-to-Queued + id=0 + duplicate-id bugs) — before any plugin adopts the axis. The fakes are
 /// private nested classes so xUnit does not discover them as tests in their own right.
 /// </summary>
 public class DownloadClientHostContractSelfCoverageTests
@@ -53,6 +53,8 @@ public class DownloadClientHostContractSelfCoverageTests
     {
         var good = new GoodProjection();
         good.CompletedDownload_CanMoveFiles_AndCanBeRemoved();
+        good.FailedDownload_CanBeRemoved();
+        good.CancelledDownload_CanBeRemoved_WhenSupported();
         good.AllItems_CarryClientDefinitionId_NotZero();
         good.CancelledDownload_IsNotReportedAsInProgress();
         good.GetItems_DedupesByDownloadId();
@@ -61,6 +63,14 @@ public class DownloadClientHostContractSelfCoverageTests
     [Fact]
     public void Base_catches_copyOnly_completed()
         => Assert.ThrowsAny<Exception>(() => new BrokenProjection().CompletedDownload_CanMoveFiles_AndCanBeRemoved());
+
+    [Fact]
+    public void Base_catches_failed_not_removable()
+        => Assert.ThrowsAny<Exception>(() => new BrokenProjection().FailedDownload_CanBeRemoved());
+
+    [Fact]
+    public void Base_catches_cancelled_not_removable()
+        => Assert.ThrowsAny<Exception>(() => new BrokenProjection().CancelledDownload_CanBeRemoved_WhenSupported());
 
     [Fact]
     public void Base_catches_cancelled_reported_as_queued()
