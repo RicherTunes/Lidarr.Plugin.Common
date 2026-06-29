@@ -132,10 +132,10 @@ parity-lint:
       shell: pwsh
       run: |
         & "ext/Lidarr.Plugin.Common/scripts/parity-lint.ps1" -Mode ci -RepoPath ...
-    - name: Ecosystem parity lint (version contract)   # Added Phase 1.5
+    - name: Ecosystem parity lint
       shell: pwsh
       run: |
-        pwsh -NoProfile -File ext/Lidarr.Plugin.Common/scripts/ecosystem-parity-lint.ps1 ...
+        pwsh -NoProfile -File ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 ...
 ```
 
 ### Proposed reusable workflow: `.github/workflows/parity-lint.yml`
@@ -147,16 +147,17 @@ on:
       submodules-token-secret-name:
         type: string
         default: 'SUBMODULES_TOKEN'
-      extra-checks:
+      parity-checks:
         type: string
-        default: 'VersionContract'
+        default: 'all'
 ```
 
 ### Benefits (Candidate 3)
 - Single PR to update both lint scripts for all 5 repos
 - Guarantees all repos run identical lint logic (no subset drift)
-- Phase 1.5's `ecosystem-parity-lint -Check VersionContract` step needs to be
-  maintained in 4 separate files today; one reusable workflow fixes this
+- The shared `run-plugin-lint-gates.ps1` path keeps structural parity,
+  version-contract parity, doc refs, date parsing, sync-over-async, and
+  test-trait policy together so repos cannot accidentally run a subset.
 
 ### Risks / blockers (Candidate 3)
 - The `parity-lint` job has repo-specific submodule token secret names

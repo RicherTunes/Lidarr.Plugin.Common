@@ -177,7 +177,7 @@ try {
     Assert-True 'Date parsing gate receives repo path and CI mode' (($lines -join "`n") -match 'date\|.*-Path .*fake-plugin.* -Mode ci') ($lines -join "`n")
     Assert-True 'Sync-over-async gate receives repo path and CI mode' (($lines -join "`n") -match 'sync\|.*-Path .*fake-plugin.* -Mode ci') ($lines -join "`n")
     Assert-True 'Trait policy gate receives repo path and CI flag' (($lines -join "`n") -match 'traits\|.*-Path .*fake-plugin.* -CI') ($lines -join "`n")
-    Assert-True 'Parity gate receives version-contract check' (($lines -join "`n") -match 'parity\|.*-RepoPath .*fake-plugin.* -CommonRoot .*Lidarr\.Plugin\.Common.* -Check VersionContract\s+-Mode ci') ($lines -join "`n")
+    Assert-True 'Parity gate receives full ecosystem check' (($lines -join "`n") -match 'parity\|.*-RepoPath .*fake-plugin.* -CommonRoot .*Lidarr\.Plugin\.Common.* -Check all\s+-Mode ci') ($lines -join "`n")
     Assert-True 'Doc-refs gate receives plugin repo root and CI flag' (($lines -join "
 ") -match 'doc-refs\|.*-RepoRoot .*fake-plugin.* -CI') ($lines -join "
 ")
@@ -243,6 +243,19 @@ try {
     $skipLines = @(if (Test-Path $log) { Get-Content $log } else { @() })
     Assert-True '-SkipDocRefs causes runner to exit successfully' ($result.ExitCode -eq 0) $result.Output
     Assert-True '-SkipDocRefs omits doc-refs gate from invocation log' (-not (($skipLines -join "`n") -match 'doc-refs\|')) ($skipLines -join "`n")
+
+    Write-Host "`n[TEST 7] -SkipEcosystemParity suppresses the parity gate..." -ForegroundColor Cyan
+    Remove-Item $log -Force -ErrorAction SilentlyContinue
+    $result = Invoke-Runner -RunnerArgs @(
+        '-RepoPath', $repo,
+        '-CommonRoot', $common,
+        '-Mode', 'ci',
+        '-SkipEcosystemParity',
+        '-SkipPluginContractTests'
+    )
+    $skipParityLines = @(if (Test-Path $log) { Get-Content $log } else { @() })
+    Assert-True '-SkipEcosystemParity causes runner to exit successfully' ($result.ExitCode -eq 0) $result.Output
+    Assert-True '-SkipEcosystemParity omits parity gate from invocation log' (-not (($skipParityLines -join "`n") -match 'parity\|')) ($skipParityLines -join "`n")
 
     $total = $passed + $failed
     Write-Host "Results: $passed/$total passed, $failed failed" -ForegroundColor $(if ($failed -eq 0) { 'Green' } else { 'Red' })
