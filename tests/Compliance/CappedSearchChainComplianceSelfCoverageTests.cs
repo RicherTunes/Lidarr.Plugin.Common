@@ -48,6 +48,23 @@ public class CappedSearchChainComplianceSelfCoverageTests
         }
     }
 
+    // Broken: preserves only the exact artist fallback and drops the rest of the artist-only fallback tier.
+    private sealed class DropsSecondaryArtistOnlyFallback : CappedSearchChainComplianceTestBase
+    {
+        protected override string PlaceholderScheme => Scheme;
+        protected override int MaxOverSpecificQueries => Cap;
+        protected override string GetExpectedArtistOnlyFallbackQuery(string artist, string album) => artist;
+        protected override IReadOnlyList<string> GetExpectedArtistOnlyFallbackQueries(string artist, string album) =>
+            new[] { artist, $"{artist} folded" };
+
+        protected override IReadOnlyList<string> GetSearchRequestUrls(string artist, string album)
+        {
+            var overSpecific = new[] { $"{artist} {album}", $"{album} {artist}" };
+            var queries = CappedSearchChain.Build(overSpecific, artistOnlyFallback: artist, maxOverSpecific: Cap);
+            return queries.Select(q => PlaceholderSearchUri.Build(Scheme, q)).ToList();
+        }
+    }
+
     // Broken: issues 3 over-specific queries bypassing CappedSearchChain.Build, exceeding cap=2.
     private sealed class ExceedsCap : CappedSearchChainComplianceTestBase
     {
@@ -74,6 +91,11 @@ public class CappedSearchChainComplianceSelfCoverageTests
     public void Base_catches_dropped_artist_only_fallback()
         => Assert.ThrowsAny<Exception>(() =>
             new DropsArtistOnlyFallback().ArtistOnlyFallback_IsAlwaysPresent());
+
+    [Fact]
+    public void Base_catches_dropped_artist_only_fallback_variant()
+        => Assert.ThrowsAny<Exception>(() =>
+            new DropsSecondaryArtistOnlyFallback().ArtistOnlyFallback_IsAlwaysPresent());
 
     [Fact]
     public void Base_catches_exceeded_cap()

@@ -37,6 +37,17 @@ public sealed class CappedSearchChainTests
     }
 
     [Fact]
+    public void AlwaysAppendsArtistOnlyFallbackVariants_EvenWhenOverSpecificExceedsCap()
+    {
+        var result = CappedSearchChain.Build(
+            new[] { "q1", "q2", "q3", "q4" },
+            artistOnlyFallbacks: new[] { "AC/DC", "AC DC", "ACDC" },
+            maxOverSpecific: 2);
+
+        Assert.Equal(new[] { "q1", "q2", "AC/DC", "AC DC", "ACDC" }, result);
+    }
+
+    [Fact]
     public void DropsBlankAndWhitespaceQueries_PreservingOrder()
     {
         var result = CappedSearchChain.Build(
