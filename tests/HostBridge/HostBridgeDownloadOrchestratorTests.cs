@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.HostBridge;
@@ -58,6 +59,27 @@ public class HostBridgeDownloadOrchestratorTests
             OutputPath = s.DownloadPath,
             StartedAt = DateTime.UtcNow
         };
+
+    private static async Task<HostBridgeDownloadItem> WaitForPersistedItemAsync(
+        string path,
+        string downloadId,
+        Func<HostBridgeDownloadItem, bool> predicate)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(5);
+        while (DateTime.UtcNow < deadline)
+        {
+            var reloaded = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+                persistencePath: path);
+            if (reloaded.TryGet(downloadId, out var loaded) && loaded is not null && predicate(loaded))
+            {
+                return loaded;
+            }
+
+            await Task.Delay(50);
+        }
+
+        throw new TimeoutException("Persisted tracker state did not match the expected predicate.");
+    }
 
     // ---------------------------------------------------------------------------
     // Test 1: Returns a GUID-shaped (32 hex chars, no hyphens) string
@@ -197,6 +219,52 @@ public class HostBridgeDownloadOrchestratorTests
         doWorkCanFinish.Release();
         // Let it drain (not required for correctness, just avoids test teardown warnings)
         await Task.Delay(50);
+    }
+
+    [Fact]
+    public async Task StartTrackedDownloadAsync_PersistsFinalItemStateAfterDoWorkMutation()
+    {
+        var path = Path.Combine(Path.GetTempPath(), "hbd-orchestrator-" + Guid.NewGuid().ToString("N"), "tracker.json");
+        try
+        {
+            var orchestrator = MakeOrchestrator();
+            var tracker = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+                persistencePath: path);
+            var settings = new TestSettings();
+            var doWorkFinished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var downloadId = await orchestrator.StartTrackedDownloadAsync(
+                settings,
+                tracker,
+                Snapshotter(),
+                ItemFactory(),
+                doWork: (_, __, item, ____) =>
+                {
+                    item.SetStatus(HostBridgeDownloadItemStatus.Completed);
+                    item.SetProgress(100);
+                    item.CompletedAt = DateTime.UtcNow;
+                    doWorkFinished.TrySetResult(true);
+                    return Task.CompletedTask;
+                });
+
+            await doWorkFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var loaded = await WaitForPersistedItemAsync(
+                path,
+                downloadId,
+                item => item.GetStatus() == HostBridgeDownloadItemStatus.Completed &&
+                        Math.Abs(item.GetProgress() - 100) < 0.0001 &&
+                        item.CompletedAt.HasValue);
+
+            Assert.Equal(downloadId, loaded.DownloadId);
+        }
+        finally
+        {
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                try { Directory.Delete(dir, recursive: true); } catch { /* best-effort */ }
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------

@@ -227,6 +227,7 @@ public sealed class HostBridgeDownloadOrchestrator
             }
             finally
             {
+                tracker.PersistSnapshot();
                 linkedCancellationSource?.Dispose();
                 try
                 {

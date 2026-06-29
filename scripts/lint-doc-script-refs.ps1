@@ -136,7 +136,10 @@ if ($SelfTest) {
 
 $RepoRoot = (Resolve-Path $RepoRoot).Path
 $mdFiles = Get-ChildItem -Path $RepoRoot -Recurse -Filter *.md -File -ErrorAction SilentlyContinue |
-    Where-Object { $_.FullName -notmatch '[\\/](node_modules|bin|obj|\.git|ext)[\\/]' }
+    Where-Object {
+        $_.FullName -notmatch '[\\/](node_modules|bin|obj|\.git|ext|\.worktrees)[\\/]' -and
+        $_.FullName -notmatch '[\\/]\.claude[\\/]worktrees[\\/]'
+    }
 
 $missingScript   = @()
 $missingWorkflow = @()

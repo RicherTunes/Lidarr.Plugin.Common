@@ -18,9 +18,10 @@ If you write one of these inline, you're forking the algorithm — when the next
 ```csharp
 public sealed class MyDownloadClient : DownloadClientBase<MySettings>
 {
-    // ONE store per process. Lidarr can re-instantiate the client between queue polls;
-    // the static keeps GetItems() consistent across instances.
-    private static readonly HostBridgeDownloadTrackerStore<HostBridgeDownloadItem> _tracker = new();
+    // ONE store per process. ForPlugin() persists queue state under the plugin config
+    // directory so completed-pending-import items survive a Lidarr restart.
+    private static readonly HostBridgeDownloadTrackerStore<HostBridgeDownloadItem> _tracker =
+        HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>.ForPlugin("MyPlugin");
 
     public override Task<string> Download(RemoteAlbum remoteAlbum, IIndexer indexer)
     {
@@ -52,7 +53,17 @@ public sealed class MyDownloadClient : DownloadClientBase<MySettings>
         item.SetStatus(HostBridgeDownloadItemStatus.Downloading);
         _tracker.AddOrReplace(item);
 
-        _ = Task.Run(() => ExecuteAsync(item, snapshot));
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ExecuteAsync(item, snapshot).ConfigureAwait(false);
+            }
+            finally
+            {
+                _tracker.PersistSnapshot();
+            }
+        });
         return Task.FromResult(item.DownloadId);
     }
 
@@ -104,9 +115,13 @@ public sealed class MyIndexer : HttpIndexerBase<MySettings>
 |---|---|---|
 | `PathTraversalGuard` | `SanitizeSegment` + `IsPathWithinRoot` for defense-in-depth path containment | apple `AppleMusicLidarrDownloadClient` (May 2026) |
 | `PrefixedReleaseGuidParser` | `{indexerId}_{scheme}:album:{id}[:extra]` GUID + InfoUrl path extraction | apple + tidalarr (identical algorithm modulo scheme literal) |
-| `HostBridgeDownloadItem` + `HostBridgeDownloadTrackerStore<T>` | Thread-safe per-download tracker + ConcurrentDictionary store with retention sweep | apple + tidalarr (byte-for-byte same pattern) |
-| `HostBridgeDownloadItemStatus` | Status enum for the tracker (Queued/Downloading/Completed/Failed) | new |
+| `HostBridgeDownloadItem` + `HostBridgeDownloadTrackerStore<T>` | Thread-safe per-download tracker + optional write-through JSON persistence with retention sweep | apple + tidalarr (byte-for-byte same pattern) |
+| `HostBridgeDownloadItemStatus` | Status enum for the tracker (Queued/Downloading/Completed/Failed/Cancelled) | new |
 | `PlaceholderSearchUri` | `{scheme}://search?query={encoded}` roundtrip | apple + tidalarr |
+
+`HostBridgeDownloadTrackerStore<T>.ForPlugin("PluginName")` is the canonical adoption path for plugins that use `HostBridgeDownloadItem` directly. Common's `HostBridgeDownloadOrchestrator` flushes the final in-place item mutations after `doWork` exits. If a plugin mutates tracked items outside that orchestrator path, call `_tracker.PersistSnapshot()` after status/progress/completion changes that must survive restart.
+
+Subclass stores need an `itemFactory` so persisted base fields can be restored into the intended runtime type. The Common DTO does not persist arbitrary subclass-only fields; derive those fields from base data in the factory, or keep restart-critical state on `HostBridgeDownloadItem`.
 
 Related helpers in sibling namespaces:
 
