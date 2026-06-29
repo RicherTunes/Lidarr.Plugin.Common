@@ -412,6 +412,37 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
         }
     }
 
+    [Fact]
+    public void ForPlugin_DropsNonTerminalPersistedItemsAfterRestart()
+    {
+        Environment.SetEnvironmentVariable("LIDARR_PLUGIN_CONFIG", _tempDir);
+        try
+        {
+            var first = HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>.ForPlugin("RestartPlugin");
+            var inProgress = new HostBridgeDownloadItem
+            {
+                DownloadId = "restart-downloading",
+                Title = "In Progress",
+                Artist = "Artist",
+            };
+            inProgress.SetStatus(HostBridgeDownloadItemStatus.Downloading);
+            first.AddOrReplace(inProgress);
+
+            var expectedPath = Path.Combine(_tempDir, "RestartPlugin", "download-tracker.json");
+            Assert.True(File.Exists(expectedPath));
+
+            var restarted = HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>.ForPlugin("RestartPlugin");
+
+            Assert.False(restarted.TryGet("restart-downloading", out _));
+            Assert.Empty(restarted.GetSnapshot());
+            Assert.DoesNotContain("restart-downloading", File.ReadAllText(expectedPath), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("LIDARR_PLUGIN_CONFIG", null);
+        }
+    }
+
     [Theory]
     [InlineData("../escape")]
     [InlineData("..\\escape")]
