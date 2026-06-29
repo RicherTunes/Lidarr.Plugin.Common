@@ -41,6 +41,33 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
             int maxOverSpecific,
             IEqualityComparer<string>? comparer = null)
         {
+            var fallbackTier = string.IsNullOrWhiteSpace(artistOnlyFallback)
+                ? Enumerable.Empty<string>()
+                : new[] { artistOnlyFallback };
+
+            return Build(overSpecificQueries, fallbackTier, maxOverSpecific, comparer);
+        }
+
+        /// <summary>
+        /// Builds the final ordered query list: at most <paramref name="maxOverSpecific"/> of the
+        /// (de-duplicated, blank-dropped, best-first) <paramref name="overSpecificQueries"/>, then every
+        /// non-blank unique value from <paramref name="artistOnlyFallbacks"/> appended in order.
+        /// </summary>
+        /// <param name="overSpecificQueries">Best-first combined / album-only query candidates. Null entries
+        /// and blank/whitespace entries are dropped; duplicates are removed (first occurrence wins).</param>
+        /// <param name="artistOnlyFallbacks">The artist-only catalogue fallback tier. Appended last and never
+        /// subject to the cap. Null/blank values are ignored; duplicates are removed against both the capped
+        /// over-specific set and earlier fallback variants.</param>
+        /// <param name="maxOverSpecific">Maximum over-specific queries to issue (values &lt;= 0 issue none,
+        /// leaving only the fallback tier).</param>
+        /// <param name="comparer">Equality used for de-dup + fallback presence checks. Defaults to
+        /// <see cref="StringComparer.OrdinalIgnoreCase"/>.</param>
+        public static IReadOnlyList<string> Build(
+            IEnumerable<string> overSpecificQueries,
+            IEnumerable<string> artistOnlyFallbacks,
+            int maxOverSpecific,
+            IEqualityComparer<string>? comparer = null)
+        {
             comparer ??= StringComparer.OrdinalIgnoreCase;
 
             // De-duplicate and drop blank queries while preserving best-first order.
@@ -55,10 +82,13 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
 
             var selected = ordered.Take(Math.Max(0, maxOverSpecific)).ToList();
 
-            // Guarantee the artist-only fallback is always issued (never truncated by the cap).
-            if (!string.IsNullOrWhiteSpace(artistOnlyFallback) && !selected.Contains(artistOnlyFallback, comparer))
+            // Guarantee the artist-only fallback tier is always issued (never truncated by the cap).
+            foreach (var fallback in artistOnlyFallbacks ?? Enumerable.Empty<string>())
             {
-                selected.Add(artistOnlyFallback);
+                if (!string.IsNullOrWhiteSpace(fallback) && !selected.Contains(fallback, comparer))
+                {
+                    selected.Add(fallback);
+                }
             }
 
             return selected;
