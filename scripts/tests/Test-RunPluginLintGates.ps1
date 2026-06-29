@@ -257,6 +257,19 @@ try {
     Assert-True '-SkipEcosystemParity causes runner to exit successfully' ($result.ExitCode -eq 0) $result.Output
     Assert-True '-SkipEcosystemParity omits parity gate from invocation log' (-not (($skipParityLines -join "`n") -match 'parity\|')) ($skipParityLines -join "`n")
 
+    Write-Host "`n[TEST 8] Legacy -SkipVersionContract alias suppresses the parity gate..." -ForegroundColor Cyan
+    Remove-Item $log -Force -ErrorAction SilentlyContinue
+    $result = Invoke-Runner -RunnerArgs @(
+        '-RepoPath', $repo,
+        '-CommonRoot', $common,
+        '-Mode', 'ci',
+        '-SkipVersionContract',
+        '-SkipPluginContractTests'
+    )
+    $skipParityLines = @(if (Test-Path $log) { Get-Content $log } else { @() })
+    Assert-True 'Legacy -SkipVersionContract alias causes runner to exit successfully' ($result.ExitCode -eq 0) $result.Output
+    Assert-True 'Legacy -SkipVersionContract alias omits parity gate from invocation log' (-not (($skipParityLines -join "`n") -match 'parity\|')) ($skipParityLines -join "`n")
+
     $total = $passed + $failed
     Write-Host "Results: $passed/$total passed, $failed failed" -ForegroundColor $(if ($failed -eq 0) { 'Green' } else { 'Red' })
     Write-Host '=================================================' -ForegroundColor Cyan

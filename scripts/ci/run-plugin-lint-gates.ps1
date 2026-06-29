@@ -18,8 +18,8 @@ param(
     [switch]$SkipDateParsing,
     [switch]$SkipSyncOverAsync,
     [switch]$SkipTestTraits,
-    [Alias('SkipEcosystemParity')]
-    [switch]$SkipVersionContract,
+    [Alias('SkipVersionContract')]
+    [switch]$SkipEcosystemParity,
     [switch]$SkipPluginContractTests,
     [switch]$SkipDocRefs
 )
@@ -152,7 +152,7 @@ try {
             -Arguments @('-Path', $resolvedRepoPath, '-CI')
     }
 
-    if (-not $SkipVersionContract) {
+    if (-not $SkipEcosystemParity) {
         Invoke-LintGate `
             -Name 'Ecosystem parity' `
             -ScriptPath (Join-Path $resolvedCommonRoot 'scripts/ecosystem-parity-lint.ps1') `
