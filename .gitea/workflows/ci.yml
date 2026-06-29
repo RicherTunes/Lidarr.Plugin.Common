@@ -121,6 +121,12 @@ jobs:
       - name: Ecosystem CI-contract self-test
         shell: pwsh
         run: ./scripts/tests/Test-EcosystemCiContract.ps1
+      - name: Workflow content integrity self-test (F2)
+        shell: pwsh
+        run: ./scripts/tests/Test-WorkflowContentsValid.ps1
+      - name: Test-project dropout guard self-test (F4)
+        shell: pwsh
+        run: ./scripts/tests/Test-VerifyTestProjectsGated.ps1
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
