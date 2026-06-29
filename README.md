@@ -5,7 +5,7 @@ Shared utilities, resilience policies, and packaging helpers for Lidarr streamin
 [![NuGet (Common)](https://img.shields.io/nuget/v/Lidarr.Plugin.Common?logo=nuget)](https://www.nuget.org/packages/Lidarr.Plugin.Common)
 [![NuGet (Abstractions)](https://img.shields.io/nuget/v/Lidarr.Plugin.Abstractions?logo=nuget)](https://www.nuget.org/packages/Lidarr.Plugin.Abstractions)
 
-> **CI:** The primary CI target is the self-hosted **Gitea** instance (`.gitea/workflows/ci.yml`); GitHub Actions hosts peripheral workflows. Plugin re-pins to a new Common SHA adopt the Common-owned deterministic test policy automatically.
+> **CI:** The primary CI target is the self-hosted **Gitea** instance (`.gitea/workflows/ci.yml`); GitHub Actions workflows are mirror/peripheral where present. Plugin re-pins to a new Common SHA adopt the Common-owned deterministic test policy automatically.
 
 ## Quick start
 
@@ -40,7 +40,7 @@ Latest release: v1.17.0 — May 25, 2026. Current dev: **v1.18.0-dev** (unreleas
 
 Release notes: [v1.17.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.17.0) · [v1.16.0](https://github.com/RicherTunes/Lidarr.Plugin.Common/releases/tag/v1.16.0)
 
-Ecosystem-wide parity (every plugin × every cross-cutting concern): see [docs/ECOSYSTEM_PARITY_MATRIX.md](docs/ECOSYSTEM_PARITY_MATRIX.md).
+Ecosystem parity evidence and the current five-plugin CI contract: see [docs/ECOSYSTEM_PARITY_MATRIX.md](docs/ECOSYSTEM_PARITY_MATRIX.md) and [wiki/Ecosystem-Parity-and-Guards.md](wiki/Ecosystem-Parity-and-Guards.md).
 
 ## Choose your adventure
 

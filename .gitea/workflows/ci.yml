@@ -21,7 +21,9 @@ jobs:
           # GITHUB_HEAD_REF is set for pull_request events (source branch name).
           # GITHUB_REF_NAME is set for push and workflow_dispatch events.
           BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
-          git clone --depth=50 --branch "$BRANCH" \
+          AUTH_HEADER="$(printf 'x-access-token:%s' '${{ secrets.GITHUB_TOKEN }}' | base64 | tr -d '\n')"
+          git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            clone --depth=50 --branch "$BRANCH" \
             "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
       - name: Install .NET SDK
         shell: bash
@@ -80,7 +82,9 @@ jobs:
         run: |
           set -e
           BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
-          git clone --depth=50 --branch "$BRANCH" \
+          AUTH_HEADER="$(printf 'x-access-token:%s' '${{ secrets.GITHUB_TOKEN }}' | base64 | tr -d '\n')"
+          git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            clone --depth=50 --branch "$BRANCH" \
             "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
       # The bare runner image has no pwsh; fetch the self-contained release tarball directly.
       - name: Install PowerShell
@@ -138,7 +142,9 @@ jobs:
         run: |
           set -e
           BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
-          git clone --depth=50 --branch "$BRANCH" \
+          AUTH_HEADER="$(printf 'x-access-token:%s' '${{ secrets.GITHUB_TOKEN }}' | base64 | tr -d '\n')"
+          git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            clone --depth=50 --branch "$BRANCH" \
             "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
       - name: gitleaks (secret scan)
         run: |

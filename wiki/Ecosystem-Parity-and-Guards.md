@@ -1,11 +1,12 @@
 # Ecosystem Parity and Guards
 
-`lidarr.plugin.common` is the single source of truth for every shared concern across the plugin ecosystem (Tidalarr, Qobuzarr, AppleMusicarr, Brainarr). Parity — the guarantee that all plugins follow the same canonical patterns — is enforced mechanically through guard tests shipped in Common's testkit, not by convention alone.
+`lidarr.plugin.common` is the single source of truth for every shared concern across the plugin ecosystem (Amazonmusicarr, AppleMusicarr, Brainarr, Qobuzarr, Tidalarr). Parity — the guarantee that all plugins follow the same canonical patterns — is enforced mechanically through guard tests shipped in Common's testkit, not by convention alone.
 
 ## How parity is tracked
 
-- **[Ecosystem Parity Matrix](../docs/ECOSYSTEM_PARITY_MATRIX.md)** — the single source of truth for per-plugin, per-concern adoption status (packaging, auth lifecycle, concurrency, E2E gates, etc.). Every cell links to source evidence.
+- **[Ecosystem Parity Matrix](../docs/ECOSYSTEM_PARITY_MATRIX.md)** — the historical per-plugin, per-concern adoption matrix for the original four-plugin set. It is still useful evidence, but Amazonmusicarr must be added before treating it as complete current coverage.
 - **[Ecosystem Parity Roadmap](../docs/ECOSYSTEM_PARITY_ROADMAP.md)** — current progress toward full structural and behavioral parity, with notes on architecturally-applicable divergences (e.g. AppleMusicarr is metadata-only, so download orchestration axes are N/A).
+- **Executable CI contract** — [`scripts/ci/ecosystem-repos.json`](../scripts/ci/ecosystem-repos.json) and [`scripts/ci/verify-ecosystem-ci-contract.ps1`](../scripts/ci/verify-ecosystem-ci-contract.ps1) are the current source of truth for active plugin repos and their CI shape.
 
 ## How parity is enforced
 
@@ -28,4 +29,4 @@ Before a new Common release propagates to all plugins:
 
 ## Summary
 
-For plugin authors: if Common already solves a problem, use Common's implementation — the parity guards will catch drift. Start with the [Parity Matrix](../docs/ECOSYSTEM_PARITY_MATRIX.md) to see what is covered, and inherit `EcosystemParityTestBase` in your plugin's test project to run the same checks locally.
+For plugin authors: if Common already solves a problem, use Common's implementation — the parity guards should catch drift. Start with the [Parity Matrix](../docs/ECOSYSTEM_PARITY_MATRIX.md) to see the legacy evidence set, then check the executable CI contract for the current five-plugin repo list. Inherit `EcosystemParityTestBase` in your plugin's test project to run the same checks locally.
