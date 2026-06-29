@@ -94,6 +94,7 @@ try {
             [string]$Dir,
             [string]$SentinelSha,       # SHA written to ext-common-sha.txt (may differ from gitlink)
             [bool]$WireDocRefs = $true,
+            [bool]$WireSharedRunner = $true,
             [int]$GithubWorkflowCount = 0
         )
         New-Item -ItemType Directory -Path $Dir -Force | Out-Null
@@ -116,7 +117,20 @@ try {
         # Create .gitea/workflows/ci.yml — must include 'on:' + 'jobs:' for F2 validity check
         New-Item -Path (Join-Path $Dir '.gitea/workflows') -ItemType Directory -Force | Out-Null
         $ciYmlPath = Join-Path $Dir '.gitea/workflows/ci.yml'
-        if ($WireDocRefs) {
+        if ($WireSharedRunner) {
+            Set-Content $ciYmlPath 'name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Shared plugin lint gates
+        run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoPath . -CommonRoot ext/Lidarr.Plugin.Common -Mode ci'
+        }
+        elseif ($WireDocRefs) {
             Set-Content $ciYmlPath 'name: CI
 on:
   push:
@@ -172,7 +186,7 @@ jobs:
 
     # --- Plugin C: no doc-refs lint in ci.yml (FAIL) ---------------------
     $DirC = Join-Path $TempDir 'plugin-no-docref'
-    New-FakePlugin -Dir $DirC -SentinelSha $FakeCommonSha -WireDocRefs $false -GithubWorkflowCount 0
+    New-FakePlugin -Dir $DirC -SentinelSha $FakeCommonSha -WireDocRefs $false -WireSharedRunner $false -GithubWorkflowCount 0
 
     # --- Plugin D: undeclared .github/workflows file (FAIL) --------------
     # manifest expects 0 but dir has 1
@@ -256,6 +270,28 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
         $tmpDir = Join-Path $TempDir 'no-ci-yml'
         New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
         $r = Test-DocRefsLintWired -PluginDir $tmpDir -PluginName 'no-ci-yml'
+        $r.Ok -eq $false
+    }
+
+    Write-Host ''
+    Write-Host 'Unit tests: Test-SharedPluginLintRunnerWired' -ForegroundColor White
+
+    Test-Assertion 'Shared lint runner: wired plugin A returns Ok=$true' {
+        $r = Test-SharedPluginLintRunnerWired -PluginDir $DirA -PluginName 'plugin-pass'
+        $r.Ok -eq $true
+    }
+
+    Test-Assertion 'Shared lint runner: direct doc-ref-only workflow returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-direct-docref-only'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -WireSharedRunner $false -GithubWorkflowCount 0
+        $r = Test-SharedPluginLintRunnerWired -PluginDir $tmpDir -PluginName 'direct-docref-only'
+        $r.Ok -eq $false
+    }
+
+    Test-Assertion 'Shared lint runner: missing ci.yml returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-no-ci-shared-runner'
+        New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+        $r = Test-SharedPluginLintRunnerWired -PluginDir $tmpDir -PluginName 'no-ci-yml'
         $r.Ok -eq $false
     }
 
