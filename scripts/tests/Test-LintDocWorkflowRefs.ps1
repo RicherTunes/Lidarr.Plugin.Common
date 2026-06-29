@@ -11,7 +11,8 @@
       1. Missing workflow ref  -> lint must fail (exit 1)
       2. Present workflow ref  -> lint must pass (exit 0)
       3. docval:ignore-workflow-refs opt-out -> lint must pass despite missing ref
-      4. -SelfTest includes workflow pattern cases and passes
+      4. .claude/worktrees markdown is ignored
+      5. -SelfTest includes workflow pattern cases and passes
 #>
 $ErrorActionPreference = 'Stop'
 $lintScript = Join-Path $PSScriptRoot '..' 'lint-doc-script-refs.ps1'
@@ -92,12 +93,32 @@ Plugins configure `.github/workflows/release.yml` themselves."
     }
 } finally { Remove-TempRepoRoot $root3 }
 
-# Test 4: -SelfTest includes workflow pattern cases and passes
+# Test 4: generated Claude worktrees are not repo docs
+$root4 = New-TempRepoRoot
+try {
+    $agentDocs = Join-Path $root4 '.claude/worktrees/agent-1/docs'
+    New-Item -ItemType Directory -Path $agentDocs -Force | Out-Null
+    [System.IO.File]::WriteAllText(
+        (Join-Path $agentDocs 'stale.md'),
+        "# Generated worktree doc
+
+Mentions `.github/workflows/missing.yml`, but this worktree is not part of repo docs."
+    )
+    $code = Invoke-Lint $root4
+    if ($code -eq 0) {
+        Write-Host "[PASS] Test 4: .claude/worktrees markdown is ignored (exit $code)" -ForegroundColor Green
+    } else {
+        Write-Host "[FAIL] Test 4: .claude/worktrees content should be ignored but got exit $code" -ForegroundColor Red
+        $fail++
+    }
+} finally { Remove-TempRepoRoot $root4 }
+
+# Test 5: -SelfTest includes workflow pattern cases and passes
 $null = & $pwsh -NonInteractive -File $lintScript -SelfTest -CI
 if ($LASTEXITCODE -eq 0) {
-    Write-Host "[PASS] Test 4: -SelfTest passes (workflow pattern cases included)" -ForegroundColor Green
+    Write-Host "[PASS] Test 5: -SelfTest passes (workflow pattern cases included)" -ForegroundColor Green
 } else {
-    Write-Host "[FAIL] Test 4: -SelfTest failed (check workflow self-test cases)" -ForegroundColor Red
+    Write-Host "[FAIL] Test 5: -SelfTest failed (check workflow self-test cases)" -ForegroundColor Red
     $fail++
 }
 

@@ -201,8 +201,9 @@ public sealed class HostBridgeDownloadItemDto
 ///
 /// <para><strong>Plugin adoption</strong>: change the static store declaration from
 /// <c>new()</c> to <c>ForPlugin("MyPluginName")</c> — one line, zero other wiring.
-/// Plugins with <c>TItem</c> subclasses that carry extra fields must also supply an
-/// <c>itemFactory</c> lambda so those fields survive the DTO round-trip.</para>
+/// Plugins with <c>TItem</c> subclasses must supply an <c>itemFactory</c> lambda to
+/// restore the subclass shape from persisted base fields. Subclass-only fields are not
+/// serialized by the Common DTO unless they are derivable in that factory.</para>
 ///
 /// <para><strong>Retention</strong>: completed/failed/cancelled items are evicted from
 /// <see cref="GetSnapshot"/> after the configured retention window. In-progress items are
@@ -243,9 +244,9 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     /// </param>
     /// <param name="itemFactory">
     /// Factory to reconstruct a <typeparamref name="TItem"/> from a persisted DTO. Required
-    /// only when <typeparamref name="TItem"/> is a subclass with extra fields that must
-    /// survive a restart. Defaults to a cast from the base <see cref="HostBridgeDownloadItem"/>
-    /// — valid when <typeparamref name="TItem"/> IS <see cref="HostBridgeDownloadItem"/>.
+    /// when <typeparamref name="TItem"/> is a subclass. Defaults to a cast from the base
+    /// <see cref="HostBridgeDownloadItem"/> — valid when <typeparamref name="TItem"/> IS
+    /// <see cref="HostBridgeDownloadItem"/>.
     /// </param>
     /// <param name="onWarn">
     /// Optional callback invoked with a human-readable message when the persistence file
@@ -306,6 +307,14 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     {
         if (string.IsNullOrWhiteSpace(pluginName))
             throw new ArgumentException("Plugin name must be non-empty.", nameof(pluginName));
+        if (pluginName is "." or ".." ||
+            Path.IsPathRooted(pluginName) ||
+            pluginName.Contains('/') ||
+            pluginName.Contains('\\') ||
+            pluginName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+        {
+            throw new ArgumentException("Plugin name must be a single directory name.", nameof(pluginName));
+        }
 
         var configRoot = PluginConfigRoots.Resolve(pluginName);
         var path       = Path.Combine(configRoot, "download-tracker.json");
@@ -453,13 +462,23 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         return true;
     }
 
+    /// <summary>
+    /// Persist the current in-memory tracker state immediately. No-op for stores created
+    /// without a <c>persistencePath</c>.
+    ///
+    /// <para>Call this after mutating a tracked item in-place when the mutation happens
+    /// outside Common's <see cref="HostBridgeDownloadOrchestrator"/>. Add/remove/eviction
+    /// already flush automatically.</para>
+    /// </summary>
+    public void PersistSnapshot() => PersistToDisk();
+
     // ─── Persistence internals ────────────────────────────────────────────────
 
     private static TItem DefaultItemFactory(HostBridgeDownloadItemDto dto)
     {
         // Correct for the common case where TItem == HostBridgeDownloadItem.
-        // Plugins with a TItem subclass that carries extra persisted fields MUST supply
-        // an itemFactory to the constructor (or ForPlugin) to avoid losing those fields.
+        // Plugins with a TItem subclass MUST supply an itemFactory to the constructor
+        // (or ForPlugin) so the restored item has the intended runtime type.
         if (typeof(TItem) != typeof(HostBridgeDownloadItem))
         {
             throw new InvalidOperationException(
@@ -483,15 +502,40 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             if (string.IsNullOrWhiteSpace(json))
                 return;
 
-            var dtos = JsonSerializer.Deserialize<List<HostBridgeDownloadItemDto>>(json, _jsonOptions);
-            if (dtos == null)
+            using var document = JsonDocument.Parse(json);
+            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                _onWarn?.Invoke(
+                    $"HostBridgeDownloadTrackerStore: could not load persistence file '{_persistencePath}' — " +
+                    "starting with empty store. Reason: root JSON value is not an array.");
                 return;
+            }
 
             var now = DateTime.UtcNow;
-            foreach (var dto in dtos)
+            foreach (var element in document.RootElement.EnumerateArray())
             {
+                HostBridgeDownloadItemDto? dto;
+                try
+                {
+                    dto = element.Deserialize<HostBridgeDownloadItemDto>(_jsonOptions);
+                }
+                catch (Exception ex)
+                {
+                    _onWarn?.Invoke(
+                        $"HostBridgeDownloadTrackerStore: skipping persistence entry — could not deserialize: {ex.Message}");
+                    continue;
+                }
+
+                if (dto == null)
+                    continue;
                 if (string.IsNullOrWhiteSpace(dto.DownloadId))
                     continue;
+                if (!Enum.IsDefined(typeof(HostBridgeDownloadItemStatus), dto.Status))
+                {
+                    _onWarn?.Invoke(
+                        $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — invalid status '{dto.Status}'.");
+                    continue;
+                }
 
                 // Skip entries already past retention window — no need to resurrect stale data.
                 if ((dto.Status == HostBridgeDownloadItemStatus.Completed ||
@@ -506,8 +550,20 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 try
                 {
                     var item = _itemFactory(dto);
-                    if (item is not null)
-                        _items[item.DownloadId] = item;
+                    if (item is null || string.IsNullOrWhiteSpace(item.DownloadId))
+                    {
+                        _onWarn?.Invoke(
+                            $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — itemFactory returned an item with no DownloadId.");
+                        continue;
+                    }
+                    if (!string.Equals(item.DownloadId, dto.DownloadId, StringComparison.Ordinal))
+                    {
+                        _onWarn?.Invoke(
+                            $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — itemFactory changed DownloadId to '{item.DownloadId}'.");
+                        continue;
+                    }
+
+                    _items[item.DownloadId] = item;
                 }
                 catch (Exception ex)
                 {
@@ -530,16 +586,16 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         if (_persistencePath == null)
             return;
 
-        // Collect a snapshot of current items under the persist lock to serialise writes.
-        // We snapshot outside the lock to avoid holding it during slow I/O.
-        var dtos = new List<HostBridgeDownloadItemDto>(_items.Count);
-        foreach (var kv in _items)
-            dtos.Add(HostBridgeDownloadItemDto.FromItem(kv.Value));
-
         lock (_persistLock)
         {
             try
             {
+                // Snapshot under the persist lock so an older mutation cannot write a stale
+                // pre-lock view after a newer mutation has already persisted.
+                var dtos = new List<HostBridgeDownloadItemDto>(_items.Count);
+                foreach (var kv in _items)
+                    dtos.Add(HostBridgeDownloadItemDto.FromItem(kv.Value));
+
                 var dir = Path.GetDirectoryName(_persistencePath);
                 if (!string.IsNullOrEmpty(dir))
                     Directory.CreateDirectory(dir);

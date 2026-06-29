@@ -215,6 +215,74 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
         Assert.Null(ex);
     }
 
+    [Fact]
+    public void PersistSnapshot_PersistsInPlaceMutationAfterAdd()
+    {
+        var path = TempFile();
+        var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+            persistencePath: path);
+
+        var item = new HostBridgeDownloadItem
+        {
+            DownloadId = "mutated-after-add",
+            Title      = "Mutable Album",
+            Artist     = "Mutable Artist",
+        };
+        item.SetStatus(HostBridgeDownloadItemStatus.Downloading);
+        item.SetProgress(10);
+        store.AddOrReplace(item);
+
+        item.SetStatus(HostBridgeDownloadItemStatus.Completed);
+        item.SetProgress(100);
+        item.CompletedAt = DateTime.UtcNow;
+        store.PersistSnapshot();
+
+        var reloaded = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+            persistencePath: path);
+
+        Assert.True(reloaded.TryGet("mutated-after-add", out var loaded));
+        Assert.NotNull(loaded);
+        Assert.Equal(HostBridgeDownloadItemStatus.Completed, loaded!.GetStatus());
+        Assert.Equal(100, loaded.GetProgress());
+        Assert.True(loaded.CompletedAt.HasValue);
+    }
+
+    [Fact]
+    public void InvalidNumericStatus_IsSkippedAndWarns()
+    {
+        var path = TempFile();
+        File.WriteAllText(path, """[{"downloadId":"bad-status","status":999}]""");
+
+        var warnings = new List<string>();
+        var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+            persistencePath: path,
+            onWarn: warnings.Add);
+
+        Assert.Empty(store.GetSnapshot());
+        Assert.Contains(warnings, warning => warning.Contains("invalid status", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void InvalidStringStatus_SkipsOnlyMalformedEntryAndWarns()
+    {
+        var path = TempFile();
+        File.WriteAllText(path, """
+[
+  {"downloadId":"good","title":"Good","artist":"Artist","status":"Queued"},
+  {"downloadId":"bad","title":"Bad","artist":"Artist","status":"NotAStatus"}
+]
+""");
+
+        var warnings = new List<string>();
+        var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+            persistencePath: path,
+            onWarn: warnings.Add);
+
+        Assert.True(store.TryGet("good", out _));
+        Assert.False(store.TryGet("bad", out _));
+        Assert.Contains(warnings, warning => warning.Contains("could not deserialize", StringComparison.Ordinal));
+    }
+
     // ─── Bounded growth / eviction ───────────────────────────────────────────
 
     [Fact]
@@ -336,6 +404,18 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
         }
     }
 
+    [Theory]
+    [InlineData("../escape")]
+    [InlineData("..\\escape")]
+    [InlineData("/absolute")]
+    [InlineData("..")]
+    [InlineData(".")]
+    public void ForPlugin_RejectsPathLikePluginName(string pluginName)
+    {
+        Assert.Throws<ArgumentException>(() =>
+            HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>.ForPlugin(pluginName));
+    }
+
     // ─── Remove persists updated state ───────────────────────────────────────
 
     [Fact]
@@ -414,6 +494,54 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
 
         Assert.Empty(storeB.GetSnapshot());
         Assert.Contains(warnings, warning => warning.Contains("itemFactory", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SubclassStore_FactoryReturningBlankDownloadId_SkipsEntryAndWarns()
+    {
+        var path = TempFile();
+        var storeA = new HostBridgeDownloadTrackerStore<CustomDownloadItem>(
+            persistencePath: path);
+        storeA.AddOrReplace(new CustomDownloadItem
+        {
+            DownloadId = "custom-blank-id",
+            AlbumId    = "album-custom",
+            Title      = "Custom Album",
+            Artist     = "Custom Artist",
+        });
+
+        var warnings = new List<string>();
+        var storeB = new HostBridgeDownloadTrackerStore<CustomDownloadItem>(
+            persistencePath: path,
+            itemFactory: _ => new CustomDownloadItem { DownloadId = " " },
+            onWarn: warnings.Add);
+
+        Assert.Empty(storeB.GetSnapshot());
+        Assert.Contains(warnings, warning => warning.Contains("no DownloadId", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void SubclassStore_FactoryChangingDownloadId_SkipsEntryAndWarns()
+    {
+        var path = TempFile();
+        var storeA = new HostBridgeDownloadTrackerStore<CustomDownloadItem>(
+            persistencePath: path);
+        storeA.AddOrReplace(new CustomDownloadItem
+        {
+            DownloadId = "custom-original-id",
+            AlbumId    = "album-custom",
+            Title      = "Custom Album",
+            Artist     = "Custom Artist",
+        });
+
+        var warnings = new List<string>();
+        var storeB = new HostBridgeDownloadTrackerStore<CustomDownloadItem>(
+            persistencePath: path,
+            itemFactory: _ => new CustomDownloadItem { DownloadId = "custom-other-id" },
+            onWarn: warnings.Add);
+
+        Assert.Empty(storeB.GetSnapshot());
+        Assert.Contains(warnings, warning => warning.Contains("changed DownloadId", StringComparison.Ordinal));
     }
 
     // ─── HostBridgeDownloadItemDto explicit round-trip ───────────────────────
