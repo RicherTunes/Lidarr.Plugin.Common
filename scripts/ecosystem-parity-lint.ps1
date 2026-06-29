@@ -3,8 +3,8 @@
 .SYNOPSIS
     Ecosystem parity lint — detects structural gaps in plugin repos against the canonical spec.
 .DESCRIPTION
-    Reads parity-spec.json and scans a plugin repo for missing files, incorrect global.json,
-    missing workflows, and other structural violations. Mirrors parity-lint.ps1 pattern.
+    Reads parity-spec.json and scans a plugin repo for missing files, missing Gitea CI,
+    incorrect global.json, and other structural violations. Mirrors parity-lint.ps1 pattern.
 .PARAMETER RepoPath
     Path to a single plugin repo to scan.
 .PARAMETER AllRepos
@@ -107,33 +107,16 @@ function Test-RequiredDirectories {
 function Test-RequiredWorkflows {
     param([string]$RepoPath, [string]$RepoName)
     $violations = @()
-    $workflowDir = Join-Path $RepoPath '.github/workflows'
-    if (-not (Test-Path $workflowDir)) {
-        # Gitea-primary repos deliberately drop .github/workflows (GitHub Actions out of
-        # credits). Deleting GitHub CI must not be a free pass out of all CI requirements:
-        # the repo must then carry the Gitea CI workflow instead.
-        $giteaCi = Join-Path $RepoPath '.gitea/workflows/ci.yml'
-        if (-not (Test-Path $giteaCi)) {
-            $violations += [PSCustomObject]@{
-                Repo = $RepoName
-                Category = 'MissingWorkflow'
-                Path = '.gitea/workflows/ci.yml'
-                Message = "Repo has no CI workflows at all: .github/workflows is absent and .gitea/workflows/ci.yml is missing"
-                Severity = 'error'
-            }
-        }
-        return $violations
-    }
-    foreach ($req in $spec.requiredWorkflows) {
-        $wfPath = Join-Path $workflowDir $req.file
-        if (-not (Test-Path $wfPath)) {
-            $violations += [PSCustomObject]@{
-                Repo = $RepoName
-                Category = 'MissingWorkflow'
-                Path = ".github/workflows/$($req.file)"
-                Message = "Missing required workflow: $($req.file) ($($req.description))"
-                Severity = 'error'
-            }
+
+    $required = $spec.requiredCiWorkflow
+    $workflowPath = Join-Path $RepoPath $required.path
+    if (-not (Test-Path $workflowPath)) {
+        $violations += [PSCustomObject]@{
+            Repo = $RepoName
+            Category = 'MissingWorkflow'
+            Path = $required.path
+            Message = "Missing required CI workflow: $($required.path) ($($required.description))"
+            Severity = 'error'
         }
     }
     return $violations
