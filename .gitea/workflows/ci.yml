@@ -1,4 +1,4 @@
-﻿name: CI
+name: CI
 on:
   workflow_dispatch:
   push:
@@ -9,10 +9,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: '8.0.x'
+      # actions/checkout@v4 and actions/setup-dotnet@v4 both require cloning from github.com.
+      # The Docker runner (codex-richertunes-docker) resolves external names via
+      # 192.168.65.7:53 which does not forward to the public internet, so those clones
+      # fail when the runner's action cache is cold. Replace with native steps that
+      # only touch the Gitea instance (192.168.2.59:3001) and microsoft.com.
+      - name: Checkout
+        shell: bash
+        run: |
+          set -e
+          # GITHUB_HEAD_REF is set for pull_request events (source branch name).
+          # GITHUB_REF_NAME is set for push and workflow_dispatch events.
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
+          git clone --depth=50 --branch "$BRANCH" \
+            "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
+      - name: Install .NET SDK
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
       # The ManifestCheck/PackagingTarget test fixtures spawn pwsh as a child process;
       # the bare runner image has none (see the lint job's note for why no container).
       - name: Install PowerShell
@@ -54,11 +73,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-      # The bare runner image has no pwsh and the catthehacker container can't reach Gitea
-      # for checkout on this host (the #12 blocker). `dotnet tool install PowerShell` also
-      # fails under act_runner (DotnetToolSettings.xml error), so fetch the self-contained
-      # release tarball directly — the same pattern the gitleaks job uses.
+      # See build-test job comment: replace actions/checkout@v4 with a native git clone
+      # that only touches the Gitea instance (no external DNS required).
+      - name: Checkout
+        shell: bash
+        run: |
+          set -e
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
+          git clone --depth=50 --branch "$BRANCH" \
+            "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
+      # The bare runner image has no pwsh; fetch the self-contained release tarball directly.
       - name: Install PowerShell
         shell: bash
         run: |
@@ -94,11 +118,22 @@ jobs:
       - name: Shared plugin lint runner self-test
         shell: pwsh
         run: ./scripts/tests/Test-RunPluginLintGates.ps1
+      - name: Ecosystem CI-contract self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-EcosystemCiContract.ps1
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      # See build-test job comment: replace actions/checkout@v4 with a native git clone
+      # that only touches the Gitea instance (no external DNS required).
+      - name: Checkout
+        shell: bash
+        run: |
+          set -e
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
+          git clone --depth=50 --branch "$BRANCH" \
+            "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
       - name: gitleaks (secret scan)
         run: |
           set -euo pipefail
