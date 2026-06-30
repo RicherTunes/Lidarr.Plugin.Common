@@ -93,8 +93,10 @@ try {
         param(
             [string]$Dir,
             [string]$SentinelSha,       # SHA written to ext-common-sha.txt (may differ from gitlink)
+            [string]$GitlinkSha = $FakeCommonSha,
             [bool]$WireDocRefs = $true,
             [bool]$WireSharedRunner = $true,
+            [bool]$WireVerify = $true,
             [int]$GithubWorkflowCount = 0
         )
         New-Item -ItemType Directory -Path $Dir -Force | Out-Null
@@ -106,7 +108,7 @@ try {
         # no file-transport security setting needed, no real remote repo required).
         # 'git submodule add' with file:// is blocked by CVE-2022-39253 hardening.
         New-Item -Path (Join-Path $Dir 'ext/Lidarr.Plugin.Common') -ItemType Directory -Force | Out-Null
-        git -C $Dir update-index --add --cacheinfo "160000,$FakeCommonSha,ext/Lidarr.Plugin.Common" 2>$null | Out-Null
+        git -C $Dir update-index --add --cacheinfo "160000,$GitlinkSha,ext/Lidarr.Plugin.Common" 2>$null | Out-Null
         $gitmodulesContent = "[submodule `"ext/Lidarr.Plugin.Common`"]`n`tpath = ext/Lidarr.Plugin.Common`n`turl = ../fake-common"
         [System.IO.File]::WriteAllText((Join-Path $Dir '.gitmodules'), $gitmodulesContent)
 
@@ -154,6 +156,15 @@ jobs:
     steps:
       - name: Build
         run: pwsh ./scripts/some-other-script.ps1'
+        }
+
+        if ($WireVerify) {
+            Add-Content $ciYmlPath '
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify local build/test/package contract
+        run: pwsh ./scripts/verify-local.ps1'
         }
 
         # Create GitHub workflows if needed (valid YAML with on: + jobs: for F2 check)
@@ -296,6 +307,28 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
     }
 
     Write-Host ''
+    Write-Host 'Unit tests: Test-PluginVerifyJobWired' -ForegroundColor White
+
+    Test-Assertion 'Verify job: wired plugin A returns Ok=$true' {
+        $r = Test-PluginVerifyJobWired -PluginDir $DirA -PluginName 'plugin-pass'
+        $r.Ok -eq $true
+    }
+
+    Test-Assertion 'Verify job: missing verify-local invocation returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-no-verify'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -WireSharedRunner $true -WireVerify $false -GithubWorkflowCount 0
+        $r = Test-PluginVerifyJobWired -PluginDir $tmpDir -PluginName 'plugin-no-verify'
+        $r.Ok -eq $false
+    }
+
+    Test-Assertion 'Verify job: missing ci.yml returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-no-ci-verify'
+        New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
+        $r = Test-PluginVerifyJobWired -PluginDir $tmpDir -PluginName 'no-ci-yml'
+        $r.Ok -eq $false
+    }
+
+    Write-Host ''
     Write-Host 'Unit tests: Test-WorkflowMirrorCount' -ForegroundColor White
 
     Test-Assertion 'WorkflowCount: 0 expected, 0 actual => Ok=$true' {
@@ -428,12 +461,27 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
         $output -match 'plugin-corrupt-wf.*FAIL|FAIL.*plugin-corrupt-wf'
     }
 
+    Test-Assertion 'Full verifier exits non-zero in CI when a manifest repo directory is missing' {
+        $missingRoot = Join-Path $TempDir 'missing-repo-ecosystem'
+        New-Item -ItemType Directory -Path $missingRoot -Force | Out-Null
+
+        $manifest = Join-Path $missingRoot 'manifest.json'
+        @{
+            plugins = @(
+                @{ repoDir = 'plugin-missing'; giteaOwner = 'Test'; giteaRepo = 'PluginMissing'; giteaPrimary = $true; mirrorWorkflows = 0 }
+            )
+        } | ConvertTo-Json -Depth 5 | Set-Content $manifest
+
+        $output = & pwsh -NoProfile -File $Verifier -EcosystemRoot $missingRoot -ManifestPath $manifest -CI *>&1
+        $LASTEXITCODE -ne 0 -and (($output -join "`n") -match 'plugin-missing.*FAIL|directory not found|not present')
+    }
+
     # ============================================================
-    # Warn-not-fail: cross-plugin SHA agreement divergence
+    # Fail-by-default: cross-plugin SHA agreement divergence
     # ============================================================
 
     Write-Host ''
-    Write-Host 'Cross-plugin SHA agreement (warn, not fail)' -ForegroundColor White
+    Write-Host 'Cross-plugin SHA agreement (fail by default)' -ForegroundColor White
 
     Test-Assertion 'All-same SHA set => no agreement warning in output' {
         # Plugin A is the only passing plugin in the fake ecosystem.
@@ -450,6 +498,26 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
         $r.Diverged -eq $true
     }
 
+    Test-Assertion 'Full verifier exits non-zero when otherwise-clean plugins pin different Common SHAs' {
+        $divergentRoot = Join-Path $TempDir 'divergent-ecosystem'
+        New-Item -ItemType Directory -Path $divergentRoot -Force | Out-Null
+
+        $shaC = 'cccccccccccccccccccccccccccccccccccccccc'
+        New-FakePlugin -Dir (Join-Path $divergentRoot 'plugin-a') -SentinelSha $FakeCommonSha -GitlinkSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        New-FakePlugin -Dir (Join-Path $divergentRoot 'plugin-b') -SentinelSha $shaC -GitlinkSha $shaC -WireDocRefs $true -GithubWorkflowCount 0
+
+        $manifest = Join-Path $divergentRoot 'manifest.json'
+        @{
+            plugins = @(
+                @{ repoDir = 'plugin-a'; giteaOwner = 'Test'; giteaRepo = 'PluginA'; giteaPrimary = $true; mirrorWorkflows = 0 }
+                @{ repoDir = 'plugin-b'; giteaOwner = 'Test'; giteaRepo = 'PluginB'; giteaPrimary = $true; mirrorWorkflows = 0 }
+            )
+        } | ConvertTo-Json -Depth 5 | Set-Content $manifest
+
+        $output = & pwsh -NoProfile -File $Verifier -EcosystemRoot $divergentRoot -ManifestPath $manifest -CI *>&1
+        $LASTEXITCODE -ne 0 -and (($output -join "`n") -match 'different Common SHAs|Diverged|pin different')
+    }
+
     Test-Assertion 'Single SHA (one plugin passing) is not diverged' {
         $shas = @($FakeCommonSha)
         $r = Test-CommonPinAgreement -Shas $shas
@@ -460,6 +528,17 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
         $shas = @()
         $r = Test-CommonPinAgreement -Shas $shas
         $r.Diverged -eq $false
+    }
+
+    Write-Host ''
+    Write-Host 'Common workflow live ecosystem guard wiring' -ForegroundColor White
+
+    Test-Assertion 'Common Gitea workflow runs the live ecosystem CI contract' {
+        $workflow = Get-Content -LiteralPath (Join-Path $RepoRoot '.gitea/workflows/ci.yml') -Raw
+        $workflow -match '(?m)^\s+ecosystem-contract:\s*$' -and
+            $workflow -match 'verify-ecosystem-ci-contract\.ps1\s+-EcosystemRoot\s+\.\.\s+-CI' -and
+            $workflow -match 'GITHUB_EVENT_NAME' -and
+            $workflow -match 'GITHUB_REF_NAME'
     }
 }
 finally {
