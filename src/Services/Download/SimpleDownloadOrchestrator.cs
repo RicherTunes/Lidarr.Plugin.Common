@@ -293,10 +293,13 @@ namespace Lidarr.Plugin.Common.Services.Download
                             result = new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = fileSize, ActualQuality = quality };
                         }
                     }
-                    catch (OperationCanceledException)
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
-                        // Cancellation is control flow for the provider, post-processor, and metadata
-                        // applier paths; let the outer catch emit cancellation telemetry and rethrow.
+                        // Genuine caller cancellation: let the outer catch emit cancellation telemetry
+                        // and rethrow. A NON-caller OCE (a per-request provider/HttpClient timeout →
+                        // TaskCanceledException with the caller token NOT cancelled) falls through to the
+                        // generic catch below and becomes a single-track failure — it must NOT escape and
+                        // cancel the whole album.
                         throw;
                     }
                     catch (Exception ex)
@@ -463,8 +466,12 @@ namespace Lidarr.Plugin.Common.Services.Download
 
                         break;
                     }
-                    catch (OperationCanceledException)
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
+                        // Only a genuine caller cancellation propagates. A non-caller OCE (per-request
+                        // HttpClient timeout → TaskCanceledException, token not cancelled) falls through to
+                        // the transient classifier below and is RETRIED (then fails the track) — it must not
+                        // be mistaken for user cancellation.
                         throw;
                     }
                     catch (Exception ex) when (attempt < maxAttempts && IsTransientDownloadException(ex, cancellationToken))
@@ -502,12 +509,14 @@ namespace Lidarr.Plugin.Common.Services.Download
 
                 return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = fileSize, ActualQuality = quality };
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex)
             {
+                // Includes a non-caller OCE that exhausted the resume-retries (e.g. repeated request
+                // timeouts) — recorded as a track failure rather than escaping as a whole-album cancel.
                 return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
             }
         }
@@ -564,12 +573,14 @@ namespace Lidarr.Plugin.Common.Services.Download
 
                 return processedPath;
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex)
             {
+                // Post-processing is best-effort: a failure (incl. a non-caller timeout OCE) must not
+                // discard the already-downloaded file — fall back to the unprocessed original.
                 _logger.LogWarning(ex, "Post-processing failed for track {TrackId}: {FilePath}", track.Id, filePath);
                 return filePath;
             }
@@ -586,14 +597,14 @@ namespace Lidarr.Plugin.Common.Services.Download
             {
                 await _metadataApplier.ApplyAsync(filePath, track, cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex)
             {
-                // Metadata application failure shouldn't fail the download
-                // The file is already successfully downloaded - log once per track
+                // Metadata application failure shouldn't fail the download (incl. a non-caller timeout
+                // OCE). The file is already successfully downloaded - log once per track.
                 _logger.LogWarning(ex, "[{ServiceName}] Failed to apply metadata to '{FileName}' (track {TrackId})",
                     ServiceName, Path.GetFileName(filePath), track.Id);
             }
