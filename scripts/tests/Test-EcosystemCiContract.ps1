@@ -190,6 +190,15 @@ jobs:
     $DirA = Join-Path $TempDir 'plugin-pass'
     New-FakePlugin -Dir $DirA -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
 
+    # --- Plugin A2: same pin, CRLF sentinel (PASS on Windows checkouts) ---
+    $DirA2 = Join-Path $TempDir 'plugin-pass-crlf-sentinel'
+    New-FakePlugin -Dir $DirA2 -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+    [System.IO.File]::WriteAllBytes(
+        (Join-Path $DirA2 'ext-common-sha.txt'),
+        [System.Text.Encoding]::ASCII.GetBytes($FakeCommonSha + "`r`n"))
+    git -C $DirA2 add ext-common-sha.txt 2>$null | Out-Null
+    git -C $DirA2 commit -m 'use crlf sentinel' --quiet 2>$null | Out-Null
+
     # --- Plugin B: sentinel mismatch (FAIL) ------------------------------
     $BadSha  = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb'
     $DirB    = Join-Path $TempDir 'plugin-bad-pin'
@@ -237,6 +246,11 @@ jobs:
 
     Test-Assertion 'Pin integrity: valid plugin A returns Ok=$true' {
         $r = Test-CommonPinIntegrity -PluginDir $DirA -PluginName 'plugin-pass'
+        $r.Ok -eq $true -and $r.Sha -eq $FakeCommonSha
+    }
+
+    Test-Assertion 'Pin integrity: CRLF sentinel returns Ok=$true' {
+        $r = Test-CommonPinIntegrity -PluginDir $DirA2 -PluginName 'plugin-pass-crlf-sentinel'
         $r.Ok -eq $true -and $r.Sha -eq $FakeCommonSha
     }
 
