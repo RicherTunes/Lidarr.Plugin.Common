@@ -121,8 +121,13 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
-        public async Task DownloadTrack_WithStreamProvider_PostProcessorCancellation_PropagatesOperationCanceledException()
+        public async Task DownloadTrack_WithStreamProvider_PostProcessorNonCallerOce_DoesNotFailDownload()
         {
+            // A post-processor throwing OCE with the caller token NOT cancelled is a non-caller event
+            // (e.g. the post-processor's own timeout), not user cancellation. Post-processing is
+            // best-effort: the already-downloaded file must survive (fall back to unprocessed), and the
+            // track must NOT be reported as cancelled. (Genuine caller cancellation is covered by
+            // SimpleDownloadOrchestratorOceTimeoutTests / the cancellation+backpressure suite.)
             using var http = new HttpClient(new FakeRangeHandler(totalBytes: 1, supportRange: false));
             var streamProvider = new FakeStreamProvider(payload: new byte[] { 1, 2, 3, 4 }, extension: "m4a");
 
@@ -140,8 +145,8 @@ namespace Lidarr.Plugin.Common.Tests
             var temp = Path.Combine(Path.GetTempPath(), $"orch_test_post_cancel_{Guid.NewGuid():N}.bin");
             try
             {
-                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                    orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 }));
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 }, CancellationToken.None);
+                Assert.True(result.Success, "a non-caller post-processor OCE must not fail/cancel a successfully downloaded track");
             }
             finally
             {
@@ -153,8 +158,10 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
-        public async Task DownloadTrack_WithStreamProvider_MetadataCancellation_PropagatesOperationCanceledException()
+        public async Task DownloadTrack_WithStreamProvider_MetadataNonCallerOce_DoesNotFailDownload()
         {
+            // Metadata application is best-effort: a non-caller OCE (token not cancelled) must be
+            // swallowed, leaving the downloaded file intact and the track successful.
             using var http = new HttpClient(new FakeRangeHandler(totalBytes: 1, supportRange: false));
             var streamProvider = new FakeStreamProvider(payload: new byte[] { 1, 2, 3, 4 }, extension: "m4a");
 
@@ -171,8 +178,8 @@ namespace Lidarr.Plugin.Common.Tests
             var temp = Path.Combine(Path.GetTempPath(), $"orch_test_metadata_cancel_{Guid.NewGuid():N}.bin");
             try
             {
-                await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                    orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 }));
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 }, CancellationToken.None);
+                Assert.True(result.Success, "a non-caller metadata OCE must not fail/cancel a successfully downloaded track");
             }
             finally
             {
