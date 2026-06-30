@@ -85,8 +85,11 @@ namespace Lidarr.Plugin.Common.Collections
             get => _inner[key];
             set
             {
-                EvictIfNeeded();
-                _inner[key] = value;
+                lock (_evictLock)
+                {
+                    EvictIfNeededLocked();
+                    _inner[key] = value;
+                }
             }
         }
 
@@ -107,8 +110,11 @@ namespace Lidarr.Plugin.Common.Collections
         /// <returns><c>true</c> if the key was added; <c>false</c> if it already existed.</returns>
         public bool TryAdd(TKey key, TValue value)
         {
-            EvictIfNeeded();
-            return _inner.TryAdd(key, value);
+            lock (_evictLock)
+            {
+                EvictIfNeededLocked();
+                return _inner.TryAdd(key, value);
+            }
         }
 
         /// <summary>
@@ -137,8 +143,11 @@ namespace Lidarr.Plugin.Common.Collections
         /// </summary>
         public TValue AddOrUpdate(TKey key, TValue addValue, Func<TKey, TValue, TValue> updateValueFactory)
         {
-            EvictIfNeeded();
-            return _inner.AddOrUpdate(key, addValue, updateValueFactory);
+            lock (_evictLock)
+            {
+                EvictIfNeededLocked();
+                return _inner.AddOrUpdate(key, addValue, updateValueFactory);
+            }
         }
 
         /// <summary>
@@ -147,8 +156,11 @@ namespace Lidarr.Plugin.Common.Collections
         /// </summary>
         public TValue AddOrUpdate(TKey key, Func<TKey, TValue> addValueFactory, Func<TKey, TValue, TValue> updateValueFactory)
         {
-            EvictIfNeeded();
-            return _inner.AddOrUpdate(key, addValueFactory, updateValueFactory);
+            lock (_evictLock)
+            {
+                EvictIfNeededLocked();
+                return _inner.AddOrUpdate(key, addValueFactory, updateValueFactory);
+            }
         }
 
         /// <summary>
@@ -158,7 +170,20 @@ namespace Lidarr.Plugin.Common.Collections
         public TValue GetOrAdd(TKey key, Func<TKey, TValue> valueFactory)
         {
             EvictIfNeeded();
-            return _inner.GetOrAdd(key, valueFactory);
+            if (_inner.TryGetValue(key, out var existing))
+                return existing;
+
+            var value = valueFactory(key);
+
+            lock (_evictLock)
+            {
+                EvictIfNeededLocked();
+                if (_inner.TryGetValue(key, out existing))
+                    return existing;
+
+                _inner[key] = value;
+                return value;
+            }
         }
 
         /// <summary>
@@ -168,7 +193,18 @@ namespace Lidarr.Plugin.Common.Collections
         public TValue GetOrAdd(TKey key, TValue value)
         {
             EvictIfNeeded();
-            return _inner.GetOrAdd(key, value);
+            if (_inner.TryGetValue(key, out var existing))
+                return existing;
+
+            lock (_evictLock)
+            {
+                EvictIfNeededLocked();
+                if (_inner.TryGetValue(key, out existing))
+                    return existing;
+
+                _inner[key] = value;
+                return value;
+            }
         }
 
         /// <summary>
@@ -189,14 +225,19 @@ namespace Lidarr.Plugin.Common.Collections
 
             lock (_evictLock)
             {
-                if (_inner.Count < _capacity)
-                    return;
-
-                var cleared = _inner.Count;
-                _inner.Clear();
-
-                try { _onEvicted?.Invoke(cleared); } catch { /* never let a callback crash an insert */ }
+                EvictIfNeededLocked();
             }
+        }
+
+        private void EvictIfNeededLocked()
+        {
+            if (_inner.Count < _capacity)
+                return;
+
+            var cleared = _inner.Count;
+            _inner.Clear();
+
+            try { _onEvicted?.Invoke(cleared); } catch { /* never let a callback crash an insert */ }
         }
     }
 }
