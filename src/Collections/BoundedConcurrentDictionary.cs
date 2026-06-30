@@ -77,7 +77,7 @@ namespace Lidarr.Plugin.Common.Collections
         /// <summary>
         /// Indexer that mirrors <see cref="ConcurrentDictionary{TKey, TValue}"/>'s.
         /// <para>Get: <see cref="KeyNotFoundException"/> when absent.</para>
-        /// <para>Set: capacity-checked then assigns (overwrite semantics). Insert path runs
+        /// <para>Set: capacity-checks only when inserting a new key, then assigns (overwrite semantics). Insert path runs
         /// <see cref="EvictIfNeeded"/> first so the indexer setter respects the cap.</para>
         /// </summary>
         public TValue this[TKey key]
@@ -87,7 +87,9 @@ namespace Lidarr.Plugin.Common.Collections
             {
                 lock (_evictLock)
                 {
-                    EvictIfNeededLocked();
+                    if (!_inner.ContainsKey(key))
+                        EvictIfNeededLocked();
+
                     _inner[key] = value;
                 }
             }
@@ -112,6 +114,9 @@ namespace Lidarr.Plugin.Common.Collections
         {
             lock (_evictLock)
             {
+                if (_inner.ContainsKey(key))
+                    return false;
+
                 EvictIfNeededLocked();
                 return _inner.TryAdd(key, value);
             }
@@ -139,37 +144,64 @@ namespace Lidarr.Plugin.Common.Collections
 
         /// <summary>
         /// Adds a key/value pair or updates an existing key using the provided functions.
-        /// If the dictionary is at or above capacity before the call, all entries are cleared first.
+        /// If inserting a new key would exceed capacity, all entries are cleared first.
         /// </summary>
         public TValue AddOrUpdate(TKey key, TValue addValue, Func<TKey, TValue, TValue> updateValueFactory)
         {
+            if (updateValueFactory is null)
+                throw new ArgumentNullException(nameof(updateValueFactory));
+
             lock (_evictLock)
             {
+                if (_inner.TryGetValue(key, out var existing))
+                {
+                    var updated = updateValueFactory(key, existing);
+                    _inner[key] = updated;
+                    return updated;
+                }
+
                 EvictIfNeededLocked();
-                return _inner.AddOrUpdate(key, addValue, updateValueFactory);
+                _inner[key] = addValue;
+                return addValue;
             }
         }
 
         /// <summary>
         /// Adds a key/value pair or updates an existing key using the provided factories.
-        /// If the dictionary is at or above capacity before the call, all entries are cleared first.
+        /// If inserting a new key would exceed capacity, all entries are cleared first.
         /// </summary>
         public TValue AddOrUpdate(TKey key, Func<TKey, TValue> addValueFactory, Func<TKey, TValue, TValue> updateValueFactory)
         {
+            if (addValueFactory is null)
+                throw new ArgumentNullException(nameof(addValueFactory));
+            if (updateValueFactory is null)
+                throw new ArgumentNullException(nameof(updateValueFactory));
+
             lock (_evictLock)
             {
+                if (_inner.TryGetValue(key, out var existing))
+                {
+                    var updated = updateValueFactory(key, existing);
+                    _inner[key] = updated;
+                    return updated;
+                }
+
                 EvictIfNeededLocked();
-                return _inner.AddOrUpdate(key, addValueFactory, updateValueFactory);
+                var added = addValueFactory(key);
+                _inner[key] = added;
+                return added;
             }
         }
 
         /// <summary>
         /// Gets the value for a key, or adds it using the factory if absent.
-        /// If the dictionary is at or above capacity before the call, all entries are cleared first.
+        /// If inserting a new key would exceed capacity, all entries are cleared first.
         /// </summary>
         public TValue GetOrAdd(TKey key, Func<TKey, TValue> valueFactory)
         {
-            EvictIfNeeded();
+            if (valueFactory is null)
+                throw new ArgumentNullException(nameof(valueFactory));
+
             if (_inner.TryGetValue(key, out var existing))
                 return existing;
 
@@ -177,10 +209,10 @@ namespace Lidarr.Plugin.Common.Collections
 
             lock (_evictLock)
             {
-                EvictIfNeededLocked();
                 if (_inner.TryGetValue(key, out existing))
                     return existing;
 
+                EvictIfNeededLocked();
                 _inner[key] = value;
                 return value;
             }
@@ -188,20 +220,19 @@ namespace Lidarr.Plugin.Common.Collections
 
         /// <summary>
         /// Gets the value for a key, or adds the specified value if absent.
-        /// If the dictionary is at or above capacity before the call, all entries are cleared first.
+        /// If inserting a new key would exceed capacity, all entries are cleared first.
         /// </summary>
         public TValue GetOrAdd(TKey key, TValue value)
         {
-            EvictIfNeeded();
             if (_inner.TryGetValue(key, out var existing))
                 return existing;
 
             lock (_evictLock)
             {
-                EvictIfNeededLocked();
                 if (_inner.TryGetValue(key, out existing))
                     return existing;
 
+                EvictIfNeededLocked();
                 _inner[key] = value;
                 return value;
             }

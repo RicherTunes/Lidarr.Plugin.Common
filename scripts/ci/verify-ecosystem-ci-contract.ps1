@@ -20,12 +20,26 @@
          directly (lint-doc-script-refs.ps1) or via the shared runner
          (run-plugin-lint-gates.ps1).
 
-      3. Workflow-mirror declaration
+      3. Shared lint runner wired
+         The plugin's .gitea/workflows/ci.yml invokes the Common-owned
+         run-plugin-lint-gates.ps1 runner.
+
+      4. Verify job wired
+         The plugin's .gitea/workflows/ci.yml invokes scripts/verify-local.ps1
+         so CI runs build/test/package checks, not lint only.
+
+      5. Workflow-mirror declaration
          Count of .github/workflows/*.yml (+.yaml) files matches the manifest's
          mirrorWorkflows field.
 
+      6. Workflow content integrity
+         Workflow files under .github/workflows and .gitea/workflows are readable,
+         non-empty, not obvious per-character corruption, and contain minimal
+         workflow structure (`on:` + `jobs:`).
+
     Cross-plugin SHA agreement is also evaluated: if passing plugins pin different
-    Common SHAs, a non-failing warning is emitted (re-pins may be mid-flight).
+    Common SHAs, the verifier fails. ALC/package drift is an ecosystem-wide runtime
+    risk, not an advisory condition.
 
     An optional -CheckBranchProtection switch queries the Gitea API for each repo's
     branch protections (requires a Gitea token via git credential fill; off by default).
@@ -215,6 +229,35 @@ function Test-SharedPluginLintRunnerWired {
         return [PSCustomObject]@{
             Ok     = $false
             Reason = '.gitea/workflows/ci.yml does not invoke run-plugin-lint-gates.ps1; hand-wired lint subsets can miss new Common gates'
+        }
+    }
+
+    return [PSCustomObject]@{ Ok = $true; Reason = $null }
+}
+
+function Test-PluginVerifyJobWired {
+    <#
+    .SYNOPSIS
+        Assert the plugin's .gitea/workflows/ci.yml invokes the repo-local
+        verify wrapper, so CI runs build/test/package checks and not lint only.
+    .OUTPUTS
+        PSCustomObject { Ok, Reason }
+    #>
+    param(
+        [string]$PluginDir,
+        [string]$PluginName
+    )
+
+    $ciYml = Join-Path $PluginDir '.gitea/workflows/ci.yml'
+    if (-not (Test-Path -LiteralPath $ciYml)) {
+        return [PSCustomObject]@{ Ok = $false; Reason = '.gitea/workflows/ci.yml not found' }
+    }
+
+    $content = [System.IO.File]::ReadAllText($ciYml)
+    if ($content -notmatch 'scripts[/\\]verify-local\.ps1') {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = '.gitea/workflows/ci.yml does not invoke scripts/verify-local.ps1; lint-only CI can miss build/test/package regressions'
         }
     }
 
@@ -496,24 +539,49 @@ foreach ($plugin in $plugins) {
     $pluginDir  = Join-Path $resolvedEcosystemRoot $repoDir
     $expected   = [int]$plugin.mirrorWorkflows
 
-    # Skip missing dirs (warn, don't fail)
+    # In CI, missing manifest repos are a hard failure: a partial checkout cannot
+    # prove ecosystem-wide pin/ALC/package convergence.
     if (-not (Test-Path -LiteralPath $pluginDir)) {
+        $missingReason = "directory not found at $pluginDir"
         if (-not $CI) {
             Write-Host "  [SKIP] $repoDir — directory not found at $pluginDir" -ForegroundColor DarkYellow
+            continue
         }
         else {
-            Write-Host "SKIP $repoDir (not present)" -ForegroundColor DarkYellow
+            Write-Host "$repoDir FAIL" -ForegroundColor Red
+            Write-Host "  repo: $missingReason" -ForegroundColor DarkGray
+            $script:anyFail = $true
+            $results.Add([PSCustomObject]@{
+                RepoDir      = $repoDir
+                Ok           = $false
+                PinOk        = $false
+                PinSha       = $null
+                PinReason    = $missingReason
+                DocOk        = $false
+                DocReason    = $missingReason
+                LintOk       = $false
+                LintReason   = $missingReason
+                VerifyOk     = $false
+                VerifyReason = $missingReason
+                WfOk         = $false
+                WfCount      = 0
+                WfReason     = $missingReason
+                WfvOk        = $false
+                WfvBadFiles  = @()
+                WfvReason    = $missingReason
+            })
+            continue
         }
-        continue
     }
 
     $pinResult  = Test-CommonPinIntegrity  -PluginDir $pluginDir -PluginName $repoDir
     $docResult  = Test-DocRefsLintWired           -PluginDir $pluginDir -PluginName $repoDir
     $lintResult = Test-SharedPluginLintRunnerWired -PluginDir $pluginDir -PluginName $repoDir
+    $verifyResult = Test-PluginVerifyJobWired     -PluginDir $pluginDir -PluginName $repoDir
     $wfResult   = Test-WorkflowMirrorCount        -PluginDir $pluginDir -Expected $expected
     $wfvResult  = Test-WorkflowFilesValid         -PluginDir $pluginDir -PluginName $repoDir
 
-    $allOk = $pinResult.Ok -and $docResult.Ok -and $lintResult.Ok -and $wfResult.Ok -and $wfvResult.Ok
+    $allOk = $pinResult.Ok -and $docResult.Ok -and $lintResult.Ok -and $verifyResult.Ok -and $wfResult.Ok -and $wfvResult.Ok
     if (-not $allOk) { $script:anyFail = $true }
     if ($pinResult.Ok -and $pinResult.Sha) { $passingShas.Add($pinResult.Sha) | Out-Null }
 
@@ -525,6 +593,7 @@ foreach ($plugin in $plugins) {
         if (-not $pinResult.Ok)  { Write-Host "  pin: $($pinResult.Reason)"    -ForegroundColor DarkGray }
         if (-not $docResult.Ok)  { Write-Host "  doc: $($docResult.Reason)"    -ForegroundColor DarkGray }
         if (-not $lintResult.Ok) { Write-Host "  lint: $($lintResult.Reason)"  -ForegroundColor DarkGray }
+        if (-not $verifyResult.Ok) { Write-Host "  verify: $($verifyResult.Reason)" -ForegroundColor DarkGray }
         if (-not $wfResult.Ok)   { Write-Host "  wf:  $($wfResult.Reason)"     -ForegroundColor DarkGray }
         if (-not $wfvResult.Ok)  { Write-Host "  wfv: $($wfvResult.Reason)"    -ForegroundColor DarkGray }
     }
@@ -555,6 +624,14 @@ foreach ($plugin in $plugins) {
             Write-Host "         lint: FAIL — $($lintResult.Reason)" -ForegroundColor Red
         }
 
+        # Verbose: verify-local
+        if ($verifyResult.Ok) {
+            Write-Host "         verify: OK (verify-local)" -ForegroundColor DarkGreen
+        }
+        else {
+            Write-Host "         verify: FAIL — $($verifyResult.Reason)" -ForegroundColor Red
+        }
+
         # Verbose: workflow count
         if ($wfResult.Ok) {
             Write-Host "         wf  : OK ($($wfResult.ActualCount) mirror(s))" -ForegroundColor DarkGreen
@@ -582,6 +659,8 @@ foreach ($plugin in $plugins) {
         DocReason  = $docResult.Reason
         LintOk     = $lintResult.Ok
         LintReason = $lintResult.Reason
+        VerifyOk   = $verifyResult.Ok
+        VerifyReason = $verifyResult.Reason
         WfOk       = $wfResult.Ok
         WfCount    = $wfResult.ActualCount
         WfReason   = $wfResult.Reason
@@ -592,17 +671,19 @@ foreach ($plugin in $plugins) {
 }
 
 # ============================================================
-# Cross-plugin SHA agreement (warn, never fail)
+# Cross-plugin SHA agreement (fail by default)
 # ============================================================
 
 $agrResult = Test-CommonPinAgreement -Shas @($passingShas)
 if ($agrResult.Diverged) {
     Write-Host ''
-    Write-Host 'WARNING: Passing plugins pin different Common SHAs (re-pin may be mid-flight):' -ForegroundColor Yellow
+    Write-Host 'FAIL: Passing plugins pin different Common SHAs:' -ForegroundColor Red
     foreach ($sha in $agrResult.UniqueShas) {
         $owners = @($results | Where-Object { $_.PinSha -eq $sha } | Select-Object -ExpandProperty RepoDir)
-        Write-Host "  $sha  ($($owners -join ', '))" -ForegroundColor Yellow
+        Write-Host "  $sha  ($($owners -join ', '))" -ForegroundColor Red
     }
+    Write-Host 'All active plugins must be re-pinned before the ecosystem ALC/package proof is considered valid.' -ForegroundColor Red
+    $anyFail = $true
 }
 
 # ============================================================
