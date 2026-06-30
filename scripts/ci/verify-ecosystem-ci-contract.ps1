@@ -116,22 +116,20 @@ function Test-CommonPinIntegrity {
         return [PSCustomObject]@{ Ok = $false; Sha = $null; Reason = 'ext-common-sha.txt missing' }
     }
 
-    # Validate format: exactly 40 lowercase hex + LF (41 bytes)
+    # Validate format: exactly 40 lowercase hex + LF or CRLF.
+    # Windows checkouts can materialize the one-line sentinel as CRLF while the
+    # committed blob remains semantically identical; the SHA payload stays strict.
     $rawBytes = [System.IO.File]::ReadAllBytes($shaFile)
-    if ($rawBytes.Length -ne 41) {
+    $hasLf = $rawBytes.Length -eq 41 -and $rawBytes[40] -eq 0x0A
+    $hasCrlf = $rawBytes.Length -eq 42 -and $rawBytes[40] -eq 0x0D -and $rawBytes[41] -eq 0x0A
+    if (-not ($hasLf -or $hasCrlf)) {
         return [PSCustomObject]@{
             Ok     = $false
             Sha    = $null
-            Reason = "ext-common-sha.txt wrong size ($($rawBytes.Length) bytes, expected 41 = 40 hex + LF)"
+            Reason = "ext-common-sha.txt wrong format ($($rawBytes.Length) bytes, expected 40 hex chars plus LF or CRLF)"
         }
     }
-    if ($rawBytes[40] -ne 0x0A) {
-        return [PSCustomObject]@{
-            Ok     = $false
-            Sha    = $null
-            Reason = "ext-common-sha.txt must end with LF (0x0A), got 0x$($rawBytes[40].ToString('X2'))"
-        }
-    }
+
     $sentinel = [System.Text.Encoding]::ASCII.GetString($rawBytes, 0, 40)
     if ($sentinel -cnotmatch '^[0-9a-f]{40}$') {
         return [PSCustomObject]@{
