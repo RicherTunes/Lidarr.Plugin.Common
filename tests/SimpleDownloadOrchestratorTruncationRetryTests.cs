@@ -113,13 +113,6 @@ namespace Lidarr.Plugin.Common.Tests
                 ok.Content.Headers.ContentLength = remaining;
                 return Task.FromResult(ok);
             }
-
-            private static byte[] BuildBytes(int offset, int count)
-            {
-                var d = new byte[count];
-                for (int i = 0; i < count; i++) d[i] = (byte)((offset + i) % 251);
-                return d;
-            }
         }
 
         // Always truncates immediately (0 bytes), so the download never completes.
@@ -136,6 +129,64 @@ namespace Lidarr.Plugin.Common.Tests
                 resp.Content.Headers.ContentLength = 100_000;
                 return Task.FromResult(resp);
             }
+        }
+
+        private sealed class TimeoutStream : Stream
+        {
+            public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+                => throw new TaskCanceledException("simulated body timeout");
+
+            public override int Read(byte[] buffer, int offset, int count) =>
+                ReadAsync(buffer.AsMemory(offset, count)).AsTask().GetAwaiter().GetResult();
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => 0; set => throw new NotSupportedException(); }
+            public override void Flush() { }
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        }
+
+        private sealed class BodyTimeoutOnceThenSuccessHandler : HttpMessageHandler
+        {
+            private readonly int _total;
+            public int Calls;
+
+            public BodyTimeoutOnceThenSuccessHandler(int total)
+            {
+                _total = total;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                Calls++;
+                if (Calls == 1)
+                {
+                    var timeout = new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StreamContent(new TimeoutStream())
+                    };
+                    timeout.Content.Headers.ContentLength = _total;
+                    return Task.FromResult(timeout);
+                }
+
+                var ok = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(BuildBytes(0, _total))
+                };
+                ok.Content.Headers.ContentLength = _total;
+                return Task.FromResult(ok);
+            }
+        }
+
+        private static byte[] BuildBytes(int offset, int count)
+        {
+            var d = new byte[count];
+            for (int i = 0; i < count; i++) d[i] = (byte)((offset + i) % 251);
+            return d;
         }
 
         private static void Cleanup(string temp)
@@ -162,6 +213,27 @@ namespace Lidarr.Plugin.Common.Tests
                 Assert.True(File.Exists(result.FilePath));
                 Assert.Equal(total, new FileInfo(result.FilePath).Length);
                 Assert.True(handler.Calls >= 2, $"Expected a resume retry (>=2 HTTP calls), got {handler.Calls}");
+            }
+            finally { Cleanup(temp); Cleanup(Path.ChangeExtension(temp, "bin")); }
+        }
+
+        [Fact]
+        public async Task DownloadTrack_retries_body_timeout_when_caller_token_not_cancelled()
+        {
+            const int total = 64_000;
+            var handler = new BodyTimeoutOnceThenSuccessHandler(total);
+            using var http = new HttpClient(handler);
+            var orch = new FastRetryOrchestrator(http, maxAttempts: 3);
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_timeout_{Guid.NewGuid():N}.bin");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 }, CancellationToken.None);
+
+                Assert.True(result.Success, $"Download should retry a provider timeout; error: {result.ErrorMessage}");
+                Assert.True(File.Exists(result.FilePath));
+                Assert.Equal(total, new FileInfo(result.FilePath).Length);
+                Assert.Equal(2, handler.Calls);
             }
             finally { Cleanup(temp); Cleanup(Path.ChangeExtension(temp, "bin")); }
         }
