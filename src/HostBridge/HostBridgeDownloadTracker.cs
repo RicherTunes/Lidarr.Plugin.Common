@@ -440,6 +440,27 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
         if (deleteData && removed is not null && !string.IsNullOrWhiteSpace(removed.OutputPath))
         {
+            // Cross-attempt re-grab guard. When the host re-grabs a failed album it queues a NEW
+            // download into the SAME OutputPath while the old item is being removed. Deleting the
+            // directory here would nuke the new attempt's in-flight files (on POSIX, recursive delete
+            // unlinks files even while a FileStream holds them), failing the new attempt → another
+            // re-grab → infinite loop (observed live on Qobuz). Skip the delete when any other
+            // tracked download is still active (Queued/Downloading) at the same path; that download
+            // now owns the directory lifecycle. (removed was already taken out of _items above.)
+            foreach (var kvp in _items)
+            {
+                var other = kvp.Value;
+                if (other is null || string.IsNullOrWhiteSpace(other.OutputPath))
+                {
+                    continue;
+                }
+                if (SameDirectory(other.OutputPath, removed.OutputPath) && IsActiveStatus(other.GetStatus()))
+                {
+                    // Another active download owns this path — leave its files intact.
+                    return true;
+                }
+            }
+
             try
             {
                 if (Directory.Exists(removed.OutputPath))
@@ -491,6 +512,36 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         => status is HostBridgeDownloadItemStatus.Completed
             or HostBridgeDownloadItemStatus.Failed
             or HostBridgeDownloadItemStatus.Cancelled;
+
+    private static bool IsActiveStatus(HostBridgeDownloadItemStatus status)
+        => status is HostBridgeDownloadItemStatus.Queued
+            or HostBridgeDownloadItemStatus.Downloading;
+
+    // OS-aware same-directory comparison for the cross-attempt cleanup guard. Canonicalizes
+    // separator and "."/".." spellings, then compares case-sensitively on Linux (the production
+    // host target) and case-insensitively elsewhere (Windows/macOS default).
+    private static bool SameDirectory(string a, string b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(NormalizeDirectoryPath(a), NormalizeDirectoryPath(b), PathComparison);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException)
+        {
+            return false;
+        }
+    }
+
+    private static string NormalizeDirectoryPath(string path)
+        => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+
+    private static StringComparison PathComparison =>
+        OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
 
     private void LoadFromDisk()
     {
