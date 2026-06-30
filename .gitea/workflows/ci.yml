@@ -71,8 +71,14 @@ jobs:
           fi
           docker --version
           docker ps >/dev/null
+      # -m:1 + UseSharedCompilation=false: the test step rebuilds the dependency graph
+      # (Abstractions -> Common -> Tests). Default MSBuild parallelism plus a compiler
+      # server lingering from the Build step above can both touch
+      # Abstractions/obj/Release/.../Lidarr.Plugin.Abstractions.dll at once, intermittently
+      # failing with CS2012 "being used by another process". Serializing the build and
+      # disabling the shared compiler server removes that race (matches the Build step's -m:1).
       - name: Test (full unit suite, excl. quarantined)
-        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -p:EnableSourceLink=false --blame-hang-timeout 10m
+        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -p:EnableSourceLink=false -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 10m
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15

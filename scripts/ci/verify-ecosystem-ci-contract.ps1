@@ -251,11 +251,18 @@ function Test-PluginVerifyJobWired {
         return [PSCustomObject]@{ Ok = $false; Reason = '.gitea/workflows/ci.yml not found' }
     }
 
-    $content = [System.IO.File]::ReadAllText($ciYml)
-    if ($content -notmatch 'scripts[/\\]verify-local\.ps1') {
+    # Only count the invocation when it appears on a NON-comment line. A commented-out
+    # "# run: pwsh scripts/verify-local.ps1" must not satisfy the gate — CI would not actually
+    # run verify, so lint-only regressions could slip through while the gate reported "wired".
+    $invoked = $false
+    foreach ($line in ([System.IO.File]::ReadAllLines($ciYml))) {
+        if ($line.TrimStart().StartsWith('#')) { continue }
+        if ($line -match 'scripts[/\\]verify-local\.ps1') { $invoked = $true; break }
+    }
+    if (-not $invoked) {
         return [PSCustomObject]@{
             Ok     = $false
-            Reason = '.gitea/workflows/ci.yml does not invoke scripts/verify-local.ps1; lint-only CI can miss build/test/package regressions'
+            Reason = '.gitea/workflows/ci.yml does not invoke scripts/verify-local.ps1 on a non-comment line; lint-only CI can miss build/test/package regressions'
         }
     }
 
