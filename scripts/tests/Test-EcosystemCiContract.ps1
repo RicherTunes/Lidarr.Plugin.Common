@@ -186,9 +186,84 @@ jobs:
         git -C $Dir commit -m 'init' --quiet 2>$null | Out-Null
     }
 
+    function Set-FakeGithubCiMirror {
+        param(
+            [string]$Dir,
+            [bool]$WireSharedRunner = $true,
+            [bool]$WireVerify = $true,
+            [bool]$WirePin = $true,
+            [bool]$WireSecretScan = $true
+        )
+
+        New-Item -Path (Join-Path $Dir '.github/workflows') -ItemType Directory -Force | Out-Null
+
+        $secretStep = if ($WireSecretScan) {
+            @'
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gitleaks detect --source . --redact --exit-code 1
+'@
+        } else {
+            @'
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo no secret scan
+'@
+        }
+
+        $lintRun = if ($WireSharedRunner) {
+            'pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoPath . -CommonRoot ext/Lidarr.Plugin.Common -Mode ci'
+        } else {
+            'pwsh ./scripts/local-only-lint.ps1'
+        }
+
+        $pinStep = if ($WirePin) {
+            @'
+      - name: Common submodule pin guard
+        run: bash ext/Lidarr.Plugin.Common/scripts/repin-common-submodule.sh --verify-only --path ext/Lidarr.Plugin.Common
+'@
+        } else {
+            @'
+      - name: Placeholder
+        run: echo no pin guard
+'@
+        }
+
+        $verifyRun = if ($WireVerify) { 'pwsh ./scripts/verify-local.ps1' } else { 'pwsh ./scripts/build-only.ps1' }
+
+        Set-Content (Join-Path $Dir '.github/workflows/ci.yml') @"
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+$secretStep
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Shared plugin lint gates
+        run: $lintRun
+  verify:
+    needs: [lint, secret-scan]
+    runs-on: ubuntu-latest
+    steps:
+$pinStep
+      - name: Full local-ci verification
+        run: $verifyRun
+"@
+    }
+
     # --- Plugin A: everything correct (PASS) -----------------------------
     $DirA = Join-Path $TempDir 'plugin-pass'
     New-FakePlugin -Dir $DirA -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+
+    # --- Plugin F: declared GitHub mirror with full CI parity (PASS) ------
+    $DirF = Join-Path $TempDir 'plugin-good-ghmirror'
+    New-FakePlugin -Dir $DirF -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+    Set-FakeGithubCiMirror -Dir $DirF
 
     # --- Plugin A2: same pin, CRLF sentinel (PASS on Windows checkouts) ---
     $DirA2 = Join-Path $TempDir 'plugin-pass-crlf-sentinel'
@@ -235,6 +310,7 @@ jobs:
             @{ repoDir = 'plugin-no-docref';   giteaOwner = 'Test'; giteaRepo = 'PluginNoDocRef';   giteaPrimary = $true; mirrorWorkflows = 0 }
             @{ repoDir = 'plugin-extra-wf';    giteaOwner = 'Test'; giteaRepo = 'PluginExtraWf';    giteaPrimary = $true; mirrorWorkflows = 0 }
             @{ repoDir = 'plugin-corrupt-wf';  giteaOwner = 'Test'; giteaRepo = 'PluginCorruptWf';  giteaPrimary = $true; mirrorWorkflows = 1 }
+            @{ repoDir = 'plugin-good-ghmirror'; giteaOwner = 'Test'; giteaRepo = 'PluginGoodGhMirror'; giteaPrimary = $true; mirrorWorkflows = 1 }
         )
     } | ConvertTo-Json -Depth 5 | Set-Content $FakeManifestPath
 
@@ -366,6 +442,58 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
         $r.Ok -eq $true
     }
 
+    Write-Host ''
+    Write-Host 'Unit tests: Test-GitHubCiMirrorContract' -ForegroundColor White
+
+    Test-Assertion 'GitHub CI mirror: expected 0 and no ci.yml returns Ok=$true' {
+        $r = Test-GitHubCiMirrorContract -PluginDir $DirA -Expected 0
+        $r.Ok -eq $true
+    }
+
+    Test-Assertion 'GitHub CI mirror: full mirror ci.yml returns Ok=$true' {
+        $r = Test-GitHubCiMirrorContract -PluginDir $DirF -Expected 1
+        $r.Ok -eq $true
+    }
+
+    Test-Assertion 'GitHub CI mirror: workflow count without ci.yml returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-no-ci'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 1
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'ci\.yml|ci\.yaml'
+    }
+
+    Test-Assertion 'GitHub CI mirror: missing shared runner returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-no-runner'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Set-FakeGithubCiMirror -Dir $tmpDir -WireSharedRunner $false
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'run-plugin-lint-gates'
+    }
+
+    Test-Assertion 'GitHub CI mirror: missing verify-local returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-no-verify'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Set-FakeGithubCiMirror -Dir $tmpDir -WireVerify $false
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'verify-local'
+    }
+
+    Test-Assertion 'GitHub CI mirror: missing pin guard returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-no-pin'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Set-FakeGithubCiMirror -Dir $tmpDir -WirePin $false
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'repin-common-submodule'
+    }
+
+    Test-Assertion 'GitHub CI mirror: missing secret scan returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-no-secret-scan'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Set-FakeGithubCiMirror -Dir $tmpDir -WireSecretScan $false
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'gitleaks'
+    }
+
     # ============================================================
     # Unit tests: Test-WorkflowFileValid (F2 — content integrity)
     # ============================================================
@@ -453,6 +581,11 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
     Test-Assertion 'Full verifier reports plugin-pass as PASS' {
         $output = (& pwsh -NoProfile -File $Verifier -EcosystemRoot $TempDir -ManifestPath $FakeManifestPath -CI *>&1) -join "`n"
         $output -match 'plugin-pass.*PASS|PASS.*plugin-pass'
+    }
+
+    Test-Assertion 'Full verifier reports plugin-good-ghmirror as PASS' {
+        $output = (& pwsh -NoProfile -File $Verifier -EcosystemRoot $TempDir -ManifestPath $FakeManifestPath -CI *>&1) -join "`n"
+        $output -match 'plugin-good-ghmirror.*PASS|PASS.*plugin-good-ghmirror'
     }
 
     Test-Assertion 'Full verifier reports plugin-bad-pin as FAIL' {
