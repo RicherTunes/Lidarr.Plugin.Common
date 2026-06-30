@@ -291,6 +291,46 @@ namespace Lidarr.Plugin.Common.Tests.Collections
                 $"Expected count ≤ {capacity} after concurrent inserts settled, but got {dict.Count}.");
         }
 
+        [Fact]
+        public async Task GetOrAdd_ConcurrentUniqueFactoriesNearCapacity_SettlesWithinCapacity()
+        {
+            const int capacity = 16;
+            const int concurrentAdds = 32;
+
+            var dict = new BoundedConcurrentDictionary<int, int>(capacity);
+            for (var i = 0; i < capacity - 1; i++)
+            {
+                Assert.True(dict.TryAdd(i, i));
+            }
+
+            using var factoriesEntered = new CountdownEvent(concurrentAdds);
+            using var releaseFactories = new ManualResetEventSlim();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            var tasks = Enumerable.Range(0, concurrentAdds)
+                .Select(i => Task.Factory.StartNew(() =>
+                {
+                    var key = 10_000 + i;
+                    return dict.GetOrAdd(key, k =>
+                    {
+                        factoriesEntered.Signal();
+                        Assert.True(releaseFactories.Wait(TimeSpan.FromSeconds(30)),
+                            "all factories should be released by the test harness");
+                        return k;
+                    });
+                }, CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default))
+                .ToArray();
+
+            Assert.True(factoriesEntered.Wait(TimeSpan.FromSeconds(30)),
+                "all concurrent factories should pass the pre-insert capacity check before release");
+
+            releaseFactories.Set();
+            await Task.WhenAll(tasks).WaitAsync(timeout.Token);
+
+            Assert.True(dict.Count <= capacity,
+                $"Expected count ≤ {capacity} after concurrent GetOrAdd inserts settled, but got {dict.Count}.");
+        }
+
         // ── ContainsKey ─────────────────────────────────────────────────────────────
 
         [Fact]
