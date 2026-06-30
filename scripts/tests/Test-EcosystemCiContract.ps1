@@ -335,6 +335,23 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
         $r.Ok -eq $false
     }
 
+    Test-Assertion 'Verify job: commented-out verify-local invocation returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-commented-verify'
+        $wf = Join-Path $tmpDir '.gitea/workflows'
+        New-Item -ItemType Directory -Path $wf -Force | Out-Null
+        @'
+name: CI
+on: [push]
+jobs:
+  verify:
+    steps:
+      # run: pwsh ./scripts/verify-local.ps1
+      - run: pwsh ./scripts/build-only.ps1
+'@ | Set-Content -LiteralPath (Join-Path $wf 'ci.yml')
+        $r = Test-PluginVerifyJobWired -PluginDir $tmpDir -PluginName 'plugin-commented-verify'
+        $r.Ok -eq $false
+    }
+
     Test-Assertion 'Verify job: missing ci.yml returns Ok=$false' {
         $tmpDir = Join-Path $TempDir 'plugin-no-ci-verify'
         New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
