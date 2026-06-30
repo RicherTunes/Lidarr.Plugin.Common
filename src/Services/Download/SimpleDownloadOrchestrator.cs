@@ -293,14 +293,10 @@ namespace Lidarr.Plugin.Common.Services.Download
                             result = new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = fileSize, ActualQuality = quality };
                         }
                     }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    catch (OperationCanceledException)
                     {
-                        // Wave 17M fix: when the caller's cancellation token requested cancellation,
-                        // the IAudioStreamProvider path must REthrow OCE so it reaches the outer
-                        // catch (line ~300) — matches DownloadViaUrlAsync's contract. Previously the
-                        // generic Exception catch below silently converted OCE into
-                        // TrackDownloadResult{Success=false}, breaking the documented "OCE on
-                        // cancel" contract and rendering the outer telemetry catch unreachable.
+                        // Cancellation is control flow for the provider, post-processor, and metadata
+                        // applier paths; let the outer catch emit cancellation telemetry and rethrow.
                         throw;
                     }
                     catch (Exception ex)
@@ -568,6 +564,10 @@ namespace Lidarr.Plugin.Common.Services.Download
 
                 return processedPath;
             }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
                 _logger.LogWarning(ex, "Post-processing failed for track {TrackId}: {FilePath}", track.Id, filePath);
@@ -585,6 +585,10 @@ namespace Lidarr.Plugin.Common.Services.Download
             try
             {
                 await _metadataApplier.ApplyAsync(filePath, track, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
             }
             catch (Exception ex)
             {

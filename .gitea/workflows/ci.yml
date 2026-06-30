@@ -1,6 +1,8 @@
 name: CI
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '17 8 * * *'
   push:
     branches: [main]
   pull_request:
@@ -131,6 +133,68 @@ jobs:
       - name: Test-project dropout guard self-test (F4)
         shell: pwsh
         run: ./scripts/tests/Test-VerifyTestProjectsGated.ps1
+  ecosystem-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Live ecosystem contract (main, dispatch, schedule)
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          EVENT="${GITHUB_EVENT_NAME:-}"
+          REF_NAME="${GITHUB_REF_NAME:-main}"
+
+          if [ "$EVENT" != "workflow_dispatch" ] && [ "$EVENT" != "schedule" ] && { [ "$EVENT" != "push" ] || [ "$REF_NAME" != "main" ]; }; then
+            echo "Skipping live ecosystem contract for event=$EVENT ref=$REF_NAME."
+            exit 0
+          fi
+
+          if [ -z "${GITEA_TOKEN:-}" ]; then
+            echo "GITEA_TOKEN is unavailable; cannot clone the private ecosystem repos." >&2
+            exit 1
+          fi
+
+          COMMON_BRANCH="$REF_NAME"
+          if [ -z "$COMMON_BRANCH" ]; then
+            COMMON_BRANCH="main"
+          fi
+
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$GITEA_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            clone --depth=50 --branch "$COMMON_BRANCH" \
+            "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
+
+          curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /opt/pwsh
+          tar -xzf /tmp/pwsh.tgz -C /opt/pwsh
+          chmod +x /opt/pwsh/pwsh
+
+          /opt/pwsh/pwsh -NoProfile -Command '
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+
+          if ([string]::IsNullOrWhiteSpace($env:GITEA_TOKEN)) {
+              throw "GITEA_TOKEN is unavailable"
+          }
+
+          $auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$($env:GITEA_TOKEN)"))
+          $manifest = Get-Content -LiteralPath "./scripts/ci/ecosystem-repos.json" -Raw | ConvertFrom-Json
+
+          foreach ($plugin in $manifest.plugins) {
+              $url = "http://192.168.2.59:3001/$($plugin.giteaOwner)/$($plugin.giteaRepo)"
+              & git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $auth" clone --depth=50 --branch main $url "../$($plugin.repoDir)"
+              if ($LASTEXITCODE -ne 0) {
+                  throw "Failed to clone $($plugin.repoDir)"
+              }
+          }
+
+          & ./scripts/ci/verify-ecosystem-ci-contract.ps1 -EcosystemRoot .. -CI
+          if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+          }
+          '
   secret-scan:
     runs-on: ubuntu-latest
     timeout-minutes: 10
