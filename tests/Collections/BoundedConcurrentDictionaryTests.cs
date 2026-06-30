@@ -11,6 +11,41 @@ namespace Lidarr.Plugin.Common.Tests.Collections
 {
     public class BoundedConcurrentDictionaryTests
     {
+        private sealed class BlockingHashComparer : IEqualityComparer<string>
+        {
+            private readonly string _blockedKey;
+            private readonly CountdownEvent _entered;
+            private readonly ManualResetEventSlim _release;
+            private int _remainingBlocks;
+
+            public BlockingHashComparer(
+                string blockedKey,
+                int blocks,
+                CountdownEvent entered,
+                ManualResetEventSlim release)
+            {
+                _blockedKey = blockedKey;
+                _remainingBlocks = blocks;
+                _entered = entered;
+                _release = release;
+            }
+
+            public bool Equals(string? x, string? y) => StringComparer.Ordinal.Equals(x, y);
+
+            public int GetHashCode(string obj)
+            {
+                if (StringComparer.Ordinal.Equals(obj, _blockedKey) &&
+                    Interlocked.Decrement(ref _remainingBlocks) >= 0)
+                {
+                    _entered.Signal();
+                    if (!_release.Wait(TimeSpan.FromSeconds(30)))
+                        throw new TimeoutException("Timed out waiting for the test harness to release hash probes.");
+                }
+
+                return StringComparer.Ordinal.GetHashCode(obj);
+            }
+        }
+
         // ── Constructor ─────────────────────────────────────────────────────────────
 
         [Fact]
@@ -144,6 +179,23 @@ namespace Lidarr.Plugin.Common.Tests.Collections
             Assert.True(dict.TryGetValue("c", out _));
         }
 
+        [Fact]
+        public void TryAdd_DuplicateKey_AtCapacity_ReturnsFalseAndPreservesExistingEntries()
+        {
+            var evicted = false;
+            var dict = new BoundedConcurrentDictionary<string, int>(2, onEvicted: _ => evicted = true);
+
+            Assert.True(dict.TryAdd("a", 1));
+            Assert.True(dict.TryAdd("b", 2));
+
+            Assert.False(dict.TryAdd("a", 99));
+
+            Assert.False(evicted);
+            Assert.Equal(2, dict.Count);
+            Assert.Equal(1, dict["a"]);
+            Assert.Equal(2, dict["b"]);
+        }
+
         // ── TryGetValue / TryRemove across capacity boundary ──────────────────────────
 
         [Fact]
@@ -178,6 +230,16 @@ namespace Lidarr.Plugin.Common.Tests.Collections
         }
 
         [Fact]
+        public void GetOrAdd_NullFactory_ThrowsArgumentNullEvenWhenKeyExists()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+            Assert.True(dict.TryAdd("a", 1));
+
+            Assert.Throws<ArgumentNullException>(() =>
+                dict.GetOrAdd("a", (Func<string, int>)null!));
+        }
+
+        [Fact]
         public void AddOrUpdate_BelowCapacity_UpdatesExisting()
         {
             var dict = new BoundedConcurrentDictionary<string, int>(5);
@@ -196,6 +258,133 @@ namespace Lidarr.Plugin.Common.Tests.Collections
             dict.TryAdd("b", 2); // count = capacity
             dict.AddOrUpdate("c", 3, (_, v) => v); // triggers eviction
             Assert.Equal(2, evicted);
+        }
+
+        [Fact]
+        public void AddOrUpdate_ExistingKey_AtCapacity_UpdatesOnlyExistingKey()
+        {
+            var evicted = false;
+            var dict = new BoundedConcurrentDictionary<string, int>(2, onEvicted: _ => evicted = true);
+
+            Assert.True(dict.TryAdd("a", 1));
+            Assert.True(dict.TryAdd("b", 2));
+
+            var result = dict.AddOrUpdate("a", 99, (_, old) => old + 10);
+
+            Assert.Equal(11, result);
+            Assert.False(evicted);
+            Assert.Equal(2, dict.Count);
+            Assert.Equal(11, dict["a"]);
+            Assert.Equal(2, dict["b"]);
+        }
+
+        [Fact]
+        public void AddOrUpdate_NullUpdateFactory_ThrowsArgumentNullBeforeAdding()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+
+            Assert.Throws<ArgumentNullException>(() =>
+                dict.AddOrUpdate("a", 1, (Func<string, int, int>)null!));
+
+            Assert.False(dict.TryGetValue("a", out _));
+        }
+
+        [Fact]
+        public void AddOrUpdate_Factory_ExistingKey_AtCapacity_UpdatesOnlyExistingKey()
+        {
+            var evicted = false;
+            var addFactoryCalled = false;
+            var dict = new BoundedConcurrentDictionary<string, int>(2, onEvicted: _ => evicted = true);
+
+            Assert.True(dict.TryAdd("a", 1));
+            Assert.True(dict.TryAdd("b", 2));
+
+            var result = dict.AddOrUpdate(
+                "a",
+                _ =>
+                {
+                    addFactoryCalled = true;
+                    return 99;
+                },
+                (_, old) => old + 10);
+
+            Assert.Equal(11, result);
+            Assert.False(addFactoryCalled);
+            Assert.False(evicted);
+            Assert.Equal(2, dict.Count);
+            Assert.Equal(11, dict["a"]);
+            Assert.Equal(2, dict["b"]);
+        }
+
+        [Fact]
+        public void AddOrUpdate_NullAddFactory_ThrowsArgumentNullEvenWhenKeyExists()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+            Assert.True(dict.TryAdd("a", 1));
+
+            Assert.Throws<ArgumentNullException>(() =>
+                dict.AddOrUpdate(
+                    "a",
+                    (Func<string, int>)null!,
+                    (_, old) => old + 1));
+
+            Assert.Equal(1, dict["a"]);
+        }
+
+        [Fact]
+        public void AddOrUpdate_NullFactoryUpdateFactory_ThrowsArgumentNullBeforeAdding()
+        {
+            var dict = new BoundedConcurrentDictionary<string, int>(5);
+
+            Assert.Throws<ArgumentNullException>(() =>
+                dict.AddOrUpdate(
+                    "a",
+                    _ => 1,
+                    (Func<string, int, int>)null!));
+
+            Assert.False(dict.TryGetValue("a", out _));
+        }
+
+        [Fact]
+        public void GetOrAdd_ExistingKey_AtCapacity_ReturnsExistingWithoutEviction()
+        {
+            var evicted = false;
+            var factoryCalled = false;
+            var dict = new BoundedConcurrentDictionary<string, int>(2, onEvicted: _ => evicted = true);
+
+            Assert.True(dict.TryAdd("a", 1));
+            Assert.True(dict.TryAdd("b", 2));
+
+            var result = dict.GetOrAdd("a", _ =>
+            {
+                factoryCalled = true;
+                return 99;
+            });
+
+            Assert.Equal(1, result);
+            Assert.False(factoryCalled);
+            Assert.False(evicted);
+            Assert.Equal(2, dict.Count);
+            Assert.Equal(1, dict["a"]);
+            Assert.Equal(2, dict["b"]);
+        }
+
+        [Fact]
+        public void GetOrAdd_Value_ExistingKey_AtCapacity_ReturnsExistingWithoutEviction()
+        {
+            var evicted = false;
+            var dict = new BoundedConcurrentDictionary<string, int>(2, onEvicted: _ => evicted = true);
+
+            Assert.True(dict.TryAdd("a", 1));
+            Assert.True(dict.TryAdd("b", 2));
+
+            var result = dict.GetOrAdd("a", 99);
+
+            Assert.Equal(1, result);
+            Assert.False(evicted);
+            Assert.Equal(2, dict.Count);
+            Assert.Equal(1, dict["a"]);
+            Assert.Equal(2, dict["b"]);
         }
 
         // ── Clear ───────────────────────────────────────────────────────────────────
@@ -331,6 +520,73 @@ namespace Lidarr.Plugin.Common.Tests.Collections
                 $"Expected count ≤ {capacity} after concurrent GetOrAdd inserts settled, but got {dict.Count}.");
         }
 
+        [Fact]
+        public async Task GetOrAdd_ConcurrentSameKeyFactoryMissAtCapacity_DoesNotEvictExistingEntries()
+        {
+            var evicted = false;
+            var dict = new BoundedConcurrentDictionary<string, int>(2, onEvicted: _ => evicted = true);
+            Assert.True(dict.TryAdd("seed", 1));
+
+            using var factoriesEntered = new CountdownEvent(2);
+            using var releaseFactories = new ManualResetEventSlim();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var nextValue = 1;
+
+            var tasks = Enumerable.Range(0, 2)
+                .Select(_ => Task.Factory.StartNew(() =>
+                    dict.GetOrAdd("shared", _ =>
+                    {
+                        factoriesEntered.Signal();
+                        Assert.True(releaseFactories.Wait(TimeSpan.FromSeconds(30)),
+                            "both same-key factories should be parked before either can add");
+                        return Interlocked.Increment(ref nextValue);
+                    }), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default))
+                .ToArray();
+
+            Assert.True(factoriesEntered.Wait(TimeSpan.FromSeconds(30)),
+                "both same-key factory calls should observe the initial miss before release");
+
+            releaseFactories.Set();
+            var results = await Task.WhenAll(tasks).WaitAsync(timeout.Token);
+
+            Assert.False(evicted);
+            Assert.Equal(2, dict.Count);
+            Assert.Equal(1, dict["seed"]);
+            Assert.Equal(dict["shared"], results[0]);
+            Assert.Equal(dict["shared"], results[1]);
+        }
+
+        [Fact]
+        public async Task GetOrAdd_Value_ConcurrentSameKeyMissAtCapacity_DoesNotEvictExistingEntries()
+        {
+            using var hashProbesEntered = new CountdownEvent(2);
+            using var releaseHashProbes = new ManualResetEventSlim();
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+
+            var evicted = false;
+            var comparer = new BlockingHashComparer("shared", blocks: 2, hashProbesEntered, releaseHashProbes);
+            var dict = new BoundedConcurrentDictionary<string, int>(2, comparer, onEvicted: _ => evicted = true);
+            Assert.True(dict.TryAdd("seed", 1));
+
+            var tasks = new[]
+            {
+                Task.Factory.StartNew(() => dict.GetOrAdd("shared", 2), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default),
+                Task.Factory.StartNew(() => dict.GetOrAdd("shared", 3), CancellationToken.None, TaskCreationOptions.LongRunning, TaskScheduler.Default)
+            };
+
+            Assert.True(hashProbesEntered.Wait(TimeSpan.FromSeconds(30)),
+                "both same-key value overload calls should observe the initial miss before release");
+
+            releaseHashProbes.Set();
+            var results = await Task.WhenAll(tasks).WaitAsync(timeout.Token);
+
+            Assert.False(evicted);
+            Assert.Equal(2, dict.Count);
+            Assert.Equal(1, dict["seed"]);
+            Assert.Equal(dict["shared"], results[0]);
+            Assert.Equal(dict["shared"], results[1]);
+        }
+
         // ── ContainsKey ─────────────────────────────────────────────────────────────
 
         [Fact]
@@ -411,6 +667,23 @@ namespace Lidarr.Plugin.Common.Tests.Collections
             Assert.Equal(3, evictionCount);
             Assert.Equal(1, dict.Count);
             Assert.Equal(4, dict["d"]);
+        }
+
+        [Fact]
+        public void Indexer_Set_ExistingKey_AtCapacity_OverwritesWithoutEviction()
+        {
+            var evicted = false;
+            var dict = new BoundedConcurrentDictionary<string, int>(2, onEvicted: _ => evicted = true);
+
+            dict["a"] = 1;
+            dict["b"] = 2;
+
+            dict["a"] = 99;
+
+            Assert.False(evicted);
+            Assert.Equal(2, dict.Count);
+            Assert.Equal(99, dict["a"]);
+            Assert.Equal(2, dict["b"]);
         }
 
         // ── Enumeration ─────────────────────────────────────────────────────────────
