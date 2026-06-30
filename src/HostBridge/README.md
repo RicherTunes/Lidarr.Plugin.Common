@@ -126,6 +126,8 @@ public sealed class MyIndexer : HttpIndexerBase<MySettings>
 
 Persistence is intentionally terminal-state-only. Completed, failed, and cancelled entries are reloaded until retention expiry so the Lidarr host can import, blocklist, or remove them. Queued and downloading entries are dropped during startup and the cleaned snapshot is written back, because the background worker task does not survive process restart. A future resumable-download feature needs an explicit plugin worker seam instead of pretending stale in-progress JSON can finish itself.
 
+`Remove(downloadId, deleteData: true, ...)` is cross-attempt aware: if another queued/downloading item still targets the same canonical output directory, Common removes only the tracker entry and leaves the directory in place for the active attempt. The comparison normalizes trailing separators and `.`/`..`; it is case-sensitive on Linux and case-insensitive on Windows/macOS to match Common's path-guard semantics.
+
 Subclass stores need an `itemFactory` so persisted base fields can be restored into the intended runtime type. The Common DTO does not persist arbitrary subclass-only fields; derive those fields from base data in the factory, or keep restart-critical state on `HostBridgeDownloadItem`.
 
 Related helpers in sibling namespaces:
