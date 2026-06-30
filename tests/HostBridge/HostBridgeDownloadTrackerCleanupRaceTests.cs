@@ -47,6 +47,69 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public void Remove_deleteData_skips_deletion_when_active_same_path_has_trailing_separator()
+        {
+            var dir = MakeTempDirWithFile();
+            try
+            {
+                var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>();
+                var oldAttempt = new HostBridgeDownloadItem { DownloadId = "old", Title = "T", Artist = "A", OutputPath = dir };
+                oldAttempt.SetStatus(HostBridgeDownloadItemStatus.Failed);
+                var newAttempt = new HostBridgeDownloadItem
+                {
+                    DownloadId = "new",
+                    Title = "T",
+                    Artist = "A",
+                    OutputPath = dir + Path.DirectorySeparatorChar,
+                };
+                newAttempt.SetStatus(HostBridgeDownloadItemStatus.Downloading);
+                store.AddOrReplace(oldAttempt);
+                store.AddOrReplace(newAttempt);
+
+                var removed = store.Remove("old", deleteData: true, out _);
+
+                Assert.True(removed);
+                Assert.True(Directory.Exists(dir),
+                    "same-directory comparisons must be canonicalized so harmless separator differences do not delete a new in-flight attempt");
+            }
+            finally { try { Directory.Delete(dir, true); } catch { /* best effort */ } }
+        }
+
+        [Fact]
+        public void Remove_deleteData_deletes_linux_case_twin_path()
+        {
+            if (!OperatingSystem.IsLinux())
+            {
+                return;
+            }
+
+            var dir = MakeTempDirWithFile();
+            var parent = Path.GetDirectoryName(dir)!;
+            var caseTwin = Path.Combine(parent, Path.GetFileName(dir).ToUpperInvariant());
+            try
+            {
+                var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>();
+                var oldAttempt = new HostBridgeDownloadItem { DownloadId = "old", Title = "T", Artist = "A", OutputPath = dir };
+                oldAttempt.SetStatus(HostBridgeDownloadItemStatus.Failed);
+                var otherAttempt = new HostBridgeDownloadItem { DownloadId = "other", Title = "T", Artist = "A", OutputPath = caseTwin };
+                otherAttempt.SetStatus(HostBridgeDownloadItemStatus.Downloading);
+                store.AddOrReplace(oldAttempt);
+                store.AddOrReplace(otherAttempt);
+
+                var removed = store.Remove("old", deleteData: true, out _);
+
+                Assert.True(removed);
+                Assert.False(Directory.Exists(dir),
+                    "Linux filesystems are case-sensitive; a case-twin path must not suppress cleanup for a distinct directory");
+            }
+            finally
+            {
+                try { Directory.Delete(dir, true); } catch { /* best effort */ }
+                try { Directory.Delete(caseTwin, true); } catch { /* best effort */ }
+            }
+        }
+
+        [Fact]
         public void Remove_deleteData_deletes_directory_when_no_other_active_download()
         {
             var dir = MakeTempDirWithFile();

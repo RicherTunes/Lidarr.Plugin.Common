@@ -454,14 +454,10 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 {
                     continue;
                 }
-                if (string.Equals(other.OutputPath, removed.OutputPath, StringComparison.OrdinalIgnoreCase))
+                if (SameDirectory(other.OutputPath, removed.OutputPath) && IsActiveStatus(other.GetStatus()))
                 {
-                    var otherStatus = other.GetStatus();
-                    if (otherStatus is HostBridgeDownloadItemStatus.Queued or HostBridgeDownloadItemStatus.Downloading)
-                    {
-                        // Another active download owns this path — leave its files intact.
-                        return true;
-                    }
+                    // Another active download owns this path — leave its files intact.
+                    return true;
                 }
             }
 
@@ -516,6 +512,36 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         => status is HostBridgeDownloadItemStatus.Completed
             or HostBridgeDownloadItemStatus.Failed
             or HostBridgeDownloadItemStatus.Cancelled;
+
+    private static bool IsActiveStatus(HostBridgeDownloadItemStatus status)
+        => status is HostBridgeDownloadItemStatus.Queued
+            or HostBridgeDownloadItemStatus.Downloading;
+
+    // OS-aware same-directory comparison for the cross-attempt cleanup guard. Canonicalizes
+    // separator and "."/".." spellings, then compares case-sensitively on Linux (the production
+    // host target) and case-insensitively elsewhere (Windows/macOS default).
+    private static bool SameDirectory(string a, string b)
+    {
+        if (string.IsNullOrWhiteSpace(a) || string.IsNullOrWhiteSpace(b))
+        {
+            return false;
+        }
+
+        try
+        {
+            return string.Equals(NormalizeDirectoryPath(a), NormalizeDirectoryPath(b), PathComparison);
+        }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException)
+        {
+            return false;
+        }
+    }
+
+    private static string NormalizeDirectoryPath(string path)
+        => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+
+    private static StringComparison PathComparison =>
+        OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
 
     private void LoadFromDisk()
     {
