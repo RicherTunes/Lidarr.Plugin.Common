@@ -54,6 +54,23 @@ namespace Lidarr.Plugin.Common.Tests.Lyrics
             public string Dir { get; }
             public TempDir() { Dir = Path.Combine(Path.GetTempPath(), "lyr-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(Dir); }
             public string Audio() { var p = Path.Combine(Dir, "song.flac"); File.WriteAllText(p, "x"); return p; }
+            // A structurally-valid minimal FLAC so TagLib can open + tag it (embed test).
+            public string RealFlac()
+            {
+                var p = Path.Combine(Dir, "real.flac");
+                File.WriteAllBytes(p, new byte[]
+                {
+                    0x66, 0x4C, 0x61, 0x43,
+                    0x80, 0x00, 0x00, 0x22,
+                    0x00, 0x10, 0x00, 0x10,
+                    0x00, 0x00, 0x01, 0x00, 0x00, 0x01,
+                    0x0A, 0xC4, 0x40, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0xFF, 0xF8, 0x09, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+                });
+                return p;
+            }
             public static string Lrc(string audio) => Path.ChangeExtension(audio, ".lrc");
             public void Dispose() { try { Directory.Delete(Dir, true); } catch { } }
         }
@@ -161,6 +178,24 @@ namespace Lidarr.Plugin.Common.Tests.Lyrics
 
             Assert.Null(ex);
             Assert.False(File.Exists(TempDir.Lrc(audio)));
+        }
+
+        [Fact]
+        public async Task Embeds_lyrics_into_audio_tag_so_they_survive_import()
+        {
+            using var tmp = new TempDir();
+            var audio = tmp.RealFlac();
+            var native = new StubNativeSource("[00:00.00]hello world lyrics");
+            var handler = new StubHandler(() => LrclibHit("x"));
+            using var sut = Enricher(native, handler);
+
+            await sut.TryEnrichAsync(audio, "Artist", "Track", "Album", 100, allowLrclibFallback: true);
+
+            // Sidecar is still written for synced-lyrics-capable players ...
+            Assert.True(File.Exists(TempDir.Lrc(audio)));
+            // ... AND embedded into the tag so it survives Lidarr import (importExtraFiles=false drops sidecars).
+            using var file = TagLib.File.Create(audio);
+            Assert.Contains("hello world lyrics", file.Tag.Lyrics ?? string.Empty);
         }
     }
 }

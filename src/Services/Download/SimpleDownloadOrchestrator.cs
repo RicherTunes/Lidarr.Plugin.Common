@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -24,6 +24,8 @@ namespace Lidarr.Plugin.Common.Services.Download
     /// </summary>
     public class SimpleDownloadOrchestrator : IStreamingDownloadOrchestrator
     {
+        private const long MaxArtworkBytes = 10L * 1024 * 1024;
+
         private readonly HttpClient _httpClient;
         private readonly Func<string, Task<StreamingAlbum>> _getAlbumAsync;
         private readonly Func<string, Task<StreamingTrack>> _getTrackAsync;
@@ -32,6 +34,7 @@ namespace Lidarr.Plugin.Common.Services.Download
         private readonly IAudioStreamProvider? _streamProvider;
         private readonly IAudioPostProcessor? _postProcessor;
         private readonly IAudioMetadataApplier? _metadataApplier;
+        private readonly IAudioArtworkEmbedder _artworkEmbedder;
         private readonly ILogger _logger;
         private readonly int _maxConcurrentTracks;
         private readonly IDownloadTelemetrySink? _telemetrySink;
@@ -64,6 +67,7 @@ namespace Lidarr.Plugin.Common.Services.Download
             _postProcessor = postProcessor;
             _metadataApplier = metadataApplier ?? new TagLibAudioMetadataApplier();
             _logger = logger ?? NullLogger.Instance;
+            _artworkEmbedder = new TagLibAudioArtworkEmbedder(_logger);
             _telemetrySink = null;
             _mediaUriPolicy = mediaUriPolicy ?? RemoteMediaUriPolicy.Strict;
         }
@@ -588,14 +592,69 @@ namespace Lidarr.Plugin.Common.Services.Download
 
         private async Task ApplyMetadataAsync(string filePath, StreamingTrack? track, CancellationToken cancellationToken)
         {
-            if (_metadataApplier == null || track == null || string.IsNullOrWhiteSpace(filePath))
+            if (track == null || string.IsNullOrWhiteSpace(filePath))
             {
+                return;
+            }
+
+            if (_metadataApplier != null)
+            {
+                try
+                {
+                    await _metadataApplier.ApplyAsync(filePath, track, cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    // Metadata application failure shouldn't fail the download.
+                    // The file is already successfully downloaded - log once per track.
+                    _logger.LogWarning(ex, "[{ServiceName}] Failed to apply metadata to '{FileName}' (track {TrackId})",
+                        ServiceName, Path.GetFileName(filePath), track.Id);
+                }
+            }
+
+            await ApplyArtworkAsync(filePath, track, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task ApplyArtworkAsync(string filePath, StreamingTrack track, CancellationToken cancellationToken)
+        {
+            var coverUrl = track.Album?.GetBestCoverArtUrl();
+            if (string.IsNullOrWhiteSpace(coverUrl))
+            {
+                return;
+            }
+
+            var uriGuard = RemoteMediaUriGuard.Validate(coverUrl, _mediaUriPolicy);
+            if (!uriGuard.IsAllowed)
+            {
+                _logger.LogDebug("[{ServiceName}] Skipping unsafe cover-art URL for track {TrackId}: {Reason}", ServiceName, track.Id, uriGuard.Reason);
                 return;
             }
 
             try
             {
-                await _metadataApplier.ApplyAsync(filePath, track, cancellationToken).ConfigureAwait(false);
+                using var request = new HttpRequestMessage(HttpMethod.Get, coverUrl);
+                using var response = await _httpClient.ExecuteWithResilienceAsync(
+                    request,
+                    ResiliencePolicy.Default,
+                    cancellationToken,
+                    validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
+
+                response.EnsureSuccessStatusCode();
+                if (response.Content.Headers.ContentLength is > MaxArtworkBytes)
+                {
+                    _logger.LogDebug("[{ServiceName}] Skipping cover art for track {TrackId}: response is too large ({Bytes} bytes",
+                        ServiceName, track.Id, response.Content.Headers.ContentLength.Value);
+                    return;
+                }
+
+                var bytes = await HttpContentLightUp.ReadAsByteArrayAsync(response.Content, cancellationToken).ConfigureAwait(false);
+                if (bytes.Length == 0 || bytes.LongLength > MaxArtworkBytes)
+                {
+                    return;
+                }
+
+                var mimeType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
+                await _artworkEmbedder.EmbedAsync(filePath, bytes, mimeType, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -603,10 +662,7 @@ namespace Lidarr.Plugin.Common.Services.Download
             }
             catch (Exception ex)
             {
-                // Metadata application failure shouldn't fail the download (incl. a non-caller timeout
-                // OCE). The file is already successfully downloaded - log once per track.
-                _logger.LogWarning(ex, "[{ServiceName}] Failed to apply metadata to '{FileName}' (track {TrackId})",
-                    ServiceName, Path.GetFileName(filePath), track.Id);
+                _logger.LogDebug(ex, "[{ServiceName}] Cover-art embedding failed for track {TrackId} (non-fatal)", ServiceName, track.Id);
             }
         }
 
