@@ -89,7 +89,7 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
                 // Off the caller thread — TagLib open/save is blocking disk I/O.
                 await Task.Run(() => TryEmbedLyrics(audioFilePath, lyrics), cancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }

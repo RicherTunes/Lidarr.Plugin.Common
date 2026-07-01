@@ -108,6 +108,21 @@ namespace Lidarr.Plugin.Common.Tests
             }
         }
 
+        private sealed class RecordingArtworkEmbedder : IAudioArtworkEmbedder
+        {
+            public int Calls { get; private set; }
+            public string? MimeType { get; private set; }
+            public byte[]? Bytes { get; private set; }
+
+            public Task EmbedAsync(string filePath, byte[] imageBytes, string mimeType, CancellationToken cancellationToken = default)
+            {
+                Calls++;
+                MimeType = mimeType;
+                Bytes = imageBytes;
+                return Task.CompletedTask;
+            }
+        }
+
         [Fact]
         public async Task DownloadTrack_WithStreamProvider_RunsPostProcessorAndUpdatesResultPath()
         {
@@ -792,6 +807,72 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task DownloadTrackAsync_SkipsCoverArtWhenJpegHeaderContainsHtmlBytes()
+        {
+            var coverUrl = "https://93.184.216.34/spoofed-cover.jpg";
+            var html = System.Text.Encoding.UTF8.GetBytes("<html><body>Not Found</body></html>");
+            using var http = new HttpClient(new StaticContentHandler(html, "image/jpeg"));
+            var streamProvider = new FakeStreamProvider(MinimalFlacBytes(), "flac");
+            var artworkEmbedder = new RecordingArtworkEmbedder();
+            var album = new StreamingAlbum { Id = "album1", Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1, CoverArtUrls = new Dictionary<string, string> { ["large"] = coverUrl } };
+            var track = new StreamingTrack { Id = "track1", Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = album, TrackNumber = 1 };
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test", httpClient: http,
+                getAlbumAsync: id => Task.FromResult(album), getTrackAsync: id => Task.FromResult(track),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "track1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/unused", "flac")),
+                maxConcurrentTracks: 1,
+                streamProvider: streamProvider,
+                metadataApplier: null,
+                logger: null,
+                postProcessor: null,
+                telemetrySink: null,
+                mediaUriPolicy: null,
+                artworkEmbedder: artworkEmbedder);
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_cover_spoofed_{Guid.NewGuid():N}.flac");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("track1", temp, new StreamingQuality { Bitrate = 320 });
+                Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
+                Assert.Equal(0, artworkEmbedder.Calls);
+            }
+            finally { TryDelete(temp); TryDelete(temp + ".partial"); TryDelete(temp + ".partial.resume.json"); }
+        }
+
+        [Fact]
+        public async Task DownloadTrackAsync_SkipsCoverArtWhenMimeTypeIsSvg()
+        {
+            var coverUrl = "https://93.184.216.34/vector-cover.svg";
+            var svg = System.Text.Encoding.UTF8.GetBytes("<svg xmlns=\"http://www.w3.org/2000/svg\"><script>alert(1)</script></svg>");
+            using var http = new HttpClient(new StaticContentHandler(svg, "image/svg+xml"));
+            var streamProvider = new FakeStreamProvider(MinimalFlacBytes(), "flac");
+            var artworkEmbedder = new RecordingArtworkEmbedder();
+            var album = new StreamingAlbum { Id = "album1", Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1, CoverArtUrls = new Dictionary<string, string> { ["large"] = coverUrl } };
+            var track = new StreamingTrack { Id = "track1", Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = album, TrackNumber = 1 };
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test", httpClient: http,
+                getAlbumAsync: id => Task.FromResult(album), getTrackAsync: id => Task.FromResult(track),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "track1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/unused", "flac")),
+                maxConcurrentTracks: 1,
+                streamProvider: streamProvider,
+                metadataApplier: null,
+                logger: null,
+                postProcessor: null,
+                telemetrySink: null,
+                mediaUriPolicy: null,
+                artworkEmbedder: artworkEmbedder);
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_cover_svg_{Guid.NewGuid():N}.flac");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("track1", temp, new StreamingQuality { Bitrate = 320 });
+                Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
+                Assert.Equal(0, artworkEmbedder.Calls);
+            }
+            finally { TryDelete(temp); TryDelete(temp + ".partial"); TryDelete(temp + ".partial.resume.json"); }
+        }
+
+        [Fact]
         public async Task DownloadTrackAsync_SkipsCoverArtWhenChunkedBodyExceedsCap()
         {
             var coverUrl = "https://93.184.216.34/huge-cover.jpg";
@@ -819,6 +900,45 @@ namespace Lidarr.Plugin.Common.Tests
             finally { TryDelete(temp); TryDelete(temp + ".partial"); TryDelete(temp + ".partial.resume.json"); }
         }
 
+        [Fact]
+        public async Task DownloadTrackAsync_SlowCoverArtBodyReadTimesOutWithoutFailingDownload()
+        {
+            var coverUrl = "https://93.184.216.34/stalled-cover.jpg";
+            var handler = new StallingArtworkHandler("image/jpeg");
+            using var http = new HttpClient(handler);
+            var streamProvider = new FakeStreamProvider(MinimalFlacBytes(), "flac");
+            var artworkEmbedder = new RecordingArtworkEmbedder();
+            var album = new StreamingAlbum { Id = "album1", Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1, CoverArtUrls = new Dictionary<string, string> { ["large"] = coverUrl } };
+            var track = new StreamingTrack { Id = "track1", Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = album, TrackNumber = 1 };
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test", httpClient: http,
+                getAlbumAsync: id => Task.FromResult(album), getTrackAsync: id => Task.FromResult(track),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "track1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/unused", "flac")),
+                maxConcurrentTracks: 1,
+                streamProvider: streamProvider,
+                metadataApplier: null,
+                logger: null,
+                postProcessor: null,
+                telemetrySink: null,
+                mediaUriPolicy: null,
+                artworkEmbedder: artworkEmbedder,
+                artworkReadTimeout: TimeSpan.FromMilliseconds(50));
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_cover_stall_{Guid.NewGuid():N}.flac");
+            try
+            {
+                var downloadTask = orch.DownloadTrackAsync("track1", temp, new StreamingQuality { Bitrate = 320 }, CancellationToken.None);
+                var completed = await Task.WhenAny(downloadTask, Task.Delay(TimeSpan.FromSeconds(1)));
+
+                Assert.Same(downloadTask, completed);
+                var result = await downloadTask;
+                Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
+                Assert.True(handler.ReadStarted.Task.IsCompleted, "the cover-art body stream should be reached before timing out");
+                Assert.Equal(0, artworkEmbedder.Calls);
+            }
+            finally { TryDelete(temp); TryDelete(temp + ".partial"); TryDelete(temp + ".partial.resume.json"); }
+        }
+
         private sealed class ChunkedStreamHandler : HttpMessageHandler
         {
             private readonly string _mediaType;
@@ -842,6 +962,71 @@ namespace Lidarr.Plugin.Common.Tests
                 // Deliberately no ContentLength -> simulates chunked transfer encoding.
                 return Task.FromResult(response);
             }
+        }
+
+        private sealed class StallingArtworkHandler : HttpMessageHandler
+        {
+            private readonly string _mediaType;
+
+            public StallingArtworkHandler(string mediaType)
+            {
+                _mediaType = mediaType;
+            }
+
+            public TaskCompletionSource<bool> ReadStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StreamContent(new StallingReadStream(ReadStarted))
+                };
+                response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(_mediaType);
+                return Task.FromResult(response);
+            }
+        }
+
+        private sealed class StallingReadStream : Stream
+        {
+            private readonly TaskCompletionSource<bool> _readStarted;
+
+            public StallingReadStream(TaskCompletionSource<bool> readStarted)
+            {
+                _readStarted = readStarted;
+            }
+
+            public override bool CanRead => true;
+            public override bool CanSeek => false;
+            public override bool CanWrite => false;
+            public override long Length => throw new NotSupportedException();
+            public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+
+#if NET8_0_OR_GREATER
+            public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+            {
+                _readStarted.TrySetResult(true);
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+                return 0;
+            }
+#endif
+
+            public override async Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+            {
+                _readStarted.TrySetResult(true);
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ConfigureAwait(false);
+                return 0;
+            }
+
+            public override int Read(byte[] buffer, int offset, int count)
+            {
+                _readStarted.TrySetResult(true);
+                throw new NotSupportedException("The cover-art timeout test must use async reads.");
+            }
+
+            public override void Flush() { }
+            public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+            public override void SetLength(long value) => throw new NotSupportedException();
+            public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
         }
 
         private sealed class ForwardOnlyZeroStream : Stream

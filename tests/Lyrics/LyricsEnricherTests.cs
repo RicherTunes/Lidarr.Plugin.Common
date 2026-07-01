@@ -29,6 +29,23 @@ namespace Lidarr.Plugin.Common.Tests.Lyrics
             }
         }
 
+        private sealed class ThrowingNativeSource : INativeLyricsSource
+        {
+            private readonly Func<CancellationToken, Exception> _exceptionFactory;
+            public int Calls { get; private set; }
+
+            public ThrowingNativeSource(Func<CancellationToken, Exception> exceptionFactory)
+            {
+                _exceptionFactory = exceptionFactory;
+            }
+
+            public Task<string?> TryGetSyncedLyricsAsync(string artistName, string trackName, string albumName, int durationSeconds, CancellationToken ct = default)
+            {
+                Calls++;
+                throw _exceptionFactory(ct);
+            }
+        }
+
         private sealed class StubHandler : HttpMessageHandler
         {
             private readonly Func<HttpResponseMessage> _factory;
@@ -177,6 +194,43 @@ namespace Lidarr.Plugin.Common.Tests.Lyrics
                 sut.TryEnrichAsync(audio, "Artist", "Track", "Album", 100, allowLrclibFallback: true));
 
             Assert.Null(ex);
+            Assert.False(File.Exists(TempDir.Lrc(audio)));
+        }
+
+        [Fact]
+        public async Task Native_source_noncaller_timeout_is_best_effort()
+        {
+            using var tmp = new TempDir();
+            var audio = tmp.Audio();
+            var native = new ThrowingNativeSource(_ => new TaskCanceledException("native lyrics timeout"));
+            var handler = new StubHandler(() => LrclibHit("[00:00.00]fallback"));
+            using var sut = Enricher(native, handler);
+
+            var ex = await Record.ExceptionAsync(() =>
+                sut.TryEnrichAsync(audio, "Artist", "Track", "Album", 100, allowLrclibFallback: true, CancellationToken.None));
+
+            Assert.Null(ex);
+            Assert.Equal(1, native.Calls);
+            Assert.Equal(0, handler.Calls);
+            Assert.False(File.Exists(TempDir.Lrc(audio)));
+        }
+
+        [Fact]
+        public async Task Native_source_caller_cancellation_is_rethrown()
+        {
+            using var tmp = new TempDir();
+            var audio = tmp.Audio();
+            var native = new ThrowingNativeSource(ct => new OperationCanceledException(ct));
+            var handler = new StubHandler(() => LrclibHit("[00:00.00]fallback"));
+            using var sut = Enricher(native, handler);
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                sut.TryEnrichAsync(audio, "Artist", "Track", "Album", 100, allowLrclibFallback: true, cts.Token));
+
+            Assert.Equal(1, native.Calls);
+            Assert.Equal(0, handler.Calls);
             Assert.False(File.Exists(TempDir.Lrc(audio)));
         }
 
