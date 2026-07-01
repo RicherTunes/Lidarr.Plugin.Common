@@ -224,3 +224,9 @@ static Lidarr.Plugin.Common.Utilities.TimeParsing.TryFromUnixTimeMilliseconds(lo
 static Lidarr.Plugin.Common.Utilities.TimeParsing.TryParseIsoDateInvariant(string? text, out System.DateTimeOffset value) -> bool
 Lidarr.Plugin.Common.Services.Download.PartialFileReset
 static Lidarr.Plugin.Common.Services.Download.PartialFileReset.ResolveWriteMode(bool serverHonoredRange) -> System.IO.FileMode
+Lidarr.Plugin.Common.Interfaces.IAudioArtworkEmbedder
+Lidarr.Plugin.Common.Interfaces.IAudioArtworkEmbedder.EmbedAsync(string! filePath, byte[]! imageBytes, string! mimeType, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task!
+Lidarr.Plugin.Common.Services.Metadata.TagLibAudioArtworkEmbedder
+Lidarr.Plugin.Common.Services.Metadata.TagLibAudioArtworkEmbedder.TagLibAudioArtworkEmbedder() -> void
+Lidarr.Plugin.Common.Services.Metadata.TagLibAudioArtworkEmbedder.TagLibAudioArtworkEmbedder(Microsoft.Extensions.Logging.ILogger! logger) -> void
+Lidarr.Plugin.Common.Services.Metadata.TagLibAudioArtworkEmbedder.EmbedAsync(string! filePath, byte[]! imageBytes, string! mimeType, System.Threading.CancellationToken cancellationToken = default) -> System.Threading.Tasks.Task!
