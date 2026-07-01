@@ -539,6 +539,156 @@ namespace Lidarr.Plugin.Common.Tests
             }
         }
 
+        [Fact]
+        public async Task DownloadTrackAsync_EmbedsAlbumCoverArtFromMetadata()
+        {
+            var coverUrl = "https://93.184.216.34/cover.jpg";
+            var image = FakeJpeg();
+            using var http = new HttpClient(new StaticContentHandler(image, "image/jpeg"));
+            var streamProvider = new FakeStreamProvider(MinimalFlacBytes(), "flac");
+
+            var album = new StreamingAlbum
+            {
+                Id = "album1",
+                Title = "A",
+                Artist = new StreamingArtist { Name = "X" },
+                TrackCount = 1,
+                CoverArtUrls = new Dictionary<string, string> { ["large"] = coverUrl }
+            };
+
+            var track = new StreamingTrack
+            {
+                Id = "track1",
+                Title = "T",
+                Artist = new StreamingArtist { Name = "X" },
+                Album = album,
+                TrackNumber = 1
+            };
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(album),
+                getTrackAsync: id => Task.FromResult(track),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "track1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/unused", "flac")),
+                streamProvider: streamProvider);
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_test_cover_{Guid.NewGuid():N}.flac");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("track1", temp, new StreamingQuality { Bitrate = 320 });
+
+                Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
+                using var file = TagLib.File.Create(result.FilePath);
+                Assert.Single(file.Tag.Pictures);
+                Assert.Equal(TagLib.PictureType.FrontCover, file.Tag.Pictures[0].Type);
+                Assert.Equal("image/jpeg", file.Tag.Pictures[0].MimeType);
+                Assert.Equal(image, file.Tag.Pictures[0].Data.Data);
+            }
+            finally
+            {
+                TryDelete(temp);
+                TryDelete(Path.ChangeExtension(temp, "flac"));
+                TryDelete(temp + ".partial");
+                TryDelete(temp + ".partial.resume.json");
+            }
+        }
+
+        [Fact]
+        public async Task DownloadTrackAsync_SkipsCoverArtWhenContentLengthTooLarge()
+        {
+            var coverUrl = "https://93.184.216.34/too-large-cover.jpg";
+            var image = FakeJpeg();
+            using var http = new HttpClient(new StaticContentHandler(image, "image/jpeg", contentLength: 10L * 1024 * 1024 + 1));
+            var streamProvider = new FakeStreamProvider(MinimalFlacBytes(), "flac");
+
+            var album = new StreamingAlbum
+            {
+                Id = "album1",
+                Title = "A",
+                Artist = new StreamingArtist { Name = "X" },
+                TrackCount = 1,
+                CoverArtUrls = new Dictionary<string, string> { ["large"] = coverUrl }
+            };
+
+            var track = new StreamingTrack
+            {
+                Id = "track1",
+                Title = "T",
+                Artist = new StreamingArtist { Name = "X" },
+                Album = album,
+                TrackNumber = 1
+            };
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(album),
+                getTrackAsync: id => Task.FromResult(track),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "track1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/unused", "flac")),
+                streamProvider: streamProvider);
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_test_cover_large_{Guid.NewGuid():N}.flac");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("track1", temp, new StreamingQuality { Bitrate = 320 });
+
+                Assert.True(result.Success, $"Download failed: {result.ErrorMessage}");
+                using var file = TagLib.File.Create(result.FilePath);
+                Assert.Empty(file.Tag.Pictures);
+            }
+            finally
+            {
+                TryDelete(temp);
+                TryDelete(Path.ChangeExtension(temp, "flac"));
+                TryDelete(temp + ".partial");
+                TryDelete(temp + ".partial.resume.json");
+            }
+        }
+        private static byte[] FakeJpeg() => new byte[]
+        {
+            0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 0x4A, 0x46, 0x49, 0x46, 0x00, 0x01,
+            0x01, 0x00, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0xFF, 0xD9
+        };
+
+        private static byte[] MinimalFlacBytes() => new byte[]
+        {
+            0x66, 0x4C, 0x61, 0x43,
+            0x80, 0x00, 0x00, 0x22,
+            0x00, 0x10, 0x00, 0x10,
+            0x00, 0x00, 0x01, 0x00, 0x00, 0x01,
+            0x0A, 0xC4, 0x40, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+            0xFF, 0xF8, 0x09, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        };
+
+        private sealed class StaticContentHandler : HttpMessageHandler
+        {
+            private readonly byte[] _payload;
+            private readonly string _mediaType;
+            private readonly long? _contentLength;
+
+            public StaticContentHandler(byte[] payload, string mediaType, long? contentLength = null)
+            {
+                _payload = payload;
+                _mediaType = mediaType;
+                _contentLength = contentLength;
+            }
+
+            protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            {
+                var response = new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new ByteArrayContent(_payload)
+                };
+                response.Content.Headers.ContentType = new System.Net.Http.Headers.MediaTypeHeaderValue(_mediaType);
+                response.Content.Headers.ContentLength = _contentLength ?? _payload.Length;
+                return Task.FromResult(response);
+            }
+        }
         private static void TryDelete(string path)
         {
             try { if (File.Exists(path)) File.Delete(path); } catch { }
