@@ -12,7 +12,7 @@ namespace Lidarr.Plugin.Common.Interfaces
     /// file's tag survives the import move unconditionally.
     /// </para>
     /// </summary>
-    public interface IAudioArtworkEmbedder
+    internal interface IAudioArtworkEmbedder
     {
         /// <summary>
         /// Embeds <paramref name="imageBytes"/> as the front-cover picture of the file at

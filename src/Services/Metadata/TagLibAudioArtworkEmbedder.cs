@@ -14,7 +14,7 @@ namespace Lidarr.Plugin.Common.Services.Metadata
     /// front-cover picture on the file (FLAC PICTURE block / ID3v2 APIC / MP4 covr). Shared across
     /// plugins so every streaming download arrives with embedded art that survives Lidarr import.
     /// </summary>
-    public sealed class TagLibAudioArtworkEmbedder : IAudioArtworkEmbedder
+    internal sealed class TagLibAudioArtworkEmbedder : IAudioArtworkEmbedder
     {
         private const string DefaultMimeType = "image/jpeg";
 
