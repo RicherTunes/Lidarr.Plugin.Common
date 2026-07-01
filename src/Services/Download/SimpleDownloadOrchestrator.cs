@@ -174,6 +174,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                 result.FilePaths = files;
                 result.TotalSize = 0;
                 result.Duration = DateTime.UtcNow - started;
+                LogUnsuccessfulAlbumDownload(albumId, successfulTracks: 0, totalTracks: total, fileCount: files.Count, result.ErrorMessage);
                 return result;
             }
 
@@ -285,17 +286,22 @@ namespace Lidarr.Plugin.Common.Services.Download
 
             if (!result.Success)
             {
-                // Surface the failure in the logs so an unsuccessful album is never silent (the caller
-                // only sees ErrorMessage on the returned result, which several download clients don't log).
-                _logger.LogWarning(
-                    "[{ServiceName}] Album '{AlbumId}' did not complete successfully ({SuccessfulTracks}/{TotalTracks} tracks, {FileCount} files): {Reason}",
-                    ServiceName, albumId, successfulTracks, result.TrackResults.Count, files.Count, result.ErrorMessage);
+                LogUnsuccessfulAlbumDownload(albumId, successfulTracks, result.TrackResults.Count, files.Count, result.ErrorMessage);
             }
 
             result.FilePaths = files;
             result.TotalSize = files.Where(File.Exists).Select(f => new FileInfo(f).Length).Sum();
             result.Duration = DateTime.UtcNow - started;
             return result;
+        }
+
+        private void LogUnsuccessfulAlbumDownload(string albumId, int successfulTracks, int totalTracks, int fileCount, string? reason)
+        {
+            // Surface the failure in the logs so an unsuccessful album is never silent (the caller
+            // only sees ErrorMessage on the returned result, which several download clients don't log).
+            _logger.LogWarning(
+                "[{ServiceName}] Album '{AlbumId}' did not complete successfully ({SuccessfulTracks}/{TotalTracks} tracks, {FileCount} files): {Reason}",
+                ServiceName, albumId, successfulTracks, totalTracks, fileCount, reason ?? "unknown reason");
         }
 
         public Task<TrackDownloadResult> DownloadTrackAsync(string trackId, string outputPath, StreamingQuality? quality = null)
