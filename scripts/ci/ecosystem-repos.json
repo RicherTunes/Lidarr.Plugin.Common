@@ -1,5 +1,5 @@
 {
-  "$comment": "Ecosystem CI-contract manifest. mirrorWorkflows = expected .github/workflows/*.yml count. Verified 2026-06-29 against live sibling layout. tidalarr intentionally carries 2 mirrors (ci.yml + submodule-pin.yml); amazonmusicarr set to 0 (dormant .github/workflows deleted in parallel PR).",
+  "$comment": "Ecosystem CI-contract manifest. mirrorWorkflows = expected plugin-root .github/workflows/*.yml count. Verified 2026-07-01 against live sibling layout. All active plugins are Gitea-primary with no plugin-root GitHub workflow mirrors.",
   "plugins": [
     {
       "repoDir": "qobuzarr",
@@ -13,7 +13,7 @@
       "giteaOwner": "RicherTunes",
       "giteaRepo": "Tidalarr",
       "giteaPrimary": true,
-      "mirrorWorkflows": 2
+      "mirrorWorkflows": 0
     },
     {
       "repoDir": "applemusicarr",
