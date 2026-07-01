@@ -1,5 +1,7 @@
 using System;
 using System.IO;
+using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Logging;
@@ -84,7 +86,8 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
                 // Also embed the lyrics into the audio tag. The .lrc sidecar above serves synced-lyrics
                 // players, but Lidarr's default importExtraFiles=false drops sidecars at import — so
                 // without embedding, lyrics never reach the library. Best-effort: never fail the download.
-                TryEmbedLyrics(audioFilePath, lyrics);
+                // Off the caller thread — TagLib open/save is blocking disk I/O.
+                await Task.Run(() => TryEmbedLyrics(audioFilePath, lyrics), cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException)
             {
@@ -106,13 +109,31 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
             try
             {
                 using var file = TagLib.File.Create(audioFilePath);
-                file.Tag.Lyrics = lyrics;
+                // The .lrc sidecar keeps the timestamped synced form for capable players; the unsynced
+                // Tag.Lyrics (USLT / UNSYNCEDLYRICS) should hold clean text so players don't render the
+                // raw "[00:01.23]" timing codes to the user.
+                file.Tag.Lyrics = StripLrcTimestamps(lyrics);
                 file.Save();
             }
             catch (Exception ex)
             {
                 _logger?.LogDebug(ex, "Embedding lyrics into tag failed for {File} (non-fatal)", Path.GetFileName(audioFilePath));
             }
+        }
+
+        private static readonly Regex LrcTimestamp = new(@"\[\d{1,2}:\d{2}(?:[.:]\d{1,3})?\]", RegexOptions.Compiled);
+
+        /// <summary>Removes synced-LRC timing tags (<c>[mm:ss.xx]</c>) so the embedded unsynced lyrics read cleanly.</summary>
+        private static string StripLrcTimestamps(string lyrics)
+        {
+            if (string.IsNullOrEmpty(lyrics))
+            {
+                return lyrics;
+            }
+
+            // Drop the timing tags, then trim the leading space each leaves behind, per line.
+            var stripped = LrcTimestamp.Replace(lyrics, string.Empty);
+            return string.Join('\n', stripped.Split('\n').Select(l => l.TrimStart()));
         }
 
         public void Dispose()
