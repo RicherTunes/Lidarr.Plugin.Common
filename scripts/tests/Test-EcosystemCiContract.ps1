@@ -695,6 +695,49 @@ jobs:
     }
 
     Write-Host ''
+    Write-Host 'Branch-protection status context matching' -ForegroundColor White
+
+    Test-Assertion 'Status context: exact configured context satisfies requirement' {
+        Test-StatusContextRequirementSatisfied `
+            -RequiredContext 'CI / lint' `
+            -ConfiguredContexts @('CI / lint', 'CI / verify')
+    }
+
+    Test-Assertion 'Status context: Gitea wildcard context satisfies base requirement' {
+        Test-StatusContextRequirementSatisfied `
+            -RequiredContext 'CI / lint' `
+            -ConfiguredContexts @('CI / lint*', 'CI / verify*')
+    }
+
+    Test-Assertion 'Status context: unrelated wildcard does not satisfy requirement' {
+        -not (Test-StatusContextRequirementSatisfied `
+            -RequiredContext 'CI / build-test' `
+            -ConfiguredContexts @('CI / lint*', 'CI / verify*'))
+    }
+
+    Test-Assertion 'Branch-protection targets include plugins plus Common' {
+        $targets = @(Get-BranchProtectionTargets -Plugins @(
+            [pscustomobject]@{ giteaOwner = 'RicherTunes'; giteaRepo = 'Qobuzarr' }
+            [pscustomobject]@{ giteaOwner = 'RicherTunes'; giteaRepo = 'Tidalarr' }
+        ))
+
+        $repos = @($targets | Select-Object -ExpandProperty Repo)
+        $repos -contains 'Qobuzarr' -and
+            $repos -contains 'Tidalarr' -and
+            $repos -contains 'Lidarr.Plugin.Common'
+    }
+
+    Test-Assertion 'Branch-protection targets require Common build-test and secret-scan contexts' {
+        $targets = @(Get-BranchProtectionTargets -Plugins @())
+        $common = $targets | Where-Object { $_.Repo -eq 'Lidarr.Plugin.Common' } | Select-Object -First 1
+
+        $null -ne $common -and
+            $common.RequiredContexts -contains 'CI / lint' -and
+            $common.RequiredContexts -contains 'CI / build-test' -and
+            $common.RequiredContexts -contains 'CI / secret-scan'
+    }
+
+    Write-Host ''
     Write-Host 'Common workflow live ecosystem guard wiring' -ForegroundColor White
 
     Test-Assertion 'Common Gitea workflow runs the live ecosystem CI contract' {
