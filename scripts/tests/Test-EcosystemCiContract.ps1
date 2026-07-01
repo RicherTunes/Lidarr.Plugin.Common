@@ -194,7 +194,11 @@ jobs:
             [bool]$WirePin = $true,
             [bool]$WireSecretScan = $true,
             [bool]$WireGitHubOnlyGuard = $true,
-            [bool]$WireFallbackLintSubset = $false
+            [bool]$WireFallbackLintSubset = $false,
+            [bool]$ContinueOnError = $false,
+            [bool]$DisableVerifyJob = $false,
+            [bool]$SwallowLintFailure = $false,
+            [string]$VerifyNeeds = '[lint, secret-scan]'
         )
 
         New-Item -Path (Join-Path $Dir '.github/workflows') -ItemType Directory -Force | Out-Null
@@ -209,6 +213,9 @@ jobs:
             'pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoPath . -CommonRoot ext/Lidarr.Plugin.Common -Mode ci'
         } else {
             'pwsh ./scripts/local-only-lint.ps1'
+        }
+        if ($SwallowLintFailure) {
+            $lintRun = "$lintRun || true"
         }
 
         $pinStep = if ($WirePin) {
@@ -228,6 +235,21 @@ jobs:
             "    if: `${{ github.server_url == 'https://github.com' }}"
         } else {
             ''
+        }
+        $verifyGuard = if ($DisableVerifyJob) {
+            '    if: false'
+        } else {
+            $jobGuard
+        }
+        $continueOnErrorBlock = if ($ContinueOnError) {
+            '    continue-on-error: true'
+        } else {
+            ''
+        }
+        $verifyNeedsBlock = if ([string]::IsNullOrWhiteSpace($VerifyNeeds)) {
+            ''
+        } else {
+            "    needs: $VerifyNeeds"
         }
         $fallbackLint = if ($WireFallbackLintSubset) {
             @'
@@ -252,14 +274,15 @@ $jobGuard
       - run: $secretRun
   lint:
 $jobGuard
+$continueOnErrorBlock
     runs-on: ubuntu-latest
     steps:
       - name: Shared plugin lint gates
         run: $lintRun
 $fallbackLint
   verify:
-$jobGuard
-    needs: [lint, secret-scan]
+$verifyGuard
+$verifyNeedsBlock
     runs-on: ubuntu-latest
     steps:
 $pinStep
@@ -605,6 +628,38 @@ jobs:
         Set-FakeGithubCiMirror -Dir $tmpDir -WireFallbackLintSubset $true
         $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
         $r.Ok -eq $false -and $r.Reason -match 'fallback|subset|direct lint'
+    }
+
+    Test-Assertion 'GitHub CI mirror: continue-on-error returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-continue-on-error'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Set-FakeGithubCiMirror -Dir $tmpDir -ContinueOnError $true
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'continue-on-error'
+    }
+
+    Test-Assertion 'GitHub CI mirror: lint failure swallowing returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-swallow-lint'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Set-FakeGithubCiMirror -Dir $tmpDir -SwallowLintFailure $true
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match '\|\| true|swallow|failure'
+    }
+
+    Test-Assertion 'GitHub CI mirror: disabled verify job returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-disabled-verify'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Set-FakeGithubCiMirror -Dir $tmpDir -DisableVerifyJob $true
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'if:\s*false|disabled'
+    }
+
+    Test-Assertion 'GitHub CI mirror: verify without lint and secret-scan needs returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-missing-needs'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Set-FakeGithubCiMirror -Dir $tmpDir -VerifyNeeds ''
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'needs|lint|secret-scan'
     }
 
     # ============================================================
