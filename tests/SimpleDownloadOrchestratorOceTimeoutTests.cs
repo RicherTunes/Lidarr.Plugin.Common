@@ -69,8 +69,23 @@ namespace Lidarr.Plugin.Common.Tests
             var dir = Path.Combine(Path.GetTempPath(), "oce-" + Guid.NewGuid().ToString("N"));
             try
             {
-                var result = await orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 }, null!,CancellationToken.None);
+                var result = await orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 }, null!, CancellationToken.None);
                 Assert.False(result.Success, "a provider timeout (non-caller OCE) is a track failure, not a whole-album cancellation");
+            }
+            finally { try { Directory.Delete(dir, true); } catch { /* best effort */ } }
+        }
+
+        [Fact]
+        public async Task ChunkProvider_NonCallerOperationCanceledException_FailsTrack_DoesNotEscapeAsCancellation()
+        {
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 1, supportRange: false));
+            var provider = new ThrowingStreamProvider(_ => new OperationCanceledException("provider operation timed out"));
+            var orch = MakeChunk(provider, http);
+            var dir = Path.Combine(Path.GetTempPath(), "oce-" + Guid.NewGuid().ToString("N"));
+            try
+            {
+                var result = await orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 }, null!, CancellationToken.None);
+                Assert.False(result.Success, "a plain non-caller OCE is a track failure, not a whole-album cancellation");
             }
             finally { try { Directory.Delete(dir, true); } catch { /* best effort */ } }
         }
@@ -87,7 +102,7 @@ namespace Lidarr.Plugin.Common.Tests
             try
             {
                 await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
-                    orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 }, null!,cts.Token));
+                    orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 }, null!, cts.Token));
             }
             finally { try { Directory.Delete(dir, true); } catch { /* best effort */ } }
         }
@@ -101,7 +116,7 @@ namespace Lidarr.Plugin.Common.Tests
             var dir = Path.Combine(Path.GetTempPath(), "oce-" + Guid.NewGuid().ToString("N"));
             try
             {
-                var result = await orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 }, null!,CancellationToken.None);
+                var result = await orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 }, null!, CancellationToken.None);
                 Assert.False(result.Success, "a request timeout is a track failure after retries, not a whole-album cancellation");
                 Assert.True(handler.Calls > 1, $"the URL path should retry the non-caller timeout before failing (calls={handler.Calls})");
             }
