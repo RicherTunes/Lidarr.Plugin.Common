@@ -50,6 +50,27 @@ public class CoverArtEmbeddingComplianceSelfCoverageTests
         protected override StreamingAlbum BuildDownloadPathAlbumWithoutCover() => AlbumWith();
     }
 
+    // Broken: a plain http:// URL. RemoteMediaUriPolicy.Strict is https-only, so the orchestrator
+    // silently skips it -- a naive "any absolute http(s) URL" predicate would wrongly pass this.
+    private sealed class HttpNotHttpsAlbum : CoverArtEmbeddingComplianceTestBase
+    {
+        protected override StreamingAlbum BuildDownloadPathAlbumWithCover() =>
+            AlbumWith(("large", "http://cdn.example.com/cover/large.jpg"));
+
+        protected override StreamingAlbum BuildDownloadPathAlbumWithoutCover() => AlbumWith();
+    }
+
+    // Broken: the "no cover" fixture wrongly returns a populated URL -- the degradation invariant
+    // must catch an adopter that can't actually produce a coverless album.
+    private sealed class PopulatedWhenShouldBeEmpty : CoverArtEmbeddingComplianceTestBase
+    {
+        protected override StreamingAlbum BuildDownloadPathAlbumWithCover() =>
+            AlbumWith(("large", "https://cdn.example.com/cover/large.jpg"));
+
+        protected override StreamingAlbum BuildDownloadPathAlbumWithoutCover() =>
+            AlbumWith(("large", "https://cdn.example.com/cover/large.jpg"));
+    }
+
     [Fact]
     public void Base_passes_on_real_cover_urls()
     {
@@ -67,4 +88,14 @@ public class CoverArtEmbeddingComplianceSelfCoverageTests
     public void Base_catches_raw_id_instead_of_url()
         => Assert.ThrowsAny<Exception>(() =>
             new RawIdAlbum().CoverArt_IsFetchableUrl_WhenProviderSuppliesIt());
+
+    [Fact]
+    public void Base_catches_plain_http_url_that_strict_policy_rejects()
+        => Assert.ThrowsAny<Exception>(() =>
+            new HttpNotHttpsAlbum().CoverArt_IsFetchableUrl_WhenProviderSuppliesIt());
+
+    [Fact]
+    public void Base_catches_populated_url_in_without_cover_fixture()
+        => Assert.ThrowsAny<Exception>(() =>
+            new PopulatedWhenShouldBeEmpty().CoverArt_DegradesToEmpty_WhenProviderHasNone());
 }
