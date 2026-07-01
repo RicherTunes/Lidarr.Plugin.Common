@@ -502,6 +502,39 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task DownloadAlbumAsync_UnsuccessfulAlbum_LogsWarningNamingAlbumAndReason()
+        {
+            // 0-byte stream => the only track fails => album is incomplete => result.Success=false.
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 0, supportRange: false));
+            var capturingLogger = new CapturingLogger();
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "TestService",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin")),
+                logger: capturingLogger
+            );
+
+            var dir = Path.Combine(Path.GetTempPath(), $"orch_album_warn_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(dir);
+            try
+            {
+                var result = await orch.DownloadAlbumAsync("album99", dir, new StreamingQuality { Bitrate = 320 });
+
+                Assert.False(result.Success);
+                // An unsuccessful album must not fail silently: a warning naming the album + reason is logged.
+                Assert.True(capturingLogger.WarningCount >= 1, "expected at least one warning for the unsuccessful album");
+                Assert.Contains("album99", capturingLogger.LastWarningMessage);
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
         public async Task DownloadTrackAsync_MetadataApplier_InvokedOncePerTrack()
         {
             var totalBytes = 1024;
