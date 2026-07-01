@@ -718,29 +718,44 @@ namespace Lidarr.Plugin.Common.Tests.Services.Resilience
         [Fact]
         public async Task Scenario_MultiplePeriodicRefreshes()
         {
-            // Arrange: 1 request per 100ms
+            // Arrange: 1 request per 100ms using virtual time. A wall-clock
+            // upper bound is scheduler-sensitive on a busy CI runner.
+            var fakeTime = new FakeTimeProvider(DateTimeOffset.UtcNow);
+            var limiter = new TokenBucketRateLimiter(NullLogger.Instance, fakeTime);
             const string resource = "periodic";
             const int capacity = 1;
             var period = TimeSpan.FromMilliseconds(100);
-            _limiter.Configure(resource, capacity, period);
+            limiter.Configure(resource, capacity, period);
 
-            var timestamps = new List<long>();
+            Assert.Equal(0, await limiter.ExecuteAsync(resource, () => Task.FromResult(0)));
 
-            // Act: make 5 requests
-            for (int i = 0; i < 5; i++)
+            var queued = Enumerable.Range(1, 4)
+                .Select(i => limiter.ExecuteAsync(resource, () => Task.FromResult(i)))
+                .ToArray();
+
+            await Task.Yield();
+            Assert.All(queued, task => Assert.False(task.IsCompleted));
+
+            for (int i = 0; i < queued.Length; i++)
             {
-                var start = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                await _limiter.ExecuteAsync(resource, () => Task.FromResult(i));
-                timestamps.Add(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - start);
+                fakeTime.Advance(period - TimeSpan.FromMilliseconds(1));
+                await Task.Yield();
+                Assert.False(queued[i].IsCompleted, $"Request {i + 1} should not complete before its refill boundary.");
+
+                fakeTime.Advance(TimeSpan.FromMilliseconds(1));
+                Assert.Equal(i + 1, await AwaitWithTimeout(queued[i]));
+
+                for (int later = i + 1; later < queued.Length; later++)
+                {
+                    Assert.False(queued[later].IsCompleted, $"Request {later + 1} should still be waiting for a later refill.");
+                }
             }
 
-            // Assert: first request instant, subsequent requests wait
-            Assert.InRange(timestamps[0], 0, 50);
-
-            for (int i = 1; i < 5; i++)
+            static async Task<T> AwaitWithTimeout<T>(Task<T> task)
             {
-                // Should wait approximately period (100ms +/- 50ms for variance)
-                Assert.InRange(timestamps[i], 50, 300);
+                var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(5)));
+                Assert.Same(task, completed);
+                return await task;
             }
         }
 
