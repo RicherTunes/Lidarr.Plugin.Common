@@ -1,5 +1,7 @@
 using System;
+using System.Net;
 using Lidarr.Plugin.Abstractions.Models;
+using Lidarr.Plugin.Common.Services.Download;
 using Xunit;
 
 namespace Lidarr.Plugin.Common.TestKit.Compliance;
@@ -48,15 +50,22 @@ public abstract class CoverArtEmbeddingComplianceTestBase
     /// </summary>
     protected abstract StreamingAlbum BuildDownloadPathAlbumWithoutCover();
 
+    // A public IP so the guard's DNS/private-IP leg passes for a hostname fixture without a real DNS
+    // lookup (hermetic). IP-literal hosts are still checked directly by the guard, so a private-IP
+    // literal is still rejected -- only real hostname resolution is stubbed.
+    private static readonly Func<string, IPAddress[]> PublicHostResolver =
+        _ => new[] { IPAddress.Parse("93.184.216.34") };
+
     /// <summary>
-    /// True when <paramref name="url"/> is a fetchable absolute http(s) URL -- something the
-    /// orchestrator's SSRF-guarded cover fetch can actually retrieve. A raw provider id
-    /// ("1a2b-3c4d") or an empty string is NOT fetchable.
+    /// True when <paramref name="url"/> is a cover URL the orchestrator can actually fetch. Delegates
+    /// to the SAME <see cref="RemoteMediaUriGuard"/> + <see cref="RemoteMediaUriPolicy.Strict"/> the
+    /// orchestrator applies, so a URL that passes here is exactly one the orchestrator would embed --
+    /// no "test green, orchestrator silently skips" divergence. This rejects plain http:// (Strict is
+    /// https-only), userinfo, metadata hosts, and private-IP literals -- all of which a naive
+    /// "any absolute http(s) URL" check would wrongly accept.
     /// </summary>
     protected static bool IsFetchableCoverUrl(string? url) =>
-        !string.IsNullOrWhiteSpace(url)
-        && Uri.TryCreate(url, UriKind.Absolute, out var uri)
-        && (uri.Scheme == Uri.UriSchemeHttp || uri.Scheme == Uri.UriSchemeHttps);
+        RemoteMediaUriGuard.Validate(url, RemoteMediaUriPolicy.Strict, PublicHostResolver).IsAllowed;
 
     /// <summary>
     /// When the provider supplies cover art, the download-path album must expose it as a fetchable
@@ -93,8 +102,8 @@ public abstract class CoverArtEmbeddingComplianceTestBase
 
         var best = album!.GetBestCoverArtUrl();
         Assert.True(
-            string.IsNullOrEmpty(best),
+            string.IsNullOrWhiteSpace(best),
             $"download-path album without provider cover art returned '{best}' from GetBestCoverArtUrl(); " +
-            "it must degrade to empty so the orchestrator skips embedding cleanly.");
+            "it must degrade to empty/blank so the orchestrator (which skips on IsNullOrWhiteSpace) embeds nothing.");
     }
 }
