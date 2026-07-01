@@ -283,6 +283,15 @@ namespace Lidarr.Plugin.Common.Services.Download
                 result.Success = true;
             }
 
+            if (!result.Success)
+            {
+                // Surface the failure in the logs so an unsuccessful album is never silent (the caller
+                // only sees ErrorMessage on the returned result, which several download clients don't log).
+                _logger.LogWarning(
+                    "[{ServiceName}] Album '{AlbumId}' did not complete successfully ({SuccessfulTracks}/{TotalTracks} tracks, {FileCount} files): {Reason}",
+                    ServiceName, albumId, successfulTracks, result.TrackResults.Count, files.Count, result.ErrorMessage);
+            }
+
             result.FilePaths = files;
             result.TotalSize = files.Where(File.Exists).Select(f => new FileInfo(f).Length).Sum();
             result.Duration = DateTime.UtcNow - started;
