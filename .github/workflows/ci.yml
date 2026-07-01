@@ -1,0 +1,110 @@
+# GitHub Actions mirror of .gitea/workflows/ci.yml (dual-platform CI parity).
+# Billing-blocked as of 2026-07; validated to build once Actions billing is restored.
+# Keep in sync with the .gitea copy -- patch both in the same PR.
+#
+# Jobs mirrored : build-test, lint, secret-scan
+# Jobs omitted  : ecosystem-contract -- that job clones all 5 plugin repos from
+#                 192.168.2.59:3001/RicherTunes/* which is unreachable from GitHub runners.
+#                 It remains Gitea-only and continues to run there on push/dispatch/schedule.
+#
+# Translation vs .gitea/workflows/ci.yml:
+#   - Checkout     : actions/checkout@v4 (replaces the Gitea-only hand-rolled git-clone that
+#                    targeted 192.168.2.59:3001; Common has no submodules)
+#   - .NET SDK     : actions/setup-dotnet@v4 replaces the curl dotnet-install.sh block
+#   - PowerShell   : ubuntu-latest ships pwsh -- "Install PowerShell" tarball step removed
+#   - Docker CLI   : ubuntu-latest ships docker -- "Install Docker CLI" apt step removed
+#   - SourceLink   : -p:EnableSourceLink=false removed from build and test; GitHub origin maps
+#                    correctly (this flag was only needed for the Gitea 192.168.2.59 origin)
+#   - CS2012 fix   : -m:1 -p:UseSharedCompilation=false retained on the test step
+#   - schedule     : omitted to avoid surprise billing when credits are restored
+#                    (Gitea side keeps the '17 8 * * *' schedule for the ecosystem-contract job)
+name: CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore
+      # Build with warnings-as-errors. -p:EnableSourceLink=false removed: the GitHub origin
+      # maps correctly (that flag was a Gitea-specific workaround for the 192.168.2.59 origin).
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -m:1
+      # -m:1 + UseSharedCompilation=false: avoids the CS2012 "being used by another process" race
+      # when MSBuild parallelism + a lingering compiler server both touch Abstractions DLL concurrently.
+      # Matches the Build step's -m:1. --blame-hang-timeout catches post-test process-exit hangs.
+      - name: Test (full unit suite, excl. quarantined)
+        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 10m
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      # All lint steps are pure PowerShell; ubuntu-latest ships pwsh so no install needed.
+      - name: Date-parsing gate (culture-safety + epoch guard)
+        shell: pwsh
+        run: ./scripts/lint-date-parsing.ps1 -SelfTest && ./scripts/lint-date-parsing.ps1 -Path . -Mode ci
+      - name: Sync-over-async gate
+        shell: pwsh
+        run: ./scripts/lint-sync-over-async.ps1 -SelfTest && ./scripts/lint-sync-over-async.ps1 -Path . -Mode ci
+      - name: Doc script/workflow-reference gate (no docs pointing at deleted scripts or workflows)
+        shell: pwsh
+        run: ./scripts/lint-doc-script-refs.ps1 -SelfTest -CI && ./scripts/lint-doc-script-refs.ps1 -CI
+      - name: Test trait policy gate
+        shell: pwsh
+        run: ./scripts/lint-test-traits.ps1 -Path . -CI
+      - name: Test trait policy self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-TestTraitPolicy.ps1
+      - name: Ecosystem parity harness self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-EcosystemParityLint.ps1
+      - name: Doc workflow-ref gate self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-LintDocWorkflowRefs.ps1
+      - name: Plugin CI truth docs self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-PluginCiTruthDocs.ps1
+      - name: Shared plugin lint runner self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-RunPluginLintGates.ps1
+      - name: Ecosystem CI-contract self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-EcosystemCiContract.ps1
+      - name: Workflow content integrity self-test (F2)
+        shell: pwsh
+        run: ./scripts/tests/Test-WorkflowContentsValid.ps1
+      - name: Test-project dropout guard self-test (F4)
+        shell: pwsh
+        run: ./scripts/tests/Test-VerifyTestProjectsGated.ps1
+
+  # ecosystem-contract is OMITTED here -- it clones 192.168.2.59:3001/RicherTunes/* which is
+  # unreachable from GitHub runners. That job remains authoritative on Gitea and runs on
+  # push-to-main, workflow_dispatch, and the daily schedule cron there.
+
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: gitleaks (secret scan)
+        shell: bash
+        run: |
+          set -euo pipefail
+          GITLEAKS_SHA256=ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz -o /tmp/gl.tgz
+          echo "${GITLEAKS_SHA256}  /tmp/gl.tgz" | sha256sum -c -
+          tar -xzf /tmp/gl.tgz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-banner --redact --exit-code 1
