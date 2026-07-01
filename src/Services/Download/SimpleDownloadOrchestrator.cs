@@ -25,6 +25,7 @@ namespace Lidarr.Plugin.Common.Services.Download
     public class SimpleDownloadOrchestrator : IStreamingDownloadOrchestrator
     {
         private const long MaxArtworkBytes = 10L * 1024 * 1024;
+        private static readonly TimeSpan DefaultArtworkReadTimeout = ResiliencePolicy.Metadata.PerRequestTimeout ?? TimeSpan.FromSeconds(10);
 
         private readonly HttpClient _httpClient;
         private readonly Func<string, Task<StreamingAlbum>> _getAlbumAsync;
@@ -39,6 +40,7 @@ namespace Lidarr.Plugin.Common.Services.Download
         private readonly int _maxConcurrentTracks;
         private readonly IDownloadTelemetrySink? _telemetrySink;
         private readonly RemoteMediaUriPolicy _mediaUriPolicy;
+        private readonly TimeSpan _artworkReadTimeout;
 
         public string ServiceName { get; }
 
@@ -69,7 +71,8 @@ namespace Lidarr.Plugin.Common.Services.Download
                 postProcessor,
                 telemetrySink: null,
                 mediaUriPolicy,
-                artworkEmbedder: null)
+                artworkEmbedder: null,
+                artworkReadTimeout: null)
         {
         }
 
@@ -101,7 +104,8 @@ namespace Lidarr.Plugin.Common.Services.Download
                 postProcessor,
                 telemetrySink,
                 mediaUriPolicy,
-                artworkEmbedder: null)
+                artworkEmbedder: null,
+                artworkReadTimeout: null)
         {
         }
 
@@ -119,7 +123,8 @@ namespace Lidarr.Plugin.Common.Services.Download
             IAudioPostProcessor? postProcessor,
             IDownloadTelemetrySink? telemetrySink,
             RemoteMediaUriPolicy? mediaUriPolicy,
-            IAudioArtworkEmbedder? artworkEmbedder)
+            IAudioArtworkEmbedder? artworkEmbedder,
+            TimeSpan? artworkReadTimeout = null)
         {
             ServiceName = serviceName;
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -135,6 +140,11 @@ namespace Lidarr.Plugin.Common.Services.Download
             _artworkEmbedder = artworkEmbedder ?? new TagLibAudioArtworkEmbedder(_logger);
             _telemetrySink = telemetrySink;
             _mediaUriPolicy = mediaUriPolicy ?? RemoteMediaUriPolicy.Strict;
+            _artworkReadTimeout = artworkReadTimeout.GetValueOrDefault(DefaultArtworkReadTimeout);
+            if (_artworkReadTimeout <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(artworkReadTimeout), _artworkReadTimeout, "Artwork read timeout must be positive.");
+            }
         }
 
         public Task<DownloadResult> DownloadAlbumAsync(string albumId, string outputDirectory, StreamingQuality quality = null, IProgress<DownloadProgress> progress = null)
@@ -685,7 +695,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                 using var request = new HttpRequestMessage(HttpMethod.Get, coverUrl);
                 using var response = await _httpClient.ExecuteWithResilienceAsync(
                     request,
-                    ResiliencePolicy.Default,
+                    ResiliencePolicy.Metadata,
                     cancellationToken,
                     validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
 
@@ -694,9 +704,9 @@ namespace Lidarr.Plugin.Common.Services.Download
                 // Only embed genuine images: a broken CDN can return an HTML soft-404 as 200; writing
                 // that into a PICTURE frame corrupts the file. Reject non-image Content-Type up front.
                 var mimeType = response.Content.Headers.ContentType?.MediaType;
-                if (string.IsNullOrEmpty(mimeType) || !mimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                if (!IsSupportedArtworkMimeType(mimeType))
                 {
-                    _logger.LogDebug("[{ServiceName}] Skipping cover art for track {TrackId}: non-image Content-Type '{MimeType}'",
+                    _logger.LogDebug("[{ServiceName}] Skipping cover art for track {TrackId}: unsupported Content-Type '{MimeType}'",
                         ServiceName, track.Id, mimeType ?? "(none)");
                     return;
                 }
@@ -712,9 +722,19 @@ namespace Lidarr.Plugin.Common.Services.Download
                     return;
                 }
 
-                var bytes = await ReadBoundedAsync(response.Content, MaxArtworkBytes, cancellationToken).ConfigureAwait(false);
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                readCts.CancelAfter(_artworkReadTimeout);
+
+                var bytes = await ReadBoundedAsync(response.Content, MaxArtworkBytes, readCts.Token).ConfigureAwait(false);
                 if (bytes == null || bytes.Length == 0)
                 {
+                    return;
+                }
+
+                if (!ArtworkBytesMatchMimeType(bytes, mimeType))
+                {
+                    _logger.LogDebug("[{ServiceName}] Skipping cover art for track {TrackId}: bytes do not match Content-Type '{MimeType}'",
+                        ServiceName, track.Id, mimeType);
                     return;
                 }
 
@@ -728,6 +748,53 @@ namespace Lidarr.Plugin.Common.Services.Download
             {
                 _logger.LogDebug(ex, "[{ServiceName}] Cover-art embedding failed for track {TrackId} (non-fatal)", ServiceName, track.Id);
             }
+        }
+
+        private static bool IsSupportedArtworkMimeType(string? mimeType)
+        {
+            return mimeType != null && (
+                mimeType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ||
+                mimeType.Equals("image/jpg", StringComparison.OrdinalIgnoreCase) ||
+                mimeType.Equals("image/png", StringComparison.OrdinalIgnoreCase) ||
+                mimeType.Equals("image/webp", StringComparison.OrdinalIgnoreCase) ||
+                mimeType.Equals("image/gif", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool ArtworkBytesMatchMimeType(byte[] bytes, string mimeType)
+        {
+            if (bytes.Length == 0)
+            {
+                return false;
+            }
+
+            if (mimeType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ||
+                mimeType.Equals("image/jpg", StringComparison.OrdinalIgnoreCase))
+            {
+                return bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
+            }
+
+            if (mimeType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
+            {
+                return bytes.Length >= 8 &&
+                    bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 &&
+                    bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A;
+            }
+
+            if (mimeType.Equals("image/webp", StringComparison.OrdinalIgnoreCase))
+            {
+                return bytes.Length >= 12 &&
+                    bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+                    bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50;
+            }
+
+            if (mimeType.Equals("image/gif", StringComparison.OrdinalIgnoreCase))
+            {
+                return bytes.Length >= 6 &&
+                    bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 &&
+                    bytes[3] == 0x38 && (bytes[4] == 0x37 || bytes[4] == 0x39) && bytes[5] == 0x61;
+            }
+
+            return false;
         }
 
         /// <summary>
