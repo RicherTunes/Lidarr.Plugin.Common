@@ -404,6 +404,87 @@ function Test-CommonPinAgreement {
     }
 }
 
+function Test-StatusContextRequirementSatisfied {
+    <#
+    .SYNOPSIS
+        Assert a required status context is covered by the branch-protection context list.
+
+    .DESCRIPTION
+        Gitea branch protection supports wildcard contexts such as `CI / lint*` so one
+        rule can cover both `CI / lint (push)` and `CI / lint (pull_request)`. The
+        ecosystem policy names base contexts (`CI / lint`, `CI / verify`, etc.); this
+        helper treats exact matches and configured wildcard matches as satisfying the
+        requirement, while a concrete event-specific context without a wildcard does
+        not satisfy the base requirement.
+
+    .OUTPUTS
+        Boolean
+    #>
+    param(
+        [string]$RequiredContext,
+        [string[]]$ConfiguredContexts
+    )
+
+    foreach ($context in @($ConfiguredContexts)) {
+        if ([string]::IsNullOrWhiteSpace($context)) { continue }
+
+        if ($context -eq $RequiredContext) {
+            return $true
+        }
+
+        if ($context.Contains('*') -and ($RequiredContext -like $context)) {
+            return $true
+        }
+    }
+
+    return $false
+}
+
+function Get-BranchProtectionTargets {
+    <#
+    .SYNOPSIS
+        Build the repo/context set checked by -CheckBranchProtection.
+
+    .DESCRIPTION
+        The manifest enumerates downstream plugin repos because most ecosystem checks
+        need plugin working trees. Branch protection also needs to verify Common itself,
+        so this helper appends Lidarr.Plugin.Common with its Common-specific contexts
+        unless the manifest already contains it.
+
+    .OUTPUTS
+        PSCustomObject { Owner, Repo, RequiredContexts }
+    #>
+    param(
+        [object[]]$Plugins
+    )
+
+    $pluginContexts = @('CI / lint', 'CI / verify')
+    $commonContexts = @('CI / lint', 'CI / build-test', 'CI / secret-scan')
+
+    $targets = [System.Collections.Generic.List[PSCustomObject]]::new()
+
+    foreach ($plugin in @($Plugins)) {
+        $repo = [string]$plugin.giteaRepo
+        $isCommon = $repo -eq 'Lidarr.Plugin.Common'
+        $targets.Add([PSCustomObject]@{
+            Owner            = [string]$plugin.giteaOwner
+            Repo             = $repo
+            RequiredContexts = if ($isCommon) { $commonContexts } else { $pluginContexts }
+        }) | Out-Null
+    }
+
+    $hasCommon = @($targets | Where-Object { $_.Repo -eq 'Lidarr.Plugin.Common' }).Count -gt 0
+    if (-not $hasCommon) {
+        $targets.Add([PSCustomObject]@{
+            Owner            = 'RicherTunes'
+            Repo             = 'Lidarr.Plugin.Common'
+            RequiredContexts = $commonContexts
+        }) | Out-Null
+    }
+
+    return @($targets)
+}
+
 function Test-WorkflowFileValid {
     <#
     .SYNOPSIS
@@ -809,13 +890,11 @@ if ($CheckBranchProtection) {
         $giteaBase     = 'http://192.168.2.59:3001/api/v1'
         $bpFail        = $false
 
-        # Expected required contexts per repo type
-        $pluginContexts = @('CI / lint', 'CI / verify')
-        $commonContexts = @('CI / lint', 'CI / build-test', 'CI / secret-scan')
+        $branchProtectionTargets = @(Get-BranchProtectionTargets -Plugins $plugins)
 
-        foreach ($plugin in $plugins) {
-            $owner   = $plugin.giteaOwner
-            $repo    = $plugin.giteaRepo
+        foreach ($target in $branchProtectionTargets) {
+            $owner   = $target.Owner
+            $repo    = $target.Repo
             $headers = @{ Authorization = "token $token" }
 
             try {
@@ -833,11 +912,12 @@ if ($CheckBranchProtection) {
                 continue
             }
 
-            $isPlugin    = $repo -ne 'Lidarr.Plugin.Common'
-            $required    = if ($isPlugin) { $pluginContexts } else { $commonContexts }
+            $required    = @($target.RequiredContexts)
             $hasEnabled  = $mainBp.enable_status_check -eq $true
             $actual      = @($mainBp.status_check_contexts)
-            $missing     = @($required | Where-Object { $_ -notin $actual })
+            $missing     = @($required | Where-Object {
+                -not (Test-StatusContextRequirementSatisfied -RequiredContext $_ -ConfiguredContexts $actual)
+            })
 
             if (-not $hasEnabled -or $missing.Count -gt 0) {
                 $bpFail = $true
