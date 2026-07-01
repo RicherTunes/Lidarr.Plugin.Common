@@ -192,25 +192,17 @@ jobs:
             [bool]$WireSharedRunner = $true,
             [bool]$WireVerify = $true,
             [bool]$WirePin = $true,
-            [bool]$WireSecretScan = $true
+            [bool]$WireSecretScan = $true,
+            [bool]$WireGitHubOnlyGuard = $true,
+            [bool]$WireFallbackLintSubset = $false
         )
 
         New-Item -Path (Join-Path $Dir '.github/workflows') -ItemType Directory -Force | Out-Null
 
-        $secretStep = if ($WireSecretScan) {
-            @'
-  secret-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - run: gitleaks detect --source . --redact --exit-code 1
-'@
+        $secretRun = if ($WireSecretScan) {
+            'gitleaks detect --source . --redact --exit-code 1'
         } else {
-            @'
-  secret-scan:
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo no secret scan
-'@
+            'echo no secret scan'
         }
 
         $lintRun = if ($WireSharedRunner) {
@@ -232,6 +224,19 @@ jobs:
         }
 
         $verifyRun = if ($WireVerify) { 'pwsh ./scripts/verify-local.ps1' } else { 'pwsh ./scripts/build-only.ps1' }
+        $jobGuard = if ($WireGitHubOnlyGuard) {
+            "    if: `${{ github.server_url == 'https://github.com' }}"
+        } else {
+            ''
+        }
+        $fallbackLint = if ($WireFallbackLintSubset) {
+            @'
+      - name: Fallback lint subset
+        run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ecosystem-parity-lint.ps1 -RepoPath . -CommonRoot ext/Lidarr.Plugin.Common -Check VersionContract -Mode ci
+'@
+        } else {
+            ''
+        }
 
         Set-Content (Join-Path $Dir '.github/workflows/ci.yml') @"
 name: CI
@@ -240,13 +245,20 @@ on:
     branches: [main]
   pull_request:
 jobs:
-$secretStep
+  secret-scan:
+$jobGuard
+    runs-on: ubuntu-latest
+    steps:
+      - run: $secretRun
   lint:
+$jobGuard
     runs-on: ubuntu-latest
     steps:
       - name: Shared plugin lint gates
         run: $lintRun
+$fallbackLint
   verify:
+$jobGuard
     needs: [lint, secret-scan]
     runs-on: ubuntu-latest
     steps:
@@ -577,6 +589,22 @@ jobs:
         Set-FakeGithubCiMirror -Dir $tmpDir -WireSecretScan $false
         $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
         $r.Ok -eq $false -and $r.Reason -match 'gitleaks'
+    }
+
+    Test-Assertion 'GitHub CI mirror: missing GitHub-only job guard returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-no-github-only-guard'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Set-FakeGithubCiMirror -Dir $tmpDir -WireGitHubOnlyGuard $false
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'github\.server_url|GitHub-only'
+    }
+
+    Test-Assertion 'GitHub CI mirror: fallback lint subset returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-fallback-subset'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Set-FakeGithubCiMirror -Dir $tmpDir -WireFallbackLintSubset $true
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'fallback|subset|direct lint'
     }
 
     # ============================================================
