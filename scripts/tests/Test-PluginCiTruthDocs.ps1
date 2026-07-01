@@ -69,6 +69,16 @@ Assert-True `
     -Condition ($reusable -match 'HISTORICAL.*Gitea-primary plugin CI') `
     -Details 'The old reusable-workflow proposal must not read as the current mirror implementation.'
 
+$ciGates = Read-RepoText 'docs/dev-guide/CI_GATES.md'
+Assert-True `
+    -Name 'CI gates guide documents the one guarded mirror policy' `
+    -Condition ($ciGates -match 'exactly one guarded GitHub CI mirror' -and $ciGates -match 'verify-ecosystem-ci-contract\.ps1') `
+    -Details 'Plugin CI guidance must point authors at the current fail-by-default mirror contract.'
+Assert-True `
+    -Name 'CI gates guide does not recommend extra plugin GitHub workflows' `
+    -Condition ($ciGates -notmatch 'recommended filename: `?\.github/workflows/packaging-gates\.yml' -and $ciGates -notmatch 'uses:\s+RicherTunes/lidarr\.plugin\.common/\.github/workflows/packaging-gates\.yml@main') `
+    -Details 'Extra plugin-root GitHub workflows would violate the one-mirror ecosystem contract.'
+
 $bulkScript = Read-RepoText 'scripts/bulk-update-workflow-pins.sh'
 Assert-True `
     -Name 'Bulk workflow pin script is explicitly deprecated' `
