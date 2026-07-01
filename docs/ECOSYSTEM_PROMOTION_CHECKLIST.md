@@ -37,13 +37,15 @@ Every plugin repo must keep the Gitea-primary guard enabled:
 
 - A `Common submodule pin guard` step in `.gitea/workflows/ci.yml`, running
   `bash ext/Lidarr.Plugin.Common/scripts/repin-common-submodule.sh --verify-only --path ext/Lidarr.Plugin.Common`.
-- Plugin repos must not carry plugin-root GitHub Actions workflows. The Common
-  ecosystem manifest enforces `mirrorWorkflows: 0` for every active plugin.
+- Plugin repos carry exactly one guarded GitHub CI mirror at
+  `.github/workflows/ci.yml`. The Common ecosystem manifest enforces
+  `mirrorWorkflows: 1` for every active plugin, and the mirror contract requires
+  `if: ${{ github.server_url == 'https://github.com' }}` on every mirror job.
 
 These guards fail when the submodule gitlink, `ext-common-sha.txt`, or the
 checked-out submodule state drift from one another.
 
-If a future plugin needs a GitHub workflow, first update
+If a future plugin needs additional GitHub workflows, first update
 `scripts/ci/ecosystem-repos.json` and the ecosystem CI contract so Gitea and
 GitHub expectations cannot diverge silently.
 
@@ -57,4 +59,4 @@ GitHub expectations cannot diverge silently.
 - Common: 1.18.0-dev
 - Host target: nightly-3.1.3.4970 (net8.0)
 - Active plugin roots: amazonmusicarr, applemusicarr, brainarr, qobuzarr, tidalarr
-- CI contract: Gitea primary, zero plugin-root GitHub workflow mirrors
+- CI contract: Gitea primary, exactly one guarded GitHub CI mirror per plugin

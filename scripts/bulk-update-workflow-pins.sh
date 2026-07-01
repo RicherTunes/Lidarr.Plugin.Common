@@ -1,16 +1,16 @@
 #!/bin/bash
 #
-# DEPRECATED: plugin-root GitHub workflow mirrors were removed from the active
-# plugin repos. The ecosystem is Gitea-primary and Common enforces
-# mirrorWorkflows=0 for every active plugin.
+# DEPRECATED: bulk plugin workflow pin mutation is no longer the maintenance
+# model. The ecosystem is Gitea-primary and Common enforces exactly one guarded
+# GitHub CI mirror per active plugin.
 #
-# This script intentionally fails closed so old runbooks cannot recreate or
-# mutate deleted plugin .github/workflows files.
+# This script intentionally fails closed so old runbooks cannot bulk-mutate
+# plugin .github/workflows files without per-repo review.
 
 set -euo pipefail
 
 cat >&2 <<'MSG'
-DEPRECATED: plugin-root GitHub workflow mirrors are no longer maintained.
+DEPRECATED: bulk plugin workflow pin mutation is no longer maintained.
 
 Use these instead:
   - Plugin Common submodule/sentinel pinning:
@@ -19,6 +19,8 @@ Use these instead:
       pwsh scripts/ci/verify-ecosystem-ci-contract.ps1 -EcosystemRoot <siblings> -CI
   - Common workflow action pin checks:
       pwsh scripts/tests/Test-LintWorkflowShaPins.ps1
+  - Plugin GitHub mirror policy:
+      pwsh scripts/ci/verify-ecosystem-ci-contract.ps1 -EcosystemRoot <siblings> -CI
 MSG
 
 exit 1
