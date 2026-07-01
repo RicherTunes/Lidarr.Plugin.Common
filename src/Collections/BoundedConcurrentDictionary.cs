@@ -77,7 +77,7 @@ namespace Lidarr.Plugin.Common.Collections
         /// <summary>
         /// Indexer that mirrors <see cref="ConcurrentDictionary{TKey, TValue}"/>'s.
         /// <para>Get: <see cref="KeyNotFoundException"/> when absent.</para>
-        /// <para>Set: capacity-checked then assigns (overwrite semantics). Insert path runs
+        /// <para>Set: capacity-checks only when inserting a new key, then assigns (overwrite semantics). Insert path runs
         /// <see cref="EvictIfNeeded"/> first so the indexer setter respects the cap.</para>
         /// </summary>
         public TValue this[TKey key]
@@ -85,8 +85,13 @@ namespace Lidarr.Plugin.Common.Collections
             get => _inner[key];
             set
             {
-                EvictIfNeeded();
-                _inner[key] = value;
+                lock (_evictLock)
+                {
+                    if (!_inner.ContainsKey(key))
+                        EvictIfNeededLocked();
+
+                    _inner[key] = value;
+                }
             }
         }
 
@@ -107,8 +112,14 @@ namespace Lidarr.Plugin.Common.Collections
         /// <returns><c>true</c> if the key was added; <c>false</c> if it already existed.</returns>
         public bool TryAdd(TKey key, TValue value)
         {
-            EvictIfNeeded();
-            return _inner.TryAdd(key, value);
+            lock (_evictLock)
+            {
+                if (_inner.ContainsKey(key))
+                    return false;
+
+                EvictIfNeededLocked();
+                return _inner.TryAdd(key, value);
+            }
         }
 
         /// <summary>
@@ -133,42 +144,98 @@ namespace Lidarr.Plugin.Common.Collections
 
         /// <summary>
         /// Adds a key/value pair or updates an existing key using the provided functions.
-        /// If the dictionary is at or above capacity before the call, all entries are cleared first.
+        /// If inserting a new key would exceed capacity, all entries are cleared first.
         /// </summary>
         public TValue AddOrUpdate(TKey key, TValue addValue, Func<TKey, TValue, TValue> updateValueFactory)
         {
-            EvictIfNeeded();
-            return _inner.AddOrUpdate(key, addValue, updateValueFactory);
+            if (updateValueFactory is null)
+                throw new ArgumentNullException(nameof(updateValueFactory));
+
+            lock (_evictLock)
+            {
+                if (_inner.TryGetValue(key, out var existing))
+                {
+                    var updated = updateValueFactory(key, existing);
+                    _inner[key] = updated;
+                    return updated;
+                }
+
+                EvictIfNeededLocked();
+                _inner[key] = addValue;
+                return addValue;
+            }
         }
 
         /// <summary>
         /// Adds a key/value pair or updates an existing key using the provided factories.
-        /// If the dictionary is at or above capacity before the call, all entries are cleared first.
+        /// If inserting a new key would exceed capacity, all entries are cleared first.
         /// </summary>
         public TValue AddOrUpdate(TKey key, Func<TKey, TValue> addValueFactory, Func<TKey, TValue, TValue> updateValueFactory)
         {
-            EvictIfNeeded();
-            return _inner.AddOrUpdate(key, addValueFactory, updateValueFactory);
+            if (addValueFactory is null)
+                throw new ArgumentNullException(nameof(addValueFactory));
+            if (updateValueFactory is null)
+                throw new ArgumentNullException(nameof(updateValueFactory));
+
+            lock (_evictLock)
+            {
+                if (_inner.TryGetValue(key, out var existing))
+                {
+                    var updated = updateValueFactory(key, existing);
+                    _inner[key] = updated;
+                    return updated;
+                }
+
+                EvictIfNeededLocked();
+                var added = addValueFactory(key);
+                _inner[key] = added;
+                return added;
+            }
         }
 
         /// <summary>
         /// Gets the value for a key, or adds it using the factory if absent.
-        /// If the dictionary is at or above capacity before the call, all entries are cleared first.
+        /// If inserting a new key would exceed capacity, all entries are cleared first.
         /// </summary>
         public TValue GetOrAdd(TKey key, Func<TKey, TValue> valueFactory)
         {
-            EvictIfNeeded();
-            return _inner.GetOrAdd(key, valueFactory);
+            if (valueFactory is null)
+                throw new ArgumentNullException(nameof(valueFactory));
+
+            if (_inner.TryGetValue(key, out var existing))
+                return existing;
+
+            var value = valueFactory(key);
+
+            lock (_evictLock)
+            {
+                if (_inner.TryGetValue(key, out existing))
+                    return existing;
+
+                EvictIfNeededLocked();
+                _inner[key] = value;
+                return value;
+            }
         }
 
         /// <summary>
         /// Gets the value for a key, or adds the specified value if absent.
-        /// If the dictionary is at or above capacity before the call, all entries are cleared first.
+        /// If inserting a new key would exceed capacity, all entries are cleared first.
         /// </summary>
         public TValue GetOrAdd(TKey key, TValue value)
         {
-            EvictIfNeeded();
-            return _inner.GetOrAdd(key, value);
+            if (_inner.TryGetValue(key, out var existing))
+                return existing;
+
+            lock (_evictLock)
+            {
+                if (_inner.TryGetValue(key, out existing))
+                    return existing;
+
+                EvictIfNeededLocked();
+                _inner[key] = value;
+                return value;
+            }
         }
 
         /// <summary>
@@ -189,14 +256,19 @@ namespace Lidarr.Plugin.Common.Collections
 
             lock (_evictLock)
             {
-                if (_inner.Count < _capacity)
-                    return;
-
-                var cleared = _inner.Count;
-                _inner.Clear();
-
-                try { _onEvicted?.Invoke(cleared); } catch { /* never let a callback crash an insert */ }
+                EvictIfNeededLocked();
             }
+        }
+
+        private void EvictIfNeededLocked()
+        {
+            if (_inner.Count < _capacity)
+                return;
+
+            var cleared = _inner.Count;
+            _inner.Clear();
+
+            try { _onEvicted?.Invoke(cleared); } catch { /* never let a callback crash an insert */ }
         }
     }
 }

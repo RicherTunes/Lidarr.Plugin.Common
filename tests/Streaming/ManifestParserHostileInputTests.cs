@@ -1,0 +1,128 @@
+using System;
+using System.Diagnostics;
+using System.Text;
+using Lidarr.Plugin.Common.Services.Streaming.Manifests;
+using Xunit;
+
+namespace Lidarr.Plugin.Common.Tests.Streaming
+{
+    /// <summary>
+    /// #24 (LOOP-012): manifest parsers consume attacker-influenceable CDN content (a hostile or compromised
+    /// edge could serve a crafted DASH/HLS manifest). These pin the fail-safe behavior so a future refactor
+    /// cannot silently reintroduce an XML-entity (XXE/SSRF/billion-laughs) expansion or an unbounded-allocation
+    /// DoS without a failing test. The DRM/PSSH/CENC parsers already have strong hostile-input coverage elsewhere.
+    /// </summary>
+    public class ManifestParserHostileInputTests
+    {
+        private const string BaseUrl = "https://cdn.example.com/v/";
+
+        // ── DASH: XML-entity attacks must NOT be processed ──────────────────────────────────────────
+
+        [Fact]
+        public void Dash_ExternalEntityDoctype_DoesNotResolveEntity_FailsClosed()
+        {
+            // Classic XXE/SSRF: an external entity pointing at a local file. Plain XDocument.Parse
+            // ACCEPTS a DOCTYPE and expands internal entities (verified empirically on .NET 9), so the
+            // pre-hardening parser was genuinely vulnerable; LoadHardened's DtdProcessing.Prohibit +
+            // null resolver rejects the DOCTYPE outright. Pin that: parsing throws and never yields
+            // the file contents.
+            const string xxe =
+                "<?xml version=\"1.0\"?>\n" +
+                "<!DOCTYPE MPD [ <!ENTITY xxe SYSTEM \"file:///etc/passwd\"> ]>\n" +
+                "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\"><Period>&xxe;</Period></MPD>";
+
+            var parser = new DashManifestParser();
+            var ex = Record.Exception(() => parser.Parse(xxe, BaseUrl));
+            Assert.NotNull(ex); // must fail, not silently resolve the entity
+        }
+
+        [Fact]
+        public void Dash_BillionLaughsDoctype_DoesNotExpand_AndReturnsQuickly()
+        {
+            // Internal-entity expansion bomb. DTD processing is prohibited, so it is rejected before any
+            // expansion -> must throw fast (no exponential blow-up / hang).
+            const string bomb =
+                "<?xml version=\"1.0\"?>\n" +
+                "<!DOCTYPE lolz [\n" +
+                "  <!ENTITY lol \"lol\">\n" +
+                "  <!ENTITY lol2 \"&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;&lol;\">\n" +
+                "  <!ENTITY lol3 \"&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;&lol2;\">\n" +
+                "  <!ENTITY lol4 \"&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;&lol3;\">\n" +
+                "]>\n" +
+                "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\"><Period>&lol4;</Period></MPD>";
+
+            var parser = new DashManifestParser();
+            var sw = Stopwatch.StartNew();
+            var ex = Record.Exception(() => parser.Parse(bomb, BaseUrl));
+            sw.Stop();
+
+            Assert.NotNull(ex);
+            Assert.True(sw.Elapsed < TimeSpan.FromSeconds(5), $"DTD must be rejected fast, took {sw.Elapsed}");
+        }
+
+        [Theory]
+        [InlineData("<MPD><Period>")]                       // truncated / non-well-formed
+        [InlineData("not xml at all {garbage}")]            // not XML
+        [InlineData("<MPD></MPD>")]                          // well-formed but no usable content
+        public void Dash_MalformedInput_FailsSafe_NoCrash(string content)
+        {
+            var parser = new DashManifestParser();
+            // Either throws a parse/format exception or returns an empty manifest — but never hangs or
+            // corrupts process state. (Record.Exception swallows the throw; the assertion is "did not hang".)
+            var ex = Record.Exception(() =>
+            {
+                var m = parser.Parse(content, BaseUrl);
+                _ = m?.Segments?.Count;
+            });
+            Assert.True(ex is null or FormatException or ArgumentException or System.Xml.XmlException,
+                $"unexpected failure mode: {ex?.GetType().Name}");
+        }
+
+        // ── HLS: unbounded allocation must be capped ────────────────────────────────────────────────
+
+        [Fact]
+        public void Hls_OversizedMediaPlaylist_IsRejected_NotOom()
+        {
+            var sb = new StringBuilder("#EXTM3U\n");
+            for (int i = 0; i < 100_001; i++)
+            {
+                sb.Append("#EXTINF:4.0,\nseg").Append(i).Append(".ts\n");
+            }
+
+            var parser = new HlsManifestParser();
+            Assert.Throws<FormatException>(() => parser.Parse(sb.ToString(), BaseUrl));
+        }
+
+        [Fact]
+        public void Hls_OversizedMasterPlaylist_IsRejected_NotOom()
+        {
+            var sb = new StringBuilder("#EXTM3U\n");
+            for (int i = 0; i < 100_001; i++)
+            {
+                sb.Append("#EXT-X-STREAM-INF:BANDWIDTH=1000\nv").Append(i).Append(".m3u8\n");
+            }
+
+            var parser = new HlsManifestParser();
+            Assert.Throws<FormatException>(() => parser.Parse(sb.ToString(), BaseUrl));
+        }
+
+        [Theory]
+        [InlineData("#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1000")]          // stream-inf with no following URI
+        [InlineData("#EXTM3U\n#EXT-X-KEY:METHOD=AES-128,URI=\"unterminated")] // unterminated quoted attribute
+        [InlineData("#EXTM3U\n#EXTINF:not-a-number,\nseg.ts")]            // non-numeric EXTINF duration
+        [InlineData("\u0000\u0001\u0002 binary garbage")]                  // non-text / control bytes
+        public void Hls_MalformedInput_FailsSoft_Bounded(string content)
+        {
+            var parser = new HlsManifestParser();
+            var ex = Record.Exception(() =>
+            {
+                var m = parser.Parse(content, BaseUrl);
+                // bounded result, no crash
+                Assert.True((m?.Segments?.Count ?? 0) < 100_000);
+                Assert.True((m?.Variants?.Count ?? 0) < 100_000);
+            });
+            Assert.True(ex is null or FormatException or ArgumentException,
+                $"unexpected failure mode: {ex?.GetType().Name}");
+        }
+    }
+}

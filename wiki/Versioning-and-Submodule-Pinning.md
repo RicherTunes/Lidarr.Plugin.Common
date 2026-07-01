@@ -1,21 +1,32 @@
+﻿<!-- docval:ignore-workflow-refs -->
 # Versioning and Submodule Pinning
 
 How Common releases are versioned, how plugin repos pin the submodule, and how the ecosystem stays in lockstep.
 
 ## Common version contract
 
-Every plugin's `plugin.json` declares a `commonVersion` field that must match the `<Version>` in [src/Lidarr.Plugin.Common.csproj](../src/Lidarr.Plugin.Common.csproj). A parity-lint spec ([scripts/parity-spec.json](../scripts/parity-spec.json)) encodes the invariants, and `ecosystem-parity-lint.ps1` enforces them in CI.
+Every plugin's `plugin.json` declares a `commonVersion` field that must match the `<Version>` in [Directory.Build.props](../Directory.Build.props). A parity-lint spec ([scripts/parity-spec.json](../scripts/parity-spec.json)) encodes the invariants, and `ecosystem-parity-lint.ps1` enforces them in CI.
 
 Full details → [Ecosystem Version Contract](../docs/ECOSYSTEM_VERSION_CONTRACT.md).
 
 ## Submodule pin and sentinel file
 
-Plugin repos consume Common as a git submodule under `ext/`. Alongside the submodule pointer, each plugin keeps an `ext-common-sha.txt` sentinel file whose content must match the submodule's checked-out SHA. CI drift detection reads this file and fails if it diverges.
+Plugin repos consume Common as a git submodule under `ext/`. Alongside the submodule pointer, each plugin keeps an `ext-common-sha.txt` sentinel file whose content must match the submodule's checked-out SHA. Gitea is the primary CI gate and runs the verify-only repin guard. GitHub mirrors, where present, may run the same guard, but they are not assumed to exist in every repo.
 
 The two scripts that automate repinning:
 
 - [scripts/repin-common-submodule.ps1](../scripts/repin-common-submodule.ps1) — PowerShell (update SHA, sentinel, optionally stage).
 - [scripts/repin-common-submodule.sh](../scripts/repin-common-submodule.sh) — Bash equivalent for CI workflows.
+
+Plugin repos should include a `Common submodule pin guard` in `.gitea/workflows/ci.yml`. If a repo also carries `.github/workflows/*.yml` mirrors, those workflows should run the same guard or be documented as non-gating mirrors.
+
+The guard command is:
+
+```bash
+bash ext/Lidarr.Plugin.Common/scripts/repin-common-submodule.sh --verify-only --path ext/Lidarr.Plugin.Common
+```
+
+There is no scheduled auto-bump workflow on the Gitea-primary copy. Re-pin Common manually in each plugin repo when Common advances, commit the gitlink and `ext-common-sha.txt` together, and let the shared lint/verify gates prove the new pin.
 
 ## Host-version upgrade flow
 

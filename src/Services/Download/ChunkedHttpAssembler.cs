@@ -106,9 +106,23 @@ namespace Lidarr.Plugin.Common.Services.Download
         /// <summary>Creates a new assembler that uses the supplied <paramref name="httpClient"/> for chunk fetches.</summary>
         /// <param name="httpClient">Host HttpClient used for chunk GETs.</param>
         /// <param name="logger">Optional logger.</param>
+        public ChunkedHttpAssembler(HttpClient httpClient, ILogger<ChunkedHttpAssembler>? logger = null)
+            : this(httpClient, logger, mediaUriPolicy: null)
+        {
+        }
+
+        /// <summary>Creates a new assembler with an explicit media URL validation policy.</summary>
+        public ChunkedHttpAssembler(HttpClient httpClient, RemoteMediaUriPolicy mediaUriPolicy)
+            : this(httpClient, logger: null, mediaUriPolicy: mediaUriPolicy)
+        {
+        }
+
+        /// <summary>Creates a new assembler with an explicit logger and media URL validation policy.</summary>
+        /// <param name="httpClient">Host HttpClient used for chunk GETs.</param>
+        /// <param name="logger">Optional logger.</param>
         /// <param name="mediaUriPolicy">SSRF policy applied to every chunk URL before fetch. Defaults to
         /// <see cref="RemoteMediaUriPolicy.Strict"/>. Pass a relaxed policy only for explicitly-local providers.</param>
-        public ChunkedHttpAssembler(HttpClient httpClient, ILogger<ChunkedHttpAssembler>? logger = null, RemoteMediaUriPolicy? mediaUriPolicy = null)
+        public ChunkedHttpAssembler(HttpClient httpClient, ILogger<ChunkedHttpAssembler>? logger, RemoteMediaUriPolicy? mediaUriPolicy)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _logger = (ILogger?)logger ?? NullLogger.Instance;

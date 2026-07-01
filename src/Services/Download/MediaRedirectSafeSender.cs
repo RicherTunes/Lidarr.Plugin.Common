@@ -109,12 +109,21 @@ namespace Lidarr.Plugin.Common.Services.Download
             {
                 // Drop Authorization on cross-origin redirects to avoid leaking credentials to the new host.
                 if (string.Equals(h.Key, "Authorization", StringComparison.OrdinalIgnoreCase) &&
-                    !string.Equals(from.RequestUri?.Host, to.RequestUri?.Host, StringComparison.OrdinalIgnoreCase))
+                    !IsSameOrigin(from.RequestUri, to.RequestUri))
                 {
                     continue;
                 }
                 to.Headers.TryAddWithoutValidation(h.Key, h.Value);
             }
+        }
+
+        private static bool IsSameOrigin(Uri? left, Uri? right)
+        {
+            return left is not null &&
+                   right is not null &&
+                   string.Equals(left.Scheme, right.Scheme, StringComparison.OrdinalIgnoreCase) &&
+                   string.Equals(left.DnsSafeHost, right.DnsSafeHost, StringComparison.OrdinalIgnoreCase) &&
+                   left.Port == right.Port;
         }
 
         private static string Redact(Uri uri) => $"{uri.Scheme}://{uri.Host}";

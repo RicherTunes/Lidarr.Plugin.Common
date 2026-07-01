@@ -363,7 +363,7 @@ namespace Lidarr.Plugin.Common.Base
                 // ExecuteWithResilienceAsync surfaces the per-request timeout as TimeoutException;
                 // translate to HttpRequestException so callers get a consistent network-error type.
                 throw new System.Net.Http.HttpRequestException(
-                    $"Request to {request.RequestUri} timed out after retries: {ex.Message}", ex);
+                    $"Request to {Observability.Scrub.Url(request.RequestUri?.ToString() ?? string.Empty)} timed out after retries: {ex.Message}", ex);
             }
             catch (TaskCanceledException ex)
             {
@@ -373,7 +373,7 @@ namespace Lidarr.Plugin.Common.Base
                 // to HttpRequestException so consumers don't have to handle two exception types for the
                 // same logical failure.
                 throw new System.Net.Http.HttpRequestException(
-                    $"Request to {request.RequestUri} failed after retries: {ex.Message}", ex);
+                    $"Request to {Observability.Scrub.Url(request.RequestUri?.ToString() ?? string.Empty)} failed after retries: {ex.Message}", ex);
             }
         }
 

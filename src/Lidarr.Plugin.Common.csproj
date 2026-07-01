@@ -13,13 +13,7 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <!-- Aligned with Directory.Build.props (1.18.0-dev) — both Common AND Abstractions
-         must ship the same version to avoid NU5104 ("stable package can't depend on
-         prerelease"). When tagging the next stable release, bump both Directory.Build.props
-         and this override to the same X.Y.Z (no -dev suffix) so the pre-tag prerelease
-         period stays NU5104-clean. -->
-    <Version>1.18.0-dev</Version>
-    <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
+    <!-- Version is inherited from ../Directory.Build.props. Do not override it here. -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
     <Authors>RicherTunes Community</Authors>
@@ -50,21 +44,6 @@
     <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <Deterministic>true</Deterministic>
     <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
-  </PropertyGroup>
-  <!-- Make PublicAPI baselines visible to analyzer tools (e.g., dotnet format) without relying on build targets -->
-  <ItemGroup>
-    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt')" />
-  </ItemGroup>
-
-  <PropertyGroup>
-    <PublicApiUseSourcesForCodeFix>false</PublicApiUseSourcesForCodeFix>
-    <_ApiSrcDir>PublicAPI/$(TargetFramework)/</_ApiSrcDir>
-    <_ApiShippedSrc>$(_ApiSrcDir)PublicAPI.Shipped.txt</_ApiShippedSrc>
-    <_ApiUnshippedSrc>$(_ApiSrcDir)PublicAPI.Unshipped.txt</_ApiUnshippedSrc>
-    <_ApiObjDir>$([System.IO.Path]::Combine('$(BaseIntermediateOutputPath)', '$(Configuration)', '$(TargetFramework)'))</_ApiObjDir>
-    <_ApiShippedObj>$([System.IO.Path]::Combine('$(_ApiObjDir)', 'PublicAPI.Shipped.txt'))</_ApiShippedObj>
-    <_ApiUnshippedObj>$([System.IO.Path]::Combine('$(_ApiObjDir)', 'PublicAPI.Unshipped.txt'))</_ApiUnshippedObj>
   </PropertyGroup>
   <!-- Exclude disabled files from compilation -->
   <ItemGroup>
@@ -109,7 +88,6 @@
     <PackageReference Include="FluentValidation" Version="9.5.4" PrivateAssets="all" />
     <PackageReference Include="Microsoft.DotNet.PackageValidation" Version="1.0.0-preview.7.21379.12" PrivateAssets="all" />
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
-    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- .NET 8.0 package versions -->
@@ -166,52 +144,6 @@
     <PackageReference Include="Azure.Identity" Version="1.17.2" PrivateAssets="all" ExcludeAssets="runtime" />
   </ItemGroup>
 
-  <Target Name="PreparePublicApiBaselines"
-          BeforeTargets="GenerateReferenceAssemblySource;CoreCompile">
-    <Error Condition="!Exists('$(_ApiShippedSrc)')"
-           Text="Missing Public API baseline: $(_ApiShippedSrc)" />
-    <Error Condition="!Exists('$(_ApiUnshippedSrc)')"
-           Text="Missing Public API baseline: $(_ApiUnshippedSrc)" />
-
-    <MakeDir Directories="$(_ApiObjDir)" />
-
-    <Copy SourceFiles="$(_ApiShippedSrc)"
-          DestinationFiles="$(_ApiShippedObj)"
-          OverwriteReadOnlyFiles="true" />
-    <Copy SourceFiles="$(_ApiUnshippedSrc)"
-          DestinationFiles="$(_ApiUnshippedObj)"
-          OverwriteReadOnlyFiles="true" />
-
-    <ItemGroup>
-      <!-- Ensure PublicApiAnalyzers see exactly one shipped/unshipped pair. -->
-      <AdditionalFiles Remove="$(_ApiShippedSrc)" />
-      <AdditionalFiles Remove="$(_ApiUnshippedSrc)" />
-      <AdditionalFiles Remove="$(_ApiShippedObj)" />
-      <AdditionalFiles Remove="$(_ApiUnshippedObj)" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' == 'true'">        
-      <AdditionalFiles Include="$(_ApiShippedSrc)" />
-      <AdditionalFiles Include="$(_ApiUnshippedSrc)" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' != 'true'">
-      <AdditionalFiles Include="$(_ApiShippedObj)" />
-      <AdditionalFiles Include="$(_ApiUnshippedObj)" />
-    </ItemGroup>
-  </Target>
-
-  <Target Name="VerifyPublicApiAdditionalFiles" BeforeTargets="Csc">
-    <Error Condition="$([System.Int32]::Parse('@(AdditionalFiles->Count())')) != 2"
-           Text="Public API baselines not applied for $(TargetFramework). AdditionalFiles: @(AdditionalFiles)" />
-  </Target>
-
-  <ItemGroup>
-    <None Remove="PublicAPI.Shipped.txt" />
-    <None Remove="PublicAPI.Unshipped.txt" />
-    <AdditionalFiles Remove="PublicAPI.Shipped.txt" />
-    <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
-  </ItemGroup>
   <!-- Audio metadata dependency: prefer public TagLibSharp, optionally use Lidarr build on CI -->
   <ItemGroup Condition="'$(UseLidarrTaglib)'!='true'">
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
@@ -225,5 +157,4 @@
     <PackageReference Include="CliWrap" Version="3.10.1" />
   </ItemGroup>
 </Project>
-
 

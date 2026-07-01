@@ -1,5 +1,7 @@
 # H2 2026 Takeover Roadmap
 
+<!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
+
 **Scope:** March 1 - August 31, 2026
 **Milestone:** v2.1 Ecosystem Reliability + Intelligence (Phases 18-23)
 **Repositories:** Brainarr, Qobuzarr, Tidalarr, AppleMusicarr, Lidarr.Plugin.Common

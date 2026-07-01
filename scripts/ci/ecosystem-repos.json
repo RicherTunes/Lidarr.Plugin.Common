@@ -1,0 +1,40 @@
+{
+  "$comment": "Ecosystem CI-contract manifest. mirrorWorkflows = expected plugin-root .github/workflows/*.yml count. Verified 2026-07-01 against live sibling layout. All active plugins are Gitea-primary with no plugin-root GitHub workflow mirrors.",
+  "plugins": [
+    {
+      "repoDir": "qobuzarr",
+      "giteaOwner": "RicherTunes",
+      "giteaRepo": "Qobuzarr",
+      "giteaPrimary": true,
+      "mirrorWorkflows": 0
+    },
+    {
+      "repoDir": "tidalarr",
+      "giteaOwner": "RicherTunes",
+      "giteaRepo": "Tidalarr",
+      "giteaPrimary": true,
+      "mirrorWorkflows": 0
+    },
+    {
+      "repoDir": "applemusicarr",
+      "giteaOwner": "RicherTunes",
+      "giteaRepo": "AppleMusicarr",
+      "giteaPrimary": true,
+      "mirrorWorkflows": 0
+    },
+    {
+      "repoDir": "brainarr",
+      "giteaOwner": "RicherTunes",
+      "giteaRepo": "Brainarr",
+      "giteaPrimary": true,
+      "mirrorWorkflows": 0
+    },
+    {
+      "repoDir": "amazonmusicarr",
+      "giteaOwner": "RicherTunes",
+      "giteaRepo": "AmazonMusicarr",
+      "giteaPrimary": true,
+      "mirrorWorkflows": 0
+    }
+  ]
+}

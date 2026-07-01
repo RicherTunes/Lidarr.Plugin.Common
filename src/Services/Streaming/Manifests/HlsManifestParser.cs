@@ -32,6 +32,10 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
     public sealed class HlsManifestParser : IStreamManifestParser
     {
         // CODECS="a,b" attribute on #EXT-X-STREAM-INF (quoted, comma-separated list).
+        // LOOP-012 (#24): cap variants/segments so a hostile playlist with millions of #EXT-X-STREAM-INF or
+        // #EXTINF lines cannot drive unbounded allocation (OOM). Mirrors DashManifestParser.MaxSegments.
+        private const int MaxEntries = 100_000;
+
         private static readonly Regex CodecsAttr =
             new("CODECS=\"(?<v>[^\"]*)\"", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
@@ -125,6 +129,12 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
 
                 if (pending)
                 {
+                    if (variants.Count >= MaxEntries)
+                    {
+                        throw new FormatException(
+                            $"HLS master playlist declares too many variants (> {MaxEntries}); refusing to allocate.");
+                    }
+
                     string url = ResolveUrl(baseUrl, line);
                     variants.Add(new StreamVariant(pendingBandwidth < 0 ? 0 : pendingBandwidth, url, pendingCodec));
                     pending = false;
@@ -183,6 +193,12 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
                 }
 
                 // A non-comment line is a media segment URI.
+                if (segments.Count >= MaxEntries)
+                {
+                    throw new FormatException(
+                        $"HLS media playlist declares too many segments (> {MaxEntries}); refusing to allocate.");
+                }
+
                 string url = ResolveUrl(baseUrl, line);
                 segments.Add(new StreamSegment(index++, url, pendingDuration));
                 pendingDuration = null;

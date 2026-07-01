@@ -63,6 +63,24 @@ namespace Lidarr.Plugin.Common.Tests
             }
         }
 
+        private sealed class OperationCanceledPostProcessor : IAudioPostProcessor
+        {
+            public Task<string> PostProcessAsync(string filePath, StreamingTrack track, StreamingQuality? quality, CancellationToken cancellationToken)
+                => throw new OperationCanceledException(cancellationToken);
+        }
+
+        private sealed class OperationCanceledMetadataApplier : IAudioMetadataApplier
+        {
+            public Task ApplyAsync(string filePath, StreamingTrack metadata, CancellationToken cancellationToken = default)
+                => throw new OperationCanceledException(cancellationToken);
+        }
+
+        private sealed class NoopMetadataApplier : IAudioMetadataApplier
+        {
+            public Task ApplyAsync(string filePath, StreamingTrack metadata, CancellationToken cancellationToken = default)
+                => Task.CompletedTask;
+        }
+
         [Fact]
         public async Task DownloadTrack_WithStreamProvider_RunsPostProcessorAndUpdatesResultPath()
         {
@@ -97,6 +115,76 @@ namespace Lidarr.Plugin.Common.Tests
                 TryDelete(temp);
                 TryDelete(Path.ChangeExtension(temp, "m4a"));
                 TryDelete(expectedFlac);
+                TryDelete(temp + ".partial");
+                TryDelete(temp + ".partial.resume.json");
+            }
+        }
+
+        [Fact]
+        public async Task DownloadTrack_WithStreamProvider_PostProcessorNonCallerOce_DoesNotFailDownload()
+        {
+            // A post-processor throwing OCE with the caller token NOT cancelled is a non-caller event
+            // (e.g. the post-processor's own timeout), not user cancellation. Post-processing is
+            // best-effort: the already-downloaded file must survive (fall back to unprocessed), and the
+            // track must NOT be reported as cancelled. (Genuine caller cancellation is covered by
+            // SimpleDownloadOrchestratorOceTimeoutTests / the cancellation+backpressure suite.)
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 1, supportRange: false));
+            var streamProvider = new FakeStreamProvider(payload: new byte[] { 1, 2, 3, 4 }, extension: "m4a");
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/unused", "bin")),
+                streamProvider: streamProvider,
+                metadataApplier: new NoopMetadataApplier(),
+                postProcessor: new OperationCanceledPostProcessor());
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_test_post_cancel_{Guid.NewGuid():N}.bin");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 }, CancellationToken.None);
+                Assert.True(result.Success, "a non-caller post-processor OCE must not fail/cancel a successfully downloaded track");
+            }
+            finally
+            {
+                TryDelete(temp);
+                TryDelete(Path.ChangeExtension(temp, "m4a"));
+                TryDelete(temp + ".partial");
+                TryDelete(temp + ".partial.resume.json");
+            }
+        }
+
+        [Fact]
+        public async Task DownloadTrack_WithStreamProvider_MetadataNonCallerOce_DoesNotFailDownload()
+        {
+            // Metadata application is best-effort: a non-caller OCE (token not cancelled) must be
+            // swallowed, leaving the downloaded file intact and the track successful.
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 1, supportRange: false));
+            var streamProvider = new FakeStreamProvider(payload: new byte[] { 1, 2, 3, 4 }, extension: "m4a");
+
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "Test",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/unused", "bin")),
+                streamProvider: streamProvider,
+                metadataApplier: new OperationCanceledMetadataApplier());
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_test_metadata_cancel_{Guid.NewGuid():N}.bin");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 }, CancellationToken.None);
+                Assert.True(result.Success, "a non-caller metadata OCE must not fail/cancel a successfully downloaded track");
+            }
+            finally
+            {
+                TryDelete(temp);
+                TryDelete(Path.ChangeExtension(temp, "m4a"));
                 TryDelete(temp + ".partial");
                 TryDelete(temp + ".partial.resume.json");
             }

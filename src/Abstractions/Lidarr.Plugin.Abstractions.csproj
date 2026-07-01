@@ -10,8 +10,7 @@
     <EnableNETAnalyzers>true</EnableNETAnalyzers>
     <RunAnalyzersDuringBuild>true</RunAnalyzersDuringBuild>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <!-- RS0025: False positive due to PreparePublicApiBaselines target adding obj/ copies after source files are already in AdditionalFiles -->
-    <NoWarn>SA1200;SA1633;CS1591;RS0016;RS0017;RS0025</NoWarn>
+    <NoWarn>SA1200;SA1633;CS1591</NoWarn>
     <AssemblyVersion>1.0.0.0</AssemblyVersion>
     <FileVersion>1.0.0.0</FileVersion>
     <!-- Version is inherited from Directory.Build.props (single source of truth shared with Common).
@@ -33,25 +32,8 @@
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>
   </PropertyGroup>
-  <!-- Make PublicAPI baselines visible to analyzer tools (e.g., dotnet format) without relying on build targets -->
-  <ItemGroup>
-    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Shipped.txt')" />
-    <AdditionalFiles Include="PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt" Condition="Exists('PublicAPI/$(TargetFramework)/PublicAPI.Unshipped.txt')" />
-  </ItemGroup>
-
-  <PropertyGroup>
-    <PublicApiUseSourcesForCodeFix>false</PublicApiUseSourcesForCodeFix>
-    <_ApiSrcDir>PublicAPI/$(TargetFramework)/</_ApiSrcDir>
-    <_ApiShippedSrc>$(_ApiSrcDir)PublicAPI.Shipped.txt</_ApiShippedSrc>
-    <_ApiUnshippedSrc>$(_ApiSrcDir)PublicAPI.Unshipped.txt</_ApiUnshippedSrc>
-    <_ApiObjDir>$([System.IO.Path]::Combine('$(BaseIntermediateOutputPath)', '$(Configuration)', '$(TargetFramework)'))</_ApiObjDir>
-    <_ApiShippedObj>$([System.IO.Path]::Combine('$(_ApiObjDir)', 'PublicAPI.Shipped.txt'))</_ApiShippedObj>
-    <_ApiUnshippedObj>$([System.IO.Path]::Combine('$(_ApiObjDir)', 'PublicAPI.Unshipped.txt'))</_ApiUnshippedObj>
-  </PropertyGroup>
-
   <ItemGroup>
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="1.1.1" PrivateAssets="All" />
-    <PackageReference Include="Microsoft.CodeAnalysis.PublicApiAnalyzers" Version="3.3.4" PrivateAssets="all" />
   </ItemGroup>
 
   <!-- .NET 8.0 package versions -->
@@ -60,49 +42,6 @@
     <PackageReference Include="System.Text.Json" Version="8.0.6" />
   </ItemGroup>
 
-  <Target Name="PreparePublicApiBaselines"
-          BeforeTargets="GenerateReferenceAssemblySource;CoreCompile">
-    <Error Condition="!Exists('$(_ApiShippedSrc)')"
-           Text="Missing Public API baseline: $(_ApiShippedSrc)" />
-    <Error Condition="!Exists('$(_ApiUnshippedSrc)')"
-           Text="Missing Public API baseline: $(_ApiUnshippedSrc)" />
-
-    <MakeDir Directories="$(_ApiObjDir)" />
-
-    <Copy SourceFiles="$(_ApiShippedSrc)"
-          DestinationFiles="$(_ApiShippedObj)"
-          OverwriteReadOnlyFiles="true" />
-    <Copy SourceFiles="$(_ApiUnshippedSrc)"
-          DestinationFiles="$(_ApiUnshippedObj)"
-          OverwriteReadOnlyFiles="true" />
-
-    <ItemGroup>
-      <AdditionalFiles Remove="**/PublicAPI.Shipped.txt" />
-      <AdditionalFiles Remove="**/PublicAPI.Unshipped.txt" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' == 'true'">
-      <AdditionalFiles Include="$(_ApiShippedSrc)" />
-      <AdditionalFiles Include="$(_ApiUnshippedSrc)" />
-    </ItemGroup>
-
-    <ItemGroup Condition="'$(PublicApiUseSourcesForCodeFix)' != 'true'">
-      <AdditionalFiles Include="$(_ApiShippedObj)" />
-      <AdditionalFiles Include="$(_ApiUnshippedObj)" />
-    </ItemGroup>
-  </Target>
-
-  <Target Name="VerifyPublicApiAdditionalFiles" BeforeTargets="Csc">
-    <Error Condition="$([System.Int32]::Parse('@(AdditionalFiles->Count())')) != 2"
-           Text="Public API baselines not applied for $(TargetFramework). AdditionalFiles: @(AdditionalFiles)" />
-  </Target>
-
-  <ItemGroup>
-    <None Remove="PublicAPI.Shipped.txt" />
-    <None Remove="PublicAPI.Unshipped.txt" />
-    <AdditionalFiles Remove="PublicAPI.Shipped.txt" />
-    <AdditionalFiles Remove="PublicAPI.Unshipped.txt" />
-  </ItemGroup>
 
   <!-- Package README -->
   <ItemGroup>

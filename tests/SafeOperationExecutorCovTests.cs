@@ -110,35 +110,21 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public void ExecuteFileOperation_UnauthorizedAccessException_ReturnsFallback()
         {
-            // Arrange - Test line 44-47: UnauthorizedAccessException returns fallback
-            // Proof: grep -n "UnauthorizedAccessException" src/Services/SafeOperationExecutor.cs
-            // Line 44: catch (UnauthorizedAccessException)
-            // Line 46: return fallbackValue!;
+            // The contract under test is "UnauthorizedAccessException => fallback". Throw it
+            // deterministically: the previous read-only-file arrangement passes as root
+            // (CI containers), because root bypasses permission bits and the write succeeds.
             string tempFile = Path.GetTempFileName();
             try
             {
-                File.WriteAllText(tempFile, "test");
-                var attrs = File.GetAttributes(tempFile) | FileAttributes.ReadOnly;
-                File.SetAttributes(tempFile, attrs);
-
-                // Act - Try to write to read-only file will throw UnauthorizedAccessException
                 string result = SafeOperationExecutor.ExecuteFileOperation(
                     tempFile,
-                    path =>
-                    {
-                        // This will throw UnauthorizedAccessException
-                        File.WriteAllText(path, "new content");
-                        return "success";
-                    },
+                    path => throw new UnauthorizedAccessException("denied"),
                     "fallback");
 
-                // Assert
                 Assert.Equal("fallback", result);
             }
             finally
             {
-                var attrs = File.GetAttributes(tempFile) & ~FileAttributes.ReadOnly;
-                File.SetAttributes(tempFile, attrs);
                 File.Delete(tempFile);
             }
         }
