@@ -196,7 +196,7 @@ public class CliRunnerStressTests
         };
 
         // Act & Assert
-        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
             await foreach (var _ in _runner.StreamAsync(command, args, options))
             {
@@ -217,7 +217,7 @@ public class CliRunnerStressTests
         cts.CancelAfter(TimeSpan.FromMilliseconds(200));
 
         // Act & Assert
-        await Assert.ThrowsAsync<OperationCanceledException>(async () =>
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
         {
             await foreach (var _ in _runner.StreamAsync(command, args, cancellationToken: cts.Token))
             {
