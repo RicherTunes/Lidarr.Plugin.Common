@@ -55,21 +55,22 @@ namespace Lidarr.Plugin.Common.Services.Download
             ILogger? logger = null,
             IAudioPostProcessor? postProcessor = null,
             RemoteMediaUriPolicy? mediaUriPolicy = null)
+            : this(
+                serviceName,
+                httpClient,
+                getAlbumAsync,
+                getTrackAsync,
+                getAlbumTrackIdsAsync,
+                getStreamAsync,
+                maxConcurrentTracks,
+                streamProvider,
+                metadataApplier,
+                logger,
+                postProcessor,
+                telemetrySink: null,
+                mediaUriPolicy,
+                artworkEmbedder: null)
         {
-            ServiceName = serviceName;
-            _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-            _getAlbumAsync = getAlbumAsync ?? throw new ArgumentNullException(nameof(getAlbumAsync));
-            _getTrackAsync = getTrackAsync ?? throw new ArgumentNullException(nameof(getTrackAsync));
-            _getAlbumTrackIdsAsync = getAlbumTrackIdsAsync ?? throw new ArgumentNullException(nameof(getAlbumTrackIdsAsync));
-            _getStreamAsync = getStreamAsync ?? throw new ArgumentNullException(nameof(getStreamAsync));
-            _maxConcurrentTracks = Math.Max(1, maxConcurrentTracks);
-            _streamProvider = streamProvider;
-            _postProcessor = postProcessor;
-            _metadataApplier = metadataApplier ?? new TagLibAudioMetadataApplier();
-            _logger = logger ?? NullLogger.Instance;
-            _artworkEmbedder = new TagLibAudioArtworkEmbedder(_logger);
-            _telemetrySink = null;
-            _mediaUriPolicy = mediaUriPolicy ?? RemoteMediaUriPolicy.Strict;
         }
 
         public SimpleDownloadOrchestrator(
@@ -86,9 +87,54 @@ namespace Lidarr.Plugin.Common.Services.Download
             IAudioPostProcessor? postProcessor,
             IDownloadTelemetrySink? telemetrySink,
             RemoteMediaUriPolicy? mediaUriPolicy = null)
-            : this(serviceName, httpClient, getAlbumAsync, getTrackAsync, getAlbumTrackIdsAsync, getStreamAsync, maxConcurrentTracks, streamProvider, metadataApplier, logger, postProcessor, mediaUriPolicy)
+            : this(
+                serviceName,
+                httpClient,
+                getAlbumAsync,
+                getTrackAsync,
+                getAlbumTrackIdsAsync,
+                getStreamAsync,
+                maxConcurrentTracks,
+                streamProvider,
+                metadataApplier,
+                logger,
+                postProcessor,
+                telemetrySink,
+                mediaUriPolicy,
+                artworkEmbedder: null)
         {
+        }
+
+        internal SimpleDownloadOrchestrator(
+            string serviceName,
+            HttpClient httpClient,
+            Func<string, Task<StreamingAlbum>> getAlbumAsync,
+            Func<string, Task<StreamingTrack>> getTrackAsync,
+            Func<string, Task<IReadOnlyList<string>>> getAlbumTrackIdsAsync,
+            Func<string, StreamingQuality?, Task<(string Url, string Extension)>> getStreamAsync,
+            int maxConcurrentTracks,
+            IAudioStreamProvider? streamProvider,
+            IAudioMetadataApplier? metadataApplier,
+            ILogger? logger,
+            IAudioPostProcessor? postProcessor,
+            IDownloadTelemetrySink? telemetrySink,
+            RemoteMediaUriPolicy? mediaUriPolicy,
+            IAudioArtworkEmbedder? artworkEmbedder)
+        {
+            ServiceName = serviceName;
+            _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+            _getAlbumAsync = getAlbumAsync ?? throw new ArgumentNullException(nameof(getAlbumAsync));
+            _getTrackAsync = getTrackAsync ?? throw new ArgumentNullException(nameof(getTrackAsync));
+            _getAlbumTrackIdsAsync = getAlbumTrackIdsAsync ?? throw new ArgumentNullException(nameof(getAlbumTrackIdsAsync));
+            _getStreamAsync = getStreamAsync ?? throw new ArgumentNullException(nameof(getStreamAsync));
+            _maxConcurrentTracks = Math.Max(1, maxConcurrentTracks);
+            _streamProvider = streamProvider;
+            _postProcessor = postProcessor;
+            _metadataApplier = metadataApplier ?? new TagLibAudioMetadataApplier();
+            _logger = logger ?? NullLogger.Instance;
+            _artworkEmbedder = artworkEmbedder ?? new TagLibAudioArtworkEmbedder(_logger);
             _telemetrySink = telemetrySink;
+            _mediaUriPolicy = mediaUriPolicy ?? RemoteMediaUriPolicy.Strict;
         }
 
         public Task<DownloadResult> DownloadAlbumAsync(string albumId, string outputDirectory, StreamingQuality quality = null, IProgress<DownloadProgress> progress = null)
@@ -602,6 +648,10 @@ namespace Lidarr.Plugin.Common.Services.Download
                 try
                 {
                     await _metadataApplier.ApplyAsync(filePath, track, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
                 }
                 catch (Exception ex)
                 {
