@@ -28,6 +28,7 @@ on:
 
 jobs:
   build-test:
+    if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -48,6 +49,7 @@ jobs:
         run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 10m
 
   lint:
+    if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -95,6 +97,7 @@ jobs:
   # push-to-main, workflow_dispatch, and the daily schedule cron there.
 
   secret-scan:
+    if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

@@ -36,7 +36,8 @@
       6. GitHub mirror CI parity
          If mirrorWorkflows > 0, .github/workflows/ci.yml must invoke the same
          shared lint runner, submodule pin guard, secret scan, and verify-local
-         merge gate used by Gitea CI.
+         merge gate used by Gitea CI. Every job must be explicitly guarded to
+         run only on github.com, and mirrors must not keep fallback lint subsets.
 
       7. Workflow content integrity
          Workflow files under .github/workflows and .gitea/workflows are readable,
@@ -349,10 +350,12 @@ function Test-GitHubCiMirrorContract {
           - repin-common-submodule.sh --verify-only
           - gitleaks detect
           - scripts/verify-local.ps1
+          - job-level github.server_url == 'https://github.com' guards
 
         This does not require byte-identical Gitea/GitHub workflow YAML; it
         requires the behavioral contract to converge on the same Common-owned
-        scripts and merge gates.
+        scripts and merge gates, without letting Gitea execute the mirror jobs
+        and without fallback lint subsets that can drift from Common.
 
     .OUTPUTS
         PSCustomObject { Ok, Reason }
@@ -406,6 +409,51 @@ function Test-GitHubCiMirrorContract {
         return [PSCustomObject]@{
             Ok     = $false
             Reason = ".github/workflows/ci.yml is missing required gate(s): $($missing -join ', ')"
+        }
+    }
+
+    if ($content -match 'Invoke-FallbackGate' -or $content -match $SharedPluginLintRunnerOwnedScriptPattern) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = '.github/workflows/ci.yml keeps fallback/direct lint subset wiring; mirror lint must flow only through run-plugin-lint-gates.ps1'
+        }
+    }
+
+    if ($content -match $SharedPluginLintRunnerSkipSwitchPattern) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml invokes run-plugin-lint-gates.ps1 with skip switch '$($Matches[0])'; mirror CI must run the full shared lint gate set"
+        }
+    }
+
+    $jobsMatch = [regex]::Match($content, '(?ms)^jobs:\s*\r?\n(?<body>.*)$')
+    if (-not $jobsMatch.Success) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml is missing a jobs block"
+        }
+    }
+
+    $jobMatches = [regex]::Matches($jobsMatch.Groups['body'].Value, '(?ms)^  (?<name>[A-Za-z0-9_-]+):\s*\r?\n(?<body>.*?)(?=^  [A-Za-z0-9_-]+:\s*$|\z)')
+    if ($jobMatches.Count -eq 0) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml has no parseable jobs"
+        }
+    }
+
+    $unguardedJobs = [System.Collections.Generic.List[string]]::new()
+    $githubOnlyGuardPattern = "(?m)^\s{4}if:\s*\$\{\{\s*github\.server_url\s*==\s*'https://github\.com'\s*\}\}\s*$"
+    foreach ($job in $jobMatches) {
+        if ($job.Groups['body'].Value -notmatch $githubOnlyGuardPattern) {
+            $unguardedJobs.Add($job.Groups['name'].Value) | Out-Null
+        }
+    }
+
+    if ($unguardedJobs.Count -gt 0) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml job(s) missing GitHub-only guard (if: github.server_url == 'https://github.com'): $($unguardedJobs -join ', ')"
         }
     }
 
