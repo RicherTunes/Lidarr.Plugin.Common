@@ -80,6 +80,11 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
                 var lrcPath = Path.ChangeExtension(audioFilePath, ".lrc");
                 await File.WriteAllTextAsync(lrcPath, lyrics, cancellationToken).ConfigureAwait(false);
                 _logger?.LogDebug("Saved synced lyrics: {File}", Path.GetFileName(lrcPath));
+
+                // Also embed the lyrics into the audio tag. The .lrc sidecar above serves synced-lyrics
+                // players, but Lidarr's default importExtraFiles=false drops sidecars at import — so
+                // without embedding, lyrics never reach the library. Best-effort: never fail the download.
+                TryEmbedLyrics(audioFilePath, lyrics);
             }
             catch (OperationCanceledException)
             {
@@ -88,6 +93,25 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
             catch (Exception ex)
             {
                 _logger?.LogDebug(ex, "Lyrics enrichment failed for {Artist} - {Track} (non-fatal)", artistName, trackName);
+            }
+        }
+
+        /// <summary>
+        /// Best-effort embed of the lyrics text into the audio file's tag (FLAC UNSYNCEDLYRICS /
+        /// ID3 USLT via TagLib's unified <c>Tag.Lyrics</c>). Any failure (non-audio file, unsupported
+        /// container) is swallowed — lyrics enrichment must never fail a download.
+        /// </summary>
+        private void TryEmbedLyrics(string audioFilePath, string lyrics)
+        {
+            try
+            {
+                using var file = TagLib.File.Create(audioFilePath);
+                file.Tag.Lyrics = lyrics;
+                file.Save();
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogDebug(ex, "Embedding lyrics into tag failed for {File} (non-fatal)", Path.GetFileName(audioFilePath));
             }
         }
 
