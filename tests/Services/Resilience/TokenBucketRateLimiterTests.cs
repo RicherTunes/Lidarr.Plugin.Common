@@ -218,29 +218,49 @@ namespace Lidarr.Plugin.Common.Tests.Services.Resilience
         public async Task Underflow_ConsumptionGoesNegative_WaitsForRefill()
         {
             // Arrange
+            var fakeTime = new FakeTimeProvider(DateTimeOffset.UtcNow);
+            var limiter = new TokenBucketRateLimiter(NullLogger.Instance, fakeTime);
             const string resource = "underflow-test";
             const int capacity = 2;
             var period = TimeSpan.FromMilliseconds(100);
-            _limiter.Configure(resource, capacity, period);
+            limiter.Configure(resource, capacity, period);
 
-            var executionTimes = new List<long>();
+            // Act: consume the burst capacity immediately, then queue three more requests.
+            Assert.Equal(1, await limiter.ExecuteAsync(resource, () => Task.FromResult(1)));
+            Assert.Equal(2, await limiter.ExecuteAsync(resource, () => Task.FromResult(2)));
 
-            // Act: consume beyond capacity (goes negative internally)
-            var tasks = Enumerable.Range(0, 5).Select(i => _limiter.ExecuteAsync(resource, async () =>
+            var third = limiter.ExecuteAsync(resource, () => Task.FromResult(3));
+            var fourth = limiter.ExecuteAsync(resource, () => Task.FromResult(4));
+            var fifth = limiter.ExecuteAsync(resource, () => Task.FromResult(5));
+
+            // Assert: extra reservations go negative internally and wait for deterministic refill.
+            await Task.Yield();
+            Assert.False(third.IsCompleted, "Third request should wait for the first refill token.");
+            Assert.False(fourth.IsCompleted, "Fourth request should wait for the second refill token.");
+            Assert.False(fifth.IsCompleted, "Fifth request should wait for the third refill token.");
+
+            fakeTime.Advance(TimeSpan.FromMilliseconds(49));
+            await Task.Yield();
+            Assert.False(third.IsCompleted, "Third request should not complete before a full token refills.");
+
+            fakeTime.Advance(TimeSpan.FromMilliseconds(1));
+            Assert.Equal(3, await AwaitWithTimeout(third));
+            Assert.False(fourth.IsCompleted, "Fourth request should still be waiting after the first refill.");
+            Assert.False(fifth.IsCompleted, "Fifth request should still be waiting after the first refill.");
+
+            fakeTime.Advance(TimeSpan.FromMilliseconds(50));
+            Assert.Equal(4, await AwaitWithTimeout(fourth));
+            Assert.False(fifth.IsCompleted, "Fifth request should still be waiting after the second refill.");
+
+            fakeTime.Advance(TimeSpan.FromMilliseconds(50));
+            Assert.Equal(5, await AwaitWithTimeout(fifth));
+
+            static async Task<T> AwaitWithTimeout<T>(Task<T> task)
             {
-                executionTimes.Add(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-                await Task.Delay(10);
-                return i;
-            })).ToArray();
-
-            await Task.WhenAll(tasks);
-
-            // Assert: all requests complete, but later ones waited for refill
-            Assert.Equal(5, executionTimes.Count);
-
-            // First 2 execute quickly, next 3 wait for refill
-            var gap1 = executionTimes[2] - executionTimes[1];
-            Assert.True(gap1 > 0, $"Expected delay between request 2 and 3, got {gap1}ms");
+                var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(5)));
+                Assert.Same(task, completed);
+                return await task;
+            }
         }
 
         #endregion
