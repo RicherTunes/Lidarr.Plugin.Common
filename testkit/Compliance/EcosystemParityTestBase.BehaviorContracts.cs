@@ -684,6 +684,93 @@ public abstract partial class EcosystemParityTestBase
 
     #endregion
 
+    #region Check_SimpleDownloadOrchestratorCoverArtComplianceAdopted
+
+    /// <summary>
+    /// Plugins that route downloads through <c>SimpleDownloadOrchestrator</c> must adopt
+    /// <see cref="CoverArtEmbeddingComplianceTestBase"/> in their test suite. The orchestrator can
+    /// only embed cover art when the plugin's download-path <c>StreamingAlbum</c> carries a fetchable
+    /// cover URL; without a plugin fixture that drives the real mapper, this cross-plugin behavior can
+    /// regress silently on a Common pin bump.
+    /// </summary>
+    public virtual ComplianceResult Check_SimpleDownloadOrchestratorCoverArtComplianceAdopted()
+    {
+        if (!Directory.Exists(PluginSourceRoot)) return Skipped();
+
+        var simpleOrchestratorUse = new System.Text.RegularExpressions.Regex(
+            @"\bnew\s+SimpleDownloadOrchestrator\b|:\s*(?:Lidarr\.Plugin\.Common\.Services\.Download\.)?SimpleDownloadOrchestrator\b",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        var usageFiles = new List<string>();
+        foreach (var file in EnumerateCSharpFiles(PluginSourceRoot, includeTests: false))
+        {
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch { continue; }
+
+            if (simpleOrchestratorUse.IsMatch(text))
+                usageFiles.Add(Path.GetRelativePath(RepoRootPath, file));
+        }
+
+        if (usageFiles.Count == 0) return ComplianceResult.Success; // N/A (does not use the cover-fetch seam)
+
+        var testsRoot = Path.Combine(RepoRootPath, "tests");
+        if (!Directory.Exists(testsRoot))
+        {
+            return ComplianceResult.Failure(
+                $"Plugin uses SimpleDownloadOrchestrator ({string.Join(", ", usageFiles)}) but has no tests/ directory adopting CoverArtEmbeddingComplianceTestBase.");
+        }
+
+        var complianceSubclass = new System.Text.RegularExpressions.Regex(
+            @"\bclass\s+\w+(?:\s*<[^>]+>)?\s*:\s*(?:Lidarr\.Plugin\.Common\.TestKit\.Compliance\.)?CoverArtEmbeddingComplianceTestBase\b",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
+
+        foreach (var file in EnumerateCSharpFiles(testsRoot, includeTests: true))
+        {
+            string text;
+            try { text = File.ReadAllText(file); }
+            catch { continue; }
+
+            if (complianceSubclass.IsMatch(text))
+                return ComplianceResult.Success;
+        }
+
+        return ComplianceResult.Failure(
+            "Plugin uses SimpleDownloadOrchestrator but does not adopt CoverArtEmbeddingComplianceTestBase. " +
+            "Add a parity/compliance test that builds the real download-path StreamingAlbum both with and " +
+            "without provider cover art, so Common's cover-art embedding contract is guarded. " +
+            $"SimpleDownloadOrchestrator usage: {string.Join(", ", usageFiles)}");
+    }
+
+    private IEnumerable<string> EnumerateCSharpFiles(string root, bool includeTests)
+    {
+        var excluded = new[]
+        {
+            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
+            $"{Path.DirectorySeparatorChar}examples{Path.DirectorySeparatorChar}",
+        };
+
+        foreach (var file in Directory.EnumerateFiles(root, "*.cs", SearchOption.AllDirectories))
+        {
+            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
+            if (!includeTests &&
+                (file.Contains($"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                 file.Contains($"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}", StringComparison.Ordinal) ||
+                 file.Contains(".Tests" + Path.DirectorySeparatorChar, StringComparison.Ordinal)))
+            {
+                continue;
+            }
+
+            yield return file;
+        }
+    }
+
+    #endregion
+
     #region Check_FileClassNameParity
 
     /// <summary>
@@ -1003,6 +1090,7 @@ public abstract partial class EcosystemParityTestBase
             [nameof(Check_DownloadClientUsesPathTraversalGuard)] = Check_DownloadClientUsesPathTraversalGuard(),
             [nameof(Check_DownloadClientStampsRegisteredClientId)] = Check_DownloadClientStampsRegisteredClientId(),
             [nameof(Check_DownloadClientUsesCommonPayloadValidator)] = Check_DownloadClientUsesCommonPayloadValidator(),
+            [nameof(Check_SimpleDownloadOrchestratorCoverArtComplianceAdopted)] = Check_SimpleDownloadOrchestratorCoverArtComplianceAdopted(),
             [nameof(Check_FileClassNameParity)] = Check_FileClassNameParity(),
             [nameof(Check_ClaudeMdDocumentsCommonHelpers)] = Check_ClaudeMdDocumentsCommonHelpers(),
         };
