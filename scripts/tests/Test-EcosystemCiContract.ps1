@@ -389,6 +389,74 @@ run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoP
         $r.Ok -eq $false
     }
 
+    Test-Assertion 'Shared lint runner: direct parity fallback subset returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-direct-parity-fallback'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -WireSharedRunner $true -GithubWorkflowCount 0
+        $ciYml = Join-Path $tmpDir '.gitea/workflows/ci.yml'
+        Add-Content -LiteralPath $ciYml @'
+      - name: Compatibility fallback
+        run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ecosystem-parity-lint.ps1 -RepoPath . -Check VersionContract -Mode ci
+'@
+        $r = Test-SharedPluginLintRunnerWired -PluginDir $tmpDir -PluginName 'direct-parity-fallback'
+        $r.Ok -eq $false -and $r.Reason -match 'direct.*ecosystem-parity-lint|fallback|subset'
+    }
+
+    Test-Assertion 'Shared lint runner: direct secret-scan fallback returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-direct-secret-scan-fallback'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -WireSharedRunner $true -GithubWorkflowCount 0
+        $ciYml = Join-Path $tmpDir '.gitea/workflows/ci.yml'
+        Add-Content -LiteralPath $ciYml @'
+      - name: Compatibility fallback
+        run: pwsh ./ext/Lidarr.Plugin.Common/scripts/lint-gitea-secret-scan.ps1 -RepoPath . -CI
+'@
+        $r = Test-SharedPluginLintRunnerWired -PluginDir $tmpDir -PluginName 'direct-secret-scan-fallback'
+        $r.Ok -eq $false -and $r.Reason -match 'lint-gitea-secret-scan|fallback|subset'
+    }
+
+    Test-Assertion 'Shared lint runner: skip switch returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-runner-skip-switch'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -WireSharedRunner $true -GithubWorkflowCount 0
+        $ciYml = Join-Path $tmpDir '.gitea/workflows/ci.yml'
+        $content = [System.IO.File]::ReadAllText($ciYml)
+        $content = $content.Replace('-Mode ci', '-Mode ci -SkipEcosystemParity')
+        [System.IO.File]::WriteAllText($ciYml, $content)
+        $r = Test-SharedPluginLintRunnerWired -PluginDir $tmpDir -PluginName 'runner-skip-switch'
+        $r.Ok -eq $false -and $r.Reason -match 'SkipEcosystemParity|skip'
+    }
+
+    Test-Assertion 'Shared lint runner: skip alias returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-runner-skip-alias'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -WireSharedRunner $true -GithubWorkflowCount 0
+        $ciYml = Join-Path $tmpDir '.gitea/workflows/ci.yml'
+        $content = [System.IO.File]::ReadAllText($ciYml)
+        $content = $content.Replace('-Mode ci', '-Mode ci -SkipVersionContract')
+        [System.IO.File]::WriteAllText($ciYml, $content)
+        $r = Test-SharedPluginLintRunnerWired -PluginDir $tmpDir -PluginName 'runner-skip-alias'
+        $r.Ok -eq $false -and $r.Reason -match 'SkipVersionContract|skip'
+    }
+
+    Test-Assertion 'Shared lint runner: commented-only runner returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-commented-runner'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $false -WireSharedRunner $false -GithubWorkflowCount 0
+        $ciYml = Join-Path $tmpDir '.gitea/workflows/ci.yml'
+        Add-Content -LiteralPath $ciYml @'
+      # run: pwsh ./ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 -RepoPath .
+'@
+        $r = Test-SharedPluginLintRunnerWired -PluginDir $tmpDir -PluginName 'commented-runner'
+        $r.Ok -eq $false -and $r.Reason -match 'run-plugin-lint-gates'
+    }
+
+    Test-Assertion 'Shared lint runner: commented fallback script name does not fail direct-script guard' {
+        $tmpDir = Join-Path $TempDir 'plugin-commented-fallback'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -WireSharedRunner $true -GithubWorkflowCount 0
+        $ciYml = Join-Path $tmpDir '.gitea/workflows/ci.yml'
+        Add-Content -LiteralPath $ciYml @'
+      # Historic fallback called ecosystem-parity-lint.ps1 directly.
+'@
+        $r = Test-SharedPluginLintRunnerWired -PluginDir $tmpDir -PluginName 'commented-fallback'
+        $r.Ok -eq $true
+    }
+
     Test-Assertion 'Shared lint runner: missing ci.yml returns Ok=$false' {
         $tmpDir = Join-Path $TempDir 'plugin-no-ci-shared-runner'
         New-Item -ItemType Directory -Path $tmpDir -Force | Out-Null
