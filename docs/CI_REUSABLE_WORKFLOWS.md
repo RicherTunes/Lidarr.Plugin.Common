@@ -3,7 +3,14 @@
 
 **Generated**: 2026-05-23
 **Agent**: ci-cd-agent (Phase 1.5)
-**Status**: PROPOSAL ONLY — do not implement without design review
+**Status**: SUPERSEDED for Gitea-primary plugin CI — historical proposal only
+
+As of 2026-07-01, plugin repos are Gitea-primary and the Common ecosystem
+contract enforces zero plugin-root GitHub Actions workflows. Do not implement
+the plugin-facing `.github/workflows/*` proposals below as active plugin CI.
+The current consolidation point is the shared script runner
+`scripts/ci/run-plugin-lint-gates.ps1`, invoked from each plugin's
+`.gitea/workflows/ci.yml`.
 
 ---
 
