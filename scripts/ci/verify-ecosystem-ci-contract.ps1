@@ -412,6 +412,34 @@ function Test-GitHubCiMirrorContract {
         }
     }
 
+    $failureWeakeningPatterns = @(
+        @{
+            Pattern = '(?m)^\s*continue-on-error:\s*true\b'
+            Reason  = ".github/workflows/ci.yml uses continue-on-error: true; mirror gates must fail closed"
+        },
+        @{
+            Pattern = '(?m)^\s*if:\s*(?:false|\$\{\{\s*false\s*\}\})\s*$'
+            Reason  = ".github/workflows/ci.yml disables a job or step with if: false; mirror gates must not be bypassed"
+        },
+        @{
+            Pattern = '\|\|\s*true\b'
+            Reason  = ".github/workflows/ci.yml swallows command failures with || true; mirror gates must fail closed"
+        },
+        @{
+            Pattern = '(?m)^\s*exit\s+0\s*$'
+            Reason  = ".github/workflows/ci.yml contains a standalone exit 0; mirror gates must not be bypassed"
+        }
+    )
+
+    foreach ($weakening in $failureWeakeningPatterns) {
+        if ($content -match $weakening.Pattern) {
+            return [PSCustomObject]@{
+                Ok     = $false
+                Reason = $weakening.Reason
+            }
+        }
+    }
+
     if ($content -match 'Invoke-FallbackGate' -or $content -match $SharedPluginLintRunnerOwnedScriptPattern) {
         return [PSCustomObject]@{
             Ok     = $false
@@ -442,6 +470,20 @@ function Test-GitHubCiMirrorContract {
         }
     }
 
+    $jobs = @{}
+    foreach ($job in $jobMatches) {
+        $jobs[$job.Groups['name'].Value] = $job.Groups['body'].Value
+    }
+
+    $requiredJobs = @('secret-scan', 'lint', 'verify')
+    $missingJobs = @($requiredJobs | Where-Object { -not $jobs.ContainsKey($_) })
+    if ($missingJobs.Count -gt 0) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml is missing required job(s): $($missingJobs -join ', ')"
+        }
+    }
+
     $unguardedJobs = [System.Collections.Generic.List[string]]::new()
     $githubOnlyGuardPattern = "(?m)^\s{4}if:\s*\$\{\{\s*github\.server_url\s*==\s*'https://github\.com'\s*\}\}\s*$"
     foreach ($job in $jobMatches) {
@@ -454,6 +496,53 @@ function Test-GitHubCiMirrorContract {
         return [PSCustomObject]@{
             Ok     = $false
             Reason = ".github/workflows/ci.yml job(s) missing GitHub-only guard (if: github.server_url == 'https://github.com'): $($unguardedJobs -join ', ')"
+        }
+    }
+
+    if ($jobs['secret-scan'] -notmatch 'gitleaks\s+detect') {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml secret-scan job must run gitleaks detect"
+        }
+    }
+
+    if ($jobs['lint'] -notmatch 'run-plugin-lint-gates\.ps1') {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml lint job must run run-plugin-lint-gates.ps1"
+        }
+    }
+
+    if ($jobs['verify'] -notmatch 'repin-common-submodule\.sh\s+--verify-only') {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml verify job must run repin-common-submodule.sh --verify-only"
+        }
+    }
+
+    if ($jobs['verify'] -notmatch 'scripts[/\\]verify-local\.ps1') {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml verify job must run scripts/verify-local.ps1"
+        }
+    }
+
+    $verifyNeedsText = ''
+    $inlineNeeds = [regex]::Match($jobs['verify'], '(?m)^\s{4}needs:\s*(?<needs>[^\r\n]+)\s*$')
+    if ($inlineNeeds.Success) {
+        $verifyNeedsText = $inlineNeeds.Groups['needs'].Value
+    }
+    else {
+        $blockNeeds = [regex]::Match($jobs['verify'], '(?ms)^\s{4}needs:\s*\r?\n(?<needs>(?:\s{6}-\s*[A-Za-z0-9_-]+\s*\r?\n?)+)')
+        if ($blockNeeds.Success) {
+            $verifyNeedsText = $blockNeeds.Groups['needs'].Value
+        }
+    }
+
+    if ($verifyNeedsText -notmatch '\blint\b' -or $verifyNeedsText -notmatch '\bsecret-scan\b') {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml verify job must need both lint and secret-scan"
         }
     }
 
