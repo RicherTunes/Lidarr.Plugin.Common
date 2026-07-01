@@ -73,6 +73,7 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         public ComplianceResult RunClaudeMdHelpers() => Check_ClaudeMdDocumentsCommonHelpers();
         public ComplianceResult RunDownloadClientIdStamp() => Check_DownloadClientStampsRegisteredClientId();
         public ComplianceResult RunPayloadValidator() => Check_DownloadClientUsesCommonPayloadValidator();
+        public ComplianceResult RunCoverArtEmbeddingComplianceAdoption() => Check_SimpleDownloadOrchestratorCoverArtComplianceAdopted();
     }
 
     /// <summary>A plugin-local re-declaration of the lyrics enricher (forbidden — must use common's).</summary>
@@ -808,6 +809,60 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         Assert.Contains(r.Errors, e => e.Contains("PayloadValidator fork"));
     }
 
+    // --- Check_SimpleDownloadOrchestratorCoverArtComplianceAdopted ---
+
+    [Fact]
+    public void CoverArtCompliance_NoSimpleDownloadOrchestratorUsage_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "cover-no-orch-src");
+        WriteSrcFile(src, "DownloadClient.cs",
+            "namespace P;\npublic sealed class DownloadClient { void Start() { } }\n");
+
+        var h = new Harness(_tempRepo)
+        {
+            SourceRootValue = src,
+        };
+
+        Assert.True(h.RunCoverArtEmbeddingComplianceAdoption().Passed);
+    }
+
+    [Fact]
+    public void CoverArtCompliance_UsesSimpleDownloadOrchestratorWithoutComplianceTest_Fails()
+    {
+        var src = Path.Combine(_tempRepo, "cover-orch-no-adoption-src");
+        Directory.CreateDirectory(Path.Combine(_tempRepo, "tests"));
+        WriteSrcFile(src, "DownloadClient.cs",
+            "namespace P;\npublic sealed class DownloadClient\n{\n" +
+            "    object Build() => new SimpleDownloadOrchestrator();\n}\n");
+
+        var h = new Harness(_tempRepo)
+        {
+            SourceRootValue = src,
+        };
+
+        var r = h.RunCoverArtEmbeddingComplianceAdoption();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("CoverArtEmbeddingComplianceTestBase"));
+    }
+
+    [Fact]
+    public void CoverArtCompliance_UsesSimpleDownloadOrchestratorWithComplianceTest_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "cover-orch-adopted-src");
+        WriteSrcFile(src, "QobuzDownloadOrchestrator.cs",
+            "namespace P;\npublic sealed class QobuzDownloadOrchestrator : SimpleDownloadOrchestrator { }\n");
+        WriteSrcFile(Path.Combine(_tempRepo, "tests"), "CoverArtTests.cs",
+            "namespace P.Tests;\npublic sealed class CoverArtTests : CoverArtEmbeddingComplianceTestBase { }\n");
+
+        var h = new Harness(_tempRepo)
+        {
+            SourceRootValue = src,
+        };
+
+        var r = h.RunCoverArtEmbeddingComplianceAdoption();
+        Assert.True(r.Passed, string.Join("; ", r.Errors));
+    }
+
     // --- Check_FileClassNameParity ---
 
     private string WriteSrcFile(string srcDir, string fileName, string content)
@@ -1021,8 +1076,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     {
         var h = new Harness(_tempRepo) { AssemblyValue = null };
         var report = h.RunBehaviorContractChecks();
-        Assert.Equal(15, report.TotalCount);
-        // No assembly + no CLAUDE.md => the other 14 skip (Pass); Check_EnforcesAlbumCompletionPolicy
+        Assert.Equal(16, report.TotalCount);
+        // No assembly + no CLAUDE.md => the other 15 skip (Pass); Check_EnforcesAlbumCompletionPolicy
         // runs unconditionally (it asserts the shared rule directly, no assembly needed) and passes.
         Assert.True(report.AllPassed);
     }
