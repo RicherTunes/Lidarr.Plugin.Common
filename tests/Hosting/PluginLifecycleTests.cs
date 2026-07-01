@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Hosting;
 using Xunit;
 
@@ -122,23 +124,80 @@ namespace Lidarr.Plugin.Common.Tests.Hosting
             Assert.True(fired);
         }
 
-        // ── Late registration after Shutdown ──────────────────────────────────────
+        // ── Re-usable across reloads (Lidarr keeps the host process alive) ─────────
 
         [Fact]
-        public void RegisterAfterShutdown_IsSilentlyIgnored()
+        public void Shutdown_LeavesRegistryReusable_NextLifecycleHookRunsOnNextShutdown()
         {
-            PluginLifecycle.Shutdown(); // shut down first (empty, idempotent)
-
-            bool lateHookFired = false;
-            // Late registration must not throw, and must not fire (Shutdown already ran).
-            var ex = Record.Exception(() =>
-                PluginLifecycle.RegisterShutdown("late", () => lateHookFired = true));
-
-            Assert.Null(ex);
-
-            // Second Shutdown is a no-op; the late hook must never fire.
+            // Lidarr keeps the host process alive across plugin reloads. After the first unload's
+            // Shutdown() the registry must re-arm so a SECOND plugin lifecycle can register and run
+            // teardown hooks. Previously _shuttingDown latched true forever and late hooks were dropped.
+            bool hookAFired = false;
+            PluginLifecycle.RegisterShutdown("hookA", () => hookAFired = true);
             PluginLifecycle.Shutdown();
-            Assert.False(lateHookFired);
+            Assert.True(hookAFired, "First lifecycle's hook must run on the first Shutdown.");
+
+            // Second lifecycle in the same process registers a fresh hook AFTER the first Shutdown.
+            bool hookBFired = false;
+            PluginLifecycle.RegisterShutdown("hookB", () => hookBFired = true);
+            PluginLifecycle.Shutdown();
+            Assert.True(hookBFired, "A hook registered after a completed Shutdown must run on the NEXT Shutdown.");
+        }
+
+        [Fact]
+        public void Shutdown_DoesNotReRunHooksFromAPriorCompletedShutdown()
+        {
+            // After a Shutdown drains and clears its hooks, a subsequent Shutdown with NO new
+            // registrations must be a no-op — it must not re-run the previously-drained hook.
+            int hookACount = 0;
+            PluginLifecycle.RegisterShutdown("hookA", () => hookACount++);
+            PluginLifecycle.Shutdown();
+            Assert.Equal(1, hookACount);
+
+            // No new registration: the next Shutdown drains an empty list.
+            PluginLifecycle.Shutdown();
+            Assert.Equal(1, hookACount);
+
+            // Now register a fresh hook and Shutdown — only the new hook runs (hookA is not re-run).
+            int hookBCount = 0;
+            PluginLifecycle.RegisterShutdown("hookB", () => hookBCount++);
+            PluginLifecycle.Shutdown();
+            Assert.Equal(1, hookACount);
+            Assert.Equal(1, hookBCount);
+        }
+
+        [Fact]
+        public async Task RegisterDuringActiveShutdown_IsRetainedForNextShutdown()
+        {
+            using var hookEntered = new ManualResetEventSlim(false);
+            using var releaseHook = new ManualResetEventSlim(false);
+
+            int slowHookCount = 0;
+            int nextLifecycleHookCount = 0;
+
+            PluginLifecycle.RegisterShutdown("slow", () =>
+            {
+                hookEntered.Set();
+                Assert.True(releaseHook.Wait(TimeSpan.FromSeconds(5)));
+                slowHookCount++;
+            });
+
+            var firstShutdown = Task.Run(() => PluginLifecycle.Shutdown());
+            Assert.True(hookEntered.Wait(TimeSpan.FromSeconds(5)),
+                "The first shutdown hook must be actively draining before registering the next lifecycle hook.");
+
+            PluginLifecycle.RegisterShutdown("next-lifecycle", () => nextLifecycleHookCount++);
+
+            releaseHook.Set();
+            await firstShutdown;
+
+            Assert.Equal(1, slowHookCount);
+            Assert.Equal(0, nextLifecycleHookCount);
+
+            PluginLifecycle.Shutdown();
+
+            Assert.Equal(1, slowHookCount);
+            Assert.Equal(1, nextLifecycleHookCount);
         }
 
         // ── Null-argument guards ──────────────────────────────────────────────────

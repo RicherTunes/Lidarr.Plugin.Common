@@ -245,14 +245,15 @@ pwsh scripts/e2e-runner.ps1 -Plugins 'Qobuzarr' -Gate all ... 2>&1 | Tee-Object 
 The `multi-plugin-docker-smoke-test.ps1` script automatically validates plugin packages before deployment using `Test-PackagingPreflight`. This catches forbidden DLLs that would cause ALC/type-identity conflicts at runtime.
 
 **Forbidden DLLs** (host-provided / cross-boundary risk, MUST NOT ship):
+- `Lidarr.Plugin.Abstractions.dll`
+- `Lidarr.Plugin.Common.dll`
 - `System.Text.Json.dll`
 - `NLog.dll`
-- `Lidarr.*.dll` (host assemblies)
-- `NzbDrone.*.dll` (host assemblies)
+- `Lidarr.*.dll` host assemblies other than the main `Lidarr.Plugin.<Name>.dll`
+- `NzbDrone.*.dll` host assemblies
 
 **Required DLLs**:
 - `Lidarr.Plugin.<Name>.dll` (merged plugin assembly)
-- `Lidarr.Plugin.Abstractions.dll` (host does NOT provide this)
 
 If a package contains forbidden DLLs, the script will fail with a clear error message before deploying:
 ```

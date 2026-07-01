@@ -1,0 +1,231 @@
+name: CI
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 8 * * *'
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  build-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      # actions/checkout@v4 and actions/setup-dotnet@v4 both require cloning from github.com.
+      # The Docker runner (codex-richertunes-docker) resolves external names via
+      # 192.168.65.7:53 which does not forward to the public internet, so those clones
+      # fail when the runner's action cache is cold. Replace with native steps that
+      # only touch the Gitea instance (192.168.2.59:3001) and microsoft.com.
+      - name: Checkout
+        shell: bash
+        run: |
+          set -e
+          # GITHUB_HEAD_REF is set for pull_request events (source branch name).
+          # GITHUB_REF_NAME is set for push and workflow_dispatch events.
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
+          AUTH_HEADER="$(printf 'x-access-token:%s' '${{ secrets.GITHUB_TOKEN }}' | base64 | tr -d '\n')"
+          git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            clone --depth=50 --branch "$BRANCH" \
+            "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
+      - name: Install .NET SDK
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+      # The ManifestCheck/PackagingTarget test fixtures spawn pwsh as a child process;
+      # the bare runner image has none (see the lint job's note for why no container).
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /opt/pwsh
+          tar -xzf /tmp/pwsh.tgz -C /opt/pwsh
+          chmod +x /opt/pwsh/pwsh
+          echo "/opt/pwsh" >> "$GITHUB_PATH"
+      - name: Restore
+        run: dotnet restore
+      # EnableSourceLink=false: Microsoft.SourceLink.GitHub cannot map the Gitea origin
+      # (192.168.2.59), so its target emits "source control information is not available"
+      # which -warnaserror promotes to a build failure. Verified against a gitea-origin
+      # clone: ContinuousIntegrationBuild=false does NOT skip the target; this flag does.
+      # This Gitea job is a correctness gate, not a publish pipeline, so no source link
+      # is needed here. GitHub-side builds keep SourceLink.
+      - name: Build (Release, warnings-as-errors)
+        run: dotnet build src/Lidarr.Plugin.Common.csproj -c Release -warnaserror -p:RunAnalyzersDuringBuild=false -p:EnableSourceLink=false -m:1
+      # act_runner executes ubuntu-latest jobs inside the configured Docker image.
+      # The Docker socket is mounted by the runner, but node:20-bookworm does not
+      # ship the docker CLI that LidarrContainerFixture invokes.
+      - name: Install Docker CLI
+        shell: bash
+        run: |
+          set -e
+          if ! command -v docker >/dev/null 2>&1; then
+            apt-get update
+            apt-get install -y --no-install-recommends docker.io
+            rm -rf /var/lib/apt/lists/*
+          fi
+          docker --version
+          docker ps >/dev/null
+      # -m:1 + UseSharedCompilation=false: the test step rebuilds the dependency graph
+      # (Abstractions -> Common -> Tests). Default MSBuild parallelism plus a compiler
+      # server lingering from the Build step above can both touch
+      # Abstractions/obj/Release/.../Lidarr.Plugin.Abstractions.dll at once, intermittently
+      # failing with CS2012 "being used by another process". Serializing the build and
+      # disabling the shared compiler server removes that race (matches the Build step's -m:1).
+      - name: Test (full unit suite, excl. quarantined)
+        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -p:EnableSourceLink=false -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 10m
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # See build-test job comment: replace actions/checkout@v4 with a native git clone
+      # that only touches the Gitea instance (no external DNS required).
+      - name: Checkout
+        shell: bash
+        run: |
+          set -e
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
+          AUTH_HEADER="$(printf 'x-access-token:%s' '${{ secrets.GITHUB_TOKEN }}' | base64 | tr -d '\n')"
+          git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            clone --depth=50 --branch "$BRANCH" \
+            "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
+      # The bare runner image has no pwsh; fetch the self-contained release tarball directly.
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /opt/pwsh
+          tar -xzf /tmp/pwsh.tgz -C /opt/pwsh
+          chmod +x /opt/pwsh/pwsh
+          echo "/opt/pwsh" >> "$GITHUB_PATH"
+      # && chaining: a failing self-test must fail the step. Sequential lines mask the
+      # first command's exit code (the step reports only the last command's).
+      - name: Date-parsing gate (culture-safety + epoch guard)
+        shell: pwsh
+        run: ./scripts/lint-date-parsing.ps1 -SelfTest && ./scripts/lint-date-parsing.ps1 -Path . -Mode ci
+      - name: Sync-over-async gate
+        shell: pwsh
+        run: ./scripts/lint-sync-over-async.ps1 -SelfTest && ./scripts/lint-sync-over-async.ps1 -Path . -Mode ci
+      - name: Doc script/workflow-reference gate (no docs pointing at deleted scripts or workflows)
+        shell: pwsh
+        run: ./scripts/lint-doc-script-refs.ps1 -SelfTest -CI && ./scripts/lint-doc-script-refs.ps1 -CI
+      - name: Test trait policy gate
+        shell: pwsh
+        run: ./scripts/lint-test-traits.ps1 -Path . -CI
+      - name: Test trait policy self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-TestTraitPolicy.ps1
+      - name: Ecosystem parity harness self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-EcosystemParityLint.ps1
+      - name: Doc workflow-ref gate self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-LintDocWorkflowRefs.ps1
+      - name: Plugin CI truth docs self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-PluginCiTruthDocs.ps1
+      - name: Shared plugin lint runner self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-RunPluginLintGates.ps1
+      - name: Ecosystem CI-contract self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-EcosystemCiContract.ps1
+      - name: Workflow content integrity self-test (F2)
+        shell: pwsh
+        run: ./scripts/tests/Test-WorkflowContentsValid.ps1
+      - name: Test-project dropout guard self-test (F4)
+        shell: pwsh
+        run: ./scripts/tests/Test-VerifyTestProjectsGated.ps1
+  ecosystem-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Live ecosystem contract (main, dispatch, schedule)
+        shell: bash
+        env:
+          GITEA_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          EVENT="${GITHUB_EVENT_NAME:-}"
+          REF_NAME="${GITHUB_REF_NAME:-main}"
+
+          if [ "$EVENT" != "workflow_dispatch" ] && [ "$EVENT" != "schedule" ] && { [ "$EVENT" != "push" ] || [ "$REF_NAME" != "main" ]; }; then
+            echo "Skipping live ecosystem contract for event=$EVENT ref=$REF_NAME."
+            exit 0
+          fi
+
+          if [ -z "${GITEA_TOKEN:-}" ]; then
+            echo "GITEA_TOKEN is unavailable; cannot clone the private ecosystem repos." >&2
+            exit 1
+          fi
+
+          COMMON_BRANCH="$REF_NAME"
+          if [ -z "$COMMON_BRANCH" ]; then
+            COMMON_BRANCH="main"
+          fi
+
+          AUTH_HEADER="$(printf 'x-access-token:%s' "$GITEA_TOKEN" | base64 | tr -d '\n')"
+          git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            clone --depth=50 --branch "$COMMON_BRANCH" \
+            "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
+
+          curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /opt/pwsh
+          tar -xzf /tmp/pwsh.tgz -C /opt/pwsh
+          chmod +x /opt/pwsh/pwsh
+
+          /opt/pwsh/pwsh -NoProfile -Command '
+          $ErrorActionPreference = "Stop"
+          Set-StrictMode -Version Latest
+
+          if ([string]::IsNullOrWhiteSpace($env:GITEA_TOKEN)) {
+              throw "GITEA_TOKEN is unavailable"
+          }
+
+          $auth = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes("x-access-token:$($env:GITEA_TOKEN)"))
+          $manifest = Get-Content -LiteralPath "./scripts/ci/ecosystem-repos.json" -Raw | ConvertFrom-Json
+
+          foreach ($plugin in $manifest.plugins) {
+              $url = "http://192.168.2.59:3001/$($plugin.giteaOwner)/$($plugin.giteaRepo)"
+              & git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $auth" clone --depth=50 --branch main $url "../$($plugin.repoDir)"
+              if ($LASTEXITCODE -ne 0) {
+                  throw "Failed to clone $($plugin.repoDir)"
+              }
+          }
+
+          & ./scripts/ci/verify-ecosystem-ci-contract.ps1 -EcosystemRoot .. -CI
+          if ($LASTEXITCODE -ne 0) {
+              exit $LASTEXITCODE
+          }
+          '
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      # See build-test job comment: replace actions/checkout@v4 with a native git clone
+      # that only touches the Gitea instance (no external DNS required).
+      - name: Checkout
+        shell: bash
+        run: |
+          set -e
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
+          AUTH_HEADER="$(printf 'x-access-token:%s' '${{ secrets.GITHUB_TOKEN }}' | base64 | tr -d '\n')"
+          git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            clone --depth=50 --branch "$BRANCH" \
+            "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
+      - name: gitleaks (secret scan)
+        run: |
+          set -euo pipefail
+          # Integrity-pin the secret scanner itself: a moved tag or a tampered single
+          # asset would otherwise be trusted silently, defeating the scan it performs.
+          GITLEAKS_SHA256=ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz -o /tmp/gl.tgz
+          echo "${GITLEAKS_SHA256}  /tmp/gl.tgz" | sha256sum -c -
+          tar -xzf /tmp/gl.tgz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-banner --redact --exit-code 1

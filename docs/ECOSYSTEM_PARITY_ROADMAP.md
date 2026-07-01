@@ -1,5 +1,7 @@
 # Ecosystem Parity Roadmap
 
+<!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
+
 This document tracks progress toward full structural and behavioral parity across the plugin ecosystem (Tidalarr, Qobuzarr, Brainarr, AppleMusicarr).
 <!-- cspell:ignore worktrees AppleMusiSharp -->
 
@@ -33,7 +35,7 @@ AppleMusicarr is a **metadata-only** plugin (no audio downloads) with different 
 
 Full ecosystem parity is achieved when:
 
-- [x] All four plugins use canonical Abstractions with SHA256 verification
+- [x] All four plugins merge/internalize Abstractions and Common into the plugin DLL
 - [x] All four plugins validate manifest entrypoints via -ResolveEntryPoints
 - [x] All four plugins enforce non-negotiable CI gates via the reusable workflow in `lidarr.plugin.common` (`.github/workflows/packaging-gates.yml`)
 - [x] Abstractions plugin-load gate (`IPlugin`) is enforced in CI for Tidalarr and AppleMusicarr
@@ -49,8 +51,7 @@ Full ecosystem parity is achieved when:
 ## Type-Identity Assembly Policy
 
 ### Required Assemblies (All Plugins)
-Plugins **MUST** ship these assemblies in the plugin payload:
-- `Lidarr.Plugin.Abstractions.dll` - Canonical ABI contract (all plugins must ship identical bytes; enforced by `tools/canonical-abstractions.json`)
+Plugins **MUST NOT** ship `Lidarr.Plugin.Abstractions.dll` or `Lidarr.Plugin.Common.dll` as sidecars. They are merged/internalized into the plugin DLL.
 
 ### Host-Shared Assemblies (Do Not Ship)
 Plugins **MUST NOT** ship these assemblies (host provides them; shipping causes cross-ALC type identity breakage):
@@ -98,7 +99,7 @@ signatures against the host.
 ## Phase 1: Lock Contracts with Tests (High Priority)
 
 ### 1.1 Packaging Content Tests
-- [x] **Common**: `tools/PluginPack.psm1` enforces the DLL cleanup/merge policy (packages must ship the plugin DLL + canonical `Lidarr.Plugin.Abstractions.dll`; non-DLL artifacts like `plugin.json`, `manifest.json`, `.lidarr.plugin` may also be present depending on plugin/host needs)
+- [x] **Common**: `tools/PluginPack.psm1` enforces the DLL cleanup/merge policy (packages must ship the plugin DLL and must not ship `Lidarr.Plugin.{Common,Abstractions}.dll` sidecars; non-DLL artifacts like `plugin.json`, `manifest.json`, `.lidarr.plugin` may also be present depending on plugin/host needs)
 - [x] **All Plugins**: Packaging tests assert the Common policy (and fail on host-shared assemblies in the ZIP)
 
 ### 1.2 Naming Contract Tests

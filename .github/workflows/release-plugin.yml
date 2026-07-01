@@ -51,7 +51,7 @@ on:
         description: 'Lidarr plugins-branch Docker tag used to extract host assemblies'
         required: false
         type: string
-        default: 'pr-plugins-3.1.2.4913'
+        default: 'nightly-3.1.3.4970'
 
       # ── Optional — feature flags ──────────────────────────────────────────
       include_cosign:
@@ -280,15 +280,6 @@ jobs:
         fi
         if [ -f manifest.json ]; then
           sed -i "0,/\"version\": \".*\"/s//\"version\": \"$VERSION_NUM\"/" manifest.json
-        fi
-        # Stamp the repo-root VERSION file when present. Plugins whose assembly version
-        # derives solely from VERSION (e.g. brainarr: GenerateAssemblyInfo=true +
-        # Directory.Build.props reads VERSION, with no <AssemblyVersion> literal for the
-        # csproj sed above to catch) would otherwise build a stale assembly version when
-        # the tag differs from the committed VERSION. Brainarr guards this with a
-        # verify-version pre-flight; this stamp protects the plugins that don't.
-        if [ -f VERSION ]; then
-          printf '%s\n' "$VERSION_NUM" > VERSION
         fi
         find . -name "*.csproj" -exec grep -l "AssemblyVersion\|FileVersion\|AssemblyInformationalVersion" {} \; \
           | while read f; do

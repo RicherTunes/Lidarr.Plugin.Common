@@ -1,0 +1,9 @@
+{
+  "_comment": "Files exempt from lint-date-parsing.ps1. The canonical TimeParsing wrapper legitimately calls the raw FromUnixTime* / TryParse primitives — every other caller must route through it. Add entries sparingly, always with a reason.",
+  "entries": [
+    {
+      "file": "src/Utilities/TimeParsing.cs",
+      "reason": "Canonical fail-closed wrapper around the raw DateTimeOffset.FromUnixTime*/TryParse primitives (the helper all other code must use)."
+    }
+  ]
+}

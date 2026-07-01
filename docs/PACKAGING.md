@@ -15,7 +15,7 @@ $artifact = New-PluginPackage -Csproj plugins/Tidalarr/Tidalarr.csproj -Manifest
 Write-Host "Created $artifact"
 ```
 
-This produces `artifacts/packages/<pluginId>-<version>-<tfm>.zip` containing the publish folder after cleanup. No ILRepack step runs, dependencies remain side-by-side with the plugin, the package ships a **canonical** `Lidarr.Plugin.Abstractions.dll` (identical bytes across plugins), and host-shared assemblies that cause type-identity conflicts are stripped.
+This produces `artifacts/packages/<pluginId>-<version>-<tfm>.zip` containing the build output after cleanup. For repos that import `build/PluginPackaging.targets`, Common and Abstractions are merged/internalized into the main plugin DLL. The package must not ship `Lidarr.Plugin.Common.dll`, `Lidarr.Plugin.Abstractions.dll`, or host-shared assemblies that cause type-identity conflicts; `New-PluginPackage` also rejects a main plugin DLL that still has external `Lidarr.Plugin.Common` or `Lidarr.Plugin.Abstractions` AssemblyRefs.
 
 ## Optional: merge plugin-private assemblies
 
@@ -33,9 +33,9 @@ Defaults baked into `ilrepack.rsp`:
 - Runs in parallel with wildcard support.
 - Uses the publish directory as the `/lib` path.
 - Writes to `<AssemblyName>.merged.dll` and swaps it into place.
-- Excludes `System.*`, `Microsoft.*`, and `Lidarr.Plugin.Abstractions` from merge candidates (Abstractions must remain a separate DLL).
+- Leaves `System.*` and `Microsoft.*` out of plugin-private merge candidates unless explicitly listed.
 
-Tweak the `.rsp` or exclude file if you need extra filters, but keep `Lidarr.Plugin.Abstractions` out of the merged output.
+Tweak the `.rsp` or exclude file if you need extra filters, but do not exclude `Lidarr.Plugin.Abstractions` from internalization.
 
 ## CI flow
 
@@ -51,7 +51,7 @@ flowchart TD
 
 1. `dotnet publish` into a plugin-local folder with `CopyLocalLockFileAssemblies=true`.
 2. Run `ManifestCheck.ps1` to ensure the manifest matches the project file.
-3. Ensure the payload contains the canonical `Lidarr.Plugin.Abstractions.dll` and does **not** ship host-shared assemblies (notably `Microsoft.Extensions.*.Abstractions.dll`).
+3. Ensure the payload does **not** ship `Lidarr.Plugin.{Common,Abstractions}.dll` sidecars or host-shared assemblies (notably `Microsoft.Extensions.*.Abstractions.dll`).
 4. Zip the folder as `<PluginId>-<Version>-<TFM>.zip` and upload as a release asset.
 5. Keep README/CHANGELOG alongside the package for discovery—other docs stay in the repo.
 

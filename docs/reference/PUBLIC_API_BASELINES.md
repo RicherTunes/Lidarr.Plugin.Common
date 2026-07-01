@@ -1,41 +1,40 @@
-# Public API Baselines
+# Public API Baselines (removed)
 
-The repository uses `Microsoft.CodeAnalysis.PublicApiAnalyzers` to ensure any change to the public surface of `Lidarr.Plugin.Abstractions` or `Lidarr.Plugin.Common` is intentional.
+> **Status: removed 2026-06.** The `Microsoft.CodeAnalysis.PublicApiAnalyzers`
+> gate and its checked-in `PublicAPI.*.txt` baselines no longer exist in this
+> repository. This page is kept only so existing links resolve and to record
+> why the gate was retired.
 
-## Files
+## What was removed
 
-- `src/Abstractions/PublicAPI/net8.0/PublicAPI.Shipped.txt`
-- `src/Abstractions/PublicAPI/net8.0/PublicAPI.Unshipped.txt`
-- `src/PublicAPI/net8.0/PublicAPI.Shipped.txt`
-- `src/PublicAPI/net8.0/PublicAPI.Unshipped.txt`
+- The `Microsoft.CodeAnalysis.PublicApiAnalyzers` PackageReference (and the
+  `RS0016`/`RS0017`/`RS0025`/`RS0026` rules it enforced) from
+  `Lidarr.Plugin.Common.csproj` and `Lidarr.Plugin.Abstractions.csproj`.
+- The checked-in baselines `src/PublicAPI/<tfm>/PublicAPI.{Shipped,Unshipped}.txt`
+  and `src/Abstractions/PublicAPI/<tfm>/PublicAPI.{Shipped,Unshipped}.txt`.
+- The `Update-PublicApiBaselines.ps1` helper and the
+  `PreparePublicApiBaselines` / `VerifyPublicApiAdditionalFiles` MSBuild targets.
 
-Baselines are tracked per target framework. `net8.0` is the only supported target — the `net6.0` baselines were removed when .NET 6 support was retired (2026-03-31).
+## Why
 
-`Shipped` files describe the APIs released in the latest NuGet version. `Unshipped` files accumulate new APIs until the next release.
+`Lidarr.Plugin.Common` is ILRepack-merged **with `Internalize=true`** into each
+plugin's shipped DLL, so its public surface is not a consumed package boundary
+the way a normal library's is. Maintaining a per-TFM checked-in API baseline
+added review friction and frequent baseline churn without protecting a real
+consumer contract. The genuinely host-facing surface
+(`Lidarr.Plugin.Abstractions`) is small and changes rarely.
 
-## Workflow
+## What replaces it
 
-1. Modify code.
-2. Run `dotnet build` or `dotnet test`.
-3. If RS0016 / RS0026 warnings appear, update the baseline using the helper script:
-
-   ```powershell
-   ./tools/Update-PublicApiBaselines.ps1 -Project src/Abstractions/Lidarr.Plugin.Abstractions.csproj
-   ./tools/Update-PublicApiBaselines.ps1 -Project src/Lidarr.Plugin.Common.csproj
-   ```
-
-4. Review the diff to ensure only intentional APIs are added or removed.
-5. Keep the `PublicAPI/<tfm>/` files committed to source control so CI and downstream builds stay aligned.
-6. Move entries from `Unshipped` to `Shipped` during release prep.
-
-## Policy
-
-- Adding APIs: update Unshipped and document usage in the relevant reference/how-to guide.
-- Removing/changing APIs: requires a major version bump and an entry in [`migration/BREAKING_CHANGES.md`](../migration/BREAKING_CHANGES.md).
-- CI fails if baselines are out of date or if undocumented breaking changes slip in.
+- **Semantic versioning + `CHANGELOG.md`** record intentional public-surface
+  changes (the [release policy](../dev-guide/RELEASE_POLICY.md) checklist
+  enforces a CHANGELOG entry).
+- **Packaging-closure validation** (`ValidatePackageClosure`, run by the merged
+  build) keeps the shipped plugin DLL free of assembly references the Lidarr
+  host does not provide — the property the merged build actually depends on.
 
 ## Related docs
 
 - [Architecture](../concepts/ARCHITECTURE.md)
 - [Release policy](../dev-guide/RELEASE_POLICY.md)
-- [Docs tooling](../dev-guide/TESTING_DOCS.md)
+- [Migration: breaking changes](../migration/BREAKING_CHANGES.md)

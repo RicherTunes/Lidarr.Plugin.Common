@@ -63,12 +63,6 @@
           "Microsoft.Extensions.DependencyInjection": "8.0.1"
         }
       },
-      "Microsoft.CodeAnalysis.PublicApiAnalyzers": {
-        "type": "Direct",
-        "requested": "[3.3.4, )",
-        "resolved": "3.3.4",
-        "contentHash": "kNLTfXtXUWDHVt5iaPkkiPuyHYlMgLI6SOFT4w88bfeI2vqSeGgHunFkdvlaCM8RDfcY0t2+jnesQtidRJJ/DA=="
-      },
       "Microsoft.DotNet.PackageValidation": {
         "type": "Direct",
         "requested": "[1.0.0-preview.7.21379.12, )",

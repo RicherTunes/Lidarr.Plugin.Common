@@ -1,8 +1,16 @@
+﻿<!-- docval:ignore-workflow-refs -->
 # Reusable Workflow Proposals
 
 **Generated**: 2026-05-23
 **Agent**: ci-cd-agent (Phase 1.5)
-**Status**: PROPOSAL ONLY — do not implement without design review
+**Status**: SUPERSEDED for Gitea-primary plugin CI — historical proposal only
+
+As of 2026-07-01, plugin repos are Gitea-primary and the Common ecosystem
+contract enforces zero plugin-root GitHub Actions workflows. Do not implement
+the plugin-facing `.github/workflows/*` proposals below as active plugin CI.
+The current consolidation point is the shared script runner
+`scripts/ci/run-plugin-lint-gates.ps1`, invoked from each plugin's
+`.gitea/workflows/ci.yml`.
 
 ---
 
@@ -131,10 +139,10 @@ parity-lint:
       shell: pwsh
       run: |
         & "ext/Lidarr.Plugin.Common/scripts/parity-lint.ps1" -Mode ci -RepoPath ...
-    - name: Ecosystem parity lint (version contract)   # Added Phase 1.5
+    - name: Ecosystem parity lint
       shell: pwsh
       run: |
-        pwsh -NoProfile -File ext/Lidarr.Plugin.Common/scripts/ecosystem-parity-lint.ps1 ...
+        pwsh -NoProfile -File ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1 ...
 ```
 
 ### Proposed reusable workflow: `.github/workflows/parity-lint.yml`
@@ -146,16 +154,17 @@ on:
       submodules-token-secret-name:
         type: string
         default: 'SUBMODULES_TOKEN'
-      extra-checks:
+      parity-checks:
         type: string
-        default: 'VersionContract'
+        default: 'all'
 ```
 
 ### Benefits (Candidate 3)
 - Single PR to update both lint scripts for all 5 repos
 - Guarantees all repos run identical lint logic (no subset drift)
-- Phase 1.5's `ecosystem-parity-lint -Check VersionContract` step needs to be
-  maintained in 4 separate files today; one reusable workflow fixes this
+- The shared `run-plugin-lint-gates.ps1` path keeps structural parity,
+  version-contract parity, doc refs, date parsing, sync-over-async, and
+  test-trait policy together so repos cannot accidentally run a subset.
 
 ### Risks / blockers (Candidate 3)
 - The `parity-lint` job has repo-specific submodule token secret names
@@ -170,7 +179,7 @@ on:
 **Pattern identified in**: ci.yml, docker-e2e.yml, nightly.yml, test-and-coverage.yml
 
 ### Current pattern (brainarr ci.yml, `prepare-lidarr` job):
-Large block pulling `ghcr.io/hotio/lidarr:pr-plugins-3.1.2.4913`, extracting DLLs,
+Large block pulling `ghcr.io/hotio/lidarr:nightly-3.1.3.4970`, extracting DLLs,
 uploading as artifact. This pattern is copy-pasted across ~20+ workflow files.
 
 ### Proposed reusable workflow: `.github/workflows/prepare-lidarr-assemblies.yml`
@@ -181,7 +190,7 @@ on:
     inputs:
       lidarr-docker-version:
         type: string
-        default: 'pr-plugins-3.1.2.4913'
+        default: 'nightly-3.1.3.4970'
       output-path:
         type: string
         default: 'ext/Lidarr-docker/_output/net8.0'

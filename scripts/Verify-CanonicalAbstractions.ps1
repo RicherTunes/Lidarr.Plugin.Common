@@ -1,13 +1,14 @@
 <#
 .SYNOPSIS
-    Verifies that multiple plugin packages contain the identical canonical Abstractions.dll.
+    Verifies legacy sidecar Abstractions.dll consistency when sidecars are present.
 
 .DESCRIPTION
-    Extracts Lidarr.Plugin.Abstractions.dll from each plugin ZIP and compares SHA256 hashes.
-    This ensures all plugins use the exact same Abstractions binary, preventing type identity
-    conflicts at runtime.
+    Merged-DLL plugin packages should not ship Lidarr.Plugin.Abstractions.dll as a
+    sidecar; the preferred outcome is that no sidecars are found. For legacy packages
+    that still include the sidecar, this script compares SHA256 hashes so all legacy
+    packages use identical bytes.
 
-    HARD GATE: Fails if any package has a different hash.
+    HARD GATE: Fails if legacy sidecars are present and have different hashes.
 
 .PARAMETER PackagePaths
     Array of paths to plugin ZIP files to verify.
@@ -52,7 +53,7 @@ if ($resolvedPaths.Count -eq 0) {
     exit 1
 }
 
-Write-Host "Verifying canonical Abstractions.dll across $($resolvedPaths.Count) package(s)..." -ForegroundColor Cyan
+Write-Host "Checking Abstractions sidecar policy across $($resolvedPaths.Count) package(s)..." -ForegroundColor Cyan
 Write-Host ""
 
 $results = @()
@@ -67,7 +68,7 @@ foreach ($zipPath in $resolvedPaths) {
 
         $abstractionsDll = Join-Path $tempDir 'Lidarr.Plugin.Abstractions.dll'
         if (-not (Test-Path $abstractionsDll)) {
-            Write-Host "    ⚠️  Abstractions.dll not found in package" -ForegroundColor Yellow
+            Write-Host "    Abstractions.dll sidecar not found; merged-DLL package" -ForegroundColor DarkGray
             $results += [pscustomobject]@{
                 Package = $zipName
                 Hash = $null
@@ -98,14 +99,14 @@ $validResults = @($results | Where-Object { $_.Status -eq "OK" })
 $missingResults = @($results | Where-Object { $_.Status -eq "MISSING" })
 
 if ($missingResults.Count -gt 0) {
-    Write-Host "⚠️  Packages missing Abstractions.dll:" -ForegroundColor Yellow
-    $missingResults | ForEach-Object { Write-Host "    - $($_.Package)" -ForegroundColor Yellow }
+    Write-Host "Packages without Abstractions sidecars (merged-DLL compliant):" -ForegroundColor DarkGray
+    $missingResults | ForEach-Object { Write-Host "    - $($_.Package)" -ForegroundColor DarkGray }
     Write-Host ""
 }
 
 if ($validResults.Count -eq 0) {
-    Write-Error "No packages with valid Abstractions.dll found."
-    exit 1
+    Write-Host "No Abstractions sidecars found; merged-DLL packages are compliant." -ForegroundColor Green
+    return $results
 }
 
 $uniqueHashes = @($validResults | Select-Object -ExpandProperty Hash -Unique)
@@ -131,7 +132,7 @@ if ($ExpectedSha256) {
     Write-Host "╔═══════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
     Write-Host "║              CANONICAL ABSTRACTIONS VERIFICATION PASSED                   ║" -ForegroundColor Green
     Write-Host "╠═══════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Green
-    Write-Host "║  All $($validResults.Count) package(s) contain canonical Abstractions.dll              ║" -ForegroundColor Green
+    Write-Host "║  All $($validResults.Count) legacy sidecar package(s) contain canonical Abstractions.dll║" -ForegroundColor Green
     Write-Host "║  SHA256: $expected" -ForegroundColor Green
     Write-Host "╚═══════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
 }
@@ -146,7 +147,7 @@ elseif ($uniqueHashes.Count -gt 1) {
         Write-Host "║      -> $packages" -ForegroundColor Red
     }
     Write-Host "╠═══════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Red
-    Write-Host "║  HARD GATE: All plugins MUST use identical Abstractions.dll               ║" -ForegroundColor Red
+    Write-Host "║  HARD GATE: Legacy sidecar packages MUST use identical Abstractions.dll    ║" -ForegroundColor Red
     Write-Host "╚═══════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Red
     exit 1
 }
@@ -154,7 +155,7 @@ else {
     Write-Host "╔═══════════════════════════════════════════════════════════════════════════╗" -ForegroundColor Green
     Write-Host "║              ABSTRACTIONS CONSISTENCY VERIFIED                            ║" -ForegroundColor Green
     Write-Host "╠═══════════════════════════════════════════════════════════════════════════╣" -ForegroundColor Green
-    Write-Host "║  All $($validResults.Count) package(s) have identical Abstractions.dll                 ║" -ForegroundColor Green
+    Write-Host "║  All $($validResults.Count) legacy sidecar package(s) have identical Abstractions.dll  ║" -ForegroundColor Green
     Write-Host "║  SHA256: $($uniqueHashes[0])" -ForegroundColor Green
     Write-Host "╚═══════════════════════════════════════════════════════════════════════════╝" -ForegroundColor Green
 }

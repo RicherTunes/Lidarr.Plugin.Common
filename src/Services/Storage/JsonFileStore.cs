@@ -54,6 +54,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
         private readonly int? _maxEntries;
         private readonly Func<TKey, TKey>? _keyNormalizer;
         private readonly IEqualityComparer<TKey>? _keyComparer;
+        private readonly TimeProvider _clock;
         private readonly ILogger? _logger;
         private readonly SemaphoreSlim _mutex = new(1, 1);
 
@@ -83,6 +84,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
             _maxEntries = options.MaxEntries;
             _keyNormalizer = options.KeyNormalizer;
             _keyComparer = options.KeyComparer;
+            _clock = options.Clock ?? TimeProvider.System;
             _options = serializerOptions ?? new JsonSerializerOptions(JsonSerializerDefaults.Web)
             {
                 WriteIndented = true,
@@ -170,7 +172,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
             try
             {
                 var normalized = NormalizeKey(key);
-                _entries[normalized] = new Entry { Value = value, Timestamp = DateTimeOffset.UtcNow };
+                _entries[normalized] = new Entry { Value = value, Timestamp = _clock.GetUtcNow() };
                 EvictExpiredAndCap();
                 Save();
             }
@@ -267,7 +269,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
 
         private bool IsExpired(Entry entry)
         {
-            return _ttl.HasValue && DateTimeOffset.UtcNow - entry.Timestamp > _ttl.Value;
+            return _ttl.HasValue && _clock.GetUtcNow() - entry.Timestamp > _ttl.Value;
         }
 
         private Dictionary<TKey, Entry> LoadInitial()
@@ -433,5 +435,12 @@ namespace Lidarr.Plugin.Common.Services.Storage
         /// insensitive lookups. Null uses the default comparer.
         /// </summary>
         public IEqualityComparer<TKey>? KeyComparer { get; set; }
+
+        /// <summary>
+        /// Gets or sets the time source used for TTL timestamps and expiry checks. Defaults to
+        /// <c>TimeProvider.System</c>. Tests can supply a fake provider to exercise TTL
+        /// expiry deterministically without wall-clock <c>Task.Delay</c>.
+        /// </summary>
+        public TimeProvider? Clock { get; set; }
     }
 }

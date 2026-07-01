@@ -22,7 +22,7 @@ on:
         description: Lidarr Docker tag (plugins branch; net8 only)
         type: string
         required: false
-        default: pr-plugins-3.1.2.4913
+        default: nightly-3.1.3.4970
   push:
     branches: [main]
     paths:
@@ -126,7 +126,7 @@ jobs:
           # PluginsDir = the workspace root where the 4 sibling repos were cloned
           pwsh lidarr.plugin.common/scripts/multi-plugin-coexistence-proof.ps1 `
             -PluginsDir . `
-            -LidarrTag ${{ inputs.lidarr_tag || 'pr-plugins-3.1.2.4913' }}
+            -LidarrTag ${{ inputs.lidarr_tag || 'nightly-3.1.3.4970' }}
 
       - name: Container logs on failure
         if: failure()

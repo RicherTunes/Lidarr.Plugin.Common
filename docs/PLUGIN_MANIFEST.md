@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 # Plugin Manifest
 
 Each plugin ships a `plugin.json` that describes identity, compatibility expectations, and diagnostics. Treat it as a contract between the host and the plugin loader.

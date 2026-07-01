@@ -7,7 +7,7 @@ Every tagged release ships with this checklist so plugin authors (and downstream
 - Confirm the tag follows the semantic `vMAJOR.MINOR.PATCH` pattern. Release automation only publishes when the tag is present and CI is green.
 
 ## Before you upgrade
-1. Scan the **API changes** section in the release note. When we add or remove public APIs, the PublicAPI baselines are updated so `dotnet format` and `apicompat` stay quiet.
+1. Scan the **API changes** section in the release note. When we add or remove public APIs, the change is recorded in `CHANGELOG.md`; breaking changes surface as compile errors when your plugin re-pins the Common submodule.
 2. Check the **Dependencies** section for new package requirements or minimum host versions.
 3. Review the **Migration** bullets for any configuration or behaviour adjustments.
 
@@ -24,7 +24,7 @@ When cutting a release, append the following to the changelog and include it in 
 - Highlight the headline change in one sentence.
 
 ### API changes
-- List added/removed/renamed types or methods (link to PublicAPI diff when possible).
+- List added/removed/renamed types or methods (link to the relevant CHANGELOG.md entry when possible).
 
 ### Dependencies
 - Note new package references, minimum Lidarr host version, or .NET TFMs.
