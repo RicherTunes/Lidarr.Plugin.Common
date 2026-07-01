@@ -10,35 +10,20 @@ namespace Lidarr.Plugin.Common.Tests.PackageValidation;
 /// Shared validation utilities for plugin package correctness.
 /// Use this in plugin test suites to ensure packaging meets Lidarr plugin requirements.
 ///
-/// ECOSYSTEM PACKAGING POLICY (empirically validated with working packages):
-/// - SHIP (type-identity assemblies - must be present):
-///   - FluentValidation.dll (required for DownloadClient.Test() signature match)
-///   - Microsoft.Extensions.DependencyInjection.Abstractions.dll
-///   - Microsoft.Extensions.Logging.Abstractions.dll
-///   - Lidarr.Plugin.Abstractions.dll (recommended; some plugins work without it)
-/// - MERGE into plugin DLL (internalized via ILRepack):
-///   - Lidarr.Plugin.Common.dll, Polly*, TagLibSharp*, MS.Ext.DI (impl), etc.
-/// - DO NOT SHIP (host assemblies - causes conflicts):
-///   - Lidarr.Core.dll, Lidarr.Common.dll, Lidarr.Host.dll, Lidarr.Http.dll, etc.
-///   - NzbDrone.*.dll
-///
-/// NOTE: This policy is based on empirical testing - Tidalarr and Qobuzarr both
-/// ship FluentValidation + MS.Extensions.*Abstractions and work correctly.
+/// ECOSYSTEM PACKAGING POLICY:
+/// - SHIP: the plugin DLL and manifest assets only.
+/// - MERGE into plugin DLL (internalized via ILRepack): Common, Abstractions, TagLibSharp,
+///   FluentValidation, Microsoft.Extensions.* implementation/abstraction sidecars, Polly, etc.
+/// - DO NOT SHIP: host assemblies or merged/internalized dependency sidecars listed in
+///   scripts/parity-spec.json versionContract.forbiddenPackageContents.
 /// </summary>
 public static class PluginPackageValidator
 {
     /// <summary>
-    /// Type-identity assemblies that should be present in plugin packages.
-    /// These ensure method signatures match between plugin and host.
-    /// Missing these is a warning (not error) since some plugins work without all of them.
+    /// Type-identity sidecars expected in plugin packages.
+    /// Current ALC/ILRepack policy internalizes these, so this remains empty by design.
     /// </summary>
-    public static readonly string[] TypeIdentityAssemblies =
-    [
-        "FluentValidation.dll",
-        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
-        "Microsoft.Extensions.Logging.Abstractions.dll",
-        "Lidarr.Plugin.Abstractions.dll"
-    ];
+    public static readonly string[] TypeIdentityAssemblies = [];
 
     /// <summary>
     /// Assemblies required to be present in plugin packages.
@@ -48,17 +33,28 @@ public static class PluginPackageValidator
     public static readonly string[] RequiredPluginAssemblies = [];
 
     /// <summary>
-    /// Assemblies that must NOT be in the package (host provides them).
-    /// Shipping these causes type-identity conflicts at runtime.
+    /// Assemblies that must NOT be in the package.
+    /// Shipping these causes type-identity conflicts at runtime or bypasses ILRepack internalization.
     /// Finding these is an ERROR.
     /// </summary>
     public static readonly string[] DisallowedHostAssemblies =
     [
+        "FluentValidation.dll",
+        "NLog.dll",
+        "System.Text.Json.dll",
+        "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+        "Microsoft.Extensions.Logging.Abstractions.dll",
+        "Microsoft.Extensions.Logging.dll",
+        "Microsoft.Extensions.Configuration.dll",
+        "Microsoft.Extensions.Caching.Memory.dll",
+        "Microsoft.Extensions.Http.dll",
+        "Lidarr.Plugin.Abstractions.dll",
+        "Lidarr.Plugin.Common.dll",
         "Lidarr.Core.dll",
         "Lidarr.Common.dll",
-        "Lidarr.Host.dll",
-        "Lidarr.Api.V1.dll",
         "Lidarr.Http.dll",
+        "Lidarr.Api.V1.dll",
+        "Lidarr.Host.dll",
         "Lidarr.SignalR.dll",
         "NzbDrone.Core.dll",
         "NzbDrone.Common.dll",
@@ -135,13 +131,13 @@ public static class PluginPackageValidator
             var foundDisallowed = dlls.Intersect(DisallowedHostAssemblies, StringComparer.OrdinalIgnoreCase).ToList();
             foreach (var dll in foundDisallowed)
             {
-                result.AddError($"Host assembly '{dll}' should not be in package (host provides it)");
+                result.AddError($"Disallowed assembly '{dll}' should not be in package (merge/internalize it or let the host provide it)");
             }
 
             // Check for bloat - should only have a few DLLs
             if (dlls.Count > 10)
             {
-                result.AddWarning($"Package contains {dlls.Count} DLLs - may have excessive dependencies. Expected ~5-6 for a well-merged plugin.");
+                result.AddWarning($"Package contains {dlls.Count} DLLs - may have excessive dependencies. Expected the plugin DLL plus manifest assets for a well-merged plugin.");
             }
 
             result.AssemblyCount = dlls.Count;
