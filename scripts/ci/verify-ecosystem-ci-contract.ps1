@@ -22,7 +22,8 @@
 
       3. Shared lint runner wired
          The plugin's .gitea/workflows/ci.yml invokes the Common-owned
-         run-plugin-lint-gates.ps1 runner.
+         run-plugin-lint-gates.ps1 runner without skip switches or direct
+         fallback calls to runner-owned lint scripts.
 
       4. Verify job wired
          The plugin's .gitea/workflows/ci.yml invokes scripts/verify-local.ps1
@@ -112,6 +113,9 @@ function Get-WorkflowNonCommentContent {
         -not $_.TrimStart().StartsWith('#')
     }) -join "`n")
 }
+
+$SharedPluginLintRunnerOwnedScriptPattern = '(ecosystem-parity-lint|lint-date-parsing|lint-sync-over-async|lint-test-traits|lint-doc-script-refs|lint-gitea-secret-scan)\.ps1'
+$SharedPluginLintRunnerSkipSwitchPattern = '-(SkipDateParsing|SkipSyncOverAsync|SkipTestTraits|SkipEcosystemParity|SkipVersionContract|SkipPluginContractTests|SkipDocRefs|SkipGiteaSecretScan)\b'
 
 function Test-CommonPinIntegrity {
     <#
@@ -245,11 +249,17 @@ function Test-SharedPluginLintRunnerWired {
         }
     }
 
-    $directSubsetPattern = '(ecosystem-parity-lint|lint-date-parsing|lint-sync-over-async|lint-test-traits|lint-doc-script-refs)\.ps1'
-    if ($content -match $directSubsetPattern) {
+    if ($content -match $SharedPluginLintRunnerOwnedScriptPattern) {
         return [PSCustomObject]@{
             Ok     = $false
             Reason = '.gitea/workflows/ci.yml invokes run-plugin-lint-gates.ps1 but also calls direct lint scripts; fallback/subset wiring can silently bypass new Common gates'
+        }
+    }
+
+    if ($content -match $SharedPluginLintRunnerSkipSwitchPattern) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".gitea/workflows/ci.yml invokes run-plugin-lint-gates.ps1 with skip switch '$($Matches[0])'; plugin CI must run the full shared lint gate set"
         }
     }
 
