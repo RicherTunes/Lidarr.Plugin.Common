@@ -32,7 +32,12 @@
          Count of .github/workflows/*.yml (+.yaml) files matches the manifest's
          mirrorWorkflows field.
 
-      6. Workflow content integrity
+      6. GitHub mirror CI parity
+         If mirrorWorkflows > 0, .github/workflows/ci.yml must invoke the same
+         shared lint runner, submodule pin guard, secret scan, and verify-local
+         merge gate used by Gitea CI.
+
+      7. Workflow content integrity
          Workflow files under .github/workflows and .gitea/workflows are readable,
          non-empty, not obvious per-character corruption, and contain minimal
          workflow structure (`on:` + `jobs:`).
@@ -298,6 +303,85 @@ function Test-WorkflowMirrorCount {
     }
 
     return [PSCustomObject]@{ Ok = $true; ActualCount = $count; Reason = $null }
+}
+
+function Test-GitHubCiMirrorContract {
+    <#
+    .SYNOPSIS
+        Assert declared GitHub mirror CI runs the same core gates as Gitea CI.
+
+    .DESCRIPTION
+        Repos with mirrorWorkflows=0 are intentionally Gitea-primary and pass
+        vacuously; Test-WorkflowMirrorCount separately fails if undeclared
+        .github/workflows files appear.
+
+        Repos with mirrorWorkflows>0 must have exactly one GitHub CI entrypoint
+        at .github/workflows/ci.yml (or ci.yaml), and that entrypoint must invoke:
+          - run-plugin-lint-gates.ps1
+          - repin-common-submodule.sh --verify-only
+          - gitleaks detect
+          - scripts/verify-local.ps1
+
+        This does not require byte-identical Gitea/GitHub workflow YAML; it
+        requires the behavioral contract to converge on the same Common-owned
+        scripts and merge gates.
+
+    .OUTPUTS
+        PSCustomObject { Ok, Reason }
+    #>
+    param(
+        [string]$PluginDir,
+        [int]$Expected
+    )
+
+    if ($Expected -le 0) {
+        return [PSCustomObject]@{ Ok = $true; Reason = $null }
+    }
+
+    $wfDir = Join-Path $PluginDir '.github/workflows'
+    $ciCandidates = @(@(
+        Join-Path $wfDir 'ci.yml'
+        Join-Path $wfDir 'ci.yaml'
+    ) | Where-Object { Test-Path -LiteralPath $_ })
+
+    if ($ciCandidates.Count -eq 0) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = 'mirrorWorkflows > 0 but .github/workflows/ci.yml (or ci.yaml) is missing'
+        }
+    }
+
+    if ($ciCandidates.Count -gt 1) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = 'both .github/workflows/ci.yml and ci.yaml exist; keep a single GitHub CI entrypoint'
+        }
+    }
+
+    $content = [System.IO.File]::ReadAllText($ciCandidates[0])
+    $missing = [System.Collections.Generic.List[string]]::new()
+
+    if ($content -notmatch 'run-plugin-lint-gates\.ps1') {
+        $missing.Add('run-plugin-lint-gates.ps1')
+    }
+    if ($content -notmatch 'repin-common-submodule\.sh\s+--verify-only') {
+        $missing.Add('repin-common-submodule.sh --verify-only')
+    }
+    if ($content -notmatch 'gitleaks\s+detect') {
+        $missing.Add('gitleaks detect')
+    }
+    if ($content -notmatch 'scripts[/\\]verify-local\.ps1') {
+        $missing.Add('scripts/verify-local.ps1')
+    }
+
+    if ($missing.Count -gt 0) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml is missing required gate(s): $($missing -join ', ')"
+        }
+    }
+
+    return [PSCustomObject]@{ Ok = $true; Reason = $null }
 }
 
 function Test-CommonPinAgreement {
@@ -571,6 +655,8 @@ foreach ($plugin in $plugins) {
                 WfOk         = $false
                 WfCount      = 0
                 WfReason     = $missingReason
+                GhMirrorOk   = $false
+                GhMirrorReason = $missingReason
                 WfvOk        = $false
                 WfvBadFiles  = @()
                 WfvReason    = $missingReason
@@ -584,9 +670,10 @@ foreach ($plugin in $plugins) {
     $lintResult = Test-SharedPluginLintRunnerWired -PluginDir $pluginDir -PluginName $repoDir
     $verifyResult = Test-PluginVerifyJobWired     -PluginDir $pluginDir -PluginName $repoDir
     $wfResult   = Test-WorkflowMirrorCount        -PluginDir $pluginDir -Expected $expected
+    $ghMirrorResult = Test-GitHubCiMirrorContract -PluginDir $pluginDir -Expected $expected
     $wfvResult  = Test-WorkflowFilesValid         -PluginDir $pluginDir -PluginName $repoDir
 
-    $allOk = $pinResult.Ok -and $docResult.Ok -and $lintResult.Ok -and $verifyResult.Ok -and $wfResult.Ok -and $wfvResult.Ok
+    $allOk = $pinResult.Ok -and $docResult.Ok -and $lintResult.Ok -and $verifyResult.Ok -and $wfResult.Ok -and $ghMirrorResult.Ok -and $wfvResult.Ok
     if (-not $allOk) { $script:anyFail = $true }
     if ($pinResult.Ok -and $pinResult.Sha) { $passingShas.Add($pinResult.Sha) | Out-Null }
 
@@ -600,6 +687,7 @@ foreach ($plugin in $plugins) {
         if (-not $lintResult.Ok) { Write-Host "  lint: $($lintResult.Reason)"  -ForegroundColor DarkGray }
         if (-not $verifyResult.Ok) { Write-Host "  verify: $($verifyResult.Reason)" -ForegroundColor DarkGray }
         if (-not $wfResult.Ok)   { Write-Host "  wf:  $($wfResult.Reason)"     -ForegroundColor DarkGray }
+        if (-not $ghMirrorResult.Ok) { Write-Host "  gh:  $($ghMirrorResult.Reason)" -ForegroundColor DarkGray }
         if (-not $wfvResult.Ok)  { Write-Host "  wfv: $($wfvResult.Reason)"    -ForegroundColor DarkGray }
     }
     else {
@@ -645,6 +733,14 @@ foreach ($plugin in $plugins) {
             Write-Host "         wf  : FAIL — $($wfResult.Reason)" -ForegroundColor Red
         }
 
+        # Verbose: GitHub mirror CI parity
+        if ($ghMirrorResult.Ok) {
+            Write-Host "         gh  : OK (mirror CI contract)" -ForegroundColor DarkGreen
+        }
+        else {
+            Write-Host "         gh  : FAIL — $($ghMirrorResult.Reason)" -ForegroundColor Red
+        }
+
         # Verbose: workflow content validity (F2)
         if ($wfvResult.Ok) {
             Write-Host "         wfv : OK (all workflow files valid)" -ForegroundColor DarkGreen
@@ -669,6 +765,8 @@ foreach ($plugin in $plugins) {
         WfOk       = $wfResult.Ok
         WfCount    = $wfResult.ActualCount
         WfReason   = $wfResult.Reason
+        GhMirrorOk = $ghMirrorResult.Ok
+        GhMirrorReason = $ghMirrorResult.Reason
         WfvOk      = $wfvResult.Ok
         WfvBadFiles= $wfvResult.BadFiles
         WfvReason  = $wfvResult.Reason
