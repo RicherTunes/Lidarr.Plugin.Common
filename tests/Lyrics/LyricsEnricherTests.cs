@@ -197,5 +197,27 @@ namespace Lidarr.Plugin.Common.Tests.Lyrics
             using var file = TagLib.File.Create(audio);
             Assert.Contains("hello world lyrics", file.Tag.Lyrics ?? string.Empty);
         }
+
+        [Fact]
+        public async Task Embedded_lyrics_strip_lrc_timestamps_but_sidecar_keeps_them()
+        {
+            using var tmp = new TempDir();
+            var audio = tmp.RealFlac();
+            var native = new StubNativeSource("[00:01.23]Line one\n[00:04.56]Line two");
+            var handler = new StubHandler(() => LrclibHit("x"));
+            using var sut = Enricher(native, handler);
+
+            await sut.TryEnrichAsync(audio, "Artist", "Track", "Album", 100, allowLrclibFallback: true);
+
+            // Sidecar keeps the synced timing tags for capable players ...
+            var lrc = await File.ReadAllTextAsync(TempDir.Lrc(audio));
+            Assert.Contains("[00:01.23]", lrc);
+            // ... but the embedded (unsynced) tag is clean so players don't render the timing codes.
+            using var file = TagLib.File.Create(audio);
+            var embedded = file.Tag.Lyrics ?? string.Empty;
+            Assert.DoesNotContain("[00:01.23]", embedded);
+            Assert.Contains("Line one", embedded);
+            Assert.Contains("Line two", embedded);
+        }
     }
 }

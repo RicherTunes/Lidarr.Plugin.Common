@@ -640,20 +640,34 @@ namespace Lidarr.Plugin.Common.Services.Download
                     validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
 
                 response.EnsureSuccessStatusCode();
+
+                // Only embed genuine images: a broken CDN can return an HTML soft-404 as 200; writing
+                // that into a PICTURE frame corrupts the file. Reject non-image Content-Type up front.
+                var mimeType = response.Content.Headers.ContentType?.MediaType;
+                if (string.IsNullOrEmpty(mimeType) || !mimeType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+                {
+                    _logger.LogDebug("[{ServiceName}] Skipping cover art for track {TrackId}: non-image Content-Type '{MimeType}'",
+                        ServiceName, track.Id, mimeType ?? "(none)");
+                    return;
+                }
+
+                // Bound the read. Content-Length can be absent (chunked transfer encoding), so a
+                // header-only check is bypassable and ReadAsByteArray would buffer the entire body
+                // into memory first. Stream-read and abort the instant the cap would be exceeded so an
+                // oversized/bogus cover URL cannot OOM the host under concurrent downloads.
                 if (response.Content.Headers.ContentLength is > MaxArtworkBytes)
                 {
-                    _logger.LogDebug("[{ServiceName}] Skipping cover art for track {TrackId}: response is too large ({Bytes} bytes",
+                    _logger.LogDebug("[{ServiceName}] Skipping cover art for track {TrackId}: response too large ({Bytes} bytes)",
                         ServiceName, track.Id, response.Content.Headers.ContentLength.Value);
                     return;
                 }
 
-                var bytes = await HttpContentLightUp.ReadAsByteArrayAsync(response.Content, cancellationToken).ConfigureAwait(false);
-                if (bytes.Length == 0 || bytes.LongLength > MaxArtworkBytes)
+                var bytes = await ReadBoundedAsync(response.Content, MaxArtworkBytes, cancellationToken).ConfigureAwait(false);
+                if (bytes == null || bytes.Length == 0)
                 {
                     return;
                 }
 
-                var mimeType = response.Content.Headers.ContentType?.MediaType ?? "image/jpeg";
                 await _artworkEmbedder.EmbedAsync(filePath, bytes, mimeType, cancellationToken).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -664,6 +678,28 @@ namespace Lidarr.Plugin.Common.Services.Download
             {
                 _logger.LogDebug(ex, "[{ServiceName}] Cover-art embedding failed for track {TrackId} (non-fatal)", ServiceName, track.Id);
             }
+        }
+
+        /// <summary>
+        /// Reads an HTTP body into memory but aborts (returns null) the moment it would exceed
+        /// <paramref name="limit"/> bytes — so a body with no Content-Length (chunked TE) can't be
+        /// buffered unbounded. Used for cover-art fetches where the payload must stay small.
+        /// </summary>
+        private static async Task<byte[]?> ReadBoundedAsync(HttpContent content, long limit, CancellationToken cancellationToken)
+        {
+            using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var buffer = new MemoryStream();
+            var chunk = new byte[65536];
+            int read;
+            while ((read = await stream.ReadAsync(chunk, 0, chunk.Length, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                if (buffer.Length + read > limit)
+                {
+                    return null; // over cap — stop before buffering the rest
+                }
+                buffer.Write(chunk, 0, read);
+            }
+            return buffer.ToArray();
         }
 
         private static void TryDelete(string path)
