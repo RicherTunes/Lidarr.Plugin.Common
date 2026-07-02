@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -24,6 +24,9 @@ namespace Lidarr.Plugin.Common.Services.Download
     /// </summary>
     public class SimpleDownloadOrchestrator : IStreamingDownloadOrchestrator
     {
+        private const long MaxArtworkBytes = 10L * 1024 * 1024;
+        private static readonly TimeSpan DefaultArtworkReadTimeout = ResiliencePolicy.Metadata.PerRequestTimeout ?? TimeSpan.FromSeconds(10);
+
         private readonly HttpClient _httpClient;
         private readonly Func<string, Task<StreamingAlbum>> _getAlbumAsync;
         private readonly Func<string, Task<StreamingTrack>> _getTrackAsync;
@@ -32,10 +35,12 @@ namespace Lidarr.Plugin.Common.Services.Download
         private readonly IAudioStreamProvider? _streamProvider;
         private readonly IAudioPostProcessor? _postProcessor;
         private readonly IAudioMetadataApplier? _metadataApplier;
+        private readonly IAudioArtworkEmbedder _artworkEmbedder;
         private readonly ILogger _logger;
         private readonly int _maxConcurrentTracks;
         private readonly IDownloadTelemetrySink? _telemetrySink;
         private readonly RemoteMediaUriPolicy _mediaUriPolicy;
+        private readonly TimeSpan _artworkReadTimeout;
 
         public string ServiceName { get; }
 
@@ -52,20 +57,23 @@ namespace Lidarr.Plugin.Common.Services.Download
             ILogger? logger = null,
             IAudioPostProcessor? postProcessor = null,
             RemoteMediaUriPolicy? mediaUriPolicy = null)
+            : this(
+                serviceName,
+                httpClient,
+                getAlbumAsync,
+                getTrackAsync,
+                getAlbumTrackIdsAsync,
+                getStreamAsync,
+                maxConcurrentTracks,
+                streamProvider,
+                metadataApplier,
+                logger,
+                postProcessor,
+                telemetrySink: null,
+                mediaUriPolicy,
+                artworkEmbedder: null,
+                artworkReadTimeout: null)
         {
-            ServiceName = serviceName;
-            _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
-            _getAlbumAsync = getAlbumAsync ?? throw new ArgumentNullException(nameof(getAlbumAsync));
-            _getTrackAsync = getTrackAsync ?? throw new ArgumentNullException(nameof(getTrackAsync));
-            _getAlbumTrackIdsAsync = getAlbumTrackIdsAsync ?? throw new ArgumentNullException(nameof(getAlbumTrackIdsAsync));
-            _getStreamAsync = getStreamAsync ?? throw new ArgumentNullException(nameof(getStreamAsync));
-            _maxConcurrentTracks = Math.Max(1, maxConcurrentTracks);
-            _streamProvider = streamProvider;
-            _postProcessor = postProcessor;
-            _metadataApplier = metadataApplier ?? new TagLibAudioMetadataApplier();
-            _logger = logger ?? NullLogger.Instance;
-            _telemetrySink = null;
-            _mediaUriPolicy = mediaUriPolicy ?? RemoteMediaUriPolicy.Strict;
         }
 
         public SimpleDownloadOrchestrator(
@@ -82,9 +90,61 @@ namespace Lidarr.Plugin.Common.Services.Download
             IAudioPostProcessor? postProcessor,
             IDownloadTelemetrySink? telemetrySink,
             RemoteMediaUriPolicy? mediaUriPolicy = null)
-            : this(serviceName, httpClient, getAlbumAsync, getTrackAsync, getAlbumTrackIdsAsync, getStreamAsync, maxConcurrentTracks, streamProvider, metadataApplier, logger, postProcessor, mediaUriPolicy)
+            : this(
+                serviceName,
+                httpClient,
+                getAlbumAsync,
+                getTrackAsync,
+                getAlbumTrackIdsAsync,
+                getStreamAsync,
+                maxConcurrentTracks,
+                streamProvider,
+                metadataApplier,
+                logger,
+                postProcessor,
+                telemetrySink,
+                mediaUriPolicy,
+                artworkEmbedder: null,
+                artworkReadTimeout: null)
         {
+        }
+
+        internal SimpleDownloadOrchestrator(
+            string serviceName,
+            HttpClient httpClient,
+            Func<string, Task<StreamingAlbum>> getAlbumAsync,
+            Func<string, Task<StreamingTrack>> getTrackAsync,
+            Func<string, Task<IReadOnlyList<string>>> getAlbumTrackIdsAsync,
+            Func<string, StreamingQuality?, Task<(string Url, string Extension)>> getStreamAsync,
+            int maxConcurrentTracks,
+            IAudioStreamProvider? streamProvider,
+            IAudioMetadataApplier? metadataApplier,
+            ILogger? logger,
+            IAudioPostProcessor? postProcessor,
+            IDownloadTelemetrySink? telemetrySink,
+            RemoteMediaUriPolicy? mediaUriPolicy,
+            IAudioArtworkEmbedder? artworkEmbedder,
+            TimeSpan? artworkReadTimeout = null)
+        {
+            ServiceName = serviceName;
+            _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
+            _getAlbumAsync = getAlbumAsync ?? throw new ArgumentNullException(nameof(getAlbumAsync));
+            _getTrackAsync = getTrackAsync ?? throw new ArgumentNullException(nameof(getTrackAsync));
+            _getAlbumTrackIdsAsync = getAlbumTrackIdsAsync ?? throw new ArgumentNullException(nameof(getAlbumTrackIdsAsync));
+            _getStreamAsync = getStreamAsync ?? throw new ArgumentNullException(nameof(getStreamAsync));
+            _maxConcurrentTracks = Math.Max(1, maxConcurrentTracks);
+            _streamProvider = streamProvider;
+            _postProcessor = postProcessor;
+            _metadataApplier = metadataApplier ?? new TagLibAudioMetadataApplier();
+            _logger = logger ?? NullLogger.Instance;
+            _artworkEmbedder = artworkEmbedder ?? new TagLibAudioArtworkEmbedder(_logger);
             _telemetrySink = telemetrySink;
+            _mediaUriPolicy = mediaUriPolicy ?? RemoteMediaUriPolicy.Strict;
+            _artworkReadTimeout = artworkReadTimeout.GetValueOrDefault(DefaultArtworkReadTimeout);
+            if (_artworkReadTimeout <= TimeSpan.Zero)
+            {
+                throw new ArgumentOutOfRangeException(nameof(artworkReadTimeout), _artworkReadTimeout, "Artwork read timeout must be positive.");
+            }
         }
 
         public Task<DownloadResult> DownloadAlbumAsync(string albumId, string outputDirectory, StreamingQuality quality = null, IProgress<DownloadProgress> progress = null)
@@ -114,6 +174,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                 result.FilePaths = files;
                 result.TotalSize = 0;
                 result.Duration = DateTime.UtcNow - started;
+                LogUnsuccessfulAlbumDownload(albumId, successfulTracks: 0, totalTracks: total, fileCount: files.Count, result.ErrorMessage);
                 return result;
             }
 
@@ -223,10 +284,24 @@ namespace Lidarr.Plugin.Common.Services.Download
                 result.Success = true;
             }
 
+            if (!result.Success)
+            {
+                LogUnsuccessfulAlbumDownload(albumId, successfulTracks, result.TrackResults.Count, files.Count, result.ErrorMessage);
+            }
+
             result.FilePaths = files;
             result.TotalSize = files.Where(File.Exists).Select(f => new FileInfo(f).Length).Sum();
             result.Duration = DateTime.UtcNow - started;
             return result;
+        }
+
+        private void LogUnsuccessfulAlbumDownload(string albumId, int successfulTracks, int totalTracks, int fileCount, string? reason)
+        {
+            // Surface the failure in the logs so an unsuccessful album is never silent (the caller
+            // only sees ErrorMessage on the returned result, which several download clients don't log).
+            _logger.LogWarning(
+                "[{ServiceName}] Album '{AlbumId}' did not complete successfully ({SuccessfulTracks}/{TotalTracks} tracks, {FileCount} files): {Reason}",
+                ServiceName, albumId, successfulTracks, totalTracks, fileCount, reason ?? "unknown reason");
         }
 
         public Task<TrackDownloadResult> DownloadTrackAsync(string trackId, string outputPath, StreamingQuality? quality = null)
@@ -295,12 +370,11 @@ namespace Lidarr.Plugin.Common.Services.Download
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
-                        // Wave 17M fix: when the caller's cancellation token requested cancellation,
-                        // the IAudioStreamProvider path must REthrow OCE so it reaches the outer
-                        // catch (line ~300) — matches DownloadViaUrlAsync's contract. Previously the
-                        // generic Exception catch below silently converted OCE into
-                        // TrackDownloadResult{Success=false}, breaking the documented "OCE on
-                        // cancel" contract and rendering the outer telemetry catch unreachable.
+                        // Genuine caller cancellation: let the outer catch emit cancellation telemetry
+                        // and rethrow. A NON-caller OCE (a per-request provider/HttpClient timeout →
+                        // TaskCanceledException with the caller token NOT cancelled) falls through to the
+                        // generic catch below and becomes a single-track failure — it must NOT escape and
+                        // cancel the whole album.
                         throw;
                     }
                     catch (Exception ex)
@@ -383,73 +457,111 @@ namespace Lidarr.Plugin.Common.Services.Download
 
                 var tempPath = outputPath + ".partial";
                 var resumePath = tempPath + ".resume.json";
+                var maxAttempts = Math.Max(1, MaxDownloadAttempts);
 
-                long existingBytes = 0;
-                string? etag = null;
-                DateTimeOffset? lastModified = null;
-                if (File.Exists(tempPath))
+                // Retry-with-resume. A mid-body truncation (HttpIOException "response ended prematurely"
+                // / ResponseEnded, or a transport reset) throws DURING the body copy below — AFTER
+                // ExecuteWithResilienceAsync has already returned the response headers — so the resilience
+                // layer (which only retries the header fetch) never sees it. Without a retry, one truncated
+                // track fails the whole album and the host re-grabs into an infinite loop (observed live on
+                // Qobuz). Each attempt re-reads the preserved ".partial" and issues a Range request, so the
+                // download resumes from where it broke instead of restarting. The atomic move + validation
+                // run only after a complete copy (outside the loop).
+                for (var attempt = 1; ; attempt++)
                 {
-                    try { existingBytes = new FileInfo(tempPath).Length; } catch { existingBytes = 0; }
                     try
                     {
-                        if (File.Exists(resumePath))
+                        long existingBytes = 0;
+                        string? etag = null;
+                        DateTimeOffset? lastModified = null;
+                        if (File.Exists(tempPath))
                         {
-                            var json = File.ReadAllText(resumePath);
-                            var state = System.Text.Json.JsonSerializer.Deserialize<ResumeState>(json);
-                            if (state != null)
+                            try { existingBytes = new FileInfo(tempPath).Length; } catch { existingBytes = 0; }
+                            try
                             {
-                                etag = state.ETag;
-                                if (state.LastModifiedUtc.HasValue) lastModified = new DateTimeOffset(state.LastModifiedUtc.Value, TimeSpan.Zero);
+                                if (File.Exists(resumePath))
+                                {
+                                    var json = File.ReadAllText(resumePath);
+                                    var state = System.Text.Json.JsonSerializer.Deserialize<ResumeState>(json);
+                                    if (state != null)
+                                    {
+                                        etag = state.ETag;
+                                        if (state.LastModifiedUtc.HasValue) lastModified = new DateTimeOffset(state.LastModifiedUtc.Value, TimeSpan.Zero);
+                                    }
+                                }
                             }
+                            catch { }
+                        }
+
+                        using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                        if (existingBytes > 0)
+                        {
+                            req.Headers.Range = new RangeHeaderValue(existingBytes, null);
+                            if (!string.IsNullOrEmpty(etag)) req.Headers.TryAddWithoutValidation("If-Range", etag);
+                            else if (lastModified.HasValue) req.Headers.TryAddWithoutValidation("If-Range", lastModified.Value.ToString("R"));
+                        }
+
+                        // LOOP-004: keep the SSRF policy in force across the resilience layer's redirect-following — the
+                        // initial URL is validated above, but a 3xx could otherwise bounce to an internal host.
+                        using var resp = await _httpClient.ExecuteWithResilienceAsync(
+                            req,
+                            ResiliencePolicy.Streaming,
+                            cancellationToken,
+                            validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
+                        resp.EnsureSuccessStatusCode();
+
+                        var totalHeader = resp.Content.Headers.ContentLength;
+                        var isPartial = resp.StatusCode == System.Net.HttpStatusCode.PartialContent;
+                        try
+                        {
+                            if (resp.Headers.ETag != null) etag = resp.Headers.ETag.Tag;
+                            if (resp.Content?.Headers?.LastModified.HasValue == true) lastModified = resp.Content.Headers.LastModified;
+                        }
+                        catch { }
+
+                        var totalExpected = isPartial && totalHeader.HasValue ? existingBytes + totalHeader.Value : (totalHeader ?? 0);
+                        if (existingBytes > 0 && !isPartial)
+                        {
+                            try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
+                            try { if (File.Exists(resumePath)) File.Delete(resumePath); } catch { }
+                            existingBytes = 0;
+                        }
+
+                        var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
+                        using (var content = await HttpContentLightUp.ReadAsStreamAsync(resp.Content, cancellationToken).ConfigureAwait(false))
+                        using (var fs = new FileStream(tempPath, fileMode, FileAccess.Write, FileShare.None, 8192, useAsync: true))
+                        {
+                            long startBytes = existingBytes;
+                            await CopyWithProgressAsync(content, fs, totalExpected, cancellationToken, (fraction, bps, eta) =>
+                            {
+                                ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
+                                TryWriteResumeCheckpoint(resumePath, (long)(startBytes + fraction * Math.Max(1, totalExpected)), totalExpected, etag, lastModified?.UtcDateTime);
+                            }).ConfigureAwait(false);
+                        }
+
+                        break;
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        // Only a genuine caller cancellation propagates. A non-caller OCE (per-request
+                        // HttpClient timeout → TaskCanceledException, token not cancelled) falls through to
+                        // the transient classifier below and is RETRIED (then fails the track) — it must not
+                        // be mistaken for user cancellation.
+                        throw;
+                    }
+                    catch (Exception ex) when (attempt < maxAttempts && IsTransientDownloadException(ex, cancellationToken))
+                    {
+                        // Telemetry: count the resume-retry (non-429 so it doesn't inflate the 429 counter).
+                        DownloadTelemetryContext.RecordRetry(System.Net.HttpStatusCode.ServiceUnavailable);
+                        _logger.LogWarning(ex,
+                            "[{ServiceName}] Transient download failure for track {TrackId} (attempt {Attempt}/{MaxAttempts}); resuming from partial after backoff",
+                            ServiceName, trackId, attempt, maxAttempts);
+                        var delay = GetRetryDelay(attempt);
+                        if (delay > TimeSpan.Zero)
+                        {
+                            await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
                         }
                     }
-                    catch { }
-                }
-
-                using var req = new HttpRequestMessage(HttpMethod.Get, url);
-                if (existingBytes > 0)
-                {
-                    req.Headers.Range = new RangeHeaderValue(existingBytes, null);
-                    if (!string.IsNullOrEmpty(etag)) req.Headers.TryAddWithoutValidation("If-Range", etag);
-                    else if (lastModified.HasValue) req.Headers.TryAddWithoutValidation("If-Range", lastModified.Value.ToString("R"));
-                }
-
-                // LOOP-004: keep the SSRF policy in force across the resilience layer's redirect-following — the
-                // initial URL is validated above, but a 3xx could otherwise bounce to an internal host.
-                using var resp = await _httpClient.ExecuteWithResilienceAsync(
-                    req,
-                    ResiliencePolicy.Streaming,
-                    cancellationToken,
-                    validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
-                resp.EnsureSuccessStatusCode();
-
-                var totalHeader = resp.Content.Headers.ContentLength;
-                var isPartial = resp.StatusCode == System.Net.HttpStatusCode.PartialContent;
-                try
-                {
-                    if (resp.Headers.ETag != null) etag = resp.Headers.ETag.Tag;
-                    if (resp.Content?.Headers?.LastModified.HasValue == true) lastModified = resp.Content.Headers.LastModified;
-                }
-                catch { }
-
-                var totalExpected = isPartial && totalHeader.HasValue ? existingBytes + totalHeader.Value : (totalHeader ?? 0);
-                if (existingBytes > 0 && !isPartial)
-                {
-                    try { if (File.Exists(tempPath)) File.Delete(tempPath); } catch { }
-                    try { if (File.Exists(resumePath)) File.Delete(resumePath); } catch { }
-                    existingBytes = 0;
-                }
-
-                var fileMode = existingBytes > 0 && isPartial ? FileMode.Append : FileMode.Create;
-                using (var content = await HttpContentLightUp.ReadAsStreamAsync(resp.Content, cancellationToken).ConfigureAwait(false))
-                using (var fs = new FileStream(tempPath, fileMode, FileAccess.Write, FileShare.None, 8192, useAsync: true))
-                {
-                    long startBytes = existingBytes;
-                    await CopyWithProgressAsync(content, fs, totalExpected, cancellationToken, (fraction, bps, eta) =>
-                    {
-                        ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
-                        TryWriteResumeCheckpoint(resumePath, (long)(startBytes + fraction * Math.Max(1, totalExpected)), totalExpected, etag, lastModified?.UtcDateTime);
-                    }).ConfigureAwait(false);
                 }
 
                 try { FileSystemUtilities.MoveFile(tempPath, outputPath, true); }
@@ -472,14 +584,46 @@ namespace Lidarr.Plugin.Common.Services.Download
 
                 return new TrackDownloadResult { TrackId = trackId, Success = true, FilePath = outputPath, FileSize = fileSize, ActualQuality = quality };
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
                 throw;
             }
             catch (Exception ex)
             {
+                // Includes a non-caller OCE that exhausted the resume-retries (e.g. repeated request
+                // timeouts) — recorded as a track failure rather than escaping as a whole-album cancel.
                 return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
             }
+        }
+
+        /// <summary>Max attempts for a single track's URL download before giving up. Overridable for tests.</summary>
+        internal virtual int MaxDownloadAttempts => 4;
+
+        /// <summary>Backoff between resume-retries (1s, 2s, 4s, capped at 8s). Overridable to zero in tests.</summary>
+        internal virtual TimeSpan GetRetryDelay(int attempt) =>
+            TimeSpan.FromSeconds(Math.Min(8, Math.Pow(2, Math.Max(0, attempt - 1))));
+
+        /// <summary>
+        /// Classifies an exception thrown during a URL download attempt as transient (worth a resume-retry).
+        /// A requested cancellation is never transient. Covers mid-body truncations (HttpIOException
+        /// "ResponseEnded"), connection resets, DNS blips, and per-request timeouts.
+        /// </summary>
+        private static bool IsTransientDownloadException(Exception ex, CancellationToken cancellationToken)
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                return false;
+            }
+
+            return ex switch
+            {
+                HttpIOException => true,                       // e.g. ResponseEnded (truncated body)
+                HttpRequestException => true,                  // connection reset / DNS / 5xx surfaced by EnsureSuccess
+                System.Net.Sockets.SocketException => true,    // transport-level reset
+                TaskCanceledException => true,                 // per-request HttpClient timeout (token not cancelled — checked above)
+                IOException => true,                           // stream copy interrupted
+                _ => false,
+            };
         }
 
         private async Task<string> PostProcessAsync(string filePath, StreamingTrack track, StreamingQuality? quality, CancellationToken cancellationToken)
@@ -504,8 +648,14 @@ namespace Lidarr.Plugin.Common.Services.Download
 
                 return processedPath;
             }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
             catch (Exception ex)
             {
+                // Post-processing is best-effort: a failure (incl. a non-caller timeout OCE) must not
+                // discard the already-downloaded file — fall back to the unprocessed original.
                 _logger.LogWarning(ex, "Post-processing failed for track {TrackId}: {FilePath}", track.Id, filePath);
                 return filePath;
             }
@@ -513,22 +663,175 @@ namespace Lidarr.Plugin.Common.Services.Download
 
         private async Task ApplyMetadataAsync(string filePath, StreamingTrack? track, CancellationToken cancellationToken)
         {
-            if (_metadataApplier == null || track == null || string.IsNullOrWhiteSpace(filePath))
+            if (track == null || string.IsNullOrWhiteSpace(filePath))
             {
+                return;
+            }
+
+            if (_metadataApplier != null)
+            {
+                try
+                {
+                    await _metadataApplier.ApplyAsync(filePath, track, cancellationToken).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    // Metadata application failure shouldn't fail the download.
+                    // The file is already successfully downloaded - log once per track.
+                    _logger.LogWarning(ex, "[{ServiceName}] Failed to apply metadata to '{FileName}' (track {TrackId})",
+                        ServiceName, Path.GetFileName(filePath), track.Id);
+                }
+            }
+
+            await ApplyArtworkAsync(filePath, track, cancellationToken).ConfigureAwait(false);
+        }
+
+        private async Task ApplyArtworkAsync(string filePath, StreamingTrack track, CancellationToken cancellationToken)
+        {
+            var coverUrl = track.Album?.GetBestCoverArtUrl();
+            if (string.IsNullOrWhiteSpace(coverUrl))
+            {
+                return;
+            }
+
+            var uriGuard = RemoteMediaUriGuard.Validate(coverUrl, _mediaUriPolicy);
+            if (!uriGuard.IsAllowed)
+            {
+                _logger.LogDebug("[{ServiceName}] Skipping unsafe cover-art URL for track {TrackId}: {Reason}", ServiceName, track.Id, uriGuard.Reason);
                 return;
             }
 
             try
             {
-                await _metadataApplier.ApplyAsync(filePath, track, cancellationToken).ConfigureAwait(false);
+                using var request = new HttpRequestMessage(HttpMethod.Get, coverUrl);
+                using var response = await _httpClient.ExecuteWithResilienceAsync(
+                    request,
+                    ResiliencePolicy.Metadata,
+                    cancellationToken,
+                    validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
+
+                response.EnsureSuccessStatusCode();
+
+                // Only embed genuine images: a broken CDN can return an HTML soft-404 as 200; writing
+                // that into a PICTURE frame corrupts the file. Reject non-image Content-Type up front.
+                var mimeType = response.Content.Headers.ContentType?.MediaType;
+                if (!IsSupportedArtworkMimeType(mimeType))
+                {
+                    _logger.LogDebug("[{ServiceName}] Skipping cover art for track {TrackId}: unsupported Content-Type '{MimeType}'",
+                        ServiceName, track.Id, mimeType ?? "(none)");
+                    return;
+                }
+
+                // Bound the read. Content-Length can be absent (chunked transfer encoding), so a
+                // header-only check is bypassable and ReadAsByteArray would buffer the entire body
+                // into memory first. Stream-read and abort the instant the cap would be exceeded so an
+                // oversized/bogus cover URL cannot OOM the host under concurrent downloads.
+                if (response.Content.Headers.ContentLength is > MaxArtworkBytes)
+                {
+                    _logger.LogDebug("[{ServiceName}] Skipping cover art for track {TrackId}: response too large ({Bytes} bytes)",
+                        ServiceName, track.Id, response.Content.Headers.ContentLength.Value);
+                    return;
+                }
+
+                using var readCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                readCts.CancelAfter(_artworkReadTimeout);
+
+                var bytes = await ReadBoundedAsync(response.Content, MaxArtworkBytes, readCts.Token).ConfigureAwait(false);
+                if (bytes == null || bytes.Length == 0)
+                {
+                    return;
+                }
+
+                if (!ArtworkBytesMatchMimeType(bytes, mimeType))
+                {
+                    _logger.LogDebug("[{ServiceName}] Skipping cover art for track {TrackId}: bytes do not match Content-Type '{MimeType}'",
+                        ServiceName, track.Id, mimeType);
+                    return;
+                }
+
+                await _artworkEmbedder.EmbedAsync(filePath, bytes, mimeType, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
             }
             catch (Exception ex)
             {
-                // Metadata application failure shouldn't fail the download
-                // The file is already successfully downloaded - log once per track
-                _logger.LogWarning(ex, "[{ServiceName}] Failed to apply metadata to '{FileName}' (track {TrackId})",
-                    ServiceName, Path.GetFileName(filePath), track.Id);
+                _logger.LogDebug(ex, "[{ServiceName}] Cover-art embedding failed for track {TrackId} (non-fatal)", ServiceName, track.Id);
             }
+        }
+
+        private static bool IsSupportedArtworkMimeType(string? mimeType)
+        {
+            return mimeType != null && (
+                mimeType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ||
+                mimeType.Equals("image/jpg", StringComparison.OrdinalIgnoreCase) ||
+                mimeType.Equals("image/png", StringComparison.OrdinalIgnoreCase) ||
+                mimeType.Equals("image/webp", StringComparison.OrdinalIgnoreCase) ||
+                mimeType.Equals("image/gif", StringComparison.OrdinalIgnoreCase));
+        }
+
+        private static bool ArtworkBytesMatchMimeType(byte[] bytes, string mimeType)
+        {
+            if (bytes.Length == 0)
+            {
+                return false;
+            }
+
+            if (mimeType.Equals("image/jpeg", StringComparison.OrdinalIgnoreCase) ||
+                mimeType.Equals("image/jpg", StringComparison.OrdinalIgnoreCase))
+            {
+                return bytes.Length >= 3 && bytes[0] == 0xFF && bytes[1] == 0xD8 && bytes[2] == 0xFF;
+            }
+
+            if (mimeType.Equals("image/png", StringComparison.OrdinalIgnoreCase))
+            {
+                return bytes.Length >= 8 &&
+                    bytes[0] == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4E && bytes[3] == 0x47 &&
+                    bytes[4] == 0x0D && bytes[5] == 0x0A && bytes[6] == 0x1A && bytes[7] == 0x0A;
+            }
+
+            if (mimeType.Equals("image/webp", StringComparison.OrdinalIgnoreCase))
+            {
+                return bytes.Length >= 12 &&
+                    bytes[0] == 0x52 && bytes[1] == 0x49 && bytes[2] == 0x46 && bytes[3] == 0x46 &&
+                    bytes[8] == 0x57 && bytes[9] == 0x45 && bytes[10] == 0x42 && bytes[11] == 0x50;
+            }
+
+            if (mimeType.Equals("image/gif", StringComparison.OrdinalIgnoreCase))
+            {
+                return bytes.Length >= 6 &&
+                    bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46 &&
+                    bytes[3] == 0x38 && (bytes[4] == 0x37 || bytes[4] == 0x39) && bytes[5] == 0x61;
+            }
+
+            return false;
+        }
+
+        /// <summary>
+        /// Reads an HTTP body into memory but aborts (returns null) the moment it would exceed
+        /// <paramref name="limit"/> bytes — so a body with no Content-Length (chunked TE) can't be
+        /// buffered unbounded. Used for cover-art fetches where the payload must stay small.
+        /// </summary>
+        private static async Task<byte[]?> ReadBoundedAsync(HttpContent content, long limit, CancellationToken cancellationToken)
+        {
+            using var stream = await content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            using var buffer = new MemoryStream();
+            var chunk = new byte[65536];
+            int read;
+            while ((read = await stream.ReadAsync(chunk, 0, chunk.Length, cancellationToken).ConfigureAwait(false)) > 0)
+            {
+                if (buffer.Length + read > limit)
+                {
+                    return null; // over cap — stop before buffering the rest
+                }
+                buffer.Write(chunk, 0, read);
+            }
+            return buffer.ToArray();
         }
 
         private static void TryDelete(string path)

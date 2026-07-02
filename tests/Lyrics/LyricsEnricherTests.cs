@@ -29,6 +29,23 @@ namespace Lidarr.Plugin.Common.Tests.Lyrics
             }
         }
 
+        private sealed class ThrowingNativeSource : INativeLyricsSource
+        {
+            private readonly Func<CancellationToken, Exception> _exceptionFactory;
+            public int Calls { get; private set; }
+
+            public ThrowingNativeSource(Func<CancellationToken, Exception> exceptionFactory)
+            {
+                _exceptionFactory = exceptionFactory;
+            }
+
+            public Task<string?> TryGetSyncedLyricsAsync(string artistName, string trackName, string albumName, int durationSeconds, CancellationToken ct = default)
+            {
+                Calls++;
+                throw _exceptionFactory(ct);
+            }
+        }
+
         private sealed class StubHandler : HttpMessageHandler
         {
             private readonly Func<HttpResponseMessage> _factory;
@@ -54,6 +71,23 @@ namespace Lidarr.Plugin.Common.Tests.Lyrics
             public string Dir { get; }
             public TempDir() { Dir = Path.Combine(Path.GetTempPath(), "lyr-" + Guid.NewGuid().ToString("N")); Directory.CreateDirectory(Dir); }
             public string Audio() { var p = Path.Combine(Dir, "song.flac"); File.WriteAllText(p, "x"); return p; }
+            // A structurally-valid minimal FLAC so TagLib can open + tag it (embed test).
+            public string RealFlac()
+            {
+                var p = Path.Combine(Dir, "real.flac");
+                File.WriteAllBytes(p, new byte[]
+                {
+                    0x66, 0x4C, 0x61, 0x43,
+                    0x80, 0x00, 0x00, 0x22,
+                    0x00, 0x10, 0x00, 0x10,
+                    0x00, 0x00, 0x01, 0x00, 0x00, 0x01,
+                    0x0A, 0xC4, 0x40, 0xF0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                    0xFF, 0xF8, 0x09, 0x18, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+                });
+                return p;
+            }
             public static string Lrc(string audio) => Path.ChangeExtension(audio, ".lrc");
             public void Dispose() { try { Directory.Delete(Dir, true); } catch { } }
         }
@@ -161,6 +195,83 @@ namespace Lidarr.Plugin.Common.Tests.Lyrics
 
             Assert.Null(ex);
             Assert.False(File.Exists(TempDir.Lrc(audio)));
+        }
+
+        [Fact]
+        public async Task Native_source_noncaller_timeout_is_best_effort()
+        {
+            using var tmp = new TempDir();
+            var audio = tmp.Audio();
+            var native = new ThrowingNativeSource(_ => new TaskCanceledException("native lyrics timeout"));
+            var handler = new StubHandler(() => LrclibHit("[00:00.00]fallback"));
+            using var sut = Enricher(native, handler);
+
+            var ex = await Record.ExceptionAsync(() =>
+                sut.TryEnrichAsync(audio, "Artist", "Track", "Album", 100, allowLrclibFallback: true, CancellationToken.None));
+
+            Assert.Null(ex);
+            Assert.Equal(1, native.Calls);
+            Assert.Equal(0, handler.Calls);
+            Assert.False(File.Exists(TempDir.Lrc(audio)));
+        }
+
+        [Fact]
+        public async Task Native_source_caller_cancellation_is_rethrown()
+        {
+            using var tmp = new TempDir();
+            var audio = tmp.Audio();
+            var native = new ThrowingNativeSource(ct => new OperationCanceledException(ct));
+            var handler = new StubHandler(() => LrclibHit("[00:00.00]fallback"));
+            using var sut = Enricher(native, handler);
+            using var cts = new CancellationTokenSource();
+            cts.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+                sut.TryEnrichAsync(audio, "Artist", "Track", "Album", 100, allowLrclibFallback: true, cts.Token));
+
+            Assert.Equal(1, native.Calls);
+            Assert.Equal(0, handler.Calls);
+            Assert.False(File.Exists(TempDir.Lrc(audio)));
+        }
+
+        [Fact]
+        public async Task Embeds_lyrics_into_audio_tag_so_they_survive_import()
+        {
+            using var tmp = new TempDir();
+            var audio = tmp.RealFlac();
+            var native = new StubNativeSource("[00:00.00]hello world lyrics");
+            var handler = new StubHandler(() => LrclibHit("x"));
+            using var sut = Enricher(native, handler);
+
+            await sut.TryEnrichAsync(audio, "Artist", "Track", "Album", 100, allowLrclibFallback: true);
+
+            // Sidecar is still written for synced-lyrics-capable players ...
+            Assert.True(File.Exists(TempDir.Lrc(audio)));
+            // ... AND embedded into the tag so it survives Lidarr import (importExtraFiles=false drops sidecars).
+            using var file = TagLib.File.Create(audio);
+            Assert.Contains("hello world lyrics", file.Tag.Lyrics ?? string.Empty);
+        }
+
+        [Fact]
+        public async Task Embedded_lyrics_strip_lrc_timestamps_but_sidecar_keeps_them()
+        {
+            using var tmp = new TempDir();
+            var audio = tmp.RealFlac();
+            var native = new StubNativeSource("[00:01.23]Line one\n[00:04.56]Line two");
+            var handler = new StubHandler(() => LrclibHit("x"));
+            using var sut = Enricher(native, handler);
+
+            await sut.TryEnrichAsync(audio, "Artist", "Track", "Album", 100, allowLrclibFallback: true);
+
+            // Sidecar keeps the synced timing tags for capable players ...
+            var lrc = await File.ReadAllTextAsync(TempDir.Lrc(audio));
+            Assert.Contains("[00:01.23]", lrc);
+            // ... but the embedded (unsynced) tag is clean so players don't render the timing codes.
+            using var file = TagLib.File.Create(audio);
+            var embedded = file.Tag.Lyrics ?? string.Empty;
+            Assert.DoesNotContain("[00:01.23]", embedded);
+            Assert.Contains("Line one", embedded);
+            Assert.Contains("Line two", embedded);
         }
     }
 }

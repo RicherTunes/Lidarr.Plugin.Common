@@ -1,0 +1,282 @@
+name: Bump Common Submodule (Reusable)
+# Reusable workflow — call from each plugin's bump-common.yml with `uses:` syntax.
+# Baseline: brainarr's bump-common.yml (concurrency guard, build verify, repin,
+# PR creation). Generalises per-plugin paths via inputs.
+#
+# TODO: replace `@main` pin with merge-commit SHA after PR #514 merges.
+
+on:
+  workflow_call:
+    inputs:
+      # ── Required ─────────────────────────────────────────────────────────
+      plugin_csproj:
+        description: |
+          Repo-relative path to the plugin csproj used for build verification
+          (e.g. "Brainarr.Plugin/Brainarr.Plugin.csproj").
+        required: true
+        type: string
+
+      # ── Optional — build knobs ────────────────────────────────────────────
+      solution_file:
+        description: |
+          Repo-relative path to the .sln file to restore before the build verify.
+          When empty, restore is run against the csproj directly.
+        required: false
+        type: string
+        default: ''
+      dotnet_version:
+        description: '.NET SDK version constraint'
+        required: false
+        type: string
+        default: '8.0.x'
+      lidarr_path_msbuild_prop:
+        description: 'MSBuild property name for the Lidarr assemblies path'
+        required: false
+        type: string
+        default: 'LidarrPath'
+      lidarr_docker_version:
+        description: 'Lidarr plugins-branch Docker tag for assembly extraction'
+        required: false
+        type: string
+        default: 'nightly-3.1.3.4970'
+
+      # ── Optional — extraction ─────────────────────────────────────────────
+      include_build_verify:
+        description: 'Run a dotnet build against the csproj after bumping submodule'
+        required: false
+        type: boolean
+        default: true
+      extract_script_path:
+        description: |
+          Repo-relative path to the Lidarr assembly extraction script.
+          When set, the script is called before the build verify step.
+          Default: "scripts/extract-lidarr-assemblies.sh"
+        required: false
+        type: string
+        default: 'scripts/extract-lidarr-assemblies.sh'
+
+      # ── Optional — PR / branch knobs ─────────────────────────────────────
+      pr_branch_prefix:
+        description: 'Prefix for the auto-created bump branch'
+        required: false
+        type: string
+        default: 'chore/bump-common-'
+      base_branch:
+        description: 'Base branch for the pull request'
+        required: false
+        type: string
+        default: 'main'
+      cron_schedule:
+        description: 'Cron expression shown in comments only (scheduling is caller-side)'
+        required: false
+        type: string
+        default: ''
+
+      # ── Optional — runner ─────────────────────────────────────────────────
+      runner:
+        description: 'GitHub Actions runner label (use ubuntu-latest for all new callers)'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+    secrets:
+      SUBMODULES_TOKEN:
+        description: 'PAT for private submodule checkout'
+        required: false
+
+concurrency:
+  group: bump-common-${{ github.repository }}
+  cancel-in-progress: true
+
+jobs:
+  bump:
+    name: Bump Common to Latest
+    runs-on: ${{ inputs.runner }}
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+    # ── Checkout ──────────────────────────────────────────────────────────────
+    - name: Checkout
+      uses: actions/checkout@v6  # TODO: pin to SHA after PR #514
+      with:
+        fetch-depth: 0
+        submodules: false
+
+    - name: Init Common submodule
+      uses: ./.github/actions/init-common-submodule
+      with:
+        token: ${{ secrets.SUBMODULES_TOKEN }}
+
+    # ── Bump submodule ────────────────────────────────────────────────────────
+    - name: Update Common submodule to latest main
+      id: update
+      run: |
+        set -euo pipefail
+
+        cd ext/Lidarr.Plugin.Common
+        git fetch origin main
+        NEW_SHA=$(git rev-parse origin/main)
+        CURRENT_SHA=$(git rev-parse HEAD)
+
+        if [ "$NEW_SHA" = "$CURRENT_SHA" ]; then
+          echo "No changes in submodule; skipping."
+          echo "changed=false" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        echo "Updating from $CURRENT_SHA to $NEW_SHA"
+        git checkout "$NEW_SHA"
+        cd ../..
+
+        # Canonical repin script: reads SHA from submodule HEAD, writes
+        # ext-common-sha.txt (with newline).
+        # Note: --update-pins omitted because GITHUB_TOKEN cannot push
+        # .github/workflows/ changes. Stale pins are advisory (--verify-only warns).
+        COMMON_PATH="ext/Lidarr.Plugin.Common"
+        bash "$COMMON_PATH/scripts/repin-common-submodule.sh" \
+          --sha-from-submodule --stage --path "$COMMON_PATH"
+
+        # Verify immediately — fail the workflow if anything drifted.
+        bash "$COMMON_PATH/scripts/repin-common-submodule.sh" --verify-only --path "$COMMON_PATH"
+
+        echo "changed=true" >> "$GITHUB_OUTPUT"
+        echo "new_sha=$NEW_SHA" >> "$GITHUB_OUTPUT"
+        echo "short_sha=${NEW_SHA:0:7}" >> "$GITHUB_OUTPUT"
+
+    # ── Toolchain (only when something changed) ───────────────────────────────
+    - name: Setup .NET
+      if: steps.update.outputs.changed == 'true' && inputs.include_build_verify == true
+      uses: actions/setup-dotnet@v5  # TODO: pin to SHA after PR #514
+      with:
+        dotnet-version: ${{ inputs.dotnet_version }}
+
+    # ── Optional assembly extraction ──────────────────────────────────────────
+    - name: Extract Lidarr assemblies
+      if: steps.update.outputs.changed == 'true' && inputs.include_build_verify == true
+      shell: bash
+      env:
+        LIDARR_DOCKER_VERSION: ${{ inputs.lidarr_docker_version }}
+      run: |
+        set -euo pipefail
+        SCRIPT="${{ inputs.extract_script_path }}"
+        if [ -f "$SCRIPT" ]; then
+          timeout 5m bash "$SCRIPT" --mode minimal \
+            --output-dir ext/Lidarr-docker/_output/net8.0 || true
+        else
+          echo "Extraction script not found at '$SCRIPT'; skipping (build may still work without it)."
+        fi
+
+    # ── Build verify ──────────────────────────────────────────────────────────
+    - name: Verify build with new submodule
+      if: steps.update.outputs.changed == 'true' && inputs.include_build_verify == true
+      id: verify
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Verifying build with updated Common submodule..."
+
+        SOLUTION="${{ inputs.solution_file }}"
+        CSPROJ_PATH="${{ inputs.plugin_csproj }}"
+        LIDARR_PATH="${GITHUB_WORKSPACE}/ext/Lidarr-docker/_output/net8.0"
+
+        # Restore
+        if [ -n "$SOLUTION" ] && [ -f "$SOLUTION" ]; then
+          dotnet restore "$SOLUTION" \
+            || { echo "build_ok=false" >> "$GITHUB_OUTPUT"; exit 0; }
+        else
+          dotnet restore "$CSPROJ_PATH" \
+            || { echo "build_ok=false" >> "$GITHUB_OUTPUT"; exit 0; }
+        fi
+
+        # Build
+        if [ -d "$LIDARR_PATH" ]; then
+          dotnet build "$CSPROJ_PATH" -c Release \
+            -p:${{ inputs.lidarr_path_msbuild_prop }}="$LIDARR_PATH" \
+            -p:RunAnalyzersDuringBuild=false \
+            -p:EnableNETAnalyzers=false \
+            -p:TreatWarningsAsErrors=false \
+            -m:1 --no-restore \
+            || { echo "build_ok=false" >> "$GITHUB_OUTPUT"; exit 0; }
+        else
+          dotnet build "$CSPROJ_PATH" -c Release \
+            -p:RunAnalyzersDuringBuild=false \
+            -p:EnableNETAnalyzers=false \
+            -p:TreatWarningsAsErrors=false \
+            -m:1 --no-restore \
+            || { echo "build_ok=false" >> "$GITHUB_OUTPUT"; exit 0; }
+        fi
+
+        echo "build_ok=true" >> "$GITHUB_OUTPUT"
+
+    # ── Unconditional pass when build_verify is disabled ─────────────────────
+    - name: Mark build as OK (build verify disabled)
+      if: steps.update.outputs.changed == 'true' && inputs.include_build_verify == false
+      id: verify_skip
+      run: echo "build_ok=true" >> "$GITHUB_OUTPUT"
+
+    # ── Create branch & commit ────────────────────────────────────────────────
+    - name: Create branch and commit
+      if: >
+        steps.update.outputs.changed == 'true' &&
+        (steps.verify.outputs.build_ok == 'true' || steps.verify_skip.outputs.build_ok == 'true')
+      run: |
+        set -euo pipefail
+        BRANCH="${{ inputs.pr_branch_prefix }}${{ steps.update.outputs.short_sha }}"
+
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git config user.name "github-actions[bot]"
+
+        git checkout -B "$BRANCH"
+        BUILD_STATUS="${{ inputs.include_build_verify == true && 'Passed' || 'skipped' }}"
+        git commit -m "chore(submodule): bump Common to ${{ steps.update.outputs.short_sha }}
+
+        Updates ext/Lidarr.Plugin.Common to ${{ steps.update.outputs.new_sha }}
+
+        Build verification: ${BUILD_STATUS}"
+
+        git push -u origin "$BRANCH" --force
+        echo "BRANCH=$BRANCH" >> "$GITHUB_ENV"
+
+    # ── Create or update PR ───────────────────────────────────────────────────
+    - name: Create or update PR
+      if: >
+        steps.update.outputs.changed == 'true' &&
+        (steps.verify.outputs.build_ok == 'true' || steps.verify_skip.outputs.build_ok == 'true')
+      env:
+        GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        BRANCH="${{ env.BRANCH }}"
+        EXISTING_PR=$(gh pr list --head "$BRANCH" --json number --jq '.[0].number' || echo "")
+
+        if [ -z "$EXISTING_PR" ]; then
+          gh pr create \
+            --title "chore(submodule): bump Common to ${{ steps.update.outputs.short_sha }}" \
+            --body "## Automated Submodule Update
+
+          Updates \`ext/Lidarr.Plugin.Common\` to latest main.
+
+          **New SHA:** \`${{ steps.update.outputs.new_sha }}\`
+
+          ### Verification
+          - ${{ inputs.include_build_verify == true && 'Build passed with updated submodule' || 'Build verify skipped (include_build_verify=false)' }}
+
+          ---
+          *This PR was automatically created by the bump-common workflow.*" \
+            --head "$BRANCH" \
+            --base "${{ inputs.base_branch }}"
+        else
+          echo "PR #$EXISTING_PR already exists for branch $BRANCH"
+        fi
+
+    # ── Report build failure ──────────────────────────────────────────────────
+    - name: Report build failure
+      if: steps.update.outputs.changed == 'true' && steps.verify.outputs.build_ok == 'false'
+      run: |
+        echo "::warning::Build failed with updated Common submodule. Manual intervention required."
+        echo "## Build Failed" >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "The build failed after updating Common to \`${{ steps.update.outputs.new_sha }}\`." >> "$GITHUB_STEP_SUMMARY"
+        echo "" >> "$GITHUB_STEP_SUMMARY"
+        echo "This may indicate breaking changes in Common that need to be addressed." >> "$GITHUB_STEP_SUMMARY"

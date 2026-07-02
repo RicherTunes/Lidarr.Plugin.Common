@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 ---
 name: release-automation
 description: Automate library releases, NuGet package publishing, and API versioning. Use when working with NuGet releases, package versioning, API compatibility checks, library releases, or semantic versioning for shared libraries. Handles package publishing, version management, and breaking change detection.

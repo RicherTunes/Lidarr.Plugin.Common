@@ -1,0 +1,1934 @@
+[
+  {
+    "raw": "Beyoncé",
+    "kind": "artist",
+    "category": "latin-accent-folds-to-ascii",
+    "trickyProperty": "Trailing acute é (U+00E9) as the final, most information-dense char of a single token; catalog slugs as 'beyonce'. ASCII-strip truncates to 'Beyonc '; .NET \\w keeps é unfolded so it never matches the folded index.",
+    "expectedHandling": "NFD-decompose then strip NonSpacingMark to fold é→e; emit BOTH 'Beyoncé' and 'beyonce'. Never replace an accented letter with whitespace; compare accent-insensitively.",
+    "realExample": true
+  },
+  {
+    "raw": "Björk",
+    "kind": "artist",
+    "category": "latin-accent-folds-to-ascii",
+    "trickyProperty": "Iconic 5-letter single token with ö right after the anchor consonant; no redundancy for fuzzy recovery. ASCII-strip splits 'Bj rk'.",
+    "expectedHandling": "Fold ö→o in place → 'bjork' as one token; emit {'Björk','bjork'}. Collapse accents in place, never to whitespace, especially for short names.",
+    "realExample": true
+  },
+  {
+    "raw": "Mylène Farmer",
+    "kind": "artist",
+    "category": "latin-accent-folds-to-ascii",
+    "trickyProperty": "Grave è (U+00E8), distinct from acute; a hand-built fold table listing é but forgetting è leaves it unmatched. Proves the fold must cover the whole accent family.",
+    "expectedHandling": "Prefer an NFD+strip-marks pass over a hand list so grave/acute/circumflex/tilde/macron all fold uniformly → 'mylene farmer'; emit {raw, folded}.",
+    "realExample": true
+  },
+  {
+    "raw": "Édith Piaf",
+    "kind": "artist",
+    "category": "leading-uppercase-accent",
+    "trickyProperty": "Leading uppercase É (U+00C9); ASCII-strip yields a leading space + 'dith', breaking any prefix match. Uppercase accents are easy to omit from a lowercase-only fold table.",
+    "expectedHandling": "Fold É→E, trim leading/trailing whitespace defensively; ensure the fold covers both É and é → 'edith piaf'.",
+    "realExample": true
+  },
+  {
+    "raw": "Motörhead",
+    "kind": "artist",
+    "category": "decorative-metal-umlaut",
+    "trickyProperty": "Mid-word decorative ö (U+00F6); pronounced 'Motorhead', slug 'motorhead'. ASCII-strip splits into 'mot'/'rhead'.",
+    "expectedHandling": "Fold ö→o via NFD → single contiguous 'motorhead'; emit folded alongside raw. Decorative umlauts join tokens, never break them.",
+    "realExample": true
+  },
+  {
+    "raw": "Mötley Crüe",
+    "kind": "artist",
+    "category": "decorative-metal-umlaut",
+    "trickyProperty": "Two decorative umlauts across two tokens (ö, trailing-ish ü). A folder handling only the first accent leaves the second; ASCII-strip yields 'M tley Cr e'.",
+    "expectedHandling": "Fold every accented letter (ö→o, ü→u) preserving word boundaries → 'motley crue'; emit {raw, folded} plus artist-only fallback.",
+    "realExample": true
+  },
+  {
+    "raw": "Tiësto",
+    "kind": "artist",
+    "category": "diaeresis-within-token",
+    "trickyProperty": "Mid-token ë (U+00EB) in a single-word stage name; any split is fatal. ASCII-strip → 'ti'/'sto'. Same class as the degree-sign bug.",
+    "expectedHandling": "Fold ë→e → 'tiesto' as one token; emit {raw, folded}. Single-token names must never be whitespace-split by sanitization.",
+    "realExample": true
+  },
+  {
+    "raw": "Håkan Hellström",
+    "kind": "artist",
+    "category": "ring-accent-decomposes-vs-stroke",
+    "trickyProperty": "å (U+00E5, ring) DOES NFD-decompose, deliberately contrasting ø/æ which do not. A map-only folder misses å/ö; an NFD-only folder misses stroke letters. Proves you need both.",
+    "expectedHandling": "NFD+strip-marks handles å→a, ö→o → 'hakan hellstrom'; pair the NFD pass with an explicit non-decomposable table.",
+    "realExample": true
+  },
+  {
+    "raw": "Antonín Dvořák",
+    "kind": "artist",
+    "category": "czech-caron-classical",
+    "trickyProperty": "Czech ř (caron) + á, both decomposable; classical metadata arrives mixed NFC/NFD so [^\\w\\s] keeps base letter AND standalone combining mark, making byte-different 'dvořák' forms unequal. Breaks classical search at scale.",
+    "expectedHandling": "NFC-canonicalize for dedup, then NFD+strip-marks → 'antonin dvorak'; emit {raw, folded}.",
+    "realExample": true
+  },
+  {
+    "raw": "Sigur Rós – Ágætis byrjun",
+    "kind": "album",
+    "category": "non-decomposable-ligature-ae",
+    "trickyProperty": "Icelandic æ (U+00E6) has NO NFD decomposition; NFD+strip-marks silently leaves it. Catalog folds 'ágætis'→'agaetis' (æ→ae).",
+    "expectedHandling": "Apply an explicit ligature map (æ→ae) in addition to NFD → 'agaetis byrjun'. Maintain a hardcoded table for the non-decomposing set {æ,œ,ß,ø,ð,þ,ł,đ,ı}; emit {raw, folded}.",
+    "realExample": true
+  },
+  {
+    "raw": "Cœur de pirate",
+    "kind": "album",
+    "category": "non-decomposable-ligature-oe",
+    "trickyProperty": "French œ (U+0153) has no NFD decomposition; NFD leaves it, ASCII-strip deletes it ('cur de pirate'). Catalog slug 'coeur-de-pirate'.",
+    "expectedHandling": "Explicit map œ→oe → 'coeur de pirate'; emit {raw, folded}. Same hardcoded-ligature-table requirement as æ.",
+    "realExample": true
+  },
+  {
+    "raw": "Ænima",
+    "kind": "album",
+    "category": "ligature-leading-character",
+    "trickyProperty": "Leading Æ ligature (U+00C6) standing for 'Ae'; ASCII-strip deletes the first sound → ' nima'. NFD does not decompose it.",
+    "expectedHandling": "Expand-then-strip: Æ→Ae BEFORE sanitization → 'Aenima'; keep raw 'Ænima'. Never strip non-ASCII letters to space.",
+    "realExample": true
+  },
+  {
+    "raw": "Großstadtgeflüster",
+    "kind": "artist",
+    "category": "eszett-and-umlaut",
+    "trickyProperty": "ß (U+00DF) folds to TWO letters 'ss', no NFD decomposition; ü decomposes. Groß+stadt yields triple-s 'grossstadt'. ToLowerInvariant leaves ß intact so casing alone never expands it.",
+    "expectedHandling": "Explicit ß→ss expansion plus NFD for ü → 'grossstadtgefluster'; treat ß as length-expanding (1→2) and do length-sensitive work after expansion.",
+    "realExample": true
+  },
+  {
+    "raw": "Rammstein - Weißes Fleisch",
+    "kind": "track",
+    "category": "german-eszett-casing",
+    "trickyProperty": "ToUpper('ß')→'SS' (1→2, shifts indices); distinct capital ẞ (U+1E9E) exists; NFC/NFD never touch ß. A normalize-only pipeline keeps 'weißes' and misses slug 'weisses-fleisch'.",
+    "expectedHandling": "Apply ß→ss (ẞ→SS) as part of casefold BEFORE invariant-lowercasing so 'Weißes'/'Weisses'/'WEISSES' all key to 'weisses'; emit both forms.",
+    "realExample": true
+  },
+  {
+    "raw": "MØ",
+    "kind": "artist",
+    "category": "non-decomposable-stroke-letter",
+    "trickyProperty": "Ø (U+00D8) is a stroke letter, NOT 'O+mark', no NFD decomposition; 2-char name has zero redundancy. ASCII-strip → bare 'M'.",
+    "expectedHandling": "Explicit map ø→o, Ø→O → 'mo'. Stroke letters {ø,đ,ð,ł,ħ} need the hardcoded table; guard degenerate 1-char queries by also emitting raw 'MØ'.",
+    "realExample": true
+  },
+  {
+    "raw": "Dawid Podsiadło",
+    "kind": "artist",
+    "category": "non-decomposable-stroke-letter",
+    "trickyProperty": "Polish ł (U+0142) is a stroke letter with NO NFD decomposition (ą/ę/ć/ś/ż DO decompose). The canonical 'looks like an accent but is a stroke letter' trap.",
+    "expectedHandling": "Explicit map ł→l, Ł→L → 'dawid podsiadlo'; verify per-letter rather than assuming all Polish diacritics behave alike.",
+    "realExample": true
+  },
+  {
+    "raw": "Þeyr",
+    "kind": "artist",
+    "category": "non-decomposable-stroke-letter",
+    "trickyProperty": "Icelandic thorn Þ (U+00DE) transliterates to digraph 'Th' (1→2 chars), no NFD decomposition; ASCII-strip → 'eyr'.",
+    "expectedHandling": "Special-letter map Þ→Th, ð→d → 'Theyr'. Length-changing transliteration must run before any min-length/token-count fallback gate.",
+    "realExample": true
+  },
+  {
+    "raw": "Sıla",
+    "kind": "artist",
+    "category": "turkish-dotless-i-casing",
+    "trickyProperty": "Turkish dotless ı (U+0131), no decomposition; folds to i ('sila'). Under a tr-TR culture a stray ToLower('I')→'ı' re-corrupts ASCII letters elsewhere in the pipeline.",
+    "expectedHandling": "Map ı→i, İ→I → 'sila'; ALWAYS use ToLowerInvariant/ToUpperInvariant so the Turkish-I rule cannot leak into ASCII.",
+    "realExample": true
+  },
+  {
+    "raw": "İstanbul'u Dinliyorum",
+    "kind": "track",
+    "category": "turkish-dotted-capital-i",
+    "trickyProperty": "İ (U+0130).ToLowerInvariant() returns TWO codepoints 'i'+combining-dot (U+0307); naive code never expects lowercasing to LENGTHEN. Apostrophe adds a second split hazard.",
+    "expectedHandling": "Fold İ→i explicitly (or NFC then strip U+0307) independent of culture → 'istanbul'; strip residual combining dots; pin the sanitize/lowercase order with a test.",
+    "realExample": true
+  },
+  {
+    "raw": "Sinéad O'Connor",
+    "kind": "artist",
+    "category": "nfc-vs-nfd-encoding-ambiguity",
+    "trickyProperty": "The é arrives precomposed (NFC U+00E9) OR decomposed (NFD e+U+0301); same name → different bytes → nondeterministic match (Apple/macOS deliver NFD). Apostrophe is a coexisting punctuation concern.",
+    "expectedHandling": "Normalize input to NFC deterministically FIRST, then NFD+strip-marks → 'sinead'; pin a test feeding both byte sequences and asserting identical output.",
+    "realExample": true
+  },
+  {
+    "raw": "Björk - Jóga",
+    "kind": "track",
+    "category": "nfc-vs-nfd-encoding-ambiguity",
+    "trickyProperty": "In NFD, 'Jóga' carries an orphan combining acute (U+0301, category Mn) that .NET \\w keeps as a word char, so 'strip non-word' leaves an un-renderable token that never matches NFC 'Jóga'.",
+    "expectedHandling": "NFC-normalize, then NFD+strip Mn for the fold variant → emit {'Jóga','Joga'}; apply identically to the artist token.",
+    "realExample": true
+  },
+  {
+    "raw": "Record n°V",
+    "kind": "album",
+    "category": "degree-ordinal-sign-glued",
+    "trickyProperty": "Canonical shipped bug: ° glued between 'n' and 'V' becomes a space ('n V'); Qobuz's slug drops it ('record-nv'). Single-letter tokens miss, album query returns 0, and the artist-only fallback was truncated downstream.",
+    "expectedHandling": "Emit symbol-removed-adjacent 'Record nV' AND spaced 'Record n V', plus a non-truncated artist-only fallback ('Bleu Jeans Bleu'). Never let a mangled album query be the only query.",
+    "realExample": true
+  },
+  {
+    "raw": "Symphonie n° 5",
+    "kind": "album",
+    "category": "non-breaking-space",
+    "trickyProperty": "French typography (pervasive on Qobuz) puts a NO-BREAK SPACE (U+00A0) between 'n°' and the number; ° becomes a space AND U+00A0 matches \\s, so 'n   5' collapses to 'n 5', missing slug 'symphonie-no-5'. Sibling JS sanitizers leave U+00A0 → silent per-plugin divergence.",
+    "expectedHandling": "Normalize all \\p{Zs} separators (U+00A0,U+202F,U+2009,U+3000) to ASCII space first, then apply the degree-sign dual-variant rule: emit 'n 5' and 'n5'/'no5'; keep composer-only fallback.",
+    "realExample": true
+  },
+  {
+    "raw": "Ke$ha",
+    "kind": "artist",
+    "category": "dollar-sign-as-letter",
+    "trickyProperty": "$ substitutes 's' inside one word; she later dropped it so both 'Ke$ha' and 'Kesha' index. $ is also a regex/shell metachar. Strip-to-space → 'Ke ha'.",
+    "expectedHandling": "Apply a leetspeak map ($→s) BEFORE the generic stripper → 'Kesha' (primary); also emit removed-adjacent 'Keha' and raw URL-encoded. Recover same way for A$AP→ASAP.",
+    "realExample": true
+  },
+  {
+    "raw": "A$AP Rocky",
+    "kind": "artist",
+    "category": "dollar-sign-as-letter",
+    "trickyProperty": "$ between 'A' and 'AP' encodes 'ASAP'; whole family (A$AP Mob/Ferg). Strip-to-space → stray 'A' + 'AP'.",
+    "expectedHandling": "$→S → 'ASAP Rocky' (primary), removed-adjacent 'AAP Rocky', raw URL-encoded, artist-only fallback. Symbol map must fire before whitespace splitting.",
+    "realExample": true
+  },
+  {
+    "raw": "Joey Bada$$",
+    "kind": "artist",
+    "category": "dollar-sign-as-letter",
+    "trickyProperty": "Trailing '$$' encodes 'ss' (Badass); strip-to-space silently truncates the surname to 'Bada', dropping the discriminating 'ss'.",
+    "expectedHandling": "$→s per glyph → 'Joey Badass' (primary), removed-adjacent 'Joey Bada' (lower priority), raw URL-encoded, artist-only fallback. Never let trailing glued symbols shorten a token.",
+    "realExample": true
+  },
+  {
+    "raw": "P!nk",
+    "kind": "artist",
+    "category": "exclamation-glued-intra-word",
+    "trickyProperty": "! between 'P' and 'nk' stands for 'i' (Pink); catalog indexes both 'P!nk' and 'Pink'. Strip-to-space → 'P nk' (split); strip-to-nothing → 'Pnk'.",
+    "expectedHandling": "Emit removed-adjacent 'Pnk', a name-specific '!'→'i' variant 'Pink', raw 'P!nk' URL-encoded, and spaced 'P nk' last; never space-replace a symbol between two word-chars. Artist-only fallback.",
+    "realExample": true
+  },
+  {
+    "raw": "3OH!3",
+    "kind": "artist",
+    "category": "exclamation-glued-intra-word",
+    "trickyProperty": "! between letter 'H' and digit '3' (both \\w); slug '3oh3'. Strip-to-space → '3OH'/'3' splits the indivisible name.",
+    "expectedHandling": "Removed-adjacent '3OH3' (primary, matches slug), raw URL-encoded, spaced fallback. Digits survive as \\w; the punctuation between them must be removed-adjacent, not spaced.",
+    "realExample": true
+  },
+  {
+    "raw": "Panic! at the Disco",
+    "kind": "artist",
+    "category": "exclamation-as-token-separator",
+    "trickyProperty": "'!' glued to the first official token; slug drops it ('panic-at-the-disco'). Strip-to-space → 'Panic  at the Disco' double-space; exact-string boost lost.",
+    "expectedHandling": "Delete glued punctuation (no space) → 'Panic at the Disco'; collapse whitespace; also emit a punctuation-preserved variant for catalogs that keep '!'.",
+    "realExample": true
+  },
+  {
+    "raw": "Tony!Toni!Toné!",
+    "kind": "artist",
+    "category": "exclamation-as-token-separator",
+    "trickyProperty": "Here '!' genuinely separates words, the OPPOSITE of Ke$ha. No single rule knows a priori whether a glued symbol is intra-word or inter-word. Also carries accent é.",
+    "expectedHandling": "ALWAYS emit BOTH symbol-removed-adjacent AND symbol-to-space variants and let the catalog decide; also fold é→e ('Tony Toni Tone'); always-present artist-only fallback. Proof the corpus must test both removal modes.",
+    "realExample": true
+  },
+  {
+    "raw": "AC/DC",
+    "kind": "artist",
+    "category": "slash-separator-url-hazard",
+    "trickyProperty": "'/' between 'AC' and 'DC' is also a URL PATH separator; raw interpolation forges a path segment → 404, not a search. Slug 'acdc'; display 'AC/DC'.",
+    "expectedHandling": "Put the value in the QUERY component and URL-encode '/'→%2F; emit {'AC/DC','AC DC','ACDC'}. Prefer query-param search over path-based for names with '/'.",
+    "realExample": true
+  },
+  {
+    "raw": "Either/Or",
+    "kind": "album",
+    "category": "slash-separator-url-hazard",
+    "trickyProperty": "Internal '/' in an album title (Elliott Smith); when concatenated 'Elliott Smith Either/Or' the '/' is misparsed as a path boundary.",
+    "expectedHandling": "Component-encode '/'→%2F within the query value; emit 'Either Or' and 'EitherOr'; keep artist+album as one encoded param and a non-truncated artist-only fallback.",
+    "realExample": true
+  },
+  {
+    "raw": "will.i.am",
+    "kind": "artist",
+    "category": "dotted-initialism",
+    "trickyProperty": "Dots glue 'will'+'i'+'am' into the pronounced 'william'; the real qobuz regex KEEPS dots so 'will.i.am' still mismatches the de-dotted slug. Strip-to-space → three tiny tokens.",
+    "expectedHandling": "Emit dot-removed-adjacent 'william' (the match), keep raw 'will.i.am', and dot→space 'will i am' last. Generalize: any dotted run between word-chars gets a de-dotted-concatenated variant.",
+    "realExample": true
+  },
+  {
+    "raw": "m.A.A.d city",
+    "kind": "track",
+    "category": "dotted-initialism",
+    "trickyProperty": "Dots glue 'm.A.A.d' into 'maad'; appears in album 'good kid, m.A.A.d city' with a comma too. Strip-to-space → four one-letter tokens.",
+    "expectedHandling": "Dot-removed-adjacent 'maad city' (the catalog match), raw preserved, dot→space last. Case-fold for comparison, keep literal for exact-match.",
+    "realExample": true
+  },
+  {
+    "raw": "R.E.M.",
+    "kind": "artist",
+    "category": "dotted-initialism",
+    "trickyProperty": "Dotted initialism with a TRAILING glued period; commonly also 'REM'. Strip-to-space → 'R E M' three single-char tokens that short-token filters discard, gutting the query.",
+    "expectedHandling": "Emit removed-adjacent 'REM' and spaced 'R E M' plus raw; do not drop single-char tokens that reconstruct a known acronym; handle the trailing dot adjacently (no dangling token).",
+    "realExample": true
+  },
+  {
+    "raw": "B'Day",
+    "kind": "album",
+    "category": "apostrophe-glued-name-boundary",
+    "trickyProperty": "Straight ' between 'B' and 'Day'; catalog indexes 'B'Day' and 'BDay'. Curly ' (U+2019) is an identical separate hazard. Strip-to-space → 'B Day' matches generic 'day'.",
+    "expectedHandling": "Normalize curly→straight first, then delete the apostrophe without a space → 'BDay' (primary), raw preserved, spaced last; pair with artist so 'BDay' isn't a bare ambiguous token.",
+    "realExample": true
+  },
+  {
+    "raw": "D'Angelo",
+    "kind": "artist",
+    "category": "apostrophe-glued-name-boundary",
+    "trickyProperty": "Apostrophe at a NAME-PREFIX boundary (O'/D'/L'); the delete-vs-space decision flips vs contractions. Qobuz slug 'd-angelo' treats it as a separator. Strip uniformly-delete → 'DAngelo' misses the spaced slug.",
+    "expectedHandling": "Treat O'/D'/L'/Mc' prefixes as a class: emit BOTH spaced 'D Angelo' (matches slug) AND joined 'DAngelo', plus apostrophe-preserved; canonicalize ',’,ʼ to one form first.",
+    "realExample": true
+  },
+  {
+    "raw": "Destiny's Child",
+    "kind": "artist",
+    "category": "possessive-apostrophe",
+    "trickyProperty": "Possessive 's; Qobuz slugs 'destiny-s-child' (separator), Apple returns one token 'Destiny's Child' where 'Destiny'≠'Destinys'. Same sanitizer over-matches one store and under-matches the other.",
+    "expectedHandling": "Generate BOTH delete-apostrophe 'Destinys Child' AND separator 'Destiny s Child'; canonicalize quote codepoint; cross-quote equality on compare.",
+    "realExample": true
+  },
+  {
+    "raw": "Livin' on a Prayer",
+    "kind": "track",
+    "category": "contraction-apostrophe",
+    "trickyProperty": "Trailing elision apostrophe in 'Livin'' (curly U+2019 on Apple); Qobuz slug 'livin-on-a-prayer' deletes it. [^\\w\\s]→space yields 'Livin ' splitting off a dangling fragment.",
+    "expectedHandling": "Normalize all apostrophe codepoints to one form, then DELETE an apostrophe flanked by/trailing letters (no space) → 'Livin on a Prayer'; emit curly and straight raw variants; artist-only fallback.",
+    "realExample": true
+  },
+  {
+    "raw": "A Hard Day's Night",
+    "kind": "album",
+    "category": "possessive-apostrophe",
+    "trickyProperty": "Saxon possessive 's; MusicBrainz leans straight U+0027, Apple curly U+2019. Strip-to-space emits a junk single-letter 's' token and 'Day'≠'Days'.",
+    "expectedHandling": "Canonicalize the quote, strip the possessive apostrophe WITHOUT a space → 'A Hard Days Night'; also emit a quote-preserving variant; treat U+2019 and U+0027 as equal.",
+    "realExample": true
+  },
+  {
+    "raw": "Sgt. Pepper's Lonely Hearts Club Band",
+    "kind": "album",
+    "category": "possessive-apostrophe",
+    "trickyProperty": "Possessive 'Pepper's' plus abbreviation period 'Sgt.'. Naive sanitizer spaces both → 'Sgt  Pepper s ...' double space + junk 's'.",
+    "expectedHandling": "Delete the possessive apostrophe (no space) → 'Peppers'; treat the abbreviation period as removed/internal → 'Sgt'; collapse whitespace; quote-preserved variant; cross-quote match.",
+    "realExample": true
+  },
+  {
+    "raw": "Rock 'n' Roll Ain't Noise Pollution",
+    "kind": "track",
+    "category": "contraction-apostrophe",
+    "trickyProperty": "Three apostrophes of two semantics: bracketing elision ''n'' (=and) plus contraction 'Ain't'. Naive sanitizer → 'Rock  n  Roll Ain t ...' riddled with junk 'n'/'t' and double spaces.",
+    "expectedHandling": "''n''→'n' (delete apostrophes, keep single spaces); 'Ain't'→'Aint'; collapse whitespace; also emit an 'and'-expanded variant 'Rock and Roll Aint ...'.",
+    "realExample": true
+  },
+  {
+    "raw": "Sign o' the Times",
+    "kind": "album",
+    "category": "elision-apostrophe",
+    "trickyProperty": "'o'' elides 'of' as its own token; Prince also appears as 'Sign O the Times'. Strip-to-space leaves a dangling single-letter 'o' and loses the 'of' meaning.",
+    "expectedHandling": "Delete the elision apostrophe keeping 'o' → 'Sign o the Times'; also generate expansion 'Sign of the Times' and quoted-letter 'Sign O the Times'; normalize curly/straight.",
+    "realExample": true
+  },
+  {
+    "raw": "'Round Midnight",
+    "kind": "track",
+    "category": "elision-apostrophe",
+    "trickyProperty": "Leading elision apostrophe (eliding 'A' from 'Around'); Apple U+2019 vs left U+2018 vs straight. A leading ' becomes a LEADING space → empty first token, and EscapeDataString encodes the leading space.",
+    "expectedHandling": "Strip leading apostrophe and Trim → 'Round Midnight'; treat U+2018/U+2019/U+0027 as one class; also emit expanded 'Around Midnight'.",
+    "realExample": true
+  },
+  {
+    "raw": "Guns N' Roses",
+    "kind": "artist",
+    "category": "n-as-and-connective",
+    "trickyProperty": "\"N'\" is phonetic 'and'; catalogs split straight/curly and also spell 'Guns and Roses'. [^\\w\\s]→space → 'Guns N  Roses' isolated 'N' + double space.",
+    "expectedHandling": "Normalize apostrophe codepoint, collapse 'N''→'N', AND generate spelled-out 'Guns and Roses' / 'Guns n Roses'; cross-quote equality.",
+    "realExample": true
+  },
+  {
+    "raw": "Israel Kamakawiwoʻole",
+    "kind": "artist",
+    "category": "hawaiian-okina-codepoint",
+    "trickyProperty": "Hawaiian ʻokina (U+02BB MODIFIER LETTER TURNED COMMA), a letter-like apostrophe NOT in the usual smart-quote set; the Common quote map only folds U+2018-201D, so U+02BB survives to [^\\w\\s]→space → 'Kamakawiwo ole'. Same gap hits U+02BC,U+0060,U+00B4,U+2032.",
+    "expectedHandling": "Extend the apostrophe class to U+02BB,U+02BC,U+02B9,U+0060,U+00B4,U+2032 (plus U+2018/2019/0027), fold to one form, delete intra-word → 'Kamakawiwoole'; emit spaced + preserved variants.",
+    "realExample": true
+  },
+  {
+    "raw": "fun.",
+    "kind": "artist",
+    "category": "trailing-period-dictionary-word",
+    "trickyProperty": "Trailing glued period on a 3-letter band name that collapses to the very common word 'fun'; the dot is part of the identity. Bare 'fun' floods the catalog.",
+    "expectedHandling": "Keep both raw 'fun.' and de-dotted 'fun', but NEVER issue the bare common word as a standalone artist-only query — always conjoin with the album ('fun. Some Nights'). Flag short-token-collapsing-to-dictionary-word as needing mandatory album context.",
+    "realExample": true
+  },
+  {
+    "raw": "“Awaken, My Love!”",
+    "kind": "album",
+    "category": "literal-double-quotes-in-title",
+    "trickyProperty": "Curly “ ” (U+201C/201D) are PART of the official title (Childish Gambino) plus a comma and trailing '!'. [^\\w\\s]→space → '  Awaken  My Love  ' leading empty token + double spaces, often shipped untrimmed.",
+    "expectedHandling": "Normalize “ ”→\", DELETE surrounding/standalone quotes (no space), collapse whitespace, always Trim → 'Awaken, My Love'; treat quoted and unquoted forms as equal.",
+    "realExample": true
+  },
+  {
+    "raw": "“Heroes”",
+    "kind": "album",
+    "category": "literal-double-quotes-in-title",
+    "trickyProperty": "Bowie's title is the word Heroes WRAPPED in quotes; codepoint is the crux (Apple/Qobuz curly U+201C/201D, MB straight U+0022, some bare). Strict compare across forms rejects the only real release.",
+    "expectedHandling": "Canonicalize all double-quote codepoints (U+201C/201D/0022/2033) to one form, strip leading/trailing quotes, Trim → 'Heroes'; all four forms compare equal; artist-qualify 'David Bowie Heroes'.",
+    "realExample": true
+  },
+  {
+    "raw": "“Weird Al” Yankovic",
+    "kind": "artist",
+    "category": "literal-double-quotes-in-title",
+    "trickyProperty": "Quotes are INTERIOR (mid-string nickname), not bracketing. Leading “→space makes a leading empty token; closing ”→space makes a double space.",
+    "expectedHandling": "Normalize the double-quote codepoint, DELETE the quotes (no space) → 'Weird Al Yankovic', collapse whitespace, Trim; cross-quote equality.",
+    "realExample": true
+  },
+  {
+    "raw": "!!!",
+    "kind": "artist",
+    "category": "punctuation-only-name-empty",
+    "trickyProperty": "Entire artist name is three '!' (pronounced 'Chk Chk Chk'); zero word-chars → sanitizes to EMPTY. An empty ARTIST has no fallback at all — both legs collapse. Already in the repo's own InlineData.",
+    "expectedHandling": "Detect empty-after-sanitize and route to an artist-alias map ('!!!'→'Chk Chk Chk') and/or artist-ID lookup; also query the literal '!!!' (catalogs index it). NEVER dispatch an empty query; sanitized output must be validated non-empty.",
+    "realExample": true
+  },
+  {
+    "raw": "Sunn O)))",
+    "kind": "artist",
+    "category": "trailing-bracket-run",
+    "trickyProperty": "Three close-parens ')))' (Sunn-amp logo) glued to 'O', UNBALANCED; parens are in the qobuz KEEP set so they survive and can corrupt slug/regex/URL building. A real word 'Sunn' survives.",
+    "expectedHandling": "Strip the trailing bracket cluster adjacently → 'Sunn O' (primary) but also keep raw verbatim (catalogs index it); bracket handling must tolerate unbalanced runs (don't throw, don't auto-close); fallback = longest alphanumeric prefix, not empty.",
+    "realExample": true
+  },
+  {
+    "raw": "( )",
+    "kind": "album",
+    "category": "bracketed-whitespace-title",
+    "trickyProperty": "Sigur Rós's 2002 album is '(' space ')'; parens are in the allow-list so '( )' survives, but the tokenizer strips brackets → empty token. Its tracks are also officially untitled (blank).",
+    "expectedHandling": "Treat a title with no alphanumeric run as 'no usable signal' → go straight to artist-only search; for untitled tracks search by album + track number; curated aliases ('Untitled') optional. Fold artist ó→o.",
+    "realExample": true
+  },
+  {
+    "raw": "★",
+    "kind": "album",
+    "category": "symbol-only-title-alias-needed",
+    "trickyProperty": "Entire title is U+2605 BLACK STAR (Bowie 'Blackstar'); strip-to-space → empty → SanitizeSearchQuery returns string.Empty. Catalogs index it as both '★' and 'Blackstar'. Exact Bleu-Jeans failure mode.",
+    "expectedHandling": "Detect symbol-only/whitespace-only post-sanitize and DO NOT emit empty; alias map ★→'Blackstar'; emit {'David Bowie Blackstar','David Bowie ★','David Bowie'}; non-truncated artist-only fallback.",
+    "realExample": true
+  },
+  {
+    "raw": "†",
+    "kind": "album",
+    "category": "symbol-only-title-alias-needed",
+    "trickyProperty": "Justice's debut is the single glyph U+2020 DAGGER ('Cross'); strips to empty. Note '†' (dagger) and '✝' (U+271D Latin cross) are distinct codepoints used interchangeably.",
+    "expectedHandling": "Alias †→'Cross'; emit {'Justice Cross','Justice †','Justice'}; fold both dagger/cross codepoints; artist-only fallback.",
+    "realExample": true
+  },
+  {
+    "raw": "†††",
+    "kind": "artist",
+    "category": "symbol-only-title-alias-needed",
+    "trickyProperty": "Crosses (Chino Moreno project) stylized as three daggers; the ARTIST field sanitizes to empty, losing the scoping anchor entirely. Proves the artist field itself must be alias-resolved before query building.",
+    "expectedHandling": "Artist-alias map †††→'Crosses' (searchable), keep '†††' as a display/literal variant; resolve aliases on the artist field, not just titles.",
+    "realExample": true
+  },
+  {
+    "raw": "∆",
+    "kind": "artist",
+    "category": "single-glyph-artist",
+    "trickyProperty": "alt-J's logo/name is the delta triangle; strips to empty. Two delta codepoints exist (U+2206 increment vs U+0394 Greek delta), visually identical.",
+    "expectedHandling": "Artist-alias map ∆→'alt-J' (the catalog's textual handle); fold U+2206/U+0394 to one; keep '∆' as a display variant.",
+    "realExample": true
+  },
+  {
+    "raw": "÷",
+    "kind": "album",
+    "category": "math-symbol-title",
+    "trickyProperty": "Ed Sheeran 2017 'Divide' (U+00F7); non-\\w strips to a space → empty query, the exact shipped failure mode. Catalogs store 'Divide' or '÷ (Divide)'.",
+    "expectedHandling": "Refuse empty queries; symbol→word lexicon ÷→'Divide'; keep raw '÷' as a literal variant; ALWAYS retain artist-scoped 'Ed Sheeran ÷'/'Ed Sheeran Divide' and a non-truncated artist-only fallback.",
+    "realExample": true
+  },
+  {
+    "raw": "+",
+    "kind": "album",
+    "category": "url-plus-space-collision",
+    "trickyProperty": "Ed Sheeran 2011 'Plus'; doubly dangerous because raw '+' in an x-www-form-urlencoded query DECODES TO A SPACE at the server, silently emptying the term even without a sanitizer.",
+    "expectedHandling": "Percent-encode '+'→%2B (never let it ride as bare '+'); map +→'Plus'; emit 'Ed Sheeran Plus' + artist-only fallback. Treat '+' as content, not a separator.",
+    "realExample": true
+  },
+  {
+    "raw": "=",
+    "kind": "album",
+    "category": "url-query-value-delimiter",
+    "trickyProperty": "Ed Sheeran 2021 'Equals'; '=' strips to empty AND is the key/value delimiter so naive concatenation corrupts adjacent params (q==&type=album).",
+    "expectedHandling": "Lexicon =→'Equals'; URL-encode raw as %3D; emit 'Ed Sheeran Equals'; sanity-check the parameter isn't delimiter-corrupted before sending.",
+    "realExample": true
+  },
+  {
+    "raw": "-",
+    "kind": "album",
+    "category": "query-operator-collision",
+    "trickyProperty": "Ed Sheeran 2023 'Subtract'; '-' strips to empty, and if preserved a leading '-' is a NOT/exclude operator in Lucene/Elastic-style backends, actively suppressing results.",
+    "expectedHandling": "Map -→'Subtract' as the primary query; never send a bare '-' to an operator-sensitive backend (quote it or drop to artist-only); document punctuation-as-title may be an operator.",
+    "realExample": true
+  },
+  {
+    "raw": "×",
+    "kind": "album",
+    "category": "symbol-vs-letter-homoglyph",
+    "trickyProperty": "Ed Sheeran 2014 'Multiply' is U+00D7 MULTIPLICATION SIGN, a homoglyph of ASCII 'x' — looks searchable but strips to empty and mishashes against a catalog that stored the real U+00D7.",
+    "expectedHandling": "Confusable-fold ×→'x' AND map ×→'Multiply'; emit both 'Ed Sheeran x' and 'Ed Sheeran Multiply'; keep raw × literal variant.",
+    "realExample": true
+  },
+  {
+    "raw": "?",
+    "kind": "album",
+    "category": "url-query-delimiter",
+    "trickyProperty": "XXXTENTACION 2018 '?'; a non-word char that strips to empty AND, unescaped in a URL, begins the query component / is a regex any-char metachar — corrupts the request, not just returns 0.",
+    "expectedHandling": "Alias ?→'Question Mark' plus artist+year fallback; ALWAYS Uri.EscapeDataString (→%3F) before it touches a URL; treat symbol-only titles as 'needs alias/fallback', not 'sanitize and send'.",
+    "realExample": true
+  },
+  {
+    "raw": "#willpower",
+    "kind": "album",
+    "category": "url-fragment-delimiter",
+    "trickyProperty": "will.i.am 2013; in a URL '#' starts the fragment (client-side only, NEVER transmitted) so unencoded '#willpower' makes the server receive an EMPTY query. Strip-to-space → 'willpower'.",
+    "expectedHandling": "Component-encode '#'→%23; emit hash-stripped 'willpower' fallback (catalogs index both); guard the URL builder so '#' can never truncate the query into a fragment.",
+    "realExample": true
+  },
+  {
+    "raw": "#1's",
+    "kind": "album",
+    "category": "url-fragment-delimiter",
+    "trickyProperty": "Mariah Carey 1998 '#1's': leading '#' fragment delimiter + digit + apostrophe. '#' empties the server query; apostrophe fragments '1's'→'1 s'.",
+    "expectedHandling": "Component-encode '#'→%23 and apostrophe→%27; emit 'Number Ones'/'No 1s'/'1's' variants; protect against '#' becoming a fragment.",
+    "realExample": true
+  },
+  {
+    "raw": "100% Electronica",
+    "kind": "album",
+    "category": "url-percent-escape-char",
+    "trickyProperty": "George Clanton 2015; '%' is the percent-ENCODING escape char itself and '% E'→'%E...' looks like the start of an escape sequence to any decoder, causing mojibake/ordering bugs.",
+    "expectedHandling": "Encode '%'→%25 FIRST/atomically via Uri.EscapeDataString (never hand-rolled ordering); emit '100 Percent Electronica' and '100 Electronica'; any later decode is a single non-recursive op.",
+    "realExample": true
+  },
+  {
+    "raw": "AC/DC (path-segment)",
+    "kind": "artist",
+    "category": "url-path-separator",
+    "trickyProperty": "Restates the '/' hazard at the PATH layer: even percent-encoded %2F, many servers/proxies reject or double-decode encoded slashes (AllowDecodedSlash), so correct encoding can still 404.",
+    "expectedHandling": "Put names with '/' in the QUERY component, never a path segment; emit 'AC DC'/'ACDC' so search succeeds even where %2F is rejected; prefer query-param search APIs over slug paths.",
+    "realExample": true
+  },
+  {
+    "raw": "F♯ A♯ ∞",
+    "kind": "album",
+    "category": "musical-and-infinity-symbols",
+    "trickyProperty": "GY!BE 1997 debut mixes MUSIC SHARP ♯ (U+266F) and INFINITY ∞ (U+221E) with letters; commonly typed 'F#A#∞' where ASCII '#' triggers fragment truncation. Strip-to-space → 'F  A' loses the meaning-bearing symbols.",
+    "expectedHandling": "Lexicon ♯→'#' and 'sharp', ∞→'infinity'; fold ♯(U+266F) against ASCII '#'; emit 'F# A# Infinity', 'F sharp A sharp Infinity', raw; UTF-8 percent-encode; band-name '!' alias too.",
+    "realExample": true
+  },
+  {
+    "raw": "4′33″",
+    "kind": "track",
+    "category": "prime-marks-with-digits",
+    "trickyProperty": "John Cage; PRIME (U+2032) and DOUBLE PRIME (U+2033), NOT ASCII '/\"', around digits. Strip-to-space → '4 33' loses the minute/second structure; catalogs storing typographic primes won't match ASCII assumptions.",
+    "expectedHandling": "Confusable-fold ′→', ″→\" → both \"4'33\\\"\" and '4 33'; add spelled alias 'Four minutes thirty-three seconds'; keep digits adjacent.",
+    "realExample": true
+  },
+  {
+    "raw": "E=MC²",
+    "kind": "album",
+    "category": "math-symbol-title",
+    "trickyProperty": "Mariah Carey 2008 mixes '=' with superscript ² (U+00B2, 'squared'); strip-to-space → 'E MC ' losing both; slug 'e-mc2'.",
+    "expectedHandling": "Normalize superscript/subscript digits to ASCII (²→2, ³→3), drop/keep operator; emit 'E=MC2','EMC2','E MC2' so one matches the de-symbolized slug.",
+    "realExample": true
+  },
+  {
+    "raw": "4x4=12",
+    "kind": "album",
+    "category": "math-symbol-title",
+    "trickyProperty": "deadmau5 2010 arithmetic title; some catalogs render the multiply as '×' (U+00D7) giving '4×4=12', so the same album tokenizes two ways. '=' strips to '4x4 12' losing identity.",
+    "expectedHandling": "Normalize ×→'x', keep digits and literal '='; emit {'4x4=12','4x4 12','4×4=12'}; preserve digit-adjacency so '4x4' isn't split into '4 4'.",
+    "realExample": true
+  },
+  {
+    "raw": "O(+>",
+    "kind": "album",
+    "category": "unrepresentable-glyph-title",
+    "trickyProperty": "Prince's 1992 'Love Symbol' has no stable codepoint; arrives as 'O(+>', a PUA char, or 'Love Symbol'. Strip-to-space collapses 'O(+>'→'O' (one ambiguous letter).",
+    "expectedHandling": "Normalize all known renderings to alias 'Love Symbol Album'; emit {'Prince Love Symbol','Prince Symbol Album','Prince'}; guard 'sanitized length < 2' → fall back to alias/artist-only, never a single char.",
+    "realExample": true
+  },
+  {
+    "raw": "/\\/\\/\\Y/\\",
+    "kind": "album",
+    "category": "slash-art-title",
+    "trickyProperty": "M.I.A. 2010 'MAYA' is slashes around one 'Y'. SanitizeSearchQuery converts '/' and '\\' to spaces (path-traversal defense) → lone 'Y'; backslashes also break JSON/regex interpolation.",
+    "expectedHandling": "Alias the slash-art form → 'MAYA'/'Maya'; emit {'M.I.A. MAYA','M.I.A. Maya','M.I.A.'}; same 'post-strip length < 2 ⇒ alias/artist-only' guard. Don't rely on the security slash-strip to produce a usable query.",
+    "realExample": true
+  },
+  {
+    "raw": "ΔMi−1 = −αΣn=1NDi[n][Σj∈C[i]Fji[n−1]+Fexti[n−1]]",
+    "kind": "track",
+    "category": "dense-equation-untypeable-title",
+    "trickyProperty": "Aphex Twin Windowlicker track; a full math formula (Greek Δ/Σ, ∈, U+2212 MINUS not ASCII hyphen). Strip-to-space yields garbage smear; title-similarity is hopeless.",
+    "expectedHandling": "Recognize formula titles (high non-ASCII ratio, sub/superscripts) and STOP matching by title; fall back to artist + EP ('Aphex Twin Windowlicker') + track position/duration; normalize U+2212→'-' generally. The 'give up on title, use surrounding metadata' tier.",
+    "realExample": true
+  },
+  {
+    "raw": "Simon & Garfunkel",
+    "kind": "artist",
+    "category": "ampersand-as-conjunction",
+    "trickyProperty": "Bare '&' joins two surnames (='and'); MB often spells 'Simon and Garfunkel'. Strip-to-space → 'Simon   Garfunkel' double space, '&' destroyed not translated.",
+    "expectedHandling": "Emit literal-'&', 'and', and removed-connective variants; collapse whitespace; canonicalize '&'→'and' on BOTH query and catalog title before similarity; artist-only fallback.",
+    "realExample": true
+  },
+  {
+    "raw": "Earth, Wind & Fire",
+    "kind": "artist",
+    "category": "ampersand-as-conjunction",
+    "trickyProperty": "Combines a list comma AND an '&'; both strip to spaces → 'Earth  Wind  Fire', and a feat-aware splitter may mistake '& Fire' for a featured-artist tail and DROP it.",
+    "expectedHandling": "Strip/space the comma, emit '&'→'and' variant ('Earth Wind and Fire'); never treat a name-internal '&'/',' as a feat delimiter; canonicalize for scoring.",
+    "realExample": true
+  },
+  {
+    "raw": "Belle & Sebastian",
+    "kind": "artist",
+    "category": "ampersand-vs-and-divergence",
+    "trickyProperty": "Streaming shows '&' but MusicBrainz/Lidarr canonical is spelled-out 'Belle and Sebastian' — the connective itself differs across the two sides of the match, so token-equality rejects the release.",
+    "expectedHandling": "Normalize '&'↔'and'↔'+' to one sentinel on both strings before comparison; generate the alternate-connective query variant.",
+    "realExample": true
+  },
+  {
+    "raw": "Me and Bobby McGee",
+    "kind": "track",
+    "category": "ampersand-vs-and-divergence",
+    "trickyProperty": "Janis Joplin: 'Me and Bobby McGee' on some releases, 'Me & Bobby McGee' on others — the connective flips at TRACK level where similarity thresholds are tighter, and a dropped '&' costs a whole token.",
+    "expectedHandling": "Canonicalize '&'→'and' (and '+'→'and') on both query and every candidate track title before scoring; emit both renderings when building the search.",
+    "realExample": true
+  },
+  {
+    "raw": "Simon &amp; Garfunkel",
+    "kind": "artist",
+    "category": "html-entity-amp-trap",
+    "trickyProperty": "Ampersand arrives HTML/XML-entity-encoded from API/RSS/JSON-in-XML; a strip-before-decode sanitizer sees a-m-p bracketed by '&'/';' and leaves the bogus token 'amp' ('Simon amp Garfunkel'). '&#38;'/'&#x26;' degrade worse.",
+    "expectedHandling": "HTML-decode FIRST (WebUtility.HtmlDecode) so the entity becomes '&', THEN connective-normalize; never run character-class stripping before decoding; assert no query ever contains the literal token 'amp'.",
+    "realExample": false
+  },
+  {
+    "raw": "Hall & Oates",
+    "kind": "artist",
+    "category": "ampersand-vs-and-divergence",
+    "trickyProperty": "Wanted as 'Hall & Oates' but canonical credit is the longer 'Daryl Hall & John Oates' — '&' equivalence compounds with a short-vs-full-name mismatch, so even a perfect connective fix needs a fallback.",
+    "expectedHandling": "Normalize '&'↔'and', collapse whitespace, AND keep token-subset/artist-only fallbacks so 'Hall & Oates' can reach the full catalog entry.",
+    "realExample": true
+  },
+  {
+    "raw": "Florence + the Machine",
+    "kind": "artist",
+    "category": "plus-as-conjunction",
+    "trickyProperty": "'+' = 'and' (also spelled 'Florence and the Machine'); '+' is ALSO the form-urlencoded space, so an unescaped '+' silently becomes a space over the wire. Strip-to-space loses the connective.",
+    "expectedHandling": "Map '+'→'and'; emit {'Florence + the Machine','Florence and the Machine','Florence the Machine'}; always Uri.EscapeDataString '+'→%2B so the wire value equals intent.",
+    "realExample": true
+  },
+  {
+    "raw": "+44",
+    "kind": "artist",
+    "category": "leading-plus-identity",
+    "trickyProperty": "Blink-182 side project; the '+' is the FIRST char and part of the identity, not a separator. Strip-then-Trim deletes it → bare '44' (wrong term); raw '+44' form-decodes to ' 44'.",
+    "expectedHandling": "Do NOT strip leading/standalone symbols; component-encode to %2B44; emit 'plus 44'/'Plus 44' and a '44' fallback; never trim a leading '+' as if it were whitespace.",
+    "realExample": true
+  },
+  {
+    "raw": "C+C Music Factory",
+    "kind": "artist",
+    "category": "plus-as-conjunction",
+    "trickyProperty": "'+' embedded between letters ('C+C') plus spaces; '+' form-decodes to a space merging 'C C', drifting from slug 'c-c-music-factory'.",
+    "expectedHandling": "Component-encode '+'→%2B and spaces→%20; emit both 'C+C Music Factory' (encoded) and form-decoded 'C C Music Factory' so either index form matches.",
+    "realExample": true
+  },
+  {
+    "raw": "Salt-N-Pepa",
+    "kind": "artist",
+    "category": "n-as-and-connective",
+    "trickyProperty": "Capital 'N' wrapped in hyphens (no spaces) is the 'and' connective; slug 'salt-n-pepa'. Hyphen→space → 'Salt N Pepa' loses the slug form and never yields an 'and' variant.",
+    "expectedHandling": "Emit BOTH a spaced form and a hyphen/no-space adjacent form (slug-style survives) plus an 'and' variant; recognize '-n-' as a connective.",
+    "realExample": true
+  },
+  {
+    "raw": "Tyler, the Creator",
+    "kind": "artist",
+    "category": "comma-separator",
+    "trickyProperty": "Comma is part of the stylized appositive name, not a list delimiter; Apple stores 'Tyler, The Creator'. Char-by-char replace leaves 'Tyler  the Creator' double space; a stopword filter may drop 'the'.",
+    "expectedHandling": "Emit {'Tyler, the Creator','Tyler the Creator'}; collapse whitespace; compare case-insensitively; do NOT strip 'the' as a stopword inside artist names.",
+    "realExample": true
+  },
+  {
+    "raw": "f(x)",
+    "kind": "artist",
+    "category": "parenthesized-glued-token",
+    "trickyProperty": "Parentheses wrap a single char inside a 4-char mononym (K-pop group); naive replace → 'f x' two ultra-short tokens that backends drop as too short, emptying the query.",
+    "expectedHandling": "Prefer the de-bracketed join; emit {'f(x)','fx','f x'} with 'fx' primary; do not discard short tokens for this whole-name case.",
+    "realExample": true
+  },
+  {
+    "raw": "4:44",
+    "kind": "album",
+    "category": "colon-between-digits",
+    "trickyProperty": "Colon glues two digit groups (JAY-Z); indexed literally '4:44'. ':'→space → '4 44' (lone '4' noise) and the digit-joined '444' some search paths normalize to is never generated.",
+    "expectedHandling": "Treat a colon between digits as glue; emit {'4:44','4 44','444'}.",
+    "realExample": true
+  },
+  {
+    "raw": "POST HUMAN: SURVIVAL HORROR",
+    "kind": "album",
+    "category": "colon-subtitle",
+    "trickyProperty": "Colon separates series/main from subtitle; all-caps; catalogs split inconsistently (some store just 'POST HUMAN'). ':'→space is fine for the full form but NO pre-colon variant is generated.",
+    "expectedHandling": "Case-fold; emit full, colon-as-space, and pre-colon 'POST HUMAN' variants; treat ':' as a soft subtitle boundary for fallback, not a hard token kill.",
+    "realExample": true
+  },
+  {
+    "raw": "Metropolis: Suite I (The Chase)",
+    "kind": "album",
+    "category": "colon-subtitle",
+    "trickyProperty": "Colon subtitle PLUS a trailing '(The Chase)' part-label that is part of the official EP title (not edition noise); a paren-as-edition heuristic deletes it, a colon-truncate deletes 'Suite I (The Chase)'.",
+    "expectedHandling": "Keep the parenthetical (no edition keyword); emit full, colon-as-space, and pre-colon 'Metropolis' (lowest priority); fold the accented artist name separately.",
+    "realExample": true
+  },
+  {
+    "raw": "Sufjan Stevens Invites You To: Come On Feel the Illinoise!",
+    "kind": "album",
+    "category": "catalog-vs-canonical-title-divergence",
+    "trickyProperty": "Catalog/cover title is long with a colon and '!', but Lidarr/MusicBrainz canonicalizes the album as just 'Illinois' — wanted query and catalog row barely overlap textually.",
+    "expectedHandling": "Generate pre-/post-colon halves; recognize catalog vs MB titles can be effectively unrelated, so ALWAYS include an artist-only fallback and rank on artist+year when title similarity is hopeless.",
+    "realExample": true
+  },
+  {
+    "raw": "7",
+    "kind": "album",
+    "category": "bare-digit-ambiguity",
+    "trickyProperty": "Sault 2019; '7' is \\w so it survives, but a title-ONLY query of '7' matches tens of thousands of releases — failure is over-broadness, not emptiness.",
+    "expectedHandling": "For 1-2 char / pure-digit titles NEVER issue a title-only query and never fall back to query-only; require artist scoping 'Sault 7' and lean on artist+year+track-count.",
+    "realExample": true
+  },
+  {
+    "raw": "21",
+    "kind": "album",
+    "category": "bare-digit-ambiguity",
+    "trickyProperty": "Adele 2011 (also 19/25/30); a min-token-length or year/track-number de-noiser drops '21', collapsing the query to 'Adele', or an unanchored '21' floods the catalog.",
+    "expectedHandling": "Preserve standalone numeric titles verbatim; never classify a digits-only title as year/track-number; generate quoted exact-title + artist-scoped variants so the number is anchored to the artist.",
+    "realExample": true
+  },
+  {
+    "raw": "1989",
+    "kind": "album",
+    "category": "numeric-title-year-collision",
+    "trickyProperty": "Taylor Swift; a four-digit title indistinguishable from a release year. De-noisers that strip 1900-2099 year-like tokens delete the actual title (worsened by the 2014 vs 2023 '(Taylor's Version)' reissues).",
+    "expectedHandling": "Only strip 4-digit years in edition/parenthetical context, never when the year-shaped token IS the title; keep '1989'; account for '(Taylor's Version)' as an appended edition, not a title change.",
+    "realExample": true
+  },
+  {
+    "raw": "blink-182",
+    "kind": "artist",
+    "category": "alphanumeric-hyphen-join",
+    "trickyProperty": "Forced-lowercase, hyphen joins word+number; slug 'blink-182'. Strip-non-word → 'blink 182' splits the canonical token; a casing normalizer corrupts to 'Blink-182'; some pipelines strip the numeric suffix.",
+    "expectedHandling": "Emit verbatim 'blink-182', de-hyphenated 'blink 182', and removed-adjacent 'blink182'; never strip a numeric suffix from an artist name; compare case-insensitively.",
+    "realExample": true
+  },
+  {
+    "raw": "M83",
+    "kind": "artist",
+    "category": "letter-digit-fused-token",
+    "trickyProperty": "Single letter fused to a number, no separator (galaxy Messier 83). Camel/alnum splitting → 'M 83', then a min-length filter drops 'M' leaving '83'.",
+    "expectedHandling": "Do NOT split at letter/digit boundaries; keep fused alphanumeric tokens (M83, U2, B52s) intact; never length-filter the surviving letter.",
+    "realExample": true
+  },
+  {
+    "raw": "deadmau5",
+    "kind": "artist",
+    "category": "leetspeak-trailing-digit",
+    "trickyProperty": "Trailing '5' substitutes 'se' ('mouse'); the digit is phonetic. A digit-boundary splitter → 'deadmau 5'; a numeric-noise dropper → 'deadmau'; slug 'deadmau5'.",
+    "expectedHandling": "Preserve trailing/embedded digits verbatim — no boundary splitting, no numeric stripping; treat 'deadmau5' as an opaque token; exact + artist-scoped matching.",
+    "realExample": true
+  },
+  {
+    "raw": "Matchbox Twenty",
+    "kind": "artist",
+    "category": "word-vs-digit-equivalence",
+    "trickyProperty": "Number spelled as a word; band also stylized 'Matchbox 20', so catalogs store either form. Naive sanitizers do no word↔digit normalization → 0 results despite an exact conceptual match.",
+    "expectedHandling": "Generate spelled-word and arabic-digit variants for small numbers ('Twenty'↔'20'); try both before falling back.",
+    "realExample": true
+  },
+  {
+    "raw": "311",
+    "kind": "artist",
+    "category": "all-numeric-name",
+    "trickyProperty": "Entire artist name is digits (also 112, 702); a digits-only-token de-noiser removes the WHOLE name → empty artist string → empty fallback → 0 results, the shipped truncation failure mode.",
+    "expectedHandling": "Never strip an all-numeric token that constitutes the entire name; guard empty post-sanitization (use raw if sanitize empties); query '311' verbatim, artist-scoped.",
+    "realExample": true
+  },
+  {
+    "raw": "Led Zeppelin IV",
+    "kind": "album",
+    "category": "roman-numeral",
+    "trickyProperty": "Roman 'IV' as the de-facto title (officially untitled); catalogs index 'IV' or '4'. No roman↔arabic normalization → 'Led Zeppelin IV' misses 'Led Zeppelin 4'; lowercasing 'iv' collides with the English word.",
+    "expectedHandling": "Detect roman numerals; emit an arabic variant (IV→4) and vice-versa; preserve original casing for the roman form; try both. Single-letter roman X/I/V must never be length-filtered (cf. Chicago X→10).",
+    "realExample": true
+  },
+  {
+    "raw": "방탄소년단",
+    "kind": "artist",
+    "category": "korean-hangul-transliteration",
+    "trickyProperty": "BTS; Hangul arrives precomposed (NFC 방=U+BC29) or decomposed conjoining jamo (NFD ᄇ+ᅡ+ᆼ). \\w keeps both but no String.Normalize means NFD≠NFC → 0 results; no Latin 'BTS' variant generated.",
+    "expectedHandling": "Normalize to NFC before tokenizing/comparing (Apple returns NFD Korean); generate cross-script aliases {방탄소년단, 'BTS'}; query native first; never reduce to ASCII-only.",
+    "realExample": true
+  },
+  {
+    "raw": "화양연화",
+    "kind": "album",
+    "category": "korean-hangul-hanja-duality",
+    "trickyProperty": "BTS 'HYYH' renders as Hangul 화양연화, Hanja 花樣年華, or English title — zero character overlap across writing systems if Lidarr and the catalog chose different forms.",
+    "expectedHandling": "NFC-normalize then generate a variant set spanning Hangul + Hanja + English (from Lidarr release aliases); always keep a native artist-only fallback; if sanitize empties the query, fall back to the NFC raw, not emptiness.",
+    "realExample": true
+  },
+  {
+    "raw": "소녀시대",
+    "kind": "artist",
+    "category": "korean-romanization-apostrophe",
+    "trickyProperty": "Girls' Generation: Hangul 소녀시대 + romanized 'Girls' Generation' (apostrophe straight U+0027 or curly U+2019) + 'SNSD'. Curly ' is replaced by a space → 'Girls  Generation', differing from slug and straight-apostrophe forms. BOTH cross-script gap AND apostrophe-variance break matching.",
+    "expectedHandling": "NFC-normalize; emit {소녀시대,'Girls' Generation','Girls Generation','SNSD'}; normalize apostrophe variants (straight↔curly↔removed); emit both apostrophe-removed-adjacent and apostrophe-as-space forms.",
+    "realExample": true
+  },
+  {
+    "raw": "훗",
+    "kind": "track",
+    "category": "single-syllable-hangul",
+    "trickyProperty": "Girls' Generation single '훗 (Hoot)'; native title is ONE Hangul syllable. ASCII sanitizer reduces it to '' keeping only parenthetical 'Hoot' (or empty if parens dropped); a one-syllable query is maximally fragile.",
+    "expectedHandling": "NFC-normalize and KEEP the native syllable; extract the parenthetical English gloss as a sibling variant ('Hoot'); never let sanitizing yield empty — fall back to raw normalized title.",
+    "realExample": true
+  },
+  {
+    "raw": "aespa",
+    "kind": "artist",
+    "category": "native-latin-with-cjk-alias",
+    "trickyProperty": "Reverse direction: canonical name is lowercase Latin 'aespa', alias is Hangul 에스파; an ASCII-clean sanitizer assumes done, but if Lidarr supplies 에스파 vs catalog 'aespa' there's no bridge. Casing to 'Aespa' can miss a case-sensitive lowercase slug.",
+    "expectedHandling": "Carry both scripts as aliases {aespa, 에스파} regardless of which Lidarr supplies; compare case-insensitively while preserving the lowercase stylization variant; don't assume ASCII-clean needs no CJK alias.",
+    "realExample": true
+  },
+  {
+    "raw": "防弾少年団",
+    "kind": "artist",
+    "category": "japanese-kanji-same-act",
+    "trickyProperty": "BTS's official JAPANESE name (Kanji), distinct from Korean 방탄소년단 and Latin 'BTS'; JP-market rows file under the Kanji. Naive code treats the three scripts as unrelated strings with no cross-walk.",
+    "expectedHandling": "Maintain artist-alias variants across all scripts an act uses (Hangul + Kanji + Latin) sourced from Lidarr/MusicBrainz aliases; fan out the search. First-class case for K/J-pop libraries.",
+    "realExample": true
+  },
+  {
+    "raw": "きゃりーぱみゅぱみゅ",
+    "kind": "artist",
+    "category": "all-hiragana-choonpu",
+    "trickyProperty": "Kyary Pamyu Pamyu, all hiragana with small kana (ゃ,ゅ) and prolonged-sound mark ー (chōonpu U+30FC, category Lm). A sanitizer that folds dash-lookalikes corrupts ー; no romaji variant is emitted.",
+    "expectedHandling": "NFC-normalize, preserve ー as a letter (never fold to '-' or strip); emit a romaji alias 'Kyary Pamyu Pamyu' alongside the native form.",
+    "realExample": true
+  },
+  {
+    "raw": "宇多田ヒカル",
+    "kind": "artist",
+    "category": "mixed-kanji-katakana-name-order",
+    "trickyProperty": "Utada Hikaru mixes Kanji 宇多田 + Katakana ヒカル in one spaceless token; catalogued 'Utada Hikaru', 'Hikaru Utada', or 'Utada'. Western↔Eastern name reversal is invisible to a char-stripper.",
+    "expectedHandling": "NFC-normalize; emit native + romaji in BOTH name orders + surname-only 'Utada'; rely on Lidarr/MusicBrainz aliases for the romanization.",
+    "realExample": true
+  },
+  {
+    "raw": "夜に駆ける",
+    "kind": "track",
+    "category": "spaceless-cjk-track",
+    "trickyProperty": "YOASOBI 'Yoru ni Kakeru'; spaceless Kanji+hiragana. ASCII sanitizer empties it → degrades to artist-only, losing track specificity; even \\w emits one spaceless token with no romaji/English variant.",
+    "expectedHandling": "Preserve native chars (Unicode-aware class, never ASCII-only); NFC-normalize; generate romaji + official-English ('Yoru ni Kakeru','Into the Night'); if sanitize empties, fall back to raw, not artist-only.",
+    "realExample": true
+  },
+  {
+    "raw": "クリスマス・イブ",
+    "kind": "track",
+    "category": "katakana-middle-dot",
+    "trickyProperty": "Tatsuro Yamashita 'Christmas Eve'; the katakana middle dot ・ (U+30FB) is NOT in the keep set so it's replaced by a space, mangling matching against a slug that drops it adjacently ('クリスマスイブ'). Exact degree-sign failure class for CJK punctuation.",
+    "expectedHandling": "For ・ (and half-width ･ U+FF65) emit BOTH the space-separated AND removed-adjacent forms plus the English 'Christmas Eve' alias — the identical dual-variant rule from the degree-sign fix.",
+    "realExample": true
+  },
+  {
+    "raw": "secret base 〜君がくれたもの〜",
+    "kind": "track",
+    "category": "wave-dash-vs-fullwidth-tilde",
+    "trickyProperty": "ZONE; subtitle wrapped in wave dashes 〜 (U+301C) which, via Shift-JIS round-trips, is the SAME visual char as fullwidth tilde ～ (U+FF5E) — raw strings never byte-equal. Mixed Latin+Kanji+Hiragana. 〜 strips to spaces.",
+    "expectedHandling": "Canonicalize the wave-dash family (U+301C,U+FF5E,U+3030,U+007E) to one representative BEFORE comparison; emit subtitle-stripped, subtitle-with-space, and subtitle-adjacent variants; NFC-normalize the remainder.",
+    "realExample": true
+  },
+  {
+    "raw": "ピースサイン",
+    "kind": "track",
+    "category": "choonpu-prolonged-mark",
+    "trickyProperty": "Kenshi Yonezu 'Peace Sign'; the prolonged-sound mark ー (U+30FC) sits mid-word as a vowel-lengthener (category Lm, \\w keeps it). A common 'fold ‐‑–—―ー to -' hardening step corrupts it to 'ピ-スサイン'/'ピスサイン'.",
+    "expectedHandling": "Explicitly EXCLUDE ー (U+30FC) and iteration marks 々/ヽヾ from any dash/punctuation folding — they are letters; NFC-normalize and keep verbatim; emit only a romaji 'Peace Sign' bridge.",
+    "realExample": true
+  },
+  {
+    "raw": "ギミチョコ！！",
+    "kind": "track",
+    "category": "fullwidth-punctuation-nfkc",
+    "trickyProperty": "BABYMETAL 'Gimme Chocolate!!' uses FULLWIDTH ！！ (U+FF01); fullwidth LETTERS/DIGITS (ＡＢＣ/１２３) are matched by \\w and survive un-normalized so they never equal ASCII forms, and fullwidth （） are stripped while ASCII () are kept — inconsistent.",
+    "expectedHandling": "Apply NFKC (or targeted fullwidth→halfwidth) so ！→!, ＡＢＣ→ABC, （）→(), ｶﾀｶﾅ→カタカナ before sanitizing; then apply the mid-token dual-variant rule to the now-ASCII '!!'. NFKC is width/compat only — not Trad↔Simp.",
+    "realExample": true
+  },
+  {
+    "raw": "モーニング娘。",
+    "kind": "artist",
+    "category": "trailing-ideographic-full-stop",
+    "trickyProperty": "Morning Musume's official name ends with U+3002 IDEOGRAPHIC FULL STOP '。' that is PART of the name; an ASCII or 'strip Unicode punctuation' filter drops it → 'モーニング娘', a different canonical name JP catalogs may not match.",
+    "expectedHandling": "Preserve non-ASCII letters; emit both '{name}。' and '{name}' variants plus romaji 'Morning Musume'; whitelist trailing ideographic full stops in names — don't equate 'strip punctuation' with stripping name-integral CJK punctuation.",
+    "realExample": true
+  },
+  {
+    "raw": "マクロスＭＡＣＲＯＳＳ８２－９９",
+    "kind": "artist",
+    "category": "fullwidth-latin-nfkc",
+    "trickyProperty": "Vaporwave 'Macross 82-99' in FULLWIDTH Latin (Ｍ U+FF2D), fullwidth digits (８ U+FF18), fullwidth hyphen (－ U+FF0D), katakana prefix. \\w keeps fullwidth letters/digits so 'ＭＡＣＲＯＳＳ' never equals ASCII 'MACROSS' — zero matches despite identical-looking text.",
+    "expectedHandling": "Apply NFKC so Ｍ→M, ８→8, －→-, etc. → 'マクロスMACROSS82-99' before building the search; NFKC is the single most important step for CJK-region metadata and must precede tokenization.",
+    "realExample": true
+  },
+  {
+    "raw": "周杰倫",
+    "kind": "artist",
+    "category": "han-traditional-vs-simplified",
+    "trickyProperty": "Jay Chou; Traditional 周杰倫 vs Simplified 周杰伦 (倫 U+502B vs 伦 U+4F26 are entirely different codepoints). NFC/NFKC do NOT bridge Trad↔Simp (semantic mapping, not normalization), so normalize-and-strip never helps.",
+    "expectedHandling": "Add a Trad↔Simp variant step (OpenCC-style table) so {周杰倫,周杰伦} plus romaji 'Jay Chou'/'Zhou Jielun' are all queried; Han folding is a distinct axis from NFC/width normalization and must run on every text field (artist AND album).",
+    "realExample": true
+  },
+  {
+    "raw": "Молчат Дома",
+    "kind": "artist",
+    "category": "cyrillic",
+    "trickyProperty": "All-Cyrillic with a space, no ASCII. An ASCII \\W→space sanitizer replaces the whole string with spaces → empty query with nothing to fall back to.",
+    "expectedHandling": "Never down-map Unicode letters (\\p{L}) to spaces; NFC-normalize; send native 'Молчат Дома' AND a romanized 'Molchat Doma'; if sanitization empties the string, fall back to the URL-encoded original.",
+    "realExample": true
+  },
+  {
+    "raw": "ДДТ",
+    "kind": "artist",
+    "category": "cyrillic-homoglyph",
+    "trickyProperty": "Visually identical to Latin 'DDT' but Cyrillic De/De/Te (U+0414/0414/0422); ASCII strip empties it, OR ordinal equality against a Latin 'DDT' slug silently rejects a true match.",
+    "expectedHandling": "Run a Unicode confusables/skeleton fold (or Cyrillic↔Latin homoglyph map) to also query Latin 'DDT'; compare confusable-insensitively, not ordinal; keep the native form primary.",
+    "realExample": true
+  },
+  {
+    "raw": "Нас не догонят",
+    "kind": "track",
+    "category": "mixed-script-fields",
+    "trickyProperty": "Cyrillic track by Latin-named, dot-laden artist 't.A.T.u.': the artist's dots explode to 't A T u' while the Cyrillic track strips to empty, so the combined query degrades to a mangled Latin fragment. Two failure modes compound.",
+    "expectedHandling": "Handle each field by its own script: native Cyrillic track + romanization 'Nas ne dogonyat'; don't shatter 't.A.T.u.' on dots (also try 'tatu'); per-field queries so a stripped field can't empty the whole search; Cyrillic artist-only fallback never truncated.",
+    "realExample": true
+  },
+  {
+    "raw": "Άννα Βίσση",
+    "kind": "artist",
+    "category": "greek",
+    "trickyProperty": "Greek with tonos-accented precomposed vowels (Ά U+0386, ί U+03AF). ASCII strip empties it; NFD-then-strip-marks removes the tonos producing a corrupted token unequal to the precomposed-NFC catalog title.",
+    "expectedHandling": "Keep Greek; normalize to NFC (not NFD-then-strip); add an accent-folded variant ('Αννα Βισση') and a romanized 'Anna Vissi' as ADDITIONAL queries; treat tonos as part of the word.",
+    "realExample": true
+  },
+  {
+    "raw": "Ελευθερία Αρβανιτάκη",
+    "kind": "artist",
+    "category": "greek-final-sigma-casing",
+    "trickyProperty": "If uppercased (ΑΡΒΑΝΙΤΑΚΗ) the trailing Σ casefolds ambiguously to medial σ vs final ς; a culture-insensitive ToLower maps every Σ→σ, wrong for word-final position, so the lowercased query ≠ catalog title.",
+    "expectedHandling": "Lowercase with Greek-aware casing (final-sigma rule) or compare with Unicode caseless matching treating σ/ς as equivalent; preserve native Greek primary + romanization 'Eleftheria Arvanitaki'; NFC.",
+    "realExample": true
+  },
+  {
+    "raw": "فيروز",
+    "kind": "artist",
+    "category": "arabic-rtl",
+    "trickyProperty": "RTL Arabic (Fairuz), caseless/cursive, multiple valid alef/yeh spellings. ASCII \\W→space erases it; when joined with a Latin album for a combined query, survivors reorder under bidi into a scrambled string.",
+    "expectedHandling": "Preserve Arabic; build a folded variant (alef أإآ→ا, yeh ي/ى, ة/ه, strip harakat U+064B-0652 and tatweel U+0640) AND keep the unfolded original; add romanizations ('Fairuz','Fayrouz'); query per-field to avoid bidi reordering.",
+    "realExample": true
+  },
+  {
+    "raw": "עומר אדם",
+    "kind": "artist",
+    "category": "hebrew-rtl",
+    "trickyProperty": "RTL Hebrew (Omer Adam) with a word-final letter form (final mem ם U+05DD) distinct from medial mem. ASCII strip empties it; naive final-form 'normalization' or strip-as-non-word breaks matching; bidi reorders a Latin-joined query.",
+    "expectedHandling": "Preserve Hebrew (final forms are distinct meaningful codepoints — do not fold ם→מ); add romanization 'Omer Adam'; NFC; logical order + per-field queries; treat any niqqud (U+0591-05C7) as part of the token. Map Hebrew geresh/gershayim (U+05F3/05F4) as apostrophe/quote equivalents.",
+    "realExample": true
+  },
+  {
+    "raw": "บอดี้สแลม",
+    "kind": "artist",
+    "category": "thai-no-word-spaces",
+    "trickyProperty": "Thai (Bodyslam) has NO inter-word spaces and stacked combining marks — sara-ii (ี U+0E35) + mai-tho (้ U+0E49). ASCII strip empties it; whitespace-splitting yields one giant token; NFD/char-class stripping removes vowel/tone marks changing the word.",
+    "expectedHandling": "Don't rely on spaces for Thai boundaries — query the whole run; NFC-normalize and never strip Thai marks (U+0E31-0E4E); add romanization 'Bodyslam'; truncate only on grapheme-cluster boundaries.",
+    "realExample": true
+  },
+  {
+    "raw": "अरिजीत सिंह",
+    "kind": "artist",
+    "category": "devanagari",
+    "trickyProperty": "Devanagari (Arijit Singh) with dependent vowel matras (ि,ी) that visually reorder + anusvara (ं U+0902). Stripping combining marks deletes matras/anusvara; trimming by code unit separates a base consonant from its dependent vowel.",
+    "expectedHandling": "Keep all matras/anusvara/virama; NFC-normalize; query native + the dominant Latin 'Arijit Singh' (Indian metadata is often Latin); operate on grapheme clusters; don't reorder logical-order codepoints.",
+    "realExample": true
+  },
+  {
+    "raw": "कभी खुशी कभी ग़म",
+    "kind": "track",
+    "category": "devanagari-nukta-nfc-nfd",
+    "trickyProperty": "Devanagari title with a nukta composition: ग़ = ग (U+0917) + nukta (U+093C), which also exists precomposed — NFC vs NFD spellings differ. NFD-then-strip-nukta turns ग़म→गम (different word).",
+    "expectedHandling": "Normalize consistently to NFC on both query and comparison so nukta forms unify; never strip U+093C nukta or matras; generate a romanized 'Kabhi Khushi Kabhie Gham'.",
+    "realExample": true
+  },
+  {
+    "raw": "Paciﬁc 231",
+    "kind": "track",
+    "category": "presentation-ligature",
+    "trickyProperty": "The 'fi' is the presentation ligature ﬁ (U+FB01), one codepoint (sneaks in via PDF/OCR copy-paste). \\w keeps it so 'paciﬁc' never matches 'pacific'; NFC/NFD leave it (only a COMPATIBILITY decomposition exists), so an NFC-only pipeline silently passes a non-matching token.",
+    "expectedHandling": "Use NFKC (not just NFC) for the search key so ﬁ→'fi', ﬂ→'fl', ﬀ/ﬃ/ﬄ decompose → 'Pacific 231'.",
+    "realExample": false
+  },
+  {
+    "raw": "1989 (Taylor's Version)",
+    "kind": "album",
+    "category": "version-suffix-rerecording",
+    "trickyProperty": "'(Taylor's Version)' designates a SEPARATE re-recording with its own MB release-group + an internal apostrophe. Strip-to-space splits Taylor's into 'taylor'/'s' and keeps version words; over-correcting bracket-strip collapses to bare '1989' grabbing the WRONG (2014) release.",
+    "expectedHandling": "Treat it as a non-droppable discriminator: primary query keeps it (apostrophe removed without a space → 'Taylors Version', also try curly form); drop-the-clause '1989' is a LAST-resort fallback ranked below, never primary.",
+    "realExample": true
+  },
+  {
+    "raw": "All Too Well (10 Minute Version) (Taylor's Version) (From the Vault)",
+    "kind": "track",
+    "category": "stacked-parentheticals",
+    "trickyProperty": "Three chained parentheticals; '(10 Minute Version)' is load-bearing (vs the 5-min cut), 'From the Vault' is promotional. A greedy bracket-stripper removes all three, collapsing distinct recordings into an ambiguous 'All Too Well'.",
+    "expectedHandling": "Parse each parenthetical independently: keep distinguishing clauses (10 Minute Version, Taylor's Version), drop promotional (From the Vault); emit a ranked variant ladder — full → minus Vault → minus Taylor's → minus 10-Minute → bare title (deep fallback).",
+    "realExample": true
+  },
+  {
+    "raw": "(What's the Story) Morning Glory?",
+    "kind": "album",
+    "category": "title-integral-parenthesis",
+    "trickyProperty": "The LEADING '(What's the Story)' is part of the canonical title, not edition noise; plus internal apostrophe and trailing '?'. A bracket-stripper deletes it → 'Morning Glory' (a different real title), grabbing the wrong entity. Also a URL '?' delimiter.",
+    "expectedHandling": "GUARD bracket-stripping: only strip a parenthetical matching the known edition/version/feat lexicon, NEVER a leading parenthetical or one whose words aren't in that lexicon. Normalize apostrophe by deletion (What's→Whats), drop trailing '?', URL-encode; always keep a full-title fallback.",
+    "realExample": true
+  },
+  {
+    "raw": "The Dark Side of the Moon (Remastered 2011)",
+    "kind": "album",
+    "category": "remaster-tag-with-year",
+    "trickyProperty": "'(Remastered 2011)' is reissue noise with a 4-digit year a detector may misread; also appears word-order-flipped as '(2011 Remaster)'.",
+    "expectedHandling": "Strip the whole remaster clause (remaster/remastered + optional year, either order) → 'The Dark Side of the Moon' primary; keep a remaster-preserving variant; don't treat a year adjacent to a remaster keyword as a title token.",
+    "realExample": true
+  },
+  {
+    "raw": "Revolver (Mono)",
+    "kind": "album",
+    "category": "mono-stereo-qualifier",
+    "trickyProperty": "'(Mono)' denotes a genuinely different master that coexists with the stereo release as its own catalog entry — droppable noise in some contexts, a true discriminator in others. Blindly stripping it can grab the wrong master.",
+    "expectedHandling": "Keep Mono/Stereo in the primary query (try '(Mono)' and bare 'Mono' forms); only fall back to dropping it if no qualified match; do not coalesce Mono and Stereo into one query that could match either.",
+    "realExample": true
+  },
+  {
+    "raw": "Easy On Me - Single",
+    "kind": "album",
+    "category": "marketing-suffix-single-ep",
+    "trickyProperty": "Apple/Amazon append ' - Single' (also ' - EP'); the ' - ' is the detection anchor. Strip-to-space → 'Easy On Me Single' where 'Single' is a literal token absent from Qobuz/Tidal, breaking cross-catalog match, and the anchor is destroyed.",
+    "expectedHandling": "Detect and strip the trailing ' - Single'/' - EP' marketing suffix BEFORE general sanitization (the ' - ' anchor must survive) → 'Easy On Me'; keep the suffix only to disambiguate a single from a same-named album.",
+    "realExample": true
+  },
+  {
+    "raw": "Random Access Memories (10th Anniversary Edition)",
+    "kind": "album",
+    "category": "anniversary-edition",
+    "trickyProperty": "'(10th Anniversary Edition)' contains an ordinal ('10th') mixing digits+letters; strip-to-space leaks '10th' as an orphan numeric token and over-constrains against the standard release.",
+    "expectedHandling": "Strip the anniversary/expanded clause including its ordinal ('Nth Anniversary [Edition]','Expanded Edition') → standard title primary; emit the edition-preserving form secondary; don't let '10th' leak as an orphan numeric.",
+    "realExample": true
+  },
+  {
+    "raw": "Take Care (Deluxe)",
+    "kind": "album",
+    "category": "edition-suffix-baseline",
+    "trickyProperty": "The simplest, highest-frequency case: a single-word '(Deluxe)' suffix; strip-to-space → 'Take Care Deluxe' where 'Deluxe' survives, missing the plain 'Take Care' entry. The golden path a sanitizer must get right by default.",
+    "expectedHandling": "Strip the trailing edition keyword family (Deluxe/Deluxe Edition/Expanded/Special/Bonus, including multi-word 'Super Deluxe Edition') → 'Take Care' primary, edition-preserving secondary. Pin this so the simple win never regresses.",
+    "realExample": true
+  },
+  {
+    "raw": "Wake Me Up (Radio Edit)",
+    "kind": "track",
+    "category": "alternate-mix-tag",
+    "trickyProperty": "'(Radio Edit)' is a mix/duration variant; catalogs inconsistently call the same thing '(Single Version)','(Album Version)', or omit it. Strip-to-space over-specifies against the plain album cut.",
+    "expectedHandling": "Treat Radio Edit/Single Version/Album Version/Original Mix as a synonym family: primary drops the clause → 'Wake Me Up'; emit mix-preserving variants for each synonym; rank bare title first for the standard track.",
+    "realExample": true
+  },
+  {
+    "raw": "Bohemian Rhapsody (Live Aid)",
+    "kind": "track",
+    "category": "live-tag",
+    "trickyProperty": "'(Live Aid)' is a performance qualifier; live tags carry open-ended venue/year free-text ('(Live at Earls Court, 1981)') that rarely matches a title verbatim. Stripping can grab the studio cut when a live release was wanted.",
+    "expectedHandling": "Recognize the live-clause family ('Live','Live at <venue>','Live in <city>','Unplugged','Acoustic') and strip for the primary studio-seeking query → 'Bohemian Rhapsody', plus a live-preserving variant; tolerate venue/year free-text inside the clause as non-title tokens.",
+    "realExample": true
+  },
+  {
+    "raw": "Uptown Funk (feat. Bruno Mars)",
+    "kind": "track",
+    "category": "featuring-clause",
+    "trickyProperty": "'(feat. Bruno Mars)' is attribution most catalogs store in a separate artist field; 'feat.' carries an abbreviation period. Strip-to-space leaves a junk 'feat' token and inflates the query with the guest name.",
+    "expectedHandling": "Detect the feat-marker family (feat./feat/ft./ft/featuring) and split: primary drops the whole '(feat. ...)' clause → 'Uptown Funk'; a secondary keeps the guest as a free token (for title-embedded catalogs); route the guest into a performer hint, never the title-similarity compare; strip the marker word itself.",
+    "realExample": true
+  },
+  {
+    "raw": "I'm the One (feat. Justin Bieber, Quavo, Chance the Rapper & Lil Wayne)",
+    "kind": "track",
+    "category": "multi-guest-featuring",
+    "trickyProperty": "One parenthetical lists four guests with commas + '&', and the base title has an apostrophe (I'm). Strip-to-space splits I'm→'I'/'m' and lets four guest names drown the four-word title.",
+    "expectedHandling": "Strip the entire feat(...) group as a unit regardless of internal commas/ampersands; preserve the apostrophe inside the contraction; base 'I'm the One' + ASCII-folded 'Im the One'.",
+    "realExample": true
+  },
+  {
+    "raw": "Despacito (Remix) [feat. Justin Bieber]",
+    "kind": "track",
+    "category": "mixed-bracket-types",
+    "trickyProperty": "'(Remix)' in round brackets (a genuinely different recording) and '[feat. Justin Bieber]' in square brackets (attribution). A stripper handling only '()' leaves the square feat clause; one stripping both collapses the Remix into the original.",
+    "expectedHandling": "Normalize '()','[]','{}' as interchangeable delimiters; classify per-clause: '[feat. ...]' droppable, '(Remix)' a release discriminator to PRESERVE in primary; emit full → minus feat (keep Remix) → bare 'Despacito'. Bracket flavor must not change clause recognition.",
+    "realExample": true
+  },
+  {
+    "raw": "Creepin' (with 21 Savage)",
+    "kind": "track",
+    "category": "collaboration-with-clause",
+    "trickyProperty": "'(with 21 Savage)' is a collaborator clause (the 'with' variant of feat), the base 'Creepin'' ends in an apostrophe, and the guest starts with a digit. Strip-to-space drops the trailing apostrophe ('Creepin') — the exact degree-sign class of a silently-deleted meaningful trailing glyph.",
+    "expectedHandling": "Recognize ' (with X)' as a feat-equivalent collaborator clause and drop it for primary → 'Creepin''; normalize the trailing apostrophe to emit both 'Creepin' and 'Creepin'' rather than blindly deleting; keep a guest-retaining variant; guarantee artist+base-title fallback is non-empty.",
+    "realExample": true
+  },
+  {
+    "raw": "See You Again (feat. Charlie Puth)",
+    "kind": "track",
+    "category": "feat-marker-spelling",
+    "trickyProperty": "The same credit appears as 'feat.','ft.','featuring','feat','f/', or 'with' across Qobuz/Tidal/Apple/Amazon. A stripper hard-coded to literal 'feat.' misses the others, leaving an orphan 'ft'/'with' token and cross-catalog mismatch.",
+    "expectedHandling": "Recognize a marker class {feat,feat.,ft,ft.,featuring,with,f/} case-insensitively, bracketed or bare, and strip marker + trailing guest list uniformly; base 'See You Again' + a canonical '(feat. Charlie Puth)' variant.",
+    "realExample": true
+  },
+  {
+    "raw": "Titanium (feat. Sia) [Alesso Remix (Radio Edit)]",
+    "kind": "track",
+    "category": "nested-brackets",
+    "trickyProperty": "A '( )' nested inside a '[ ]' plus a separate feat group; a regex stripping '\\[[^\\]]*\\]' or matching the first ')' mis-balances — '(feat. Sia)' closes the wrong bracket or the inner '(Radio Edit)' dangles.",
+    "expectedHandling": "Parse brackets with a depth counter (balance-aware), NOT a greedy/first-match regex; strip the whole feat group and the whole remix group including its nested sub-tag; base 'Titanium' + 'Titanium (Alesso Remix)'.",
+    "realExample": false
+  },
+  {
+    "raw": "Hurt (Live at Folsom Prison",
+    "kind": "track",
+    "category": "unbalanced-bracket",
+    "trickyProperty": "Dirty live/bootleg metadata leaves an opening '(' with no closer. A paired-bracket stripper '\\([^)]*\\)' finds no match and leaves it intact; a greedy '\\(.*' eats to end-of-string deleting the whole tail; strip-to-space leaves a stray '(' junk token.",
+    "expectedHandling": "Tolerate unbalanced brackets: when an opener has no closer, strip from the opener to end-of-string for the base variant ('Hurt') while ALSO keeping the raw form as a fallback; never let an unbalanced bracket make the strip a no-op or over-eat the title.",
+    "realExample": false
+  },
+  {
+    "raw": "KoЯn",
+    "kind": "artist",
+    "category": "cyrillic-homoglyph",
+    "trickyProperty": "Stylized with reversed-R rendered as Cyrillic Я (U+042F); 'Korn' is itself a deliberate misspelling. ASCII \\w treats Я as non-word → 'Ko n'/'Kon'; a spell-corrector would 'fix' Korn→Corn.",
+    "expectedHandling": "Apply confusable/homoglyph folding (Я→R) BEFORE tokenizing → 'Korn'; never spell-correct deliberate-misspelling artist tokens.",
+    "realExample": true
+  },
+  {
+    "raw": "MF DOOM",
+    "kind": "artist",
+    "category": "allcaps-vs-mixedcase-casing",
+    "trickyProperty": "Conventionally all-caps but catalogs disagree ('MF DOOM' vs 'MF Doom'); also released as 'DOOM','Viktor Vaughn'. Case-sensitive equality/Levenshtein inflates distance enough to drop the match.",
+    "expectedHandling": "Casefold both sides before comparing/scoring; probe known aliases ('DOOM'); never rely on the catalog preserving all-caps stylization.",
+    "realExample": true
+  },
+  {
+    "raw": "tUnE-yArDs",
+    "kind": "artist",
+    "category": "erratic-mixed-casing",
+    "trickyProperty": "Intentionally alternating case (Merrill Garbus) that no deterministic case rule reproduces; any 'fix the case' normalizer yields a different string than the catalog stores. Hyphen too.",
+    "expectedHandling": "Casefold BOTH query and catalog before comparing ('tuneyards'/'tune yards'); emit hyphen-removed-adjacent and spaced variants; never rely on exact casing.",
+    "realExample": true
+  },
+  {
+    "raw": "JAY-Z",
+    "kind": "artist",
+    "category": "allcaps-vs-mixedcase-casing",
+    "trickyProperty": "Restyled from 'Jay-Z' to all-caps in 2017; catalogs carry both by vintage. Case-sensitive match against older 'Jay-Z' rows fails; a single exact form only matches half the catalog. Hyphen mid-name.",
+    "expectedHandling": "Casefold so 'Jay-Z' and 'JAY-Z' are equal; emit hyphen→space 'JAY Z', removed-adjacent 'JAYZ', and raw.",
+    "realExample": true
+  },
+  {
+    "raw": "IGOR",
+    "kind": "album",
+    "category": "allcaps-vs-mixedcase-casing",
+    "trickyProperty": "Intentionally all-caps title (Tyler, the Creator); metadata sometimes title-cases to 'Igor'. Case-sensitive title equality fails; an all-caps-as-acronym detector might try to expand it.",
+    "expectedHandling": "Compare album titles case-insensitively (casefold); preserve the title verbatim; do not title-case it or treat an all-caps word as an acronym to expand.",
+    "realExample": true
+  },
+  {
+    "raw": "715 - CRΣΣKS",
+    "kind": "track",
+    "category": "greek-letter-stylization-in-word",
+    "trickyProperty": "Bon Iver; the 'EE' in 'CREEKS' is two Greek capital sigmas Σ (U+03A3), and a leading 'number - ' looks like a track index. \\w treats Σ as non-word → '715 CR KS' (word gutted); the leading '715 -' may be stripped as a track number.",
+    "expectedHandling": "Apply confusable/homoglyph folding (Σ→E) → 'CREEKS' with strip-to-space fallback; preserve leading numerals as part of the title (do not treat as a track number); case-insensitive.",
+    "realExample": true
+  },
+  {
+    "raw": "Be​yoncé",
+    "kind": "artist",
+    "category": "zero-width-space",
+    "trickyProperty": "A zero-width space (U+200B, category Cf) sits after 'Be' (invisible when rendered); arrives via web/PDF copy-paste. NOT matched by \\s or \\w so it falls into [^\\w\\s...] and is REPLACED with a space → 'Be yoncé' — the degree-sign failure mode, but invisible to any human reviewing the query.",
+    "expectedHandling": "Add a pre-step that DELETES (not space-substitutes) the zero-width/format set — U+200B,200C,200D,2060,FEFF and bidi controls U+200E/200F/202A-202E — before the symbol pass so neighbours stay adjacent; pin a test that ZWSP-injected name == clean name.",
+    "realExample": false
+  },
+  {
+    "raw": "﻿Radiohead",
+    "kind": "artist",
+    "category": "bom-zero-width-nobreak",
+    "trickyProperty": "A UTF-8 BOM (U+FEFF) survives from a BOM-prefixed CSV/JSON or clipboard. A LEADING BOM is masked (becomes a leading space Trim removes) so it passes tests, but a MID-STRING BOM splits a real token; raw-string equality also makes '﻿Radiohead'≠'Radiohead' so cache/dedup keys diverge.",
+    "expectedHandling": "Strip U+FEFF (and the zero-width set) up front by deletion; NFC-normalize and strip BOM before the string is used as a cache key, dedup key, or query; treat leading- and mid-string-BOM identically so the leading case can't hide the mid-string regression.",
+    "realExample": false
+  },
+  {
+    "raw": "",
+    "kind": "track",
+    "category": "empty-string",
+    "trickyProperty": "Hidden/untitled tracks (Sigur Rós '( )' tracks, pre-gap ghosts) deserialize to an empty title; CleanQuery('') returns '' but the call site builds 'Artist ' (trailing space) → the API returns the whole catalog or a 400.",
+    "expectedHandling": "Branch on emptiness explicitly: empty album → artist-only; empty track → album + position match; empty artist AND album → do NOT call the API (return no releases) rather than emit a wildcard; never concatenate fields without checking each is non-empty post-sanitize.",
+    "realExample": false
+  },
+  {
+    "raw": "   ",
+    "kind": "album",
+    "category": "whitespace-only",
+    "trickyProperty": "A title of only spaces/tab/NBSP; IsNullOrEmpty is FALSE while IsNullOrWhiteSpace is TRUE, so code guarding only on IsNullOrEmpty lets it through and ships a whitespace-padded query. A custom Trim(' ') misses U+00A0.",
+    "expectedHandling": "Always gate on IsNullOrWhiteSpace and treat whitespace-only (including Unicode-space-only and zero-width-only) identically to empty → artist-only or no-op; use full-Unicode String.Trim() consistently across plugins.",
+    "realExample": false
+  },
+  {
+    "raw": "  OK Computer  ",
+    "kind": "album",
+    "category": "leading-trailing-spaces",
+    "trickyProperty": "Data-entry padding + doubled internal spaces, endemic in real metadata. If trimming happens after concatenation but a per-field path skips it, '  OK Computer  '≠'OK Computer' so dedup/cache keys and the artist-only fallback comparison (q.Trim().Equals(artist)) miss; doubled spaces yield empty tokens after Split.",
+    "expectedHandling": "Canonicalize early: Trim() + collapse internal \\s+ to a single ASCII space as the FIRST transform before any keying/dedup/length check; make CleanQuery idempotent (clean(clean(x))==clean(x)) and pin it with a test.",
+    "realExample": false
+  },
+  {
+    "raw": "Pink Floyd\tThe Wall\nDisc 1",
+    "kind": "album",
+    "category": "embedded-tab-newline",
+    "trickyProperty": "TAB/LF/CR/VT/FF embedded from CSV/TSV/HTML/multi-line clipboard. They ARE matched by \\s here, but a raw newline reaching the HTTP layer is a CRLF-injection/log-forging vector, and a sibling sanitizer built on literal ' ' replace (not \\s) leaves them intact → broken querystring/400.",
+    "expectedHandling": "Normalize the full C0/C1 whitespace set (\\t\\n\\r\\v\\f, U+0085) to a single ASCII space and collapse, in the SHARED sanitizer; reject/strip raw control bytes before any header/URL/log use; never interpolate an un-sanitized title into a header or log.",
+    "realExample": false
+  },
+  {
+    "raw": "Kind of Blue\u0000",
+    "kind": "album",
+    "category": "control-characters",
+    "trickyProperty": "A NUL/BEL/C1 control byte from a corrupted SQLite blob or truncated UTF-8. NUL isn't \\s or \\w → replaced with a space here, but at a native/interop boundary many C/HTTP stacks treat NUL as a C-string terminator and TRUNCATE the query, or .NET %00-encodes it → 400; control chars also corrupt log/JSON and cache files.",
+    "expectedHandling": "Strip ALL Unicode control chars (Cc and Cf, i.e. char.IsControl plus the format set) by deletion as the very FIRST sanitizer step, before symbol/whitespace handling, so no control byte reaches HTTP, a cache key, or a log; pin a test that any control-injected title sanitizes to the clean title.",
+    "realExample": false
+  },
+  {
+    "raw": "i love u so much it hurts 💀❤️",
+    "kind": "track",
+    "category": "pictographic-emoji-trailing",
+    "trickyProperty": "Hyperpop/SoundCloud titles ending in astral emoji (💀 U+1F480, ❤️ = U+2764+U+FE0F, ZWJ sequences). A \\W regex on UTF-16 can SPLIT a surrogate pair, leaving an unpaired surrogate → invalid string EscapeDataString rejects; variation selector U+FE0F and ZWJ survive a BMP-only strip as invisible junk.",
+    "expectedHandling": "Strip emoji by GRAPHEME CLUSTER (astral-aware: runes/StringInfo, never UTF-16 code units) so surrogate pairs, variation selectors, and ZWJ sequences are removed whole; drop them (no search signal) while preserving the real text; if stripping empties an emoji-only title, fall back to alias/artist-only.",
+    "realExample": false
+  },
+  {
+    "raw": "When the Pawn Hits the Conflicts He Thinks like a King ... You're Right",
+    "kind": "album",
+    "category": "extremely-long-title",
+    "trickyProperty": "Fiona Apple 1999, the full 444-char title (catalogs store the short 'When the Pawn...'). No length cap → ~460-char query the API has indexed under the SHORT title → 0 via AND-tokenization; straight apostrophes in He'll/'fore/There's/Won't are not allow-listed so each becomes a space, splitting tokens.",
+    "expectedHandling": "Cap query length (~120 chars / first ~12 tokens) and emit a truncated 'When the Pawn' prefix variant; strip apostrophes by DELETION keeping neighbours adjacent (don't→dont, you're→youre); always retain artist-only fallback 'Fiona Apple'.",
+    "realExample": true
+  },
+  {
+    "raw": "The Boy Bands Have Won, and All the Copyists ... Doomed to Fail",
+    "kind": "album",
+    "category": "extremely-long-title",
+    "trickyProperty": "Chumbawamba 2008, the canonical 'longest album title' at 865 chars. '{artist} {title}' produces a ~880-char query that blows past server/path limits (HTTP 414 URI Too Long) or is silently truncated mid-word by a proxy, yielding a different token set each time.",
+    "expectedHandling": "Hard length budget BEFORE building the URL: truncate to the first sentence / first N tokens, percent-encode safely, and if over budget SKIP the album-specific query and use artist-only ('Chumbawamba'); emit a short-prefix variant; never let an unbounded title reach the HTTP layer.",
+    "realExample": true
+  },
+  {
+    "raw": "Sơn Tùng M-TP",
+    "kind": "script-gap",
+    "category": "vietnamese-stacked-diacritics",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "NFD must strip the stacked horn+tone marks to ASCII fold (Son Tung M-TP) in the fold variant while the accented original is preserved; folding only NonSpacingMark must handle multi-mark base letters, not just single-accent Latin.",
+    "realExample": false
+  },
+  {
+    "raw": "Sigur Rós — Ágætis byrjun (þ/ð band: Sigurður)",
+    "kind": "fold-table-gap",
+    "category": "icelandic-thorn-eth-and-extra-nondecomposable-letters",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "þ→th, ð→d/th, đ→d expansions belong in the NonDecomposableSpecialLetters table alongside ø/ł/æ/œ/ß; currently absent, so Icelandic/Croatian titles produce no usable ASCII-fold variant.",
+    "realExample": false
+  },
+  {
+    "raw": "می‌خواهم",
+    "kind": "wrong-behavior",
+    "category": "indic-and-persian-zwj-zwnj-semantic",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "The ZWNJ (U+200C) is semantic in Persian/Indic — blanket 'ControlAndZeroWidthChars_DeletedNotSpaced' corrupts the term. Either preserve in the primary variant or keep a non-deleted variant; prove the catalog form still matches.",
+    "realExample": false
+  },
+  {
+    "raw": "𝐌𝐚𝐭𝐡 𝐁𝐨𝐥𝐝 (U+1D400 block)",
+    "kind": "wrong-behavior",
+    "category": "math-alphanumeric-astral-foldable",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "These astral codepoints ARE letters and NFKC-fold to ASCII 'Math Bold'. 'EmojiAndAstral_StrippedByGraphemeCluster' would delete the whole title. NFKC must run BEFORE any astral strip, and only pictographic/symbol graphemes get stripped.",
+    "realExample": false
+  },
+  {
+    "raw": "𠮷野家 (CJK-Ext-B name char U+20BB7)",
+    "kind": "wrong-behavior",
+    "category": "astral-han-cjk-ext-b",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "Astral Han are real name characters. char-based StripSymbols/SymbolsToSpace (char.IsLetterOrDigit on each surrogate half returns false) strips them as 'symbols'. Must iterate Runes/text-elements, not char.",
+    "realExample": false
+  },
+  {
+    "raw": "<lone high surrogate 0xD83D with no low half>",
+    "kind": "pathological",
+    "category": "lone-surrogate-invalid-utf16",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "String.Normalize(FormD/FormC/FormKC) THROWS ArgumentException on invalid UTF-16. This directly violates NeverThrows_OnAnyInput. Must scrub/replace unpaired surrogates before any Normalize call.",
+    "realExample": false
+  },
+  {
+    "raw": "Кино (pure Cyrillic)",
+    "kind": "wrong-behavior",
+    "category": "additional-scripts",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "'ConfusableHomoglyphFold' must NOT fire on wholly-Cyrillic titles — folding to Latin produces garbage the catalog (stored in Cyrillic) won't match. Conflicts with NonLatinScripts_PassThroughNeverDownmappedToSpace. Scope homoglyph fold to mixed-script tokens only.",
+    "realExample": false
+  },
+  {
+    "raw": "R&B",
+    "kind": "encoding",
+    "category": "ampersand-inside-initialism",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "HtmlEntityDecodedBeforeStripping must not treat bare & as an entity, and ConnectiveNormalization must produce RB (glued) / R and B / R&B variants without dropping a token. AT&T and D&B are the same trap.",
+    "realExample": false
+  },
+  {
+    "raw": "AC½DC type: ½ (U+00BD)",
+    "kind": "ordering-trap",
+    "category": "nfkc-singletons",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "NFKC of ½ = '1⁄2' using FRACTION SLASH U+2044 — NFKC INTRODUCES a new non-ASCII separator/slash. NFKC must run before URL/separator handling or the new slash becomes an unescaped delimiter.",
+    "realExample": false
+  },
+  {
+    "raw": "Ω (U+2126 ohm) / K (U+212A kelvin) / Å (U+212B angstrom) / № (U+2116)",
+    "kind": "normalization",
+    "category": "nfkc-singletons",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "Singleton/compat codepoints fold under NFC/NFKC (ohm→Greek omega, numero→'No'). Corpus must pin these so a band literally named 'Ω' or 'No.6' normalizes deterministically.",
+    "realExample": false
+  },
+  {
+    "raw": "F# Minor / Bb / B♭",
+    "kind": "over-strip",
+    "category": "musical-sharp-flat-ascii-homoglyph",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "Stripping '#'/'♯' to 'F' loses the musical key (huge in classical/jazz catalogs). Need a glued variant that keeps F#→Fsharp-ish or preserves '#', not just removal.",
+    "expectedVariantPresent": "F# Minor / Bb / Bb",
+    "realExample": false
+  },
+  {
+    "raw": "Beatles, The  /  The Beatles",
+    "kind": "matching-gap",
+    "category": "leading-article-the",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "MusicBrainz/Lidarr use sort-names that drop/relocate leading articles. A variant without the leading article materially raises hit-rate; not represented.",
+    "realExample": false
+  },
+  {
+    "raw": "× (Ed Sheeran) and album 'X'",
+    "kind": "over-strip",
+    "category": "multiplication-sign-collab",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "× (U+00D7) must not be force-mapped to 'x'/collab/'and'; and RomanArabicNumeralCrosswalk must NOT convert title 'X' to '10'. Ambiguous single roman letters (I V X L C D M) must be excluded from crosswalk.",
+    "realExample": false
+  },
+  {
+    "raw": "٤ (Arabic-Indic digit 4) / 二〇二三",
+    "kind": "script-gap",
+    "category": "arabic-indic-and-cjk-digits",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "These are digits (char.IsDigit true for Arabic-Indic) but non-ASCII; a digit-crosswalk to western digits is needed for numeric-title matching, distinct from Roman↔Arabic.",
+    "realExample": false
+  },
+  {
+    "raw": "“Smart” ‘Quotes’ – En–Dash — Em—Dash … (U+2013/2014/2018/2019/201C/201D/2026/2212)",
+    "kind": "punctuation-gap",
+    "category": "typographic-quotes-and-dashes",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "Curly quotes, en/em dash, minus sign U+2212, ellipsis must canonicalize to ASCII equivalents (en/em dash often = artist–title separator). 'literal-double-quotes-in-title' only covers ASCII \".",
+    "realExample": false
+  },
+  {
+    "raw": "Album­Name / word⁠joiner",
+    "kind": "encoding",
+    "category": "soft-hyphen-and-word-joiner",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "Soft hyphen (U+00AD) and word joiner (U+2060) are invisible and must be deleted like zero-width; not in the enumerated zero-width set.",
+    "realExample": false
+  },
+  {
+    "raw": "​​​ (ZWSP-only title)",
+    "kind": "guard-gap",
+    "category": "sanitizer-output-is-raw-not-transport-encoded",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "ZWSP is NOT char.IsWhiteSpace, so a ZWSP-only input passes the EmptyAndWhitespaceOnly guard but becomes empty after zero-width deletion. Post-transform empties must route to the no-signal/alias path, not emit an empty query.",
+    "realExample": false
+  },
+  {
+    "raw": "col·lecció (Catalan U+00B7 geminated l)",
+    "kind": "over-strip",
+    "category": "catalan-middot-gemination",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "Middle dot here is intra-word (l·l), not a separator. SymbolsToSpace splitting it is wrong for Catalan; the glued variant (colleccio) is the catalog form.",
+    "realExample": false
+  },
+  {
+    "raw": "Guns N' Roses",
+    "kind": "regression-risk",
+    "category": "sanitizer-output-is-raw-not-transport-encoded",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "ApostropheClassCanonicalizedThenDeleted must NOT be the only output — the existing tidal regression test asserts the apostrophe is PRESERVED in the primary query. Deleting-as-sole-form regresses it; keep original + glued + spaced.",
+    "realExample": false
+  },
+  {
+    "raw": "a̸̢̛very zalgo title with stacked combining marks",
+    "kind": "pathological",
+    "category": "zalgo-combining-mark-storm",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "Unbounded combining marks per base blow up NFD and produce un-matchable text; cap/strip excess combining marks. Also a length-budget DoS surface.",
+    "realExample": false
+  },
+  {
+    "raw": "Édition Deluxe / デラックス・エディション / Edición Especial",
+    "kind": "matching-gap",
+    "category": "localized-edition-and-feat-tags",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "VersionSuffixStripping token list must be i18n; English-only stripping misses localized edition/feat markers and leaves over-specific queries.",
+    "realExample": false
+  },
+  {
+    "raw": "Beyoncé — Beyoncé (eponymous)",
+    "kind": "matching-gap",
+    "category": "eponymous-self-titled-dedup",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "Combined 'artist album' doubles the name; needs a de-dup variant so the self-titled case isn't an over-specific 'Beyonce Beyonce'.",
+    "realExample": false
+  },
+  {
+    "raw": "BeyoncÃ© / RÃ¶yksopp (UTF-8-as-Latin1 mojibake)",
+    "kind": "encoding",
+    "category": "mojibake-double-encoding",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "Real catalog metadata is full of double-encoding. Either declare it an explicit non-goal in the corpus or add a best-effort repair variant — silently passing it through guarantees 0 results.",
+    "realExample": false
+  },
+  {
+    "raw": "f*** the censored title!!! / 100% / death's dynamic shroud.wmv",
+    "kind": "punctuation-gap",
+    "category": "censorship-asterisk-and-repeated-punctuation",
+    "trickyProperty": "gap-fill",
+    "expectedHandling": "Asterisk (also a search-wildcard hazard like slash/query-operator), repeated punctuation, underscore stylization, and trailing .wmv-as-name need glued+spaced variants and wildcard-safe escaping.",
+    "realExample": false
+  },
+  {
+    "raw": "Hoàng Thùy Linh",
+    "kind": "artist",
+    "category": "vietnamese-stacked-diacritics",
+    "trickyProperty": "Vietnamese stacks a base vowel with a tone mark AND (for o-horn/u-horn) a horn; multi-mark NFD sequences. A single-accent fold table misses the second mark.",
+    "expectedHandling": "NFD then strip every NonSpacingMark (not just the first) -> 'Hoang Thuy Linh' fold; preserve the accented original.",
+    "realExample": true
+  },
+  {
+    "raw": "Mỹ Tâm",
+    "kind": "artist",
+    "category": "vietnamese-stacked-diacritics",
+    "trickyProperty": "'y-tilde' stacks y + tilde; 'a-circumflex' = a + circumflex. Char-fold tables listing only Latin-1 accents leave the Vietnamese extended block unfolded.",
+    "expectedHandling": "NFD-strip-marks folds the whole stack -> 'My Tam'; keep the accented form primary.",
+    "realExample": true
+  },
+  {
+    "raw": "Sigurður",
+    "kind": "artist",
+    "category": "icelandic-thorn-eth-and-extra-nondecomposable-letters",
+    "trickyProperty": "Icelandic eth eth (U+00F0) has no NFD decomposition; ASCII-strip deletes it ('Sigurur').",
+    "expectedHandling": "Special-letter table eth->d -> 'Sigurdur' fold variant; preserve original.",
+    "realExample": true
+  },
+  {
+    "raw": "Þú og ég",
+    "kind": "track",
+    "category": "icelandic-thorn-eth-and-extra-nondecomposable-letters",
+    "trickyProperty": "Leading thorn transliterates to digraph 'Th' (1->2). NFD leaves it; ASCII-strip drops the first sound.",
+    "expectedHandling": "thorn->Th, eth->d expansion before any length gate -> 'Thu og eg'.",
+    "realExample": true
+  },
+  {
+    "raw": "Ħamallu",
+    "kind": "artist",
+    "category": "icelandic-thorn-eth-and-extra-nondecomposable-letters",
+    "trickyProperty": "Maltese H-bar (U+0126/0127) is a stroke letter with no NFD decomposition; ASCII-strip deletes it.",
+    "expectedHandling": "Special-letter table h-bar->h -> 'Hamallu'.",
+    "realExample": false
+  },
+  {
+    "raw": "Saŋ",
+    "kind": "artist",
+    "category": "icelandic-thorn-eth-and-extra-nondecomposable-letters",
+    "trickyProperty": "Eng (U+014B, Sami/IPA) has no NFD decomposition; usually transliterated 'ng'.",
+    "expectedHandling": "Special-letter table eng->ng -> 'Sang'.",
+    "realExample": false
+  },
+  {
+    "raw": "नमस्‍ते",
+    "kind": "track",
+    "category": "indic-and-persian-zwj-zwnj-semantic",
+    "trickyProperty": "Devanagari with a semantic ZWJ (U+200D) controlling the half-form ligature; blanket zero-width deletion changes the rendered conjunct.",
+    "expectedHandling": "Keep ZWJ/ZWNJ in the native primary variant (do not blanket-delete); the catalog stores the same ZWJ-bearing form.",
+    "realExample": false
+  },
+  {
+    "raw": "‎Fairuz ‫فيروز‬",
+    "kind": "artist",
+    "category": "bidi-control-and-isolates",
+    "trickyProperty": "Mixes LRM (U+200E) and an RLE/PDF (U+202B/202C) bidi-embedding pair around an Arabic alias; invisible Cf controls corrupt cache keys and reorder a joined query.",
+    "expectedHandling": "Delete bidi controls (LRM/RLM/LRE/RLO/PDF/isolates U+2066-2069) like other zero-width Cf; query each script field separately.",
+    "realExample": false
+  },
+  {
+    "raw": "⁦Tame Impala⁩",
+    "kind": "artist",
+    "category": "bidi-control-and-isolates",
+    "trickyProperty": "Wrapped in LRI/PDI isolates (U+2066/U+2069); they survive a BMP control filter covering only U+200x and silently differ from the clean name.",
+    "expectedHandling": "Include the isolate range U+2066-2069 in the deleted Cf set -> 'Tame Impala'.",
+    "realExample": false
+  },
+  {
+    "raw": "Soft­Hyphen",
+    "kind": "album",
+    "category": "soft-hyphen-and-word-joiner",
+    "trickyProperty": "Soft hyphen U+00AD is an invisible Cf format char; not in the U+200B-200D zero-width set, so a hand-rolled list misses it and splits the token.",
+    "expectedHandling": "Delete U+00AD (and word joiner U+2060) up front like other zero-width Cf -> 'SoftHyphen'.",
+    "realExample": false
+  },
+  {
+    "raw": "Word⁠Joiner",
+    "kind": "track",
+    "category": "soft-hyphen-and-word-joiner",
+    "trickyProperty": "Word joiner U+2060 is invisible and glues without breaking; must be deleted, not spaced.",
+    "expectedHandling": "Delete U+2060 in the control/format pass -> 'WordJoiner'.",
+    "realExample": false
+  },
+  {
+    "raw": "Discovery – Daft Punk",
+    "kind": "album",
+    "category": "typographic-quotes-and-dashes",
+    "trickyProperty": "En dash U+2013 used as an artist-title separator; differs byte-wise from ASCII '-' and from em dash.",
+    "expectedHandling": "Canonicalize the dash family (U+2010-2015,U+2212) to ASCII '-' for comparison; keep both halves.",
+    "realExample": false
+  },
+  {
+    "raw": "Yesterday…Today",
+    "kind": "track",
+    "category": "typographic-quotes-and-dashes",
+    "trickyProperty": "Horizontal ellipsis U+2026 is one codepoint; an ASCII pipeline never matches catalog rows storing '...'.",
+    "expectedHandling": "Map U+2026 -> '...'; also fold curly quotes and U+2212 minus to ASCII.",
+    "realExample": false
+  },
+  {
+    "raw": "Wide Em Narrow Ideographic　End",
+    "kind": "album",
+    "category": "unicode-space-family",
+    "trickyProperty": "Mixes EM SPACE U+2003, NARROW NO-BREAK SPACE U+202F and IDEOGRAPHIC SPACE U+3000 - all Zs but not ASCII space; a literal ' ' replacer leaves them and Trim(' ') misses them.",
+    "expectedHandling": "Normalize the whole Zs family (incl. U+2000-200A,U+202F,U+205F,U+3000) to a single ASCII space, then collapse+trim.",
+    "realExample": false
+  },
+  {
+    "raw": "№ 9 Dream",
+    "kind": "track",
+    "category": "nfkc-singletons",
+    "trickyProperty": "NUMERO SIGN (U+2116) NFKC-folds to 'No'; an NFC-only pipeline keeps the singleton and never matches 'No 9 Dream'.",
+    "expectedHandling": "NFKC key variant folds numero -> 'No' before symbol handling -> 'No 9 Dream'.",
+    "realExample": true
+  },
+  {
+    "raw": "½ Past Nine",
+    "kind": "album",
+    "category": "nfkc-singletons",
+    "trickyProperty": "VULGAR FRACTION 1/2 (U+00BD) NFKC-decomposes to '1', FRACTION SLASH U+2044, '2' - NFKC INTRODUCES a new non-ASCII slash separator.",
+    "expectedHandling": "Run NFKC before URL/separator handling; treat the injected U+2044 as a separator; percent-encode atomically.",
+    "realExample": false
+  },
+  {
+    "raw": "Ω",
+    "kind": "artist",
+    "category": "nfkc-singletons",
+    "trickyProperty": "OHM SIGN (U+2126) is a compatibility singleton that NFC-folds to GREEK CAPITAL OMEGA (U+03A9); two byte-different inputs must normalize to one.",
+    "expectedHandling": "NFC canonicalization unifies U+2126 and U+03A9; keep the Greek letter as signal (not symbol-only).",
+    "realExample": false
+  },
+  {
+    "raw": "𝓢𝓬𝓻𝓲𝓹𝓽 Title",
+    "kind": "album",
+    "category": "math-alphanumeric-astral-foldable",
+    "trickyProperty": "MATHEMATICAL SCRIPT letters (U+1D4xx) are astral LETTERS that NFKC-fold to ASCII 'Script'; a char-based symbol strip deletes them as symbols.",
+    "expectedHandling": "Iterate Runes; NFKC BEFORE any astral strip -> 'Script Title'; never delete astral letters as symbols.",
+    "realExample": false
+  },
+  {
+    "raw": "𝟙𝟡𝟠𝟡",
+    "kind": "album",
+    "category": "math-alphanumeric-astral-foldable",
+    "trickyProperty": "MATHEMATICAL DOUBLE-STRUCK DIGITS (U+1D7Dx) are astral DIGITS that NFKC-fold to '1989'; surrogate-half digit checks miss them.",
+    "expectedHandling": "Rune iteration + NFKC -> '1989'; keep as a digit title (do not strip, do not treat as year).",
+    "realExample": false
+  },
+  {
+    "raw": "𩸽の唄",
+    "kind": "track",
+    "category": "astral-han-cjk-ext-b",
+    "trickyProperty": "Leading char (U+29E3D, CJK-Ext-B) is a real name kanji above the BMP; char.IsLetterOrDigit is false on each surrogate half so a char loop strips it as a 'symbol'.",
+    "expectedHandling": "Iterate Runes/text-elements; preserve astral Han primary + romaji alias.",
+    "realExample": false
+  },
+  {
+    "raw": "1️⃣ One",
+    "kind": "track",
+    "category": "variation-selectors-and-enclosing-keycap",
+    "trickyProperty": "Enclosing keycap sequence '1' + VS16 (U+FE0F) + COMBINING ENCLOSING KEYCAP (U+20E3); VS/keycap survive a BMP strip as invisible junk and the '1' must stay a digit.",
+    "expectedHandling": "Strip emoji presentation marks (U+FE0E/FE0F,U+20E3) by grapheme cluster; keep the base '1' -> '1 One'.",
+    "realExample": false
+  },
+  {
+    "raw": "❤︎ Heart",
+    "kind": "track",
+    "category": "variation-selectors-and-enclosing-keycap",
+    "trickyProperty": "Heart + VS15 (U+FE0E text presentation); the variation selector is invisible and must be dropped with its base symbol, not left as a lone mark.",
+    "expectedHandling": "Grapheme-cluster strip removes the heart+VS together -> 'Heart'.",
+    "realExample": false
+  },
+  {
+    "raw": "Sonata in F♯ Minor",
+    "kind": "track",
+    "category": "musical-sharp-flat-ascii-homoglyph",
+    "trickyProperty": "MUSIC SHARP SIGN (U+266F) vs ASCII '#'; stripping it to 'F' loses the key. Classical/jazz catalogs store either glyph.",
+    "expectedHandling": "Confusable-fold sharp<->'#' and emit a 'sharp'-spelled variant ('F sharp Minor'); keep '#'/sharp rather than deleting.",
+    "expectedVariantPresent": "Sonata in F# Minor",
+    "realExample": true
+  },
+  {
+    "raw": "B♭ Major",
+    "kind": "track",
+    "category": "musical-sharp-flat-ascii-homoglyph",
+    "trickyProperty": "MUSIC FLAT SIGN (U+266D) homoglyph of ASCII 'b'; some catalogs store 'Bb Major'.",
+    "expectedHandling": "Fold flat and emit both a 'Bb'-style glued form and a 'B flat' spelled form.",
+    "expectedVariantPresent": "Bb Major",
+    "realExample": true
+  },
+  {
+    "raw": "AT&T",
+    "kind": "artist",
+    "category": "ampersand-inside-initialism",
+    "trickyProperty": "Bare '&' inside an initialism; HtmlDecode must NOT treat it as an entity, and connective expansion must not drop a token.",
+    "expectedHandling": "Emit 'AT&T' (raw), 'ATT' (glued), 'AT and T' (connective) - never decode a bare & and never collapse a token to nothing.",
+    "realExample": false
+  },
+  {
+    "raw": "Drum & Bass",
+    "kind": "album",
+    "category": "ampersand-inside-initialism",
+    "trickyProperty": "'&' as a real conjunction with a short trailing token 'Bass'; same family as Simon & Garfunkel.",
+    "expectedHandling": "Emit literal '&', spaced 'Drum Bass', and 'Drum and Bass'.",
+    "realExample": false
+  },
+  {
+    "raw": "Ke€ha",
+    "kind": "artist",
+    "category": "currency-symbols-as-letters",
+    "trickyProperty": "EURO SIGN (U+20AC) used as a stylized letter inside a word; a symbol strip-to-space gives 'Ke ha' (the Ke$ha class with a currency glyph).",
+    "expectedHandling": "Emit glued 'Keha' and spaced 'Ke ha'; do not split mid-token. Currency glyphs are content here, not separators.",
+    "realExample": false
+  },
+  {
+    "raw": "£ s d",
+    "kind": "album",
+    "category": "currency-symbols-as-letters",
+    "trickyProperty": "POUND SIGN (U+00A3) as the leading meaning-bearing glyph; strip-then-trim deletes the identity.",
+    "expectedHandling": "Do not strip a leading standalone currency symbol as if whitespace; keep an alias path / artist-only fallback.",
+    "realExample": false
+  },
+  {
+    "raw": "¥en",
+    "kind": "artist",
+    "category": "currency-symbols-as-letters",
+    "trickyProperty": "YEN SIGN (U+00A5) homoglyph-stylizing 'Y'; strip empties the leading char.",
+    "expectedHandling": "Emit glued 'en' plus a fallback; never let a leading currency glyph empty the token to a sub-2-char query.",
+    "realExample": false
+  },
+  {
+    "raw": "Above & Beyond × Seven Lions",
+    "kind": "track",
+    "category": "multiplication-sign-collab",
+    "trickyProperty": "MULTIPLICATION SIGN (U+00D7) as a collaboration separator; must not be force-mapped to the word 'and' nor a roman-numeral crosswalk.",
+    "expectedHandling": "Confusable-fold mult-sign->'x' for one variant and space-separate for another; never crosswalk a standalone letter 'X' to '10'.",
+    "realExample": false
+  },
+  {
+    "raw": "٢٣",
+    "kind": "album",
+    "category": "arabic-indic-and-cjk-digits",
+    "trickyProperty": "ARABIC-INDIC DIGITS (U+0662/0663) are digits (char.IsDigit true) but non-ASCII; a western-digit crosswalk is needed to match '23'.",
+    "expectedHandling": "Digit-crosswalk Arabic-Indic -> '23' as an additional variant; keep the native digits primary.",
+    "realExample": false
+  },
+  {
+    "raw": "２０２３",
+    "kind": "album",
+    "category": "arabic-indic-and-cjk-digits",
+    "trickyProperty": "FULLWIDTH DIGITS (U+FF12...) match \\w but never equal ASCII '2023' until NFKC width-folds them.",
+    "expectedHandling": "NFKC width-fold fullwidth digits -> '2023'.",
+    "realExample": false
+  },
+  {
+    "raw": "The Beatles",
+    "kind": "artist",
+    "category": "leading-article-the",
+    "trickyProperty": "MusicBrainz/Lidarr sort-name drops/relocates the leading article ('Beatles, The'); a query keeping 'The' can miss sort-name-indexed rows.",
+    "expectedHandling": "Emit an article-dropped variant ('Beatles') alongside the literal 'The Beatles'; never strip 'The' mid-name.",
+    "realExample": true
+  },
+  {
+    "raw": "The The",
+    "kind": "artist",
+    "category": "leading-article-the",
+    "trickyProperty": "Pathological: the entire name is the article repeated; an over-eager 'drop leading The' rule would empty or halve it.",
+    "expectedHandling": "Drop ONLY one leading article and never reduce below a non-empty token -> keep 'The The' + 'The'.",
+    "realExample": true
+  },
+  {
+    "raw": "Weezer",
+    "kind": "album",
+    "category": "eponymous-self-titled-dedup",
+    "trickyProperty": "Weezer's self-titled albums (Blue/Green/...) make the combined 'Weezer Weezer' query doubly-specific.",
+    "expectedHandling": "When artist==album (case-insensitive), BuildPlan emits a de-duplicated single-name combined variant, not 'Weezer Weezer' only.",
+    "realExample": true
+  },
+  {
+    "raw": "intel·ligència",
+    "kind": "album",
+    "category": "catalan-middot-gemination",
+    "trickyProperty": "Catalan MIDDLE DOT (U+00B7) in the l-dot-l geminate is intra-word, not a separator; SymbolsToSpace wrongly splits it.",
+    "expectedHandling": "Prefer the glued 'intelligencia' (catalog form) AND fold accents; keep a spaced fallback but glued ranks first for middle-dot.",
+    "realExample": false
+  },
+  {
+    "raw": "Z͓͑ͫa͓͙l͖̗g̣̺o",
+    "kind": "artist",
+    "category": "zalgo-combining-mark-storm",
+    "trickyProperty": "Stacked combining marks (zalgo) blow up NFD length and produce un-matchable text; also a length-budget DoS surface.",
+    "expectedHandling": "Cap/strip excess combining marks per base; the fold variant collapses to 'Zalgo'; never throw on the mark storm.",
+    "realExample": false
+  },
+  {
+    "raw": "მგზავრები",
+    "kind": "artist",
+    "category": "additional-scripts",
+    "trickyProperty": "Georgian (Mkhedruli) is caseless and has no ASCII fold; an ASCII W->space sanitizer empties it.",
+    "expectedHandling": "Never down-map any letter; keep native primary + supplied romanization; fall back to URL-encoded original, never emptiness.",
+    "realExample": false
+  },
+  {
+    "raw": "Սիրուշո",
+    "kind": "artist",
+    "category": "additional-scripts",
+    "trickyProperty": "Armenian script; ASCII strip empties it. Armenian has its own apostrophe-like punctuation too.",
+    "expectedHandling": "Preserve Armenian letters; add romanization 'Sirusho' as an additional variant.",
+    "realExample": true
+  },
+  {
+    "raw": "இளையராஜா",
+    "kind": "artist",
+    "category": "additional-scripts",
+    "trickyProperty": "Tamil (Ilaiyaraaja) with dependent vowel signs that reorder visually; stripping combining marks corrupts the word.",
+    "expectedHandling": "NFC-normalize; operate on grapheme clusters; keep native + Latin 'Ilaiyaraaja'.",
+    "realExample": true
+  },
+  {
+    "raw": "សីន សីសាមុត",
+    "kind": "artist",
+    "category": "additional-scripts",
+    "trickyProperty": "Khmer (Sin Sisamouth) has no inter-word spaces and stacked subscripts (coeng); whitespace splitting and mark stripping both break it.",
+    "expectedHandling": "Query the whole run; never strip Khmer marks; add Latin alias.",
+    "realExample": true
+  },
+  {
+    "raw": "ቅድፍሉ ሙላ",
+    "kind": "artist",
+    "category": "additional-scripts",
+    "trickyProperty": "Ethiopic (Geez) syllabary; caseless, no ASCII fold; ASCII strip empties it.",
+    "expectedHandling": "Preserve Ethiopic; supply Latin alias; fall back to native, never emptiness.",
+    "realExample": false
+  },
+  {
+    "raw": "Beethoven: Symphony No. 9 in D minor, Op. 125",
+    "kind": "album",
+    "category": "classical-catalog-number",
+    "trickyProperty": "Classical title carries a colon subtitle, a 'No. N' work number, and an 'Op. N' opus catalog number. A period/colon stripper that does not glue tokens leaves stray punctuation; the opus number is load-bearing for disambiguation, not droppable.",
+    "expectedHandling": "Strip the colon/comma/period to a clean spaced variant while preserving the catalog tokens (No 9, Op 125); emit {raw, punctuation-stripped}.",
+    "realExample": true,
+    "expectedVariantPresent": "Beethoven Symphony No 9 in D minor Op 125",
+    "expectedTierShape": "combined-plus-field-fallback"
+  },
+  {
+    "raw": "Bach: Goldberg Variations, BWV 988",
+    "kind": "album",
+    "category": "classical-catalog-number",
+    "trickyProperty": "BWV (Bach-Werke-Verzeichnis) catalog number; the 'BWV 988' token is the canonical identifier and must survive sanitization intact (never split on the digit boundary).",
+    "expectedHandling": "Emit a punctuation-stripped variant 'Bach Goldberg Variations BWV 988' keeping the BWV catalog token whole.",
+    "realExample": true,
+    "expectedVariantPresent": "Bach Goldberg Variations BWV 988"
+  },
+  {
+    "raw": "Mozart: Piano Sonata No. 11 in A major, K. 331",
+    "kind": "album",
+    "category": "classical-catalog-number",
+    "trickyProperty": "Köchel (K.) catalog number with a single-letter abbreviation followed by digits; a stripper that drops 'K.' to 'K' must keep it glued to the following number context for catalog matching.",
+    "expectedHandling": "Punctuation-stripped variant 'Mozart Piano Sonata No 11 in A major K 331'; never delete the K/No catalog tokens.",
+    "realExample": true,
+    "expectedVariantPresent": "Mozart Piano Sonata No 11 in A major K 331"
+  },
+  {
+    "raw": "Allegro con brio",
+    "kind": "track",
+    "category": "classical-movement-title",
+    "trickyProperty": "A movement title that is a generic Italian tempo marking; it is highly ambiguous catalog-wide and only meaningful when artist/work-scoped, but it is NOT a 1-2 char / pure-digit / dictionary-word title so it is not auto-artist-scoped.",
+    "expectedHandling": "Pass through unchanged as a usable multi-token query; rely on the combined artist+work tier for disambiguation.",
+    "realExample": true,
+    "expectedVariantPresent": "Allegro con brio"
+  },
+  {
+    "raw": "Glenn Gould",
+    "kind": "artist",
+    "category": "classical-composer-vs-performer",
+    "trickyProperty": "Performer name distinct from the composer the recording is filed under; the artist field must be searchable on its own so a performer-only fallback tier can recover works mis-attributed to the composer.",
+    "expectedHandling": "Plain two-token name passes through; BuildPlan must keep a full, non-truncated artist-only fallback tier.",
+    "realExample": true,
+    "expectedVariantPresent": "Glenn Gould"
+  },
+  {
+    "raw": "Maître Gims",
+    "kind": "artist",
+    "category": "provider-catalog-slug-divergence",
+    "trickyProperty": "Provider catalog slug folds the circumflex away (raw 'Maître Gims' -> slug 'maitre-gims'); an accented-only query never matches the ASCII-slug index.",
+    "expectedHandling": "Emit the accent-folded ASCII variant 'Maitre Gims' alongside the accented original so the slug-derived index is reachable.",
+    "realExample": true,
+    "expectedVariantPresent": "Maitre Gims"
+  },
+  {
+    "raw": "Œuvres du Roi",
+    "kind": "album",
+    "category": "provider-catalog-slug-divergence",
+    "trickyProperty": "Non-decomposable ligature Œ at the head of a title; provider slug expands it (raw 'Œuvres' -> slug 'oeuvres-du-roi'). NFD alone leaves Œ intact, missing the slug.",
+    "expectedHandling": "Expand the ligature via the special-letter table (Œ->Oe) to emit 'Oeuvres du Roi'; keep the original too.",
+    "realExample": true,
+    "expectedVariantPresent": "Oeuvres du Roi"
+  },
+  {
+    "raw": "夢を見る",
+    "kind": "album",
+    "category": "mixed-script-combined",
+    "trickyProperty": "CJK album title that would be paired with a Latin artist in BuildPlan; the combined tier must carry BOTH the Latin artist and the CJK title without down-mapping the ideographs to whitespace, and a CJK-only album fallback tier must remain.",
+    "expectedHandling": "Pass the CJK run through intact; combined tier = 'Latin Artist 夢を見る', and a standalone album fallback tier preserves the CJK title.",
+    "realExample": true,
+    "expectedVariantPresent": "夢を見る",
+    "expectedTierShape": "combined-plus-field-fallback"
+  },
+  {
+    "raw": "Greatest Hits (Fleetwood Mac)",
+    "kind": "album",
+    "category": "artist-disambiguation-bracket",
+    "trickyProperty": "A generic compilation title disambiguated by a trailing parenthetical naming the artist; the parenthetical is title-integral (not a droppable edition clause) so it must be preserved, and a paren-stripped glued variant should also be offered.",
+    "expectedHandling": "Keep the original with parens AND emit 'Greatest Hits Fleetwood Mac' (symbols stripped); never drop the disambiguating artist parenthetical.",
+    "realExample": true,
+    "expectedVariantPresent": "Greatest Hits Fleetwood Mac",
+    "expectedTierShape": "combined-plus-field-fallback"
+  },
+  {
+    "raw": "The Wall [Disc 2]",
+    "kind": "album",
+    "category": "disc-designation",
+    "trickyProperty": "Multi-disc designation in square brackets; the '[Disc 2]' marker should be reachable both as a bracket-stripped spaced variant and preserved verbatim so a per-disc catalog edition can still match.",
+    "expectedHandling": "Emit 'The Wall Disc 2' (brackets stripped to space) alongside the original; never split the disc number off as a bare token.",
+    "realExample": true,
+    "expectedVariantPresent": "The Wall Disc 2"
+  },
+  {
+    "raw": "क्‍ष",
+    "kind": "album",
+    "category": "zwj-round-trip-indic",
+    "trickyProperty": "Devanagari conjunct using an explicit ZWJ (U+200D) between virama and the following consonant to force the half-form; the ZWJ is semantic (not emoji-presentation noise) and the verbatim ZWJ form must round-trip as the leading variant.",
+    "expectedHandling": "Preserve the ZWJ joiner in the canonical/original variant (do NOT delete it as a format char); additional joiner-stripped fallbacks may follow.",
+    "realExample": true,
+    "expectedVariantPresent": "क्‍ष"
+  },
+  {
+    "raw": "ЖШЩ",
+    "kind": "artist",
+    "category": "extended-cyrillic-non-homoglyph",
+    "trickyProperty": "Cyrillic letters Ж/Ш/Щ that have NO Latin look-alike in the homoglyph table; a naive confusable folder that blanks unmapped Cyrillic would empty the query. They must pass through as native Cyrillic.",
+    "expectedHandling": "Leave the wholly-Cyrillic run native (Variants[0] == NFC original); the confusable fold is gated off when residual non-ASCII letters survive.",
+    "realExample": true,
+    "expectedVariantPresent": "ЖШЩ"
+  },
+  {
+    "raw": "Жуки",
+    "kind": "artist",
+    "category": "extended-cyrillic-non-homoglyph",
+    "trickyProperty": "Mostly-Cyrillic band name where exactly one letter (у, U+0443) IS in the homoglyph table; folding only that letter would corrupt the word, so the gate must discard the partial fold and keep the native form.",
+    "expectedHandling": "Confusable fold is discarded because residual Cyrillic letters remain; pass through as 'Жуки'.",
+    "realExample": true,
+    "expectedVariantPresent": "Жуки"
+  },
+  {
+    "raw": "Taylor's Version",
+    "kind": "album",
+    "category": "bare-taylors-version",
+    "trickyProperty": "The re-recording marker WITHOUT the usual parentheses ('1989 (Taylor's Version)'); as a bare title the possessive apostrophe must canonicalize and a glued variant 'Taylors Version' must be present for slug matching.",
+    "expectedHandling": "Canonicalize the apostrophe then emit 'Taylors Version' (deleted) alongside the original; never leave a leading space or stray apostrophe.",
+    "realExample": true,
+    "expectedVariantPresent": "Taylors Version"
+  }
+]

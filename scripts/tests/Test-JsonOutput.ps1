@@ -81,7 +81,7 @@ function New-MockRunContext {
     param(
         [string]$LidarrUrl = "http://localhost:8686",
         [string]$ContainerName = "lidarr-e2e-test",
-        [string]$ImageTag = "pr-plugins-3.1.1.4884",
+        [string]$ImageTag = "nightly-3.1.3.4970",
         [string]$RequestedGate = "bootstrap",
         [string[]]$Plugins = @("Qobuzarr", "Tidalarr"),
         [string[]]$EffectiveGates = @("Schema", "Configure", "Search"),
@@ -1749,7 +1749,7 @@ if (Test-Path $jsonModulePath) {
     "lidarr": {
         "url": "http://localhost:8686",
         "containerName": "lidarr-test",
-        "imageTag": "pr-plugins-3.1.1.4884",
+        "imageTag": "nightly-3.1.3.4970",
         "imageDigest": "sha256:abc",
         "version": "2.9.6",
         "branch": "plugins"
@@ -1848,7 +1848,7 @@ if (Test-Path $jsonModulePath) {
         lidarr = [ordered]@{
             url = "http://[LOCALHOST]:8686"
             containerName = "lidarr-e2e-test"
-            imageTag = "pr-plugins-3.1.1.4884"
+            imageTag = "nightly-3.1.3.4970"
             imageDigest = "sha256:abc123..."
             version = "2.9.6.4552"
             branch = "plugins"

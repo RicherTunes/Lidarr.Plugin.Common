@@ -38,13 +38,13 @@
 - Strict/permissive loader modes (strict is default)
 - Single IPlugin enforcement (fail-fast on >1)
 - PluginType explicit selection option
-- DefaultHostVersion aligned to 3.1.2.4913
+- DefaultHostVersion aligned to 3.1.3.4970
 - ReflectionTypeLoadException handling for ILRepack'd assemblies
 
 ### Hardening
 - ~500 tests added across ecosystem
 - Zero bare catch blocks remaining
-- 105 net6.0 references eliminated
+- 105 net8.0 references eliminated
 - Thread safety fixes (provider swap, bridge singletons)
 - 5 production bugs fixed (crypto-cache, null-ref, SampleRate, DI bypass, GUID collision)
 

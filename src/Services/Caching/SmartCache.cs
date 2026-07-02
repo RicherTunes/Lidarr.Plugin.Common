@@ -449,6 +449,43 @@ namespace Lidarr.Plugin.Common.Services.Caching
                     existing.LastSeen = _timeProvider.GetUtcNow().UtcDateTime;
                     return existing;
                 });
+
+            // Bound the parallel _patterns dictionary the same way _cache is bounded. Cache keys are
+            // high-cardinality, so without this the pattern map grows without limit (slow heap leak
+            // over weeks of uptime). Use the same cap and eviction lock as the cache.
+            if (_patterns.Count > _options.MaxCacheSize)
+            {
+                lock (_evictionLock)
+                {
+                    // Double-check after acquiring lock (mirrors the Set() eviction guard).
+                    if (_patterns.Count > _options.MaxCacheSize)
+                    {
+                        EvictLeastValuablePatterns();
+                    }
+                }
+            }
+        }
+
+        /// <summary>
+        /// Trims the least-valuable access patterns when the dictionary exceeds the cap.
+        /// Lowest-value = lowest <see cref="AccessPattern.AccessFrequency"/>, then oldest
+        /// <see cref="AccessPattern.LastSeen"/>, so frequently-accessed patterns survive over one-offs.
+        /// Must be called under <c>_evictionLock</c>.
+        /// </summary>
+        private void EvictLeastValuablePatterns()
+        {
+            var candidates = _patterns.Values
+                .OrderBy(p => p.AccessFrequency)
+                .ThenBy(p => p.LastSeen)
+                .Take(_options.EvictionBatchSize)
+                .ToList();
+
+            foreach (var pattern in candidates)
+            {
+                _patterns.TryRemove(pattern.Key, out _);
+            }
+
+            _logger?.LogDebug("Evicted {Count} access patterns, current patterns: {Size}", candidates.Count, _patterns.Count);
         }
 
         private void EvictLeastValuable()

@@ -10,7 +10,7 @@ Full source-adjacent documentation: [`src/HostBridge/README.md`](../src/HostBrid
 |------|---------|
 | `HostBridgeDownloadOrchestrator` | Centralizes fire-and-forget download enqueue pattern for streaming plugins. Snapshots settings before enqueue to avoid mutation races. |
 | `HostBridgeRuntimeCache<TRuntime, TSettings>` | Generic singleton-runtime cache for Lidarr-native bridge plugins. Stores per-plugin runtime state keyed by settings instance. |
-| `HostBridgeDownloadTrackerStore<TItem>` | Thread-safe `ConcurrentDictionary`-backed download tracker with retention sweep. Use one static instance per process. |
+| `HostBridgeDownloadTrackerStore<TItem>` | Thread-safe `ConcurrentDictionary`-backed download tracker with terminal-item persistence and retention sweep. Use one static instance per process. Queued/downloading entries are process-local and are dropped on startup because no resumable worker survives restart. |
 | `AlbumSizeEstimator` | Estimates on-disk byte size of a streaming album/track from duration and bitrate. Formula: `bytes = durationSeconds × (bitrate ÷ 8)` with a 3-rung fallback ladder (album duration → summed tracks → count × average). |
 | `MultiQualityReleaseBuilder` | Builds multi-quality release variants — one `ReleaseInfo` per quality tier so the host can pick the best match. |
 | `AlbumReleaseInfoBuilder` | Builds the three `ReleaseInfo` string fields (`Guid`, `DownloadUrl`, `Title`) for streaming-service plugins. Supports edition, explicit, and live marker brackets. |
