@@ -127,6 +127,9 @@ jobs:
       - name: Doc workflow-ref gate self-test
         shell: pwsh
         run: ./scripts/tests/Test-LintDocWorkflowRefs.ps1
+      - name: Merge conflict marker guard
+        shell: pwsh
+        run: ./scripts/tests/Test-NoMergeConflictMarkers.ps1
       - name: Plugin CI truth docs self-test
         shell: pwsh
         run: ./scripts/tests/Test-PluginCiTruthDocs.ps1
