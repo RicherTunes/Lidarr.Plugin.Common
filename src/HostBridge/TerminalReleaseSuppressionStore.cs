@@ -25,8 +25,10 @@ public sealed class TerminalReleaseSuppressionStore : ITerminalReleaseSuppressio
     private readonly JsonFileStore<string, TerminalReleaseSuppressionRecord> _store;
     private readonly TimeProvider _clock;
     private readonly TimeSpan _refreshInterval;
+    private readonly object _snapshotGate = new();
     private volatile HashSet<string> _snapshot;
     private DateTimeOffset _lastRefreshUtc;
+    private long _snapshotVersion;
 
     public TerminalReleaseSuppressionStore(
         string filePath,
@@ -53,6 +55,7 @@ public sealed class TerminalReleaseSuppressionStore : ITerminalReleaseSuppressio
                 KeyNormalizer = NormalizeReleaseId,
                 KeyComparer = StringComparer.OrdinalIgnoreCase,
                 Clock = _clock,
+                ThrowOnSaveFailure = true,
             });
 
         _snapshot = BuildSnapshot();
@@ -120,8 +123,9 @@ public sealed class TerminalReleaseSuppressionStore : ITerminalReleaseSuppressio
             },
             cancellationToken).ConfigureAwait(false);
 
-        _snapshot = await BuildSnapshotAsync(cancellationToken).ConfigureAwait(false);
-        _lastRefreshUtc = _clock.GetUtcNow();
+        var version = Interlocked.Increment(ref _snapshotVersion);
+        var snapshot = await BuildSnapshotAsync(cancellationToken).ConfigureAwait(false);
+        PublishSnapshot(snapshot, version);
     }
 
     public Task SuppressAsync(string releaseId, string? reason, CancellationToken cancellationToken = default)
@@ -137,8 +141,9 @@ public sealed class TerminalReleaseSuppressionStore : ITerminalReleaseSuppressio
         var removed = await _store.RemoveAsync(releaseId, cancellationToken).ConfigureAwait(false);
         if (removed)
         {
-            _snapshot = await BuildSnapshotAsync(cancellationToken).ConfigureAwait(false);
-            _lastRefreshUtc = _clock.GetUtcNow();
+            var version = Interlocked.Increment(ref _snapshotVersion);
+            var snapshot = await BuildSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            PublishSnapshot(snapshot, version);
         }
 
         return removed;
@@ -151,8 +156,9 @@ public sealed class TerminalReleaseSuppressionStore : ITerminalReleaseSuppressio
             return;
         }
 
-        _snapshot = BuildSnapshot();
-        _lastRefreshUtc = _clock.GetUtcNow();
+        var version = Interlocked.Read(ref _snapshotVersion);
+        var snapshot = BuildSnapshot();
+        PublishSnapshot(snapshot, version);
     }
 
     // Sync bridge for the sync IsSuppressed()/MaybeRefresh() path (the indexer parser is synchronous).
@@ -170,6 +176,20 @@ public sealed class TerminalReleaseSuppressionStore : ITerminalReleaseSuppressio
         }
 
         return set;
+    }
+
+    private void PublishSnapshot(HashSet<string> snapshot, long version)
+    {
+        lock (_snapshotGate)
+        {
+            if (version != Interlocked.Read(ref _snapshotVersion))
+            {
+                return;
+            }
+
+            _snapshot = snapshot;
+            _lastRefreshUtc = _clock.GetUtcNow();
+        }
     }
 
     private static string NormalizeReleaseId(string releaseId)

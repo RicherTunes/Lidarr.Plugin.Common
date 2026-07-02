@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.HostBridge;
 using Xunit;
@@ -126,6 +127,40 @@ public sealed class TerminalReleaseSuppressionStoreTests : IDisposable
         Assert.True(removed);
         Assert.False(first.IsSuppressed("album-clear"));
         Assert.False(second.IsSuppressed("album-clear"));
+    }
+
+    [Fact]
+    public async Task SuppressAsync_WhenPersistenceFails_ThrowsAndDoesNotPublishSuppression()
+    {
+        var directoryPath = Path.Combine(_tempDir, "directory-instead-of-file");
+        Directory.CreateDirectory(directoryPath);
+        var sut = new TerminalReleaseSuppressionStore(directoryPath, "Qobuzarr");
+
+        var exception = await Record.ExceptionAsync(() =>
+            sut.SuppressAsync("album-not-durable", "track-1", "Restricted"));
+
+        Assert.True(exception is IOException or UnauthorizedAccessException, exception?.GetType().FullName);
+        Assert.False(sut.IsSuppressed("album-not-durable"));
+        Assert.Equal(0, sut.Count);
+    }
+
+    [Fact]
+    public async Task SuppressAsync_ConcurrentWrites_RemainImmediatelyVisible()
+    {
+        var sut = new TerminalReleaseSuppressionStore(
+            PathFor(),
+            "Qobuzarr",
+            refreshInterval: TimeSpan.Zero);
+        var ids = Enumerable.Range(0, 50)
+            .Select(static i => "album-" + i.ToString("D2"))
+            .ToArray();
+
+        await Task.WhenAll(ids.Select(id => sut.SuppressAsync(id, "track-" + id, "Restricted")));
+
+        foreach (var id in ids)
+        {
+            Assert.True(sut.IsSuppressed(id));
+        }
     }
 
     private sealed class ManualTimeProvider : TimeProvider
