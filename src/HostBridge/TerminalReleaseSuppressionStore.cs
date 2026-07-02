@@ -155,8 +155,11 @@ public sealed class TerminalReleaseSuppressionStore : ITerminalReleaseSuppressio
         _lastRefreshUtc = _clock.GetUtcNow();
     }
 
+    // Sync bridge for the sync IsSuppressed()/MaybeRefresh() path (the indexer parser is synchronous).
+    // Wrapped in Task.Run so the .GetAwaiter().GetResult() runs on a thread-pool thread with no ambient
+    // SynchronizationContext — avoids the direct-block deadlock trap (Category A, matches AuthFailureGate).
     private HashSet<string> BuildSnapshot()
-        => BuildSnapshotAsync(CancellationToken.None).GetAwaiter().GetResult();
+        => Task.Run(() => BuildSnapshotAsync(CancellationToken.None)).GetAwaiter().GetResult();
 
     private async Task<HashSet<string>> BuildSnapshotAsync(CancellationToken cancellationToken)
     {
