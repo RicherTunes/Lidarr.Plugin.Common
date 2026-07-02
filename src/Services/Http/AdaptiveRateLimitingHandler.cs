@@ -41,6 +41,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         private readonly string _serviceName;
         private readonly ILogger? _logger;
         private readonly TimeSpan _maxRetryAfterDelay;
+        private long _responseCount;
 
         /// <summary>
         /// Initialises the handler.
@@ -92,9 +93,29 @@ namespace Lidarr.Plugin.Common.Services.Http
             HttpResponseMessage response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
             // Post-send: feed the response back to the limiter for adaptive adjustment.
+            // The limiter adapts its budget silently, so bracket RecordResponse with
+            // budget reads and surface any change; this log line is the only
+            // adaptation-event observability and load-test tooling parses its shape.
             try
             {
+                int oldRpm = _limiter.GetCurrentLimit(_serviceName, endpointKey);
                 _limiter.RecordResponse(_serviceName, endpointKey, response);
+                int newRpm = _limiter.GetCurrentLimit(_serviceName, endpointKey);
+
+                if (newRpm != oldRpm)
+                {
+                    _logger?.LogInformation(
+                        "{Service}/{Endpoint} rate-limit budget adapted {OldRpm} -> {NewRpm} (status {Status})",
+                        _serviceName, endpointKey, oldRpm, newRpm, (int)response.StatusCode);
+                }
+
+                if (Interlocked.Increment(ref _responseCount) % 100 == 0)
+                {
+                    var stats = _limiter.GetServiceStats(_serviceName);
+                    _logger?.LogInformation(
+                        "{Service} limiter stats: {Requests} req, {Errors} err, {RateLimitHits} 429s",
+                        _serviceName, stats.TotalRequests, stats.TotalErrors, stats.TotalRateLimitHits);
+                }
             }
             catch (ObjectDisposedException) { /* limiter shut down mid-request */ }
 
