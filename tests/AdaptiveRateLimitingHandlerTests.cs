@@ -54,5 +54,49 @@ namespace Lidarr.Plugin.Common.Tests
             // Pre-fix the unclamped far-future delay threw ArgumentOutOfRangeException from Task.Delay.
             Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
         }
+
+        [Fact]
+        public async Task SendAsync_UsesHostFirstSegmentEndpointKeyForAllLimiterInteractions()
+        {
+            const string service = "Tidal";
+            const string expectedEndpoint = "api.tidal.com:v1";
+
+            var limiter = new Mock<IUniversalAdaptiveRateLimiter>(MockBehavior.Strict);
+            limiter.Setup(l => l.WaitIfNeededAsync(service, expectedEndpoint, It.IsAny<CancellationToken>()))
+                   .ReturnsAsync(true);
+            limiter.Setup(l => l.GetCurrentLimit(service, expectedEndpoint))
+                   .Returns(300);
+            limiter.Setup(l => l.RecordResponse(service, expectedEndpoint, It.IsAny<HttpResponseMessage>()));
+            limiter.Setup(l => l.Dispose());
+
+            var inner = new Mock<HttpMessageHandler>();
+            inner.Protected()
+                 .Setup<Task<HttpResponseMessage>>(
+                     "SendAsync",
+                     ItExpr.IsAny<HttpRequestMessage>(),
+                     ItExpr.IsAny<CancellationToken>())
+                 .ReturnsAsync(new HttpResponseMessage(HttpStatusCode.OK));
+
+            using var handler = new AdaptiveRateLimitingHandler(limiter.Object, service)
+            {
+                InnerHandler = inner.Object
+            };
+            using var client = new HttpClient(handler);
+
+            using var response = await client.SendAsync(
+                new HttpRequestMessage(HttpMethod.Get, "https://api.tidal.com/v1/search?q=album"),
+                CancellationToken.None);
+
+            Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            limiter.Verify(
+                l => l.WaitIfNeededAsync(service, expectedEndpoint, It.IsAny<CancellationToken>()),
+                Times.Once);
+            limiter.Verify(
+                l => l.RecordResponse(service, expectedEndpoint, It.Is<HttpResponseMessage>(r => r.StatusCode == HttpStatusCode.OK)),
+                Times.Once);
+            limiter.Verify(
+                l => l.GetCurrentLimit(service, expectedEndpoint),
+                Times.Exactly(2));
+        }
     }
 }
