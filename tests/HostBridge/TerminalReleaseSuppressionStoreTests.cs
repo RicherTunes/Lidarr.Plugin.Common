@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.HostBridge;
 using Xunit;
@@ -160,6 +162,37 @@ public sealed class TerminalReleaseSuppressionStoreTests : IDisposable
         {
             Assert.True(sut.IsSuppressed(id));
         }
+    }
+
+    [Fact]
+    public async Task PublishSnapshot_WithOlderVersion_DoesNotResurrectClearedSuppression()
+    {
+        var sut = new TerminalReleaseSuppressionStore(PathFor(), "Qobuzarr");
+        await sut.SuppressAsync("album-race", "track-1", "Restricted");
+        await sut.ClearAsync("album-race");
+
+        SimulateDelayedSnapshotPublish(sut, "album-race", staleVersion: 1);
+
+        Assert.False(sut.IsSuppressed("album-race"));
+    }
+
+    private static void SimulateDelayedSnapshotPublish(
+        TerminalReleaseSuppressionStore sut,
+        string releaseId,
+        long staleVersion)
+    {
+        var publish = typeof(TerminalReleaseSuppressionStore).GetMethod(
+            "PublishSnapshot",
+            BindingFlags.Instance | BindingFlags.NonPublic);
+        Assert.NotNull(publish);
+
+        publish.Invoke(
+            sut,
+            new object[]
+            {
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { releaseId },
+                staleVersion,
+            });
     }
 
     private sealed class ManualTimeProvider : TimeProvider
