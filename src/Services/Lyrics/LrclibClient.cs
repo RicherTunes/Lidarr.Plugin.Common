@@ -165,6 +165,7 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
                 foreach (var r in results)
                 {
                     if (string.IsNullOrWhiteSpace(r?.SyncedLyrics)) continue;
+                    if (!IsSameTrack(trackName, r.TrackName)) continue;
 
                     if (durationSeconds <= 0)
                     {
@@ -225,6 +226,32 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
             return builder.Uri;
         }
 
+        private static bool IsSameTrack(string requested, string? candidate)
+        {
+            var normalizedRequested = NormalizeTrackName(requested);
+            var normalizedCandidate = NormalizeTrackName(candidate);
+            return normalizedRequested.Length > 0
+                && normalizedCandidate.Length > 0
+                && string.Equals(normalizedRequested, normalizedCandidate, StringComparison.Ordinal);
+        }
+
+        private static string NormalizeTrackName(string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value)) return string.Empty;
+
+            var buffer = new char[value.Length];
+            var length = 0;
+            foreach (var c in value)
+            {
+                if (char.IsLetterOrDigit(c))
+                {
+                    buffer[length++] = char.ToLowerInvariant(c);
+                }
+            }
+
+            return length == 0 ? string.Empty : new string(buffer, 0, length);
+        }
+
         private static void EnsureUserAgent(HttpClient client)
         {
             if (client.DefaultRequestHeaders.UserAgent.Count == 0)
@@ -255,6 +282,9 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
 
         private sealed class LrclibSearchResult
         {
+            [JsonPropertyName("trackName")]
+            public string? TrackName { get; init; }
+
             [JsonPropertyName("syncedLyrics")]
             public string? SyncedLyrics { get; init; }
 

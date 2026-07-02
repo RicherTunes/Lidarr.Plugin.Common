@@ -60,7 +60,7 @@ public sealed class LrclibClientSearchFallbackTests
         var handler = new RoutingStubHandler
         {
             Get = (HttpStatusCode.NotFound, null),
-            Search = (HttpStatusCode.OK, "[{\"syncedLyrics\":null,\"plainLyrics\":\"words\",\"duration\":188.0}]"),
+            Search = (HttpStatusCode.OK, "[{\"trackName\":\"B\",\"syncedLyrics\":null,\"plainLyrics\":\"words\",\"duration\":188.0}]"),
         };
         using var client = new LrclibClient(new HttpClient(handler));
 
@@ -77,11 +77,28 @@ public sealed class LrclibClientSearchFallbackTests
         var handler = new RoutingStubHandler
         {
             Get = (HttpStatusCode.NotFound, null),
-            Search = (HttpStatusCode.OK, "[{\"syncedLyrics\":\"[00:00.00] wrong\",\"duration\":320.0}]"),
+            Search = (HttpStatusCode.OK, "[{\"trackName\":\"B\",\"syncedLyrics\":\"[00:00.00] wrong\",\"duration\":320.0}]"),
         };
         using var client = new LrclibClient(new HttpClient(handler));
 
         var lrc = await client.TryFetchSyncedLyricsAsync("A", "B", "C", 188);
+
+        Assert.Null(lrc);
+    }
+
+    [Fact]
+    public async Task GetMiss_SearchSameDurationWrongTrack_ReturnsNull()
+    {
+        // LRCLIB search is fuzzy. Duration alone is not enough: two different tracks can
+        // share a runtime, and returning the wrong LRC would be worse than no lyrics.
+        var handler = new RoutingStubHandler
+        {
+            Get = (HttpStatusCode.NotFound, null),
+            Search = (HttpStatusCode.OK, "[{\"trackName\":\"Wrong Song\",\"syncedLyrics\":\"[00:00.00] wrong\",\"duration\":188.0}]"),
+        };
+        using var client = new LrclibClient(new HttpClient(handler));
+
+        var lrc = await client.TryFetchSyncedLyricsAsync("A", "Right Song", "C", 188);
 
         Assert.Null(lrc);
     }
@@ -92,7 +109,7 @@ public sealed class LrclibClientSearchFallbackTests
         var handler = new RoutingStubHandler
         {
             Get = (HttpStatusCode.NotFound, null),
-            Search = (HttpStatusCode.OK, "[{\"syncedLyrics\":\"[00:00.00] far\",\"duration\":196.0},{\"syncedLyrics\":\"[00:00.00] close\",\"duration\":189.0}]"),
+            Search = (HttpStatusCode.OK, "[{\"trackName\":\"B\",\"syncedLyrics\":\"[00:00.00] far\",\"duration\":196.0},{\"trackName\":\"B\",\"syncedLyrics\":\"[00:00.00] close\",\"duration\":189.0}]"),
         };
         using var client = new LrclibClient(new HttpClient(handler));
 
@@ -124,7 +141,7 @@ public sealed class LrclibClientSearchFallbackTests
         var handler = new RoutingStubHandler
         {
             Get = (HttpStatusCode.NotFound, null),
-            Search = (HttpStatusCode.OK, "[{\"syncedLyrics\":\"[00:00.00] first\",\"duration\":260.0}]"),
+            Search = (HttpStatusCode.OK, "[{\"trackName\":\"B\",\"syncedLyrics\":\"[00:00.00] first\",\"duration\":260.0}]"),
         };
         using var client = new LrclibClient(new HttpClient(handler));
 
