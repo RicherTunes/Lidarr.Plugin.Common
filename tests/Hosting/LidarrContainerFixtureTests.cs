@@ -197,7 +197,10 @@ public sealed class LidarrContainerFixtureTests
         try
         {
             var opts = BuildOptions(findDll: _ => dllPath);
-            using var fixture = new TestableContainerFixture(opts, dockerAvailable: true);
+            using var fixture = new TestableContainerFixture(
+                opts,
+                dockerAvailable: true,
+                dockerResult: (1, "docker intentionally skipped by unit test"));
             // Stub docker so we don't actually try to run a container — we only care that
             // IsHostBridgeBuild accepts the merged shape (no skip due to sidecar absence).
             await fixture.InitializeAsync();
@@ -225,20 +228,28 @@ public sealed class LidarrContainerFixtureTests
     }
 
     /// <summary>
-    /// Subclass that overrides <c>DockerAvailable</c> so unit tests can drive
-    /// the skip-path decisions without invoking the real <c>docker</c> binary.
+    /// Subclass that overrides Docker probes/commands so unit tests can drive
+    /// skip-path decisions without invoking the real <c>docker</c> binary.
     /// </summary>
     private sealed class TestableContainerFixture : LidarrContainerFixture, IDisposable
     {
         private readonly bool _dockerAvailable;
+        private readonly (int ExitCode, string Output)? _dockerResult;
 
-        public TestableContainerFixture(LidarrContainerOptions options, bool dockerAvailable)
+        public TestableContainerFixture(
+            LidarrContainerOptions options,
+            bool dockerAvailable,
+            (int ExitCode, string Output)? dockerResult = null)
             : base(options)
         {
             _dockerAvailable = dockerAvailable;
+            _dockerResult = dockerResult;
         }
 
         protected override bool DockerAvailable() => _dockerAvailable;
+
+        protected override (int ExitCode, string Output) RunDocker(string arguments)
+            => _dockerResult ?? base.RunDocker(arguments);
 
         public void Dispose() => DisposeAsync().GetAwaiter().GetResult();
     }
