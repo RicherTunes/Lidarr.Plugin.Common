@@ -25,7 +25,7 @@ build step is `pwsh scripts/verify-local.ps1 -SkipExtract -SkipTests`.
 |---|---|---|---|
 | `plugin-name` | yes | — | Plugin slug. Used for artifact naming and to derive the default container name (`<plugin-name>-e2e`). |
 | `test-project` | yes | — | Path to the test csproj containing DockerE2E facts. |
-| `lidarr-docker-version` | no | `pr-plugins-3.1.2.4913` | Lidarr container tag (plugins branch, net8). |
+| `lidarr-docker-version` | no | `nightly-3.1.3.4970` | Lidarr container tag (plugins branch, net8). |
 | `configuration` | no | `Release` | Build configuration. Must match the build step (we pass `--no-build`). |
 | `test-filter` | no | `Category=DockerE2E` | xUnit filter expression. |
 | `container-name` | no | `<plugin-name>-e2e` | Override the docker container name used for log capture. |

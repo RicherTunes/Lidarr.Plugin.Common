@@ -82,15 +82,27 @@ namespace Lidarr.Plugin.Common.Services.Resilience
     {
         private readonly ConcurrentDictionary<string, TokenBucket> _buckets;
         private readonly ILogger _logger;
+        private readonly TimeProvider _timeProvider;
 
         /// <summary>
         /// Creates a new token bucket rate limiter.
         /// </summary>
         /// <param name="logger">Optional logger for diagnostics.</param>
         public TokenBucketRateLimiter(ILogger logger = null)
+            : this(logger, TimeProvider.System)
+        {
+        }
+
+        /// <summary>
+        /// Creates a new token bucket rate limiter with an injectable clock for deterministic tests.
+        /// </summary>
+        /// <param name="logger">Optional logger for diagnostics.</param>
+        /// <param name="timeProvider">Clock used for token refill calculations.</param>
+        public TokenBucketRateLimiter(ILogger logger, TimeProvider? timeProvider)
         {
             _buckets = new ConcurrentDictionary<string, TokenBucket>(StringComparer.OrdinalIgnoreCase);
             _logger = logger;
+            _timeProvider = timeProvider ?? TimeProvider.System;
         }
 
         /// <inheritdoc />
@@ -114,7 +126,7 @@ namespace Lidarr.Plugin.Common.Services.Resilience
                 period = TimeSpan.FromMinutes(1);
             }
 
-            _buckets[resource] = new TokenBucket(maxRequests, period);
+            _buckets[resource] = new TokenBucket(maxRequests, period, _timeProvider);
             _logger?.LogDebug("Rate limiter configured for {Resource}: {MaxRequests} requests per {PeriodSeconds}s",
                 resource, maxRequests, period.TotalSeconds);
         }
@@ -141,7 +153,7 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             if (waitTime > TimeSpan.Zero)
             {
                 _logger?.LogDebug("Rate limit for {Resource}: waiting {WaitMs:F0}ms", resource, waitTime.TotalMilliseconds);
-                await Task.Delay(waitTime, cancellationToken).ConfigureAwait(false);
+                await Task.Delay(waitTime, _timeProvider, cancellationToken).ConfigureAwait(false);
             }
 
             cancellationToken.ThrowIfCancellationRequested();
@@ -187,16 +199,18 @@ namespace Lidarr.Plugin.Common.Services.Resilience
             private readonly object _lock = new object();
             private readonly double _maxTokens;
             private readonly double _refillRatePerSecond;
+            private readonly TimeProvider _timeProvider;
             private double _availableTokens;
-            private DateTime _lastRefill;
+            private DateTimeOffset _lastRefill;
 
-            public TokenBucket(int maxRequests, TimeSpan period)
+            public TokenBucket(int maxRequests, TimeSpan period, TimeProvider timeProvider)
             {
                 _maxTokens = Math.Max(1, maxRequests);
                 var seconds = Math.Max(0.001, period.TotalSeconds);
                 _refillRatePerSecond = _maxTokens / seconds;
+                _timeProvider = timeProvider ?? TimeProvider.System;
                 _availableTokens = _maxTokens;
-                _lastRefill = DateTime.UtcNow;
+                _lastRefill = _timeProvider.GetUtcNow();
             }
 
             public TimeSpan ReserveToken()
@@ -233,13 +247,13 @@ namespace Lidarr.Plugin.Common.Services.Resilience
                 lock (_lock)
                 {
                     _availableTokens = _maxTokens;
-                    _lastRefill = DateTime.UtcNow;
+                    _lastRefill = _timeProvider.GetUtcNow();
                 }
             }
 
             private void RefillTokens()
             {
-                var now = DateTime.UtcNow;
+                var now = _timeProvider.GetUtcNow();
                 if (now <= _lastRefill)
                     return;
 

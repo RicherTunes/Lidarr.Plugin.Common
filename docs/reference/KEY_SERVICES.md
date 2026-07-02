@@ -168,6 +168,22 @@ Source: [`src/Abstractions/Results/PluginErrorCode.cs`](../../src/Abstractions/R
 
 - `SlidingWindowAuthFailureHandler` — `IAuthFailureHandler` with K-of-N-in-W sliding-window failure threshold semantics. Trips when K failures occur within window W; auto-resets after cooldown. → [CHANGELOG v1.7.0](../../CHANGELOG.md)
 
+## Search Intelligence
+
+- `SearchQuerySanitizer` — sanitizes raw artist/album strings and builds ordered fallback tiers (`BuildPlan`). Each tier is a best-first variant list (accent-folded, connective-expanded, NFKC, confusable-folded). Use `BuildPlan` to get the full tier structure; the executor iterates tiers.
+- `SearchPlanExecutor` — drives a pre-built `SearchPlan` (from `BuildPlan`) against any async search function, applying a `SearchStopPolicy` (`AccumulateAll`, `StopAfterFirstTierWithResults`, `StopAfterFirstVariantWithResults`). Throws `AllSearchVariantsFailed` (via `ThrowAllFailed`) when every variant returned empty.
+- `CappedSearchChain` — for capping plugins (e.g. qobuz) that cannot or should not issue all plan variants: caps combined/album-only queries to a maximum of `maxOverSpecific`, then unconditionally appends the artist-only fallback so it is never truncated away. This is the fix for the "Bleu Jeans Bleu / Record n°V returned 0 results" bug — a `Take(N)` that dropped the fallback tier. Plugins backed by `CappedSearchChain` inherit the fallback-survival guarantee with cross-plugin test coverage.
+
+```csharp
+// Build the plan and cap the over-specific queries to 3, always preserving the artist-only fallback.
+var plan = SearchQuerySanitizer.BuildPlan(artist, album);
+var overSpecific = plan.Tiers.Count > 0 ? plan.Combined : Array.Empty<string>();
+var artistOnly   = plan.Tiers.Count > 1 ? plan.Tiers[1].FirstOrDefault() : null;
+var queries = CappedSearchChain.Build(overSpecific, artistOnly, maxOverSpecific: 3);
+```
+
+See also: `SearchRequestChainComplianceTestBase` (TestKit) — compliance axis that drives the real request generator and verifies the chain preserves the full plan (including the fallback tier). Opt in to `RequiresExactPlanSequence` for full-chain plugins to also enforce duplicate-free exact ordering.
+
 ## HostBridge Subsystem
 
 - `HostBridgeDownloadOrchestrator` — centralizes fire-and-forget download enqueue pattern for streaming plugins.

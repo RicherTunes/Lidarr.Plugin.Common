@@ -4,6 +4,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Resilience;
+using Microsoft.Extensions.Time.Testing;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
 
@@ -217,29 +218,49 @@ namespace Lidarr.Plugin.Common.Tests.Services.Resilience
         public async Task Underflow_ConsumptionGoesNegative_WaitsForRefill()
         {
             // Arrange
+            var fakeTime = new FakeTimeProvider(DateTimeOffset.UtcNow);
+            var limiter = new TokenBucketRateLimiter(NullLogger.Instance, fakeTime);
             const string resource = "underflow-test";
             const int capacity = 2;
             var period = TimeSpan.FromMilliseconds(100);
-            _limiter.Configure(resource, capacity, period);
+            limiter.Configure(resource, capacity, period);
 
-            var executionTimes = new List<long>();
+            // Act: consume the burst capacity immediately, then queue three more requests.
+            Assert.Equal(1, await limiter.ExecuteAsync(resource, () => Task.FromResult(1)));
+            Assert.Equal(2, await limiter.ExecuteAsync(resource, () => Task.FromResult(2)));
 
-            // Act: consume beyond capacity (goes negative internally)
-            var tasks = Enumerable.Range(0, 5).Select(i => _limiter.ExecuteAsync(resource, async () =>
+            var third = limiter.ExecuteAsync(resource, () => Task.FromResult(3));
+            var fourth = limiter.ExecuteAsync(resource, () => Task.FromResult(4));
+            var fifth = limiter.ExecuteAsync(resource, () => Task.FromResult(5));
+
+            // Assert: extra reservations go negative internally and wait for deterministic refill.
+            await Task.Yield();
+            Assert.False(third.IsCompleted, "Third request should wait for the first refill token.");
+            Assert.False(fourth.IsCompleted, "Fourth request should wait for the second refill token.");
+            Assert.False(fifth.IsCompleted, "Fifth request should wait for the third refill token.");
+
+            fakeTime.Advance(TimeSpan.FromMilliseconds(49));
+            await Task.Yield();
+            Assert.False(third.IsCompleted, "Third request should not complete before a full token refills.");
+
+            fakeTime.Advance(TimeSpan.FromMilliseconds(1));
+            Assert.Equal(3, await AwaitWithTimeout(third));
+            Assert.False(fourth.IsCompleted, "Fourth request should still be waiting after the first refill.");
+            Assert.False(fifth.IsCompleted, "Fifth request should still be waiting after the first refill.");
+
+            fakeTime.Advance(TimeSpan.FromMilliseconds(50));
+            Assert.Equal(4, await AwaitWithTimeout(fourth));
+            Assert.False(fifth.IsCompleted, "Fifth request should still be waiting after the second refill.");
+
+            fakeTime.Advance(TimeSpan.FromMilliseconds(50));
+            Assert.Equal(5, await AwaitWithTimeout(fifth));
+
+            static async Task<T> AwaitWithTimeout<T>(Task<T> task)
             {
-                executionTimes.Add(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
-                await Task.Delay(10);
-                return i;
-            })).ToArray();
-
-            await Task.WhenAll(tasks);
-
-            // Assert: all requests complete, but later ones waited for refill
-            Assert.Equal(5, executionTimes.Count);
-
-            // First 2 execute quickly, next 3 wait for refill
-            var gap1 = executionTimes[2] - executionTimes[1];
-            Assert.True(gap1 > 0, $"Expected delay between request 2 and 3, got {gap1}ms");
+                var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(5)));
+                Assert.Same(task, completed);
+                return await task;
+            }
         }
 
         #endregion
@@ -322,6 +343,37 @@ namespace Lidarr.Plugin.Common.Tests.Services.Resilience
             await Assert.ThrowsAsync<TaskCanceledException>(async () => await task);
         }
 
+        [Fact]
+        public async Task ExecuteAsync_WhenThrottled_WaitHonorsInjectedTimeProvider()
+        {
+            // Arrange: 1 request per 100 seconds so the second call must wait ~100s
+            var fakeTime = new FakeTimeProvider(DateTimeOffset.UtcNow);
+            var limiter = new TokenBucketRateLimiter(NullLogger.Instance, fakeTime);
+            const string resource = "timeprovider-delay-test";
+            var period = TimeSpan.FromSeconds(100);
+            limiter.Configure(resource, 1, period);
+
+            // Consume the single token immediately (no wait)
+            await limiter.ExecuteAsync(resource, () => Task.FromResult(0));
+
+            // Start a second request - it must wait ~100s for refill
+            var secondTask = limiter.ExecuteAsync(resource, () => Task.FromResult(1));
+
+            // Give the real scheduler a moment; the task must NOT have completed yet
+            // (it should be blocked on Task.Delay ~100s)
+            await Task.Delay(TimeSpan.FromMilliseconds(200));
+            Assert.False(secondTask.IsCompleted,
+                "Second request should still be waiting for rate-limit delay");
+
+            // Advance fake clock by the full period - this should release the wait
+            fakeTime.Advance(period);
+
+            // Now it must complete quickly (well within a second of real time)
+            var completed = await Task.WhenAny(secondTask, Task.Delay(TimeSpan.FromSeconds(5)));
+            Assert.Same(secondTask, completed);
+            Assert.Equal(1, await secondTask);
+        }
+
         #endregion
 
         #region Token Capacity Limits
@@ -385,23 +437,27 @@ namespace Lidarr.Plugin.Common.Tests.Services.Resilience
         public async Task Refill_LinearWithTime(int capacity, int periodSeconds, int waitSeconds)
         {
             // Arrange
+            var fakeTime = new FakeTimeProvider(DateTimeOffset.UtcNow);
+            var limiter = new TokenBucketRateLimiter(NullLogger.Instance, fakeTime);
             var resource = $"refill-{capacity}-{periodSeconds}";
             var period = TimeSpan.FromSeconds(periodSeconds);
-            _limiter.Configure(resource, capacity, period);
+            limiter.Configure(resource, capacity, period);
 
             // Consume all tokens
             for (int i = 0; i < capacity; i++)
             {
-                await _limiter.ExecuteAsync(resource, () => Task.FromResult(i));
+                await limiter.ExecuteAsync(resource, () => Task.FromResult(i));
             }
 
-            Assert.Equal(0, _limiter.GetAvailableTokens(resource));
+            Assert.Equal(0, limiter.GetAvailableTokens(resource));
 
-            // Act: wait for partial refill
-            Thread.Sleep(TimeSpan.FromSeconds(waitSeconds));
+            // Act: deterministically advance time for partial refill. Real Thread.Sleep can wake
+            // just before the whole-token boundary on a busy CI host, and GetAvailableTokens()
+            // truncates fractional tokens to int.
+            fakeTime.Advance(TimeSpan.FromSeconds(waitSeconds));
 
             // Assert: should have at least some tokens
-            var available = _limiter.GetAvailableTokens(resource);
+            var available = limiter.GetAvailableTokens(resource);
             Assert.True(available > 0, $"Expected tokens after {waitSeconds}s, got {available}");
         }
 
@@ -662,29 +718,44 @@ namespace Lidarr.Plugin.Common.Tests.Services.Resilience
         [Fact]
         public async Task Scenario_MultiplePeriodicRefreshes()
         {
-            // Arrange: 1 request per 100ms
+            // Arrange: 1 request per 100ms using virtual time. A wall-clock
+            // upper bound is scheduler-sensitive on a busy CI runner.
+            var fakeTime = new FakeTimeProvider(DateTimeOffset.UtcNow);
+            var limiter = new TokenBucketRateLimiter(NullLogger.Instance, fakeTime);
             const string resource = "periodic";
             const int capacity = 1;
             var period = TimeSpan.FromMilliseconds(100);
-            _limiter.Configure(resource, capacity, period);
+            limiter.Configure(resource, capacity, period);
 
-            var timestamps = new List<long>();
+            Assert.Equal(0, await limiter.ExecuteAsync(resource, () => Task.FromResult(0)));
 
-            // Act: make 5 requests
-            for (int i = 0; i < 5; i++)
+            var queued = Enumerable.Range(1, 4)
+                .Select(i => limiter.ExecuteAsync(resource, () => Task.FromResult(i)))
+                .ToArray();
+
+            await Task.Yield();
+            Assert.All(queued, task => Assert.False(task.IsCompleted));
+
+            for (int i = 0; i < queued.Length; i++)
             {
-                var start = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
-                await _limiter.ExecuteAsync(resource, () => Task.FromResult(i));
-                timestamps.Add(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - start);
+                fakeTime.Advance(period - TimeSpan.FromMilliseconds(1));
+                await Task.Yield();
+                Assert.False(queued[i].IsCompleted, $"Request {i + 1} should not complete before its refill boundary.");
+
+                fakeTime.Advance(TimeSpan.FromMilliseconds(1));
+                Assert.Equal(i + 1, await AwaitWithTimeout(queued[i]));
+
+                for (int later = i + 1; later < queued.Length; later++)
+                {
+                    Assert.False(queued[later].IsCompleted, $"Request {later + 1} should still be waiting for a later refill.");
+                }
             }
 
-            // Assert: first request instant, subsequent requests wait
-            Assert.InRange(timestamps[0], 0, 50);
-
-            for (int i = 1; i < 5; i++)
+            static async Task<T> AwaitWithTimeout<T>(Task<T> task)
             {
-                // Should wait approximately period (100ms +/- 50ms for variance)
-                Assert.InRange(timestamps[i], 50, 300);
+                var completed = await Task.WhenAny(task, Task.Delay(TimeSpan.FromSeconds(5)));
+                Assert.Same(task, completed);
+                return await task;
             }
         }
 

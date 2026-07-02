@@ -1,3 +1,5 @@
+<!-- docval:ignore-script-refs: references plugin-local verify wrappers from the workspace root -->
+
 # Ecosystem Handoff Guide
 
 This document enables another developer (human or AI) to continue ecosystem work with full context. It captures the current state, ongoing work, and decision rationale.
@@ -11,32 +13,37 @@ This document enables another developer (human or AI) to continue ecosystem work
 cd D:\Alex\github
 
 # Repos in this workspace:
+# - amazonmusicarr/    Amazon Music streaming plugin
+# - applemusicarr/     Apple Music import-list/indexer/download-client plugin
 # - brainarr/          AI-powered import list plugin
 # - qobuzarr/          Qobuz streaming plugin
 # - tidalarr/          Tidal streaming plugin
-# - applemusicarr/     Apple Music plugin (metadata only)
 # - lidarr.plugin.common/  Shared library + tooling
 
 # Each plugin has Common as a submodule:
+git -C amazonmusicarr submodule update --init --recursive
+git -C applemusicarr submodule update --init --recursive
+git -C brainarr submodule update --init --recursive
 git -C qobuzarr submodule update --init --recursive
 git -C tidalarr submodule update --init --recursive
-git -C brainarr submodule update --init --recursive
-git -C applemusicarr submodule update --init --recursive
 ```
 
 ### 2. Build & Test
 
 ```powershell
 # Build all plugins
+dotnet build amazonmusicarr/src/Lidarr.Plugin.Amazonmusicarr/Lidarr.Plugin.Amazonmusicarr.csproj -c Release
+dotnet build applemusicarr/src/AppleMusicarr.Plugin/AppleMusicarr.Plugin.csproj -c Release
+dotnet build brainarr/Brainarr.Plugin/Brainarr.Plugin.csproj -c Release
 dotnet build qobuzarr/Qobuzarr.csproj -c Release
 dotnet build tidalarr/src/Tidalarr/Tidalarr.csproj -c Release
-dotnet build brainarr/Brainarr.Plugin/Brainarr.Plugin.csproj -c Release
-dotnet build applemusicarr/src/AppleMusicarr.Plugin/AppleMusicarr.Plugin.csproj -c Release
 
-# Run tests
-dotnet test qobuzarr/Qobuzarr.Tests/
-dotnet test tidalarr/tests/
-dotnet test brainarr/Brainarr.Tests/
+# Run the same local verify wrappers used by Gitea CI where available
+pwsh amazonmusicarr/scripts/verify-local.ps1
+pwsh applemusicarr/scripts/verify-local.ps1
+pwsh brainarr/scripts/verify-local.ps1
+pwsh qobuzarr/scripts/verify-local.ps1
+pwsh tidalarr/scripts/verify-local.ps1
 ```
 
 ### 3. Package Plugins
@@ -45,8 +52,8 @@ dotnet test brainarr/Brainarr.Tests/
 # Use the unified PluginPack tooling
 Import-Module lidarr.plugin.common/tools/PluginPack.psm1
 
-# Package with canonical Abstractions (recommended)
-New-PluginPackage -Csproj qobuzarr/Qobuzarr.csproj -Manifest qobuzarr/plugin.json -RequireCanonicalAbstractions
+# Package with merged/internalized Common + Abstractions
+New-PluginPackage -Csproj qobuzarr/Qobuzarr.csproj -Manifest qobuzarr/plugin.json
 ```
 
 ## Current Work Streams
@@ -55,18 +62,21 @@ New-PluginPackage -Csproj qobuzarr/Qobuzarr.csproj -Manifest qobuzarr/plugin.jso
 
 Check these repos for open PRs:
 - `gh pr list -R RicherTunes/Lidarr.Plugin.Common`
+- `gh pr list -R RicherTunes/amazonmusicarr`
+- `gh pr list -R RicherTunes/AppleMusicarr`
+- `gh pr list -R RicherTunes/Brainarr`
 - `gh pr list -R RicherTunes/Qobuzarr`
 - `gh pr list -R RicherTunes/Tidalarr`
-- `gh pr list -R RicherTunes/Brainarr`
-- `gh pr list -R RicherTunes/AppleMusicarr`
 
-### Canonical Abstractions (Completed)
+### Merged Abstractions Packaging (Completed)
 
-All plugins now use `canonical-abstractions.json` to ensure identical Abstractions.dll:
-- Version: 1.5.0
-- SHA256: `251bf049c28737ac1912074733adf04f099f54c801c914ac9c0e056b2a8232db`
+Plugins that import Common's `build/PluginPackaging.targets` merge and internalize
+`Lidarr.Plugin.Abstractions.dll` and `Lidarr.Plugin.Common.dll` into the main plugin
+DLL. Packages must not ship either DLL as a sidecar.
 
-Verification: `lidarr.plugin.common/scripts/Verify-CanonicalAbstractions.ps1`
+Legacy sidecar packages are still checked by
+`lidarr.plugin.common/scripts/Verify-CanonicalAbstractions.ps1`; when no sidecars
+are present, the package is compliant.
 
 ### Manifest Entrypoint Validation (Completed)
 
@@ -77,15 +87,15 @@ Verification: `lidarr.plugin.common/scripts/Verify-CanonicalAbstractions.ps1`
 
 ## Architecture Decisions
 
-### Why Canonical Abstractions?
+### Why Merged Abstractions?
 
-**Problem**: Plugins built at different times had byte-different Abstractions.dll, causing potential type identity issues.
+**Problem**: Plugins built at different times had byte-different Abstractions.dll sidecars, causing type identity issues.
 
-**Solution**: Pin Abstractions to a specific release with SHA256 verification:
-1. `canonical-abstractions.json` stores version + SHA256
-2. `Install-CanonicalAbstractions` downloads/caches the DLL
-3. `New-PluginPackage -RequireCanonicalAbstractions` enforces injection
-4. `Assert-CanonicalAbstractions` verifies post-package
+**Solution**: Merge/internalize Abstractions and Common into the plugin DLL:
+1. `PluginPackaging.targets` includes both DLLs in the ILRepack input.
+2. `PluginPack.psm1` removes and rejects Abstractions/Common sidecars.
+3. Packaging preflight fails if either sidecar is present.
+4. The legacy canonical verifier only compares hashes when old sidecars are present.
 
 ### Why Manifest Entrypoint Validation?
 
@@ -102,7 +112,7 @@ Verification: `lidarr.plugin.common/scripts/Verify-CanonicalAbstractions.ps1`
 |-----------|-------|-------|
 | `tools/PluginPack.psm1` | Common | Core packaging logic |
 | `tools/ManifestCheck.ps1` | Common | Manifest validation |
-| `tools/canonical-abstractions.json` | Common | Pinned Abstractions config |
+| `tools/canonical-abstractions.json` | Common | Legacy sidecar hash config |
 | `scripts/e2e-runner.ps1` | Common | E2E test orchestration |
 | `docs/reference/plugin.schema.json` | Common | Manifest JSON schema |
 | `plugin.json` | Each plugin | Plugin-specific manifest |
@@ -110,23 +120,17 @@ Verification: `lidarr.plugin.common/scripts/Verify-CanonicalAbstractions.ps1`
 
 ## Known Issues
 
-### GitHub Actions Billing
+### Gitea-Primary CI
 
-When Actions is blocked by billing limits:
-1. Run builds locally (see CLAUDE.md)
-2. Verify manually before merging
-3. Do NOT trust cached CI status
+Gitea is the primary CI surface. GitHub Actions workflows are mirrors/peripheral where present and must not be treated as the only merge gate. When the Gitea runner is unavailable, run each plugin's `scripts/verify-local.ps1` and the shared plugin lint runner locally before merging.
 
-### Multi-Plugin E2E Instability
+### Multi-Plugin E2E
 
-The Lidarr host has an AssemblyLoadContext lifecycle bug that affects multi-plugin scenarios.
-- Use single-plugin E2E for reliable testing
-- `:8691` (multi-plugin) is "best-effort"
-- See `ECOSYSTEM_PARITY_ROADMAP.md` for details
+The current packaging contract merges/internalizes Common and Abstractions into each plugin DLL to avoid cross-plugin AssemblyLoadContext type-identity conflicts. Use single-plugin Docker E2E for plugin-specific smoke coverage and the Common multi-plugin coexistence proof when changing package closure, host-pinned dependencies, or Common internalization.
 
 ## Merge Order (When CI Unblocks)
 
-1. Common PRs first (e.g., canonical Abstractions, entrypoint validation)
+1. Common PRs first (e.g., packaging policy, entrypoint validation)
 2. Bump Common submodule in each plugin
 3. Merge plugin PRs (verify locally first)
 

@@ -3,8 +3,10 @@
 <!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
 
 **Generated**: 2026-05-25 (Wave 21 parity-mission session). **Refreshed**: 2026-05-25 (Wave-22 adversarial-review pass). **Refreshed again**: 2026-05-25 (Wave-23 adversarial-review pass — apple-drift correction + security hardening + parity convergence). **Refreshed again**: 2026-05-26 (Mission #52 stale-cell pass + Mission #53 rows 31-35 cross-cutting concerns).
-**Common pin**: `v1.17.0` (639d573 — restored lockstep Wave-23 after applemusicarr was discovered ahead by one tag; siblings brainarr/tidalarr/qobuzarr bumped to match).
-**Plugins covered**: `applemusicarr`, `tidalarr`, `qobuzarr`, `brainarr` + the shared `lidarr.plugin.common`
+> **Scope note (2026-06-29):** This matrix is a historical four-plugin evidence set. The current active ecosystem also includes `amazonmusicarr`; do not treat missing Amazon cells as N/A. Current CI repo coverage is enforced by `scripts/ci/ecosystem-repos.json` + `scripts/ci/verify-ecosystem-ci-contract.ps1`.
+
+**Current Common dev version**: `1.18.0-dev`. **Current five-plugin sentinel pin**: `cd1869642faab044da515b74983051283e573d3c` (verified 2026-06-29 from `ext-common-sha.txt` in amazonmusicarr, applemusicarr, brainarr, qobuzarr, and tidalarr).
+**Plugins covered by the historical matrix below**: `applemusicarr`, `tidalarr`, `qobuzarr`, `brainarr` + the shared `lidarr.plugin.common`
 
 This document is the single source of truth for "does every plugin follow the same canonical pattern, or does the divergence have a documented architectural reason?" Each row is a cross-cutting concern; each column is a plugin; each cell is a status + evidence pointer.
 
@@ -114,7 +116,7 @@ This document is the single source of truth for "does every plugin follow the sa
 | 32 | `FieldDefinition` order discipline | ⚠ indexer puts `MusicUserToken` at field 3 `Advanced=true`; DC puts it at field 3 `Advanced=false` — inconsistent within the same plugin | ✓ constants-file approach (`SettingsDisplay.Indexer.ConfigPathOrder`) | ✓ fields 1-11 with named sections | N/A — import-list, different field shape |
 | 33 | Cookie persistence / cookie-jar TTL | N/A — developer-token auth, no cookies | ⚠ OAuth session cookies inherited via host `CookieContainer`; no TTL eviction logic | ⚠ same exposure as tidal — session cookies can accumulate across restarts | N/A — stateless API key auth |
 | 34 | TLS certificate pinning / custom validation | N/A — deliberate; no plugin pins certs | N/A — deliberate | N/A — deliberate | N/A — deliberate |
-| 35 | Plugin-state recovery on restart (download-queue checkpointing) | N/A for download checkpoint — `FileUnresolvedQueueStore` persists IMPORT-LIST unresolved-album candidates (different concern) | ⚠ **intentionally divergent** — in-memory `HostBridgeDownloadTrackerStore` (process-lifetime) + host `DownloadItemStatus`; no plugin-side checkpoint (host owns download lifecycle) | ⚠ **intentionally divergent** — same as tidalarr (in-memory `DownloadQueueService` + host tracking); consistent host-reliant design, NOT a qobuz-specific gap | N/A — import-list, no download queue |
+| 35 | Plugin-state recovery on restart (download-queue checkpointing) | ✓ terminal-state checkpoint via Common `HostBridgeDownloadTrackerStore.ForPlugin`; ⚠ queued/downloading entries intentionally dropped on restart until a resumable worker seam exists | ✓ terminal-state checkpoint via Common `HostBridgeDownloadTrackerStore.ForPlugin`; ⚠ queued/downloading entries intentionally dropped on restart until a resumable worker seam exists | ✓ terminal-state checkpoint via Common `HostBridgeDownloadTrackerStore.ForPlugin`; ⚠ queued/downloading entries intentionally dropped on restart until a resumable worker seam exists | N/A — import-list, no download queue |
 
 **Row 31 — Retry policy (#31)**: Tidal and Qobuz each maintain their own HTTP retry/backoff logic (Polly policies or manual catch-retry loops) that predate Common's `ResiliencePolicy`. Convergence would require threading a Common executor through each HTTP pipeline. Non-blocking but creates duplicated exponential-backoff tuning surface. Brainarr's LLM-specific retry has distinct concerns (per-model timeout budgets, provider failover, `LlmAuthCircuit` coordination) that don't map cleanly to streaming-service resilience — N/A is correct.
 
@@ -124,7 +126,7 @@ This document is the single source of truth for "does every plugin follow the sa
 
 **Row 34 — TLS cert pinning (#34)**: Recorded explicitly so future security audits don't re-raise this as a missing item. All four plugins intentionally rely on Lidarr host's default TLS validation (OS trust store + .NET's `HttpClient` defaults). Pinning would create operational burden for certificate rotations without meaningful security benefit for this threat model (streaming API calls over HTTPS to well-known providers).
 
-**Row 35 — Restart checkpointing (#35)** — *intentionally divergent; reclassified 2026-05-30 after verifying against source.* Both streaming plugins hold in-flight download state **in-memory** — tidalarr in a `private static readonly HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>` (process-lifetime; `TidalLidarrDownloadClient.cs:41`), qobuzarr in `DownloadQueueService._activeDownloads` (a `ConcurrentDictionary`; `DownloadQueueService.cs:19`) — and both rely on the Lidarr host's `DownloadItemStatus` for download lifecycle. **Neither persists a plugin-side crash checkpoint, and that is consistent between them** — the standard Lidarr download-client design (the host owns the download queue; plugins are clients). The earlier "qobuz ✗ loses-all vs tidal ⚠ soft-recovery" split was an **audit inconsistency**: both use the same in-memory tracking, so they behave identically on restart — qobuz is *not* a qobuz-specific gap. Apple's `FileUnresolvedQueueStore` is **not** a download checkpoint; it persists import-list *unresolved-album* candidates (a different concern). A true plugin-side crash-resume (persist + resume in-flight transfers, building on Common's `JsonFileStore` + resume-transfer logic) would be an **optional shared enhancement for both streaming plugins**, tracked as future work — not a parity divergence between plugins.
+**Row 35 — Restart checkpointing (#35)** — *updated 2026-06-29 after the Common tracker-persistence adoption.* Streaming download clients now use Common's `HostBridgeDownloadTrackerStore.ForPlugin(...)` for terminal-state persistence. Completed, failed, and cancelled items reload after a Lidarr restart until retention expiry so the host can import, blocklist, or remove them. Queued/downloading entries are still process-local: Common drops persisted non-terminal entries during startup and writes back the cleaned snapshot because the background worker task does not survive process restart. A true crash-resume feature would require an explicit resumable worker contract in Common plus plugin-specific transfer resume support; stale in-progress JSON is deliberately not treated as resumable work.
 
 ---
 
@@ -188,7 +190,7 @@ These items are NOT blocking shipping any plugin; they are recorded for future c
 17. **qobuz appSecret-reconstruction surfaces** — regex calls in `ExtractAppSecretFromBundle` lacked timeouts (defense-in-depth, not catastrophic ReDoS — patterns are linear). `request_sig` (appSecret-derivative signature) was logged at Debug. `loginResponse.Message` interpolated into exception text could echo attacker-controlled API response content. All three fixed in qobuzarr `45e240b`.
 18. **brainarr MakeKey whitespace gap** — Wave-22 fix used `IsNullOrEmpty`; whitespace `"   "` would still produce a single collision-prone hash slot. Tightened to `IsNullOrWhiteSpace` in `20b133f`; new `[Theory] MakeKey_WhitespaceApiKey_ThrowsArgumentException` covers " ", "\t", "\n", " \t\n ". Same fix applied to `GeminiModelDiscovery.CreateCacheKey` (sibling pattern).
 19. **qobuz AuthFailureGate registration shape** — used `AddSingleton<AuthFailureGate>()` (default ctor) while apple+tidal passed explicit `(handler, TimeProvider.System, TimeSpan.FromSeconds(60), logger)`. Probe interval was implicit. Aligned in qobuzarr `342ee99`.
-20. **tidal+qobuz floating Docker tags** — 10 workflow files used `ghcr.io/hotio/lidarr:pr-plugins` without version suffix while apple+brainarr pin `pr-plugins-3.1.2.4913`. Pinned in tidalarr `cb2e43e` + qobuzarr `342ee99`.
+20. **tidal+qobuz floating Docker tags** — 10 workflow files used `ghcr.io/hotio/lidarr:pr-plugins` without version suffix while apple+brainarr pin `nightly-3.1.3.4970`. Pinned in tidalarr `cb2e43e` + qobuzarr `342ee99`.
 21. **brainarr constants triple** — added (see row 5 update).
 22. **Cleanup leftovers** — stale TechDebt refs in 4 brainarr docs purged; DIWiringAndParityTests relocated; QobuzarrPluginComplianceTests renamed (referred to deleted symbol). brainarr `8830609`, qobuzarr `fe685cf`.
 
@@ -243,7 +245,7 @@ Per the user's mission contract:
 
 > Common extensions are tested, versioned, and pinned consistently.
 
-✓ Common v1.15.0 is the current pin across all 4 plugins (`git submodule status` consistent).
+✓ Historical Wave-21/31 verification used Common v1.15.0 across the original 4-plugin set. Current five-plugin pin/version truth is recorded in the scope note at the top of this document and enforced by `scripts/ci/ecosystem-repos.json` + `scripts/ci/verify-ecosystem-ci-contract.ps1`.
 
 > No plugin remains on an older/divergent Common version.
 

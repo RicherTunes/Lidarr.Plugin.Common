@@ -30,7 +30,6 @@ ls X:\lidarr-test\plugins\RicherTunes\MyPlugin
 
 # Expected files:
 # - Lidarr.Plugin.MyPlugin.dll
-# - Lidarr.Plugin.Abstractions.dll
 # - plugin.json
 ```
 
@@ -59,17 +58,17 @@ docker logs lidarr-test 2>&1 | Select-String "ReflectionTypeLoadException|TypeLo
 ```
 
 **Common Causes**:
-1. Abstractions.dll version mismatch
+1. Unmerged Common/Abstractions sidecars or stale AssemblyRefs
 2. Missing required dependency
 3. Wrong .NET target framework
 
 **Fix**:
 ```powershell
-# Verify canonical Abstractions
+# Verify sidecar policy. Merged packages should have no Abstractions sidecar.
 lidarr.plugin.common/scripts/Verify-CanonicalAbstractions.ps1
 
-# Rebuild with canonical injection
-./build.ps1 -Package  # Uses -RequireCanonicalAbstractions
+# Rebuild with PluginPackaging.targets / PluginPack cleanup
+./build.ps1 -Package
 ```
 
 ### E2E_ABSTRACTIONS_SHA_MISMATCH
@@ -89,7 +88,7 @@ cd qobuzarr && git submodule update --init
 cd tidalarr && git submodule update --init
 cd brainarr && git submodule update --init
 
-# Rebuild each with canonical Abstractions
+# Rebuild each from the same Common commit
 foreach ($plugin in @('qobuzarr', 'tidalarr', 'brainarr')) {
     Push-Location $plugin
     ./build.ps1 -Package
@@ -181,9 +180,9 @@ ReflectionTypeLoadException: Unable to load one or more of the requested types.
 FileNotFoundException: Could not load file or assembly 'Lidarr.Plugin.Abstractions'
 ```
 
-**Cause**: Abstractions.dll not included in package.
+**Cause**: The plugin DLL still references `Lidarr.Plugin.Abstractions` but the package no longer ships a sidecar. A correct merged package has no external Abstractions AssemblyRef.
 
-**Fix**: Ensure `New-PluginPackage -RequireCanonicalAbstractions` is used.
+**Fix**: Rebuild with Common `PluginPackaging.targets` enabled so Abstractions is merged/internalized into the main plugin DLL.
 
 ### Method not found
 

@@ -19,7 +19,11 @@ namespace Lidarr.Plugin.Common.Hosting
     /// </summary>
     /// <remarks>
     /// Thread-safe. All mutations are guarded by <c>_lock</c>.
-    /// Shutdown is idempotent: subsequent calls after the first are no-ops.
+    /// Shutdown is idempotent for a given set of registered hooks: it drains and clears the hooks,
+    /// then re-arms the registry so a subsequent plugin lifecycle in the same process can re-register.
+    /// Lidarr keeps the host process alive across plugin reloads, so the registry must NOT latch
+    /// permanently after the first <see cref="Shutdown"/> — mirrors <see cref="Utilities.HostGateRegistry"/>'s
+    /// re-arm philosophy.
     /// </remarks>
     public static class PluginLifecycle
     {
@@ -36,8 +40,8 @@ namespace Lidarr.Plugin.Common.Hosting
 
         /// <summary>
         /// Registers a shutdown action under the given name. Actions are invoked in LIFO order
-        /// by <see cref="Shutdown"/>. Registrations after <see cref="Shutdown"/> has been called
-        /// are silently ignored (the plugin is already being torn down).
+        /// by <see cref="Shutdown"/>. Registrations made while a <see cref="Shutdown"/> is actively
+        /// draining its already-snapshotted hooks are retained for the next shutdown.
         /// </summary>
         /// <param name="name">Human-readable name used in log messages on failure.</param>
         /// <param name="shutdown">Action to invoke on plugin teardown.</param>
@@ -47,48 +51,64 @@ namespace Lidarr.Plugin.Common.Hosting
             if (name is null) throw new ArgumentNullException(nameof(name));
             if (shutdown is null) throw new ArgumentNullException(nameof(shutdown));
 
-            // If already shutting down, silently discard late registrations.
-            if (_shuttingDown) return;
-
             lock (_lock)
             {
-                if (_shuttingDown) return;
+                // If a shutdown is actively draining, it has already taken and cleared its snapshot
+                // under this same lock. New registrations therefore belong to the next lifecycle and
+                // must be retained, not dropped.
                 _hooks.Add((name, shutdown));
             }
         }
 
         /// <summary>
-        /// Invokes all registered shutdown actions in reverse-registration order (LIFO).
-        /// Exceptions thrown by individual hooks are caught and logged; they do not prevent
-        /// subsequent hooks from running. After the first call, subsequent calls are no-ops.
+        /// Invokes all registered shutdown actions in reverse-registration order (LIFO), then
+        /// clears them and re-arms the registry. A subsequent call with no new registrations drains
+        /// an empty list (effective no-op); a hook registered after a completed Shutdown is retained
+        /// and runs on the next Shutdown. Exceptions thrown by individual hooks are caught and logged;
+        /// they do not prevent subsequent hooks from running.
         /// </summary>
         public static void Shutdown()
         {
-            // Fast path: already shut down.
-            if (_shuttingDown) return;
-
             List<(string Name, Action Action)> hooks;
             lock (_lock)
             {
+                // A concurrent Shutdown is already draining; let it own this pass. Its drain plus
+                // re-arm leaves the registry consistent, and re-entrancy here would double-run hooks.
                 if (_shuttingDown) return;
+
                 _shuttingDown = true;
 
-                // Snapshot in LIFO order.
+                // Snapshot in LIFO order and clear, so this drain owns exactly these hooks. New
+                // registrations that race the drain are retained in _hooks for the next shutdown.
                 hooks = new List<(string Name, Action Action)>(_hooks);
                 hooks.Reverse();
                 _hooks.Clear();
             }
 
-            foreach (var (name, action) in hooks)
+            try
             {
-                try
+                foreach (var (name, action) in hooks)
                 {
-                    action();
+                    try
+                    {
+                        action();
+                    }
+                    catch (Exception ex)
+                    {
+                        try { _logger?.LogWarning(ex, "PluginLifecycle: shutdown hook '{HookName}' threw an exception.", name); }
+                        catch { /* logger itself must not block teardown */ }
+                    }
                 }
-                catch (Exception ex)
+            }
+            finally
+            {
+                // Re-arm: leave the registry re-usable so a fresh plugin lifecycle in the same host
+                // process can re-register and run its own teardown hooks on the next Shutdown.
+                // Mirrors HostGateRegistry's re-arm philosophy. Done in finally so a hook that throws
+                // past the inner catch (e.g. a logger failure) still re-arms the registry.
+                lock (_lock)
                 {
-                    try { _logger?.LogWarning(ex, "PluginLifecycle: shutdown hook '{HookName}' threw an exception.", name); }
-                    catch { /* logger itself must not block teardown */ }
+                    _shuttingDown = false;
                 }
             }
         }

@@ -104,6 +104,56 @@ function Test-PluginManifest {
     }
 }
 
+function Get-ManagedAssemblyReferenceNames {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AssemblyPath
+    )
+
+    $resolvedPath = Resolve-Path -LiteralPath $AssemblyPath
+    $stream = [IO.File]::OpenRead($resolvedPath)
+    $peReader = $null
+    try {
+        $peReader = [System.Reflection.PortableExecutable.PEReader]::new($stream)
+        if (-not $peReader.HasMetadata) {
+            throw "Assembly '$AssemblyPath' does not contain managed metadata."
+        }
+
+        $metadata = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($peReader)
+        $references = @()
+        foreach ($handle in $metadata.AssemblyReferences) {
+            $reference = $metadata.GetAssemblyReference($handle)
+            $references += $metadata.GetString($reference.Name)
+        }
+
+        return $references
+    }
+    finally {
+        if ($peReader) { $peReader.Dispose() }
+        $stream.Dispose()
+    }
+}
+
+function Assert-PluginAssemblyHasNoMergedReferences {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$AssemblyPath,
+
+        [string[]]$ForbiddenReferences = @('Lidarr.Plugin.Abstractions', 'Lidarr.Plugin.Common')
+    )
+
+    if (-not (Test-Path -LiteralPath $AssemblyPath)) {
+        throw "Plugin assembly not found at '$AssemblyPath'."
+    }
+
+    $references = @(Get-ManagedAssemblyReferenceNames -AssemblyPath $AssemblyPath)
+    $violations = @($references | Where-Object { $ForbiddenReferences -contains $_ } | Select-Object -Unique)
+    if ($violations.Count -gt 0) {
+        throw "Plugin assembly '$AssemblyPath' still has external merged assembly reference(s): $($violations -join ', '). Rebuild with PluginPackaging.targets/ILRepack internalization before packaging; do not rely on removed sidecars."
+    }
+}
 function New-PluginPackage {
     [CmdletBinding()]
     param(
@@ -235,27 +285,18 @@ function New-PluginPackage {
     # This matches PluginPackaging.targets behavior
     Invoke-PluginCleanup -PublishPath $publishPath -AssemblyName $assemblyName -AdditionalKeep $AdditionalKeepAssemblies
 
-    # Step 3: Inject canonical Abstractions (if requested or required)
-    # This ensures all plugins ship with the exact same Abstractions binary
-    # Priority: 1) explicit parameters, 2) canonical-abstractions.json, 3) skip if not required
+    $mainAssemblyPath = Join-Path $publishPath "$assemblyName.dll"
+    Assert-PluginAssemblyHasNoMergedReferences -AssemblyPath $mainAssemblyPath
+
+    # Step 3: Historical canonical Abstractions sidecar injection is intentionally
+    # disabled. Abstractions is now merged/internalized into each plugin DLL by
+    # PluginPackaging.targets; shipping it as a sidecar reintroduces the cross-ALC
+    # conflict that the merged-DLL packaging policy fixed.
     $doCanonicalInjection = $CanonicalAbstractionsVersion -or $CanonicalAbstractionsPath -or $RequireCanonicalAbstractions
 
     $canonicalResult = $null
     if ($doCanonicalInjection) {
-        $installParams = @{
-            PublishPath = $publishPath
-        }
-        if ($CanonicalAbstractionsVersion) {
-            $installParams['CommonVersion'] = $CanonicalAbstractionsVersion
-        }
-        if ($CanonicalAbstractionsSha256) {
-            $installParams['ExpectedSha256'] = $CanonicalAbstractionsSha256
-        }
-        if ($CanonicalAbstractionsPath) {
-            $installParams['CanonicalAbstractionsPath'] = $CanonicalAbstractionsPath
-        }
-        $canonicalResult = Install-CanonicalAbstractions @installParams
-        Write-Host "Canonical Abstractions installed: v$($canonicalResult.Version)" -ForegroundColor Cyan
+        Write-Warning "Canonical Abstractions sidecar injection is deprecated and skipped; Abstractions must be merged/internalized into the plugin DLL."
     }
 
     # Step 4: Entrypoint validation (after all assembly modifications)
@@ -309,13 +350,17 @@ function New-PluginPackage {
     Compress-Archive -Path (Join-Path $publishPath '*') -DestinationPath $zipPath
     Write-Host "Created plugin package: $zipPath" -ForegroundColor Green
 
-    # Post-package verification: if canonical Abstractions was installed, verify it's in the ZIP
-    if ($doCanonicalInjection -and $canonicalResult) {
-        Write-Host "Verifying canonical Abstractions in package..." -ForegroundColor Cyan
+    # Post-package guardrail: canonical Abstractions sidecars are forbidden for
+    # merged plugin packages.
+    if ($doCanonicalInjection) {
+        Write-Host "Verifying package does not ship Abstractions sidecar..." -ForegroundColor Cyan
         $verifyDir = Join-Path ([IO.Path]::GetTempPath()) "verify-package-$(Get-Random)"
         try {
             Expand-Archive -LiteralPath $zipPath -DestinationPath $verifyDir -Force
-            Assert-CanonicalAbstractions -Path $verifyDir -ExpectedSha256 $canonicalResult.Sha256 | Out-Null
+            $sidecar = Join-Path $verifyDir 'Lidarr.Plugin.Abstractions.dll'
+            if (Test-Path -LiteralPath $sidecar) {
+                throw "Package ships forbidden Lidarr.Plugin.Abstractions.dll sidecar; Abstractions must be merged/internalized."
+            }
             Write-Host "[OK] Package verification passed" -ForegroundColor Green
         }
         finally {
@@ -339,9 +384,10 @@ function Invoke-PluginCleanup {
     MUST SHIP:
       - Lidarr.Plugin.<Name>.dll (merged assembly)
       - plugin.json
-      - Lidarr.Plugin.Abstractions.dll (host does NOT provide this)
 
     MUST NOT SHIP:
+      - Lidarr.Plugin.Abstractions.dll (merged/internalized; sidecar breaks multi-plugin loading)
+      - Lidarr.Plugin.Common.dll (merged/internalized)
       - FluentValidation.dll (host provides; shipping causes type-identity conflicts)
       - Microsoft.Extensions.DependencyInjection.Abstractions.dll (host provides; shipping breaks DI contracts)
       - Microsoft.Extensions.Logging.Abstractions.dll (host provides; shipping breaks ILogger contracts)
@@ -360,8 +406,7 @@ function Invoke-PluginCleanup {
     # Canonical keep list - these assemblies belong in the package.
     # Everything else is either merged/internalized or host-provided.
     $keepPatterns = @(
-        "$AssemblyName.dll",                                    # Plugin itself (merged)
-        'Lidarr.Plugin.Abstractions.dll'                        # Required - host does NOT provide this
+        "$AssemblyName.dll"                                     # Plugin itself (merged)
     )
 
     # Add any plugin-specific additional assemblies (maps to PluginPackagingAdditionalKeep)
@@ -382,7 +427,9 @@ function Invoke-PluginCleanup {
         'FluentValidation.dll',
         'Microsoft.Extensions.DependencyInjection.Abstractions.dll',
         'Microsoft.Extensions.Logging.Abstractions.dll',
-        'System.Text.Json.dll'
+        'System.Text.Json.dll',
+        'Lidarr.Plugin.Abstractions.dll',
+        'Lidarr.Plugin.Common.dll'
     )
     foreach ($forbidden in $forbiddenNames) {
         $shouldKeepForbidden = $keepPatterns | Where-Object { $forbidden -like $_ } | Select-Object -First 1
@@ -441,13 +488,13 @@ function Invoke-PluginMerge {
     - Polly*.dll
     - TagLibSharp*.dll
     - Microsoft.Extensions.DependencyInjection.dll (implementation, not abstractions)
+    - Lidarr.Plugin.Abstractions.dll
     - Microsoft.Extensions.Caching.*.dll
     - Microsoft.Extensions.Options.dll
     - Microsoft.Extensions.Primitives.dll
     - Microsoft.Extensions.Http.dll
     
     Does NOT merge (type identity with host):
-    - Lidarr.Plugin.Abstractions.dll
     - FluentValidation.dll
     - Microsoft.Extensions.DependencyInjection.Abstractions.dll
     - Microsoft.Extensions.Logging.Abstractions.dll
@@ -475,6 +522,7 @@ function Invoke-PluginMerge {
     #       and cause TypeLoadException or weird serialization issues
     $mergePatterns = @(
         'Lidarr.Plugin.Common.dll',
+        'Lidarr.Plugin.Abstractions.dll',
         'Polly.dll',
         'Polly.Core.dll', 
         'Polly.Extensions.Http.dll',
@@ -592,12 +640,15 @@ function Get-CanonicalAbstractionsConfig {
 function Install-CanonicalAbstractions {
     <#
     .SYNOPSIS
-    Injects the canonical Lidarr.Plugin.Abstractions.dll into the publish output.
+    Legacy helper that injects the canonical Lidarr.Plugin.Abstractions.dll into the publish output.
 
     .DESCRIPTION
     Downloads the canonical Abstractions DLL from a Common release (or uses a local cache),
     replaces the build output's copy, and verifies the SHA256 hash matches. This ensures all
     plugins use the exact same Abstractions binary, eliminating drift.
+
+    Current plugin packages should not use this helper; Abstractions is merged/internalized into
+    the plugin DLL and sidecars are rejected by New-PluginPackage.
 
     HARD GATE: Build fails if verification fails.
 
@@ -818,5 +869,5 @@ function Assert-CanonicalAbstractions {
     return $true
 }
 
-Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage, Invoke-PluginCleanup, Get-CanonicalAbstractionsConfig, Install-CanonicalAbstractions, Assert-CanonicalAbstractions
+Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage, Invoke-PluginCleanup, Assert-PluginAssemblyHasNoMergedReferences, Get-CanonicalAbstractionsConfig, Install-CanonicalAbstractions, Assert-CanonicalAbstractions
 # end-snippet
