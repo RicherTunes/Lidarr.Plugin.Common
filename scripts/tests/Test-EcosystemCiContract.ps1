@@ -916,7 +916,10 @@ jobs:
     Test-Assertion 'Common Gitea workflow runs the live ecosystem CI contract' {
         $workflow = Get-Content -LiteralPath (Join-Path $RepoRoot '.gitea/workflows/ci.yml') -Raw
         $workflow -match '(?m)^\s+ecosystem-contract:\s*$' -and
-            $workflow -match '\$verifierArgs\s*=\s*@\("-EcosystemRoot",\s*"\.\.",\s*"-CI"\)' -and
+            $workflow -match '\$verifierArgs\s*=\s*@\{' -and
+            $workflow -match 'EcosystemRoot\s*=\s*"\.\."' -and
+            $workflow -match 'CI\s*=\s*\$true' -and
+            $workflow -notmatch '\$verifierArgs\s*=\s*@\(' -and
             $workflow -match 'verify-ecosystem-ci-contract\.ps1\s+@verifierArgs' -and
             $workflow -match 'WarnOnDivergentPins' -and
             $workflow -match 'GITHUB_EVENT_NAME\s*-eq\s*"push"' -and
