@@ -961,6 +961,17 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     }
 
     [Fact]
+    public void FileClassParity_BlockNamespaceInternalPrimaryWithPublicNestedHelper_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "TokenBudgetResolver.cs",
+            "namespace N\n{\n    internal sealed class TokenBudgetResolver\n    {\n        public sealed record PromptBudget;\n    }\n}");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
     public void FileClassParity_MultiTypeGroupingFile_Passes()
     {
         // DTO/exception-family grouping files declare >1 public type — allowed, not flagged.
