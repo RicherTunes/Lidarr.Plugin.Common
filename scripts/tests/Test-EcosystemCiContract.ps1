@@ -833,6 +833,28 @@ jobs:
         $LASTEXITCODE -ne 0 -and (($output -join "`n") -match 'different Common SHAs|Diverged|pin different')
     }
 
+    Test-Assertion 'Full verifier can warn instead of fail for transient repin-window SHA divergence' {
+        $divergentRoot = Join-Path $TempDir 'divergent-warning-ecosystem'
+        New-Item -ItemType Directory -Path $divergentRoot -Force | Out-Null
+
+        $shaC = 'cccccccccccccccccccccccccccccccccccccccc'
+        New-FakePlugin -Dir (Join-Path $divergentRoot 'plugin-a') -SentinelSha $FakeCommonSha -GitlinkSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        New-FakePlugin -Dir (Join-Path $divergentRoot 'plugin-b') -SentinelSha $shaC -GitlinkSha $shaC -WireDocRefs $true -GithubWorkflowCount 0
+
+        $manifest = Join-Path $divergentRoot 'manifest.json'
+        @{
+            plugins = @(
+                @{ repoDir = 'plugin-a'; giteaOwner = 'Test'; giteaRepo = 'PluginA'; giteaPrimary = $true; mirrorWorkflows = 0 }
+                @{ repoDir = 'plugin-b'; giteaOwner = 'Test'; giteaRepo = 'PluginB'; giteaPrimary = $true; mirrorWorkflows = 0 }
+            )
+        } | ConvertTo-Json -Depth 5 | Set-Content $manifest
+
+        $output = & pwsh -NoProfile -File $Verifier -EcosystemRoot $divergentRoot -ManifestPath $manifest -CI -WarnOnDivergentPins *>&1
+        $LASTEXITCODE -eq 0 -and
+            (($output -join "`n") -match 'WARN: Passing plugins pin different Common SHAs') -and
+            (($output -join "`n") -notmatch 'All active plugins must be re-pinned before the ecosystem ALC/package proof is considered valid')
+    }
+
     Test-Assertion 'Single SHA (one plugin passing) is not diverged' {
         $shas = @($FakeCommonSha)
         $r = Test-CommonPinAgreement -Shas $shas
@@ -894,7 +916,11 @@ jobs:
     Test-Assertion 'Common Gitea workflow runs the live ecosystem CI contract' {
         $workflow = Get-Content -LiteralPath (Join-Path $RepoRoot '.gitea/workflows/ci.yml') -Raw
         $workflow -match '(?m)^\s+ecosystem-contract:\s*$' -and
-            $workflow -match 'verify-ecosystem-ci-contract\.ps1\s+-EcosystemRoot\s+\.\.\s+-CI' -and
+            $workflow -match '\$verifierArgs\s*=\s*@\("-EcosystemRoot",\s*"\.\.",\s*"-CI"\)' -and
+            $workflow -match 'verify-ecosystem-ci-contract\.ps1\s+@verifierArgs' -and
+            $workflow -match 'WarnOnDivergentPins' -and
+            $workflow -match 'GITHUB_EVENT_NAME\s*-eq\s*"push"' -and
+            $workflow -match 'GITHUB_REF_NAME\s*-eq\s*"main"' -and
             $workflow -match 'GITHUB_EVENT_NAME' -and
             $workflow -match 'GITHUB_REF_NAME'
     }
