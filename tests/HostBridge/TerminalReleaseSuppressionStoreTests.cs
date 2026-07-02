@@ -149,8 +149,7 @@ public sealed class TerminalReleaseSuppressionStoreTests : IDisposable
     {
         var sut = new TerminalReleaseSuppressionStore(
             PathFor(),
-            "Qobuzarr",
-            refreshInterval: TimeSpan.Zero);
+            "Qobuzarr");
         var ids = Enumerable.Range(0, 50)
             .Select(static i => "album-" + i.ToString("D2"))
             .ToArray();

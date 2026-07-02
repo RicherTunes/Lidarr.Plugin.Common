@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 namespace Lidarr.Plugin.Common.Services.Storage
 {
     /// <summary>
-    /// Generic JSON-backed key/value store with optional TTL and LRU size cap.
+    /// Generic JSON-backed key/value store with optional TTL and oldest-write size cap.
     /// Persists entries to a single file with atomic replace semantics, and serializes
     /// concurrent access through an in-process mutex. Suitable for plugin caches and
     /// small mapping stores (UPC -> MBID, ISO -> region, etc.).
@@ -35,8 +35,8 @@ namespace Lidarr.Plugin.Common.Services.Storage
     /// the TTL are treated as missing on read and quietly purged on the next save.
     /// </para>
     /// <para>
-    /// LRU eviction: when <see cref="JsonFileStoreOptions{TKey}.MaxEntries"/> is set, the
-    /// oldest entries (by last-touch timestamp) are evicted on insert when the store
+    /// Size cap: when <see cref="JsonFileStoreOptions{TKey}.MaxEntries"/> is set, the
+    /// oldest entries (by write timestamp) are evicted on insert when the store
     /// would exceed the cap.
     /// </para>
     /// <para>
@@ -158,8 +158,8 @@ namespace Lidarr.Plugin.Common.Services.Storage
 
         /// <summary>
         /// Stores a value for the specified key. The entry's timestamp is updated to "now",
-        /// which positions it as the most-recently-used and protects it from immediate eviction.
-        /// Triggers LRU eviction when <see cref="JsonFileStoreOptions{TKey}.MaxEntries"/> is set
+        /// which updates its write timestamp and protects it from immediate eviction.
+        /// Triggers oldest-write eviction when <see cref="JsonFileStoreOptions{TKey}.MaxEntries"/> is set
         /// and the resulting size would exceed the cap.
         /// </summary>
         /// <param name="key">Key to set.</param>
@@ -458,7 +458,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
 
             /// <summary>
             /// Gets or sets the UTC timestamp at which the entry was last set.
-            /// Used for TTL expiry checks and LRU eviction ordering.
+            /// Used for TTL expiry checks and oldest-write eviction ordering.
             /// </summary>
             public DateTimeOffset Timestamp { get; set; }
         }
@@ -480,7 +480,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
 
         /// <summary>
         /// Gets or sets the optional maximum number of entries. When the store would exceed
-        /// this count on insert, the oldest entries (by timestamp) are evicted first (LRU).
+        /// this count on insert, the oldest entries (by write timestamp) are evicted first.
         /// Null disables the cap.
         /// </summary>
         public int? MaxEntries { get; set; }
