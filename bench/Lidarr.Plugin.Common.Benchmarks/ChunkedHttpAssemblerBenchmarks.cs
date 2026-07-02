@@ -24,6 +24,10 @@ public class ChunkedHttpAssemblerBenchmarks
     private string _outputDir = null!;
     private ChunkSpec[] _smallChunks = null!;
     private ChunkSpec[] _largeChunks = null!;
+    private static readonly RemoteMediaUriPolicy BenchmarkMediaUriPolicy = new()
+    {
+        ResolveDns = false,
+    };
 
     [GlobalSetup]
     public void Setup()
@@ -52,7 +56,7 @@ public class ChunkedHttpAssemblerBenchmarks
     public async Task<long> SmallChunkCount()
     {
         var output = Path.Combine(_outputDir, $"small-{Guid.NewGuid():N}.bin");
-        var assembler = new ChunkedHttpAssembler(_client);
+        var assembler = new ChunkedHttpAssembler(_client, BenchmarkMediaUriPolicy);
         var result = await assembler.AssembleAsync(_smallChunks, output, new ChunkedAssemblyOptions { MaxConcurrency = 4 }).ConfigureAwait(false);
         File.Delete(output);
         return result.TotalBytes;
@@ -62,7 +66,7 @@ public class ChunkedHttpAssemblerBenchmarks
     public async Task<long> LargeChunkCount()
     {
         var output = Path.Combine(_outputDir, $"large-{Guid.NewGuid():N}.bin");
-        var assembler = new ChunkedHttpAssembler(_client);
+        var assembler = new ChunkedHttpAssembler(_client, BenchmarkMediaUriPolicy);
         var result = await assembler.AssembleAsync(_largeChunks, output, new ChunkedAssemblyOptions { MaxConcurrency = 8 }).ConfigureAwait(false);
         File.Delete(output);
         return result.TotalBytes;

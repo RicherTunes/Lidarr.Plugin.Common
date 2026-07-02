@@ -4,6 +4,7 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using Lidarr.Plugin.Common.Services.Intelligence;
 
 namespace Lidarr.Plugin.Common.Security
 {
@@ -241,10 +242,28 @@ namespace Lidarr.Plugin.Common.Security
         /// <summary>
         /// Escapes for HTML rendering. Do not use for URL building.
         /// </summary>
+        /// <remarks>
+        /// WARNING: this is an HTML ENCODER. It must NEVER touch a search term — HTML-encoding a query
+        /// corrupts every accented/punctuated term (e.g. "Beyoncé" → "Beyonc&amp;#233;") and was the exact
+        /// bug that shipped 0-result searches. For search queries use <see cref="SearchTerm"/> (canonical
+        /// raw text) and percent-encode at the request boundary via
+        /// <see cref="SearchQuerySanitizer.ToQueryParameterValue"/>.
+        /// </remarks>
         public static string DisplayText(string? value)
         {
             if (string.IsNullOrEmpty(value)) return string.Empty;
             return System.Net.WebUtility.HtmlEncode(value);
+        }
+
+        /// <summary>
+        /// Canonicalizes a streaming-service search term (NFC, control/zero-width-deleted,
+        /// whitespace-collapsed RAW text) via the shared <see cref="SearchQuerySanitizer"/>. Use this —
+        /// never <see cref="DisplayText"/> — when building a search query; the output is raw text, and
+        /// transport-encoding is applied later via <see cref="SearchQuerySanitizer.ToQueryParameterValue"/>.
+        /// </summary>
+        public static string SearchTerm(string? value)
+        {
+            return SearchQuerySanitizer.Sanitize(value).Original;
         }
 
         /// <summary>

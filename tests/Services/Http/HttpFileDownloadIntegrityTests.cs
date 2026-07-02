@@ -48,7 +48,7 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
             advertisedLength: 1000,
             contentType: "audio/flac");
 
-        var svc = new HttpFileDownloadService(new HttpClient(handler));
+        var svc = CreateService(new HttpClient(handler));
         var dest = Path.Combine(_tempDir, "track.flac");
 
         var ex = await Assert.ThrowsAsync<DownloadIntegrityException>(async () =>
@@ -68,7 +68,7 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
         var body = MakeFlacPayload(200);
         var handler = new TruncatingHandler(body: body, advertisedLength: 1000, contentType: "audio/flac");
 
-        var svc = new HttpFileDownloadService(new HttpClient(handler));
+        var svc = CreateService(new HttpClient(handler));
         var dest = Path.Combine(_tempDir, "truncated.flac");
 
         var ex = await Assert.ThrowsAsync<DownloadIntegrityException>(async () =>
@@ -100,7 +100,7 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
             totalLength: 1000,
             contentType: "audio/flac");
 
-        var svc = new HttpFileDownloadService(new HttpClient(handler));
+        var svc = CreateService(new HttpClient(handler));
 
         var ex = await Assert.ThrowsAsync<DownloadIntegrityException>(async () =>
             await svc.DownloadToFileAsync("https://93.184.216.34/track.flac", dest, CancellationToken.None));
@@ -123,7 +123,7 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
         var body = MakeFlacPayload(4096);
         var handler = new ExactLengthHandler(body: body, contentType: "audio/flac");
 
-        var svc = new HttpFileDownloadService(new HttpClient(handler));
+        var svc = CreateService(new HttpClient(handler));
         var dest = Path.Combine(_tempDir, "exact.flac");
 
         var written = await svc.DownloadToFileAsync("https://93.184.216.34/exact.flac", dest, CancellationToken.None);
@@ -147,7 +147,7 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
         var body = MakeFlacPayload(2048);
         var handler = new ChunkedNoLengthHandler(body: body, contentType: "audio/flac");
 
-        var svc = new HttpFileDownloadService(new HttpClient(handler));
+        var svc = CreateService(new HttpClient(handler));
         var dest = Path.Combine(_tempDir, "chunked.flac");
 
         // Must NOT throw DownloadIntegrityException.
@@ -181,6 +181,16 @@ public sealed class HttpFileDownloadIntegrityTests : IDisposable
         for (var i = 0; i < size; i++) buf[i] = (byte)((i * 11 + 97) & 0xFF);
         return buf;
     }
+
+    private static HttpFileDownloadService CreateService(HttpClient httpClient)
+    {
+        return new HttpFileDownloadService(httpClient, mediaUriPolicy: TestMediaUriPolicy);
+    }
+
+    private static RemoteMediaUriPolicy TestMediaUriPolicy { get; } = new()
+    {
+        ResolveDns = false,
+    };
 
     // ──────────────────────────────────────────────────────────────────────
     // Fake HTTP handlers

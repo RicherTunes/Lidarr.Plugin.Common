@@ -4,9 +4,7 @@
 Because the publish folder can contain both plugin-owned copies and host-shared assemblies. Stick to the ecosystem packaging pipeline (`tools/PluginPack.psm1`) so host-shared binaries are stripped consistently and you don’t accidentally ship type-identity conflicts.
 
 ## Do I merge `Lidarr.Plugin.Abstractions` into my plugin?
-No. `Lidarr.Plugin.Abstractions` is the shared ABI contract loaded in the default AssemblyLoadContext, and it must remain a separate assembly (not merged/internalized).
-
-In this ecosystem, plugins ship a **canonical** `Lidarr.Plugin.Abstractions.dll` (identical bytes across all plugins). `tools/PluginPack.psm1` enforces this via canonical injection and post-package SHA verification.
+Yes for deployed plugin packages. Lidarr discovers plugins through the host's own plugin types and does not need a sidecar `Lidarr.Plugin.Abstractions.dll`; shipping one caused multi-plugin AssemblyLoadContext conflicts. Current packages merge/internalize `Lidarr.Plugin.Abstractions.dll` and `Lidarr.Plugin.Common.dll` into the main plugin DLL.
 
 ## How do I test `StreamingPlugin<TModule, TSettings>` locally?
 Follow the harness in [How-to: Test `StreamingPlugin<TModule, TSettings>`](how-to/USE_STREAMING_PLUGIN.md). Build your plugin with `dotnet publish`, run the xUnit fixture, and expose DI services via a simple `IServiceProviderAccessor` interface.

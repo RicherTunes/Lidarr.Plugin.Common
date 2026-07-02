@@ -8,7 +8,8 @@ namespace Lidarr.Plugin.Common.Utilities
         public static partial HttpMessageHandler CreateDefaultHandler()
             => new SocketsHttpHandler
             {
-                AutomaticDecompression = DecompressionMethods.All
+                AutomaticDecompression = DecompressionMethods.All,
+                AllowAutoRedirect = false
             };
     }
 }

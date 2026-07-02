@@ -1,4 +1,5 @@
 using System.Collections.Immutable;
+using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
@@ -10,7 +11,10 @@ namespace Lidarr.Plugin.Analyzers;
 public sealed class Analyzer : DiagnosticAnalyzer
 {
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
-        ImmutableArray.Create(Diagnostics.AvoidRawSend, Diagnostics.PreferPolicyOverload);
+        ImmutableArray.Create(
+            Diagnostics.AvoidRawSend,
+            Diagnostics.PreferPolicyOverload,
+            Diagnostics.AvoidHtmlEncodeOnSearchTerm);
 
     public override void Initialize(AnalysisContext context)
     {
@@ -41,6 +45,25 @@ public sealed class Analyzer : DiagnosticAnalyzer
         if (symbol.Name == "SendAsync" && symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat) == "global::System.Net.Http.HttpClient")
         {
             ctx.ReportDiagnostic(Diagnostic.Create(Diagnostics.AvoidRawSend, inv.GetLocation()));
+            return;
+        }
+
+        // LPC0003: HTML-encoding / display-sanitizing a search term. Encoding ships the literal entity to
+        // the API ("Beyoncé" -> "Beyonc&#233;") and loses matches — search terms must reach the wire as
+        // RAW text, percent-encoded by the request builder only.
+        var containingFq = symbol.ContainingType?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
+        if (symbol.Name == "HtmlEncode" &&
+            (containingFq == "global::System.Net.WebUtility" || containingFq == "global::System.Web.HttpUtility"))
+        {
+            ctx.ReportDiagnostic(Diagnostic.Create(
+                Diagnostics.AvoidHtmlEncodeOnSearchTerm, inv.GetLocation(), $"{symbol.ContainingType!.Name}.HtmlEncode"));
+            return;
+        }
+
+        if (symbol.Name == "DisplayText" && symbol.ContainingType?.Name == "Sanitize")
+        {
+            ctx.ReportDiagnostic(Diagnostic.Create(
+                Diagnostics.AvoidHtmlEncodeOnSearchTerm, inv.GetLocation(), "Sanitize.DisplayText"));
             return;
         }
 

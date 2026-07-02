@@ -20,6 +20,10 @@ namespace Lidarr.Plugin.Common.Tests.PackageClosure;
 /// Tests SKIP (rather than FAIL) when a plugin's build output is not present.
 /// Build the plugin with "dotnet build --configuration Release" first.
 /// </summary>
+// Cross-repo: requires sibling plugin builds present on disk. On a multi-repo dev machine the
+// un-merged dev bin/ legitimately contains the "forbidden" host DLLs, so this must NOT run in the
+// deterministic per-PR lane (it would false-positive). Runs in the opt-in Integration lane.
+[Trait("Category", "Integration")]
 public sealed class PackageClosureTests
 {
     // ─────────────────────────────────────────────────────────────────────────

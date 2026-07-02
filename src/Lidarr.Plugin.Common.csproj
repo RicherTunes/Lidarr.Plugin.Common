@@ -13,13 +13,7 @@
     <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
     <!-- NuGet Package Configuration -->
     <PackageId>Lidarr.Plugin.Common</PackageId>
-    <!-- Aligned with Directory.Build.props (1.18.0-dev) — both Common AND Abstractions
-         must ship the same version to avoid NU5104 ("stable package can't depend on
-         prerelease"). When tagging the next stable release, bump both Directory.Build.props
-         and this override to the same X.Y.Z (no -dev suffix) so the pre-tag prerelease
-         period stays NU5104-clean. -->
-    <Version>1.18.0-dev</Version>
-    <!-- For stable releases, keep PackageVersion omitted or equal to Version -->
+    <!-- Version is inherited from ../Directory.Build.props. Do not override it here. -->
     <!-- Package Metadata -->
     <Title>Lidarr Plugin Common Library</Title>
     <Authors>RicherTunes Community</Authors>
@@ -163,5 +157,4 @@
     <PackageReference Include="CliWrap" Version="3.10.1" />
   </ItemGroup>
 </Project>
-
 

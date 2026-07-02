@@ -25,6 +25,10 @@ namespace Lidarr.Plugin.Common.Tests.MultiPluginAlc;
 /// Tests SKIP (rather than FAIL) when a plugin's DLL is not present locally — build
 /// the plugin with "dotnet build --configuration Release" first.
 /// </summary>
+// Cross-repo: requires all four sibling plugin DLLs built on disk. On a multi-repo dev machine the
+// dev builds can drift in Common.dll version, so this must NOT run in the deterministic per-PR lane.
+// Runs in the opt-in Integration lane (and the dedicated coexistence proof).
+[Trait("Category", "Integration")]
 public sealed class MultiPluginAlcTests
 {
     /// <summary>

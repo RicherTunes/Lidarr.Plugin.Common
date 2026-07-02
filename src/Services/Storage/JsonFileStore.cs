@@ -15,7 +15,7 @@ using Microsoft.Extensions.Logging;
 namespace Lidarr.Plugin.Common.Services.Storage
 {
     /// <summary>
-    /// Generic JSON-backed key/value store with optional TTL and LRU size cap.
+    /// Generic JSON-backed key/value store with optional TTL and oldest-write size cap.
     /// Persists entries to a single file with atomic replace semantics, and serializes
     /// concurrent access through an in-process mutex. Suitable for plugin caches and
     /// small mapping stores (UPC -> MBID, ISO -> region, etc.).
@@ -35,14 +35,16 @@ namespace Lidarr.Plugin.Common.Services.Storage
     /// the TTL are treated as missing on read and quietly purged on the next save.
     /// </para>
     /// <para>
-    /// LRU eviction: when <see cref="JsonFileStoreOptions{TKey}.MaxEntries"/> is set, the
-    /// oldest entries (by last-touch timestamp) are evicted on insert when the store
+    /// Size cap: when <see cref="JsonFileStoreOptions{TKey}.MaxEntries"/> is set, the
+    /// oldest entries (by write timestamp) are evicted on insert when the store
     /// would exceed the cap.
     /// </para>
     /// <para>
     /// Errors during load (corrupted JSON, IO failures) reset the in-memory state to empty
-    /// and log a warning. Errors during save are logged but do not throw, matching the
-    /// behavior of similar stores that prefer "best-effort" persistence.
+    /// and log a warning. Errors during save are logged; by default they do not throw,
+    /// matching the behavior of similar stores that prefer "best-effort" persistence.
+    /// Durable state machines can set <see cref="JsonFileStoreOptions{TKey}.ThrowOnSaveFailure"/>
+    /// to propagate save failures and roll back the in-memory mutation.
     /// </para>
     /// </remarks>
     public sealed class JsonFileStore<TKey, TValue>
@@ -56,6 +58,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
         private readonly IEqualityComparer<TKey>? _keyComparer;
         private readonly TimeProvider _clock;
         private readonly ILogger? _logger;
+        private readonly bool _throwOnSaveFailure;
         private readonly SemaphoreSlim _mutex = new(1, 1);
 
         private Dictionary<TKey, Entry> _entries;
@@ -85,6 +88,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
             _keyNormalizer = options.KeyNormalizer;
             _keyComparer = options.KeyComparer;
             _clock = options.Clock ?? TimeProvider.System;
+            _throwOnSaveFailure = options.ThrowOnSaveFailure;
             _options = serializerOptions ?? new JsonSerializerOptions(JsonSerializerDefaults.Web)
             {
                 WriteIndented = true,
@@ -154,8 +158,8 @@ namespace Lidarr.Plugin.Common.Services.Storage
 
         /// <summary>
         /// Stores a value for the specified key. The entry's timestamp is updated to "now",
-        /// which positions it as the most-recently-used and protects it from immediate eviction.
-        /// Triggers LRU eviction when <see cref="JsonFileStoreOptions{TKey}.MaxEntries"/> is set
+        /// which updates its write timestamp and protects it from immediate eviction.
+        /// Triggers oldest-write eviction when <see cref="JsonFileStoreOptions{TKey}.MaxEntries"/> is set
         /// and the resulting size would exceed the cap.
         /// </summary>
         /// <param name="key">Key to set.</param>
@@ -171,10 +175,23 @@ namespace Lidarr.Plugin.Common.Services.Storage
             await _mutex.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                var rollback = _throwOnSaveFailure ? CloneEntries() : null;
                 var normalized = NormalizeKey(key);
-                _entries[normalized] = new Entry { Value = value, Timestamp = _clock.GetUtcNow() };
-                EvictExpiredAndCap();
-                Save();
+                try
+                {
+                    _entries[normalized] = new Entry { Value = value, Timestamp = _clock.GetUtcNow() };
+                    EvictExpiredAndCap();
+                    Save();
+                }
+                catch
+                {
+                    if (rollback is not null)
+                    {
+                        _entries = rollback;
+                    }
+
+                    throw;
+                }
             }
             finally
             {
@@ -198,11 +215,24 @@ namespace Lidarr.Plugin.Common.Services.Storage
             await _mutex.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                var rollback = _throwOnSaveFailure ? CloneEntries() : null;
                 var normalized = NormalizeKey(key);
                 var removed = _entries.Remove(normalized);
                 if (removed)
                 {
-                    Save();
+                    try
+                    {
+                        Save();
+                    }
+                    catch
+                    {
+                        if (rollback is not null)
+                        {
+                            _entries = rollback;
+                        }
+
+                        throw;
+                    }
                 }
 
                 return removed;
@@ -222,8 +252,21 @@ namespace Lidarr.Plugin.Common.Services.Storage
             await _mutex.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
+                var rollback = _throwOnSaveFailure ? CloneEntries() : null;
                 _entries = new Dictionary<TKey, Entry>(_keyComparer);
-                Save();
+                try
+                {
+                    Save();
+                }
+                catch
+                {
+                    if (rollback is not null)
+                    {
+                        _entries = rollback;
+                    }
+
+                    throw;
+                }
             }
             finally
             {
@@ -265,6 +308,21 @@ namespace Lidarr.Plugin.Common.Services.Storage
         private TKey NormalizeKey(TKey key)
         {
             return _keyNormalizer != null ? _keyNormalizer(key) : key;
+        }
+
+        private Dictionary<TKey, Entry> CloneEntries()
+        {
+            var clone = new Dictionary<TKey, Entry>(_keyComparer);
+            foreach (var pair in _entries)
+            {
+                clone[pair.Key] = new Entry
+                {
+                    Value = pair.Value.Value,
+                    Timestamp = pair.Value.Timestamp,
+                };
+            }
+
+            return clone;
         }
 
         private bool IsExpired(Entry entry)
@@ -376,9 +434,13 @@ namespace Lidarr.Plugin.Common.Services.Storage
                     File.Move(tempPath, _filePath, overwrite: true);
                 }
             }
-            catch (Exception ex) when (ex is IOException or JsonException)
+            catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException)
             {
                 _logger?.LogWarning(ex, "JsonFileStore failed to save {FilePath}", _filePath);
+                if (_throwOnSaveFailure)
+                {
+                    throw;
+                }
             }
         }
 
@@ -396,7 +458,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
 
             /// <summary>
             /// Gets or sets the UTC timestamp at which the entry was last set.
-            /// Used for TTL expiry checks and LRU eviction ordering.
+            /// Used for TTL expiry checks and oldest-write eviction ordering.
             /// </summary>
             public DateTimeOffset Timestamp { get; set; }
         }
@@ -418,7 +480,7 @@ namespace Lidarr.Plugin.Common.Services.Storage
 
         /// <summary>
         /// Gets or sets the optional maximum number of entries. When the store would exceed
-        /// this count on insert, the oldest entries (by timestamp) are evicted first (LRU).
+        /// this count on insert, the oldest entries (by write timestamp) are evicted first.
         /// Null disables the cap.
         /// </summary>
         public int? MaxEntries { get; set; }
@@ -442,5 +504,12 @@ namespace Lidarr.Plugin.Common.Services.Storage
         /// expiry deterministically without wall-clock <c>Task.Delay</c>.
         /// </summary>
         public TimeProvider? Clock { get; set; }
+
+        /// <summary>
+        /// Gets or sets a value indicating whether save failures are propagated to callers.
+        /// Defaults to false for best-effort cache semantics. Durable state machines should
+        /// set this to true so callers cannot report success for state that never reached disk.
+        /// </summary>
+        public bool ThrowOnSaveFailure { get; set; }
     }
 }
