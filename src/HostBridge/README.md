@@ -10,8 +10,34 @@ You're writing a class that extends Lidarr's `HttpIndexerBase<TSettings>`, `Down
 - `release.Guid.Split(':')` parsing → use `PrefixedReleaseGuidParser`
 - `static ConcurrentDictionary<string, MyDownloadItem>` for in-flight tracking → use `HostBridgeDownloadTrackerStore<T>`
 - `applemusic://search?query=...` placeholder URI roundtrip → use `PlaceholderSearchUri`
+- Settings snapshot code before a fire-and-forget download → use `SettingsSnapshot.Copy` or the `HostBridgeDownloadOrchestrator` overload without an explicit snapshotter
 
 If you write one of these inline, you're forking the algorithm — when the next bug or hardening fix lands, your copy doesn't get it.
+
+## Settings snapshots
+
+For settings made of primitive, enum, nullable, and string properties, prefer the orchestrator overload that omits the explicit snapshotter:
+
+```csharp
+await _orchestrator.StartTrackedDownloadAsync(
+    (MySettings)Definition.Settings,
+    _tracker,
+    CreateItem,
+    ExecuteAsync);
+```
+
+If you need the explicit snapshotter overload, pass `SettingsSnapshot.Copy<T>` directly instead of snapshotting into a local first:
+
+```csharp
+await _orchestrator.StartTrackedDownloadAsync(
+    (MySettings)Definition.Settings,
+    _tracker,
+    SettingsSnapshot.Copy<MySettings>,
+    CreateItem,
+    ExecuteAsync);
+```
+
+Both routes snapshot public read-write non-indexer properties before `Task.Run`, so the background download sees the original values even if the host mutates live settings afterward. If settings contain mutable reference types such as lists, dictionaries, caches, or credential containers, keep using the explicit `snapshotter` overload and deep-copy those fields yourself.
 
 ## Canonical adoption pattern
 
@@ -28,8 +54,8 @@ public sealed class MyDownloadClient : DownloadClientBase<MySettings>
 
     public override Task<string> Download(RemoteAlbum remoteAlbum, IIndexer indexer)
     {
-        // SNAPSHOT settings before Task.Run — Definition.Settings is mutable.
-        var snapshot = (MySettings)Definition.Settings; // or build a record-style copy
+        // If you are not using HostBridgeDownloadOrchestrator, snapshot exactly once before Task.Run.
+        var snapshot = SettingsSnapshot.Copy((MySettings)Definition.Settings);
 
         // Extract IDs using the prefix shared with your indexer.
         var albumId = PrefixedReleaseGuidParser.ExtractAlbumId(

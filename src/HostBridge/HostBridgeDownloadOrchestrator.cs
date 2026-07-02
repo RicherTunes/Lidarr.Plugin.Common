@@ -1,6 +1,7 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Lidarr.Plugin.Common.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace Lidarr.Plugin.Common.HostBridge;
@@ -63,12 +64,11 @@ public sealed class HostBridgeDownloadStartOptions<TItem>
 ///   <item>Return <c>downloadId</c>.</item>
 /// </list>
 ///
-/// <para><strong>Snapshot strategy</strong>: option (c) — caller supplies a snapshotter
-/// lambda. This is zero-magic and explicit about which fields are included in the snapshot.
-/// Per-plugin call sites pass <c>s => new TSettings { Field1 = s.Field1, … }</c> or call a
-/// <c>Clone()</c> method if one exists. This is especially important for settings that hold
-/// reference types (lists, dicts): the snapshotter is responsible for deep-copying those
-/// fields.</para>
+/// <para><strong>Snapshot strategy</strong>: settings that only contain primitive,
+/// enum, nullable, and string values can use the overloads that call
+/// <see cref="SettingsSnapshot.Copy{TSettings}(TSettings)"/>. Settings with mutable
+/// reference-typed fields should keep using the explicit snapshotter overloads so the
+/// caller can deep-copy those fields.</para>
 ///
 /// <para>Lifted from Tidalarr and AppleMusicarr as Wave A item 2 of the May 2026
 /// bridge-unification plan.</para>
@@ -85,6 +85,68 @@ public sealed class HostBridgeDownloadOrchestrator
     public HostBridgeDownloadOrchestrator(ILogger? logger = null)
     {
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Snapshot settings with <see cref="SettingsSnapshot.Copy{TSettings}(TSettings)"/>,
+    /// create a tracked item, enqueue fire-and-forget work, return downloadId.
+    /// </summary>
+    /// <typeparam name="TItem">Per-plugin item type extending <see cref="HostBridgeDownloadItem"/> (or
+    /// <see cref="HostBridgeDownloadItem"/> itself).</typeparam>
+    /// <typeparam name="TSettings">Per-plugin settings type with a public parameterless constructor.
+    /// Public read-write non-indexer properties are copied into the snapshot.</typeparam>
+    /// <param name="settings">Live settings object to snapshot before Task.Run.</param>
+    /// <param name="tracker">Process-wide tracker store. The item is inserted BEFORE Task.Run
+    /// so GetItems() polling never races against a just-started download.</param>
+    /// <param name="itemFactory">Creates the tracker item. Receives the SNAPSHOT and the
+    /// generated downloadId. Called synchronously before Task.Run.</param>
+    /// <param name="doWork">The actual download logic. Receives the SNAPSHOT, downloadId,
+    /// the created item (for progress updates), and the cancellation token.
+    /// Executed fire-and-forget on <c>Task.Run</c>.</param>
+    /// <param name="cancellationToken">Token forwarded into <paramref name="doWork"/>.</param>
+    /// <returns>The generated downloadId (32 hex characters, no hyphens).</returns>
+    public Task<string> StartTrackedDownloadAsync<TItem, TSettings>(
+        TSettings settings,
+        HostBridgeDownloadTrackerStore<TItem> tracker,
+        Func<TSettings, string, TItem> itemFactory,
+        Func<TSettings, string, TItem, CancellationToken, Task> doWork,
+        CancellationToken cancellationToken = default)
+        where TItem : HostBridgeDownloadItem
+        where TSettings : class, new()
+        => StartTrackedDownloadAsyncCore(
+            settings,
+            tracker,
+            SettingsSnapshot.Copy<TSettings>,
+            itemFactory,
+            doWork,
+            options: null,
+            cancellationToken);
+
+    /// <summary>
+    /// Snapshot settings with <see cref="SettingsSnapshot.Copy{TSettings}(TSettings)"/>,
+    /// create a tracked item, enqueue fire-and-forget work, and return the downloadId,
+    /// with optional per-download cancellation registration.
+    /// </summary>
+    public Task<string> StartTrackedDownloadAsync<TItem, TSettings>(
+        TSettings settings,
+        HostBridgeDownloadTrackerStore<TItem> tracker,
+        Func<TSettings, string, TItem> itemFactory,
+        Func<TSettings, string, TItem, CancellationToken, Task> doWork,
+        HostBridgeDownloadStartOptions<TItem> options,
+        CancellationToken cancellationToken = default)
+        where TItem : HostBridgeDownloadItem
+        where TSettings : class, new()
+    {
+        if (options is null) throw new ArgumentNullException(nameof(options));
+
+        return StartTrackedDownloadAsyncCore(
+            settings,
+            tracker,
+            SettingsSnapshot.Copy<TSettings>,
+            itemFactory,
+            doWork,
+            options,
+            cancellationToken);
     }
 
     /// <summary>
