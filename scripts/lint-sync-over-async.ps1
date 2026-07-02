@@ -15,6 +15,8 @@
 .PARAMETER DiffBase
     Git ref to diff against for PR mode. When set, only new occurrences in the diff are flagged.
     Unset = strict mode (all non-allowlisted matches fail).
+.PARAMETER SourceDir
+    Optional source directory relative to Path or absolute. Defaults to src/, then *.Plugin/.
 .PARAMETER SelfTest
     Run built-in fixture tests to validate detection and allowlist logic.
 #>
@@ -25,6 +27,7 @@ param(
     [string]$Mode = 'interactive',
     [string]$AllowlistPath,
     [string]$DiffBase,
+    [string]$SourceDir,
     [switch]$SelfTest
 )
 
@@ -77,7 +80,7 @@ function Get-DiffAddedLines {
     param([string]$Base, [string]$RepoRoot)
     $added = @{}
     try {
-        $diff = git -C $RepoRoot diff "$Base...HEAD" --unified=0 --diff-filter=ACMR -- 'src/**/*.cs' 2>$null
+        $diff = git -C $RepoRoot diff "$Base...HEAD" --unified=0 --diff-filter=ACMR -- '*.cs' 2>$null
         $currentFile = $null
         foreach ($line in $diff) {
             if ($line -match '^\+\+\+ b/(.+)$') {
@@ -97,19 +100,53 @@ function Get-DiffAddedLines {
 
 # ─── Core Scan ───────────────────────────────────────────────────────────────
 
+function Resolve-SourceDir {
+    param(
+        [string]$RepoRoot,
+        [string]$Explicit
+    )
+
+    if ($Explicit) {
+        $candidate = if ([System.IO.Path]::IsPathRooted($Explicit)) {
+            $Explicit
+        } else {
+            Join-Path $RepoRoot $Explicit
+        }
+
+        if (Test-Path -LiteralPath $candidate) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+
+        throw "SourceDir not found: $candidate"
+    }
+
+    $src = Join-Path $RepoRoot 'src'
+    if (Test-Path -LiteralPath $src) {
+        return $src
+    }
+
+    $pluginDir = Get-ChildItem -Path $RepoRoot -Directory -Filter '*.Plugin' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($pluginDir) {
+        return $pluginDir.FullName
+    }
+
+    return $null
+}
+
 function Invoke-Scan {
     param(
         [string]$RepoRoot,
         [array]$Allowlist,
-        [hashtable]$DiffLines
+        [hashtable]$DiffLines,
+        [string]$SourceDir
     )
 
     $violations = @()
     $suppressed = @()
-    $srcPath = Join-Path $RepoRoot 'src'
+    $srcPath = Resolve-SourceDir -RepoRoot $RepoRoot -Explicit $SourceDir
 
-    if (-not (Test-Path $srcPath)) {
-        Write-Warning "No src/ directory found at $RepoRoot"
+    if (-not $srcPath -or -not (Test-Path -LiteralPath $srcPath)) {
+        Write-Warning "No source directory found at $RepoRoot (tried 'src' and '*.Plugin')"
         return @{ Violations = $violations; Suppressed = $suppressed }
     }
 
@@ -230,6 +267,20 @@ function Invoke-SelfTest {
             $failed++
         }
 
+        # Test 6: Brainarr-style source layout (*.Plugin/) is scanned when src/ is absent.
+        Remove-Item $srcDir -Recurse -Force
+        $pluginDir = Join-Path $tempDir 'Brainarr.Plugin'
+        New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
+        Set-Content (Join-Path $pluginDir 'Bad.cs') 'var x = task.GetAwaiter().GetResult();'
+        $result = Invoke-Scan -RepoRoot $tempDir -Allowlist @() -DiffLines @{}
+        if ($result.Violations.Count -eq 1) {
+            Write-Host '  [PASS] Test 6: *.Plugin source layout is scanned' -ForegroundColor Green
+            $passed++
+        } else {
+            Write-Host "  [FAIL] Test 6: Expected 1 violation in *.Plugin layout, got $($result.Violations.Count)" -ForegroundColor Red
+            $failed++
+        }
+
         Write-Host ""
         Write-Host "Self-test: $passed passed, $failed failed" -ForegroundColor $(if ($failed -eq 0) { 'Green' } else { 'Red' })
         return $failed -eq 0
@@ -258,7 +309,7 @@ if ($DiffBase) {
     $diffLines = Get-DiffAddedLines -Base $DiffBase -RepoRoot $resolvedPath
 }
 
-$result = Invoke-Scan -RepoRoot $resolvedPath -Allowlist $allowlist -DiffLines $diffLines
+$result = Invoke-Scan -RepoRoot $resolvedPath -Allowlist $allowlist -DiffLines $diffLines -SourceDir $SourceDir
 
 # ─── Output ──────────────────────────────────────────────────────────────────
 

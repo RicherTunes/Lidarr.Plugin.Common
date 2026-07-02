@@ -1,0 +1,15 @@
+{
+  "_comment": "Files exempt from lint-sync-over-async.ps1. Category A = host-required synchronous bridge (the host calls us on a sync path and we must block); B = avoidable (should be fixed); C = test/helper. Add entries sparingly, always with a reason.",
+  "entries": [
+    {
+      "file": "src/Services/Bridge/AuthFailureGate.cs",
+      "category": "A",
+      "reason": "RecordExceptionOutcome is invoked from the host's synchronous exception-handling path; it hops to the thread pool via Task.Run before blocking on the handler's ValueTask so it cannot deadlock the host's single-threaded SynchronizationContext. Intentional, documented inline."
+    },
+    {
+      "file": "src/HostBridge/TerminalReleaseSuppressionStore.cs",
+      "category": "A",
+      "reason": "BuildSnapshot bridges the synchronous IsSuppressed()/MaybeRefresh() path (the indexer parser that reads suppression is synchronous) to the async disk-backed store enumeration; it hops to the thread pool via Task.Run before blocking so it cannot deadlock a host SynchronizationContext. Intentional, documented inline."
+    }
+  ]
+}

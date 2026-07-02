@@ -1,9 +1,51 @@
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Lidarr.Plugin.Common.Utilities;
 using Microsoft.Extensions.Logging;
 
 namespace Lidarr.Plugin.Common.HostBridge;
+
+/// <summary>
+/// Per-download cancellation registration owned by <see cref="HostBridgeDownloadOrchestrator"/>.
+/// Plugins use this to expose an externally cancellable token for a queued download and to
+/// remove/dispose any registry entry when the background work exits.
+/// </summary>
+public sealed class HostBridgeDownloadCancellationRegistration : IDisposable
+{
+    private readonly Action? _dispose;
+    private int _disposed;
+
+    public HostBridgeDownloadCancellationRegistration(CancellationToken token, Action? dispose = null)
+    {
+        Token = token;
+        _dispose = dispose;
+    }
+
+    public CancellationToken Token { get; }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 0)
+        {
+            _dispose?.Invoke();
+        }
+    }
+}
+
+/// <summary>
+/// Optional behaviors for <see cref="HostBridgeDownloadOrchestrator.StartTrackedDownloadAsync{TItem,TSettings}(TSettings, HostBridgeDownloadTrackerStore{TItem}, Func{TSettings,TSettings}, Func{TSettings,string,TItem}, Func{TSettings,string,TItem,CancellationToken,Task}, HostBridgeDownloadStartOptions{TItem}, CancellationToken)"/>.
+/// </summary>
+public sealed class HostBridgeDownloadStartOptions<TItem>
+    where TItem : HostBridgeDownloadItem
+{
+    /// <summary>
+    /// Called after the tracker item is created and inserted, before the background task is
+    /// scheduled. The returned token is linked with the caller token, and the registration is
+    /// disposed by Common when the background work exits.
+    /// </summary>
+    public Func<string, TItem, HostBridgeDownloadCancellationRegistration>? RegisterCancellation { get; init; }
+}
 
 /// <summary>
 /// Centralises the fire-and-forget download enqueue pattern shared by every RicherTunes
@@ -22,12 +64,11 @@ namespace Lidarr.Plugin.Common.HostBridge;
 ///   <item>Return <c>downloadId</c>.</item>
 /// </list>
 ///
-/// <para><strong>Snapshot strategy</strong>: option (c) — caller supplies a snapshotter
-/// lambda. This is zero-magic and explicit about which fields are included in the snapshot.
-/// Per-plugin call sites pass <c>s => new TSettings { Field1 = s.Field1, … }</c> or call a
-/// <c>Clone()</c> method if one exists. This is especially important for settings that hold
-/// reference types (lists, dicts): the snapshotter is responsible for deep-copying those
-/// fields.</para>
+/// <para><strong>Snapshot strategy</strong>: settings that only contain primitive,
+/// enum, nullable, and string values can use the overloads that call
+/// <see cref="SettingsSnapshot.Copy{TSettings}(TSettings)"/>. Settings with mutable
+/// reference-typed fields should keep using the explicit snapshotter overloads so the
+/// caller can deep-copy those fields.</para>
 ///
 /// <para>Lifted from Tidalarr and AppleMusicarr as Wave A item 2 of the May 2026
 /// bridge-unification plan.</para>
@@ -44,6 +85,68 @@ public sealed class HostBridgeDownloadOrchestrator
     public HostBridgeDownloadOrchestrator(ILogger? logger = null)
     {
         _logger = logger;
+    }
+
+    /// <summary>
+    /// Snapshot settings with <see cref="SettingsSnapshot.Copy{TSettings}(TSettings)"/>,
+    /// create a tracked item, enqueue fire-and-forget work, return downloadId.
+    /// </summary>
+    /// <typeparam name="TItem">Per-plugin item type extending <see cref="HostBridgeDownloadItem"/> (or
+    /// <see cref="HostBridgeDownloadItem"/> itself).</typeparam>
+    /// <typeparam name="TSettings">Per-plugin settings type with a public parameterless constructor.
+    /// Public read-write non-indexer properties are copied into the snapshot.</typeparam>
+    /// <param name="settings">Live settings object to snapshot before Task.Run.</param>
+    /// <param name="tracker">Process-wide tracker store. The item is inserted BEFORE Task.Run
+    /// so GetItems() polling never races against a just-started download.</param>
+    /// <param name="itemFactory">Creates the tracker item. Receives the SNAPSHOT and the
+    /// generated downloadId. Called synchronously before Task.Run.</param>
+    /// <param name="doWork">The actual download logic. Receives the SNAPSHOT, downloadId,
+    /// the created item (for progress updates), and the cancellation token.
+    /// Executed fire-and-forget on <c>Task.Run</c>.</param>
+    /// <param name="cancellationToken">Token forwarded into <paramref name="doWork"/>.</param>
+    /// <returns>The generated downloadId (32 hex characters, no hyphens).</returns>
+    public Task<string> StartTrackedDownloadAsync<TItem, TSettings>(
+        TSettings settings,
+        HostBridgeDownloadTrackerStore<TItem> tracker,
+        Func<TSettings, string, TItem> itemFactory,
+        Func<TSettings, string, TItem, CancellationToken, Task> doWork,
+        CancellationToken cancellationToken = default)
+        where TItem : HostBridgeDownloadItem
+        where TSettings : class, new()
+        => StartTrackedDownloadAsyncCore(
+            settings,
+            tracker,
+            SettingsSnapshot.Copy<TSettings>,
+            itemFactory,
+            doWork,
+            options: null,
+            cancellationToken);
+
+    /// <summary>
+    /// Snapshot settings with <see cref="SettingsSnapshot.Copy{TSettings}(TSettings)"/>,
+    /// create a tracked item, enqueue fire-and-forget work, and return the downloadId,
+    /// with optional per-download cancellation registration.
+    /// </summary>
+    public Task<string> StartTrackedDownloadAsync<TItem, TSettings>(
+        TSettings settings,
+        HostBridgeDownloadTrackerStore<TItem> tracker,
+        Func<TSettings, string, TItem> itemFactory,
+        Func<TSettings, string, TItem, CancellationToken, Task> doWork,
+        HostBridgeDownloadStartOptions<TItem> options,
+        CancellationToken cancellationToken = default)
+        where TItem : HostBridgeDownloadItem
+        where TSettings : class, new()
+    {
+        if (options is null) throw new ArgumentNullException(nameof(options));
+
+        return StartTrackedDownloadAsyncCore(
+            settings,
+            tracker,
+            SettingsSnapshot.Copy<TSettings>,
+            itemFactory,
+            doWork,
+            options,
+            cancellationToken);
     }
 
     /// <summary>
@@ -75,6 +178,50 @@ public sealed class HostBridgeDownloadOrchestrator
         Func<TSettings, string, TItem, CancellationToken, Task> doWork,
         CancellationToken cancellationToken = default)
         where TItem : HostBridgeDownloadItem
+        => StartTrackedDownloadAsyncCore(
+            settings,
+            tracker,
+            snapshotter,
+            itemFactory,
+            doWork,
+            options: null,
+            cancellationToken);
+
+    /// <summary>
+    /// Snapshot settings, create a tracked item, enqueue fire-and-forget work, and return the
+    /// downloadId, with optional per-download cancellation registration.
+    /// </summary>
+    public Task<string> StartTrackedDownloadAsync<TItem, TSettings>(
+        TSettings settings,
+        HostBridgeDownloadTrackerStore<TItem> tracker,
+        Func<TSettings, TSettings> snapshotter,
+        Func<TSettings, string, TItem> itemFactory,
+        Func<TSettings, string, TItem, CancellationToken, Task> doWork,
+        HostBridgeDownloadStartOptions<TItem> options,
+        CancellationToken cancellationToken = default)
+        where TItem : HostBridgeDownloadItem
+    {
+        if (options is null) throw new ArgumentNullException(nameof(options));
+
+        return StartTrackedDownloadAsyncCore(
+            settings,
+            tracker,
+            snapshotter,
+            itemFactory,
+            doWork,
+            options,
+            cancellationToken);
+    }
+
+    private Task<string> StartTrackedDownloadAsyncCore<TItem, TSettings>(
+        TSettings settings,
+        HostBridgeDownloadTrackerStore<TItem> tracker,
+        Func<TSettings, TSettings> snapshotter,
+        Func<TSettings, string, TItem> itemFactory,
+        Func<TSettings, string, TItem, CancellationToken, Task> doWork,
+        HostBridgeDownloadStartOptions<TItem>? options,
+        CancellationToken cancellationToken)
+        where TItem : HostBridgeDownloadItem
     {
         if (tracker is null) throw new ArgumentNullException(nameof(tracker));
         if (snapshotter is null) throw new ArgumentNullException(nameof(snapshotter));
@@ -100,14 +247,35 @@ public sealed class HostBridgeDownloadOrchestrator
             "HostBridgeDownloadOrchestrator: enqueuing download {DownloadId} (tracker count after add: item inserted)",
             downloadId);
 
+        HostBridgeDownloadCancellationRegistration? cancellationRegistration = null;
+        try
+        {
+            cancellationRegistration = options?.RegisterCancellation?.Invoke(downloadId, item);
+        }
+        catch
+        {
+            tracker.Remove(downloadId, deleteData: false, out _);
+            throw;
+        }
+
+        CancellationToken effectiveCancellationToken =
+            CreateEffectiveCancellationToken(cancellationToken, cancellationRegistration, out var linkedCancellationSource);
+
+        // Preserve old-overload scheduling semantics when no per-download cancellation
+        // registration exists. New options-based callers always run the delegate so Common
+        // can dispose the registration even when the caller token was already cancelled.
+        var taskRunCancellationToken = cancellationRegistration is null
+            ? cancellationToken
+            : CancellationToken.None;
+
         // Step 5: fire-and-forget. Captures snapshot (not live settings), downloadId, and item.
         _ = Task.Run(async () =>
         {
             try
             {
-                await doWork(snapshot, downloadId, item, cancellationToken).ConfigureAwait(false);
+                await doWork(snapshot, downloadId, item, effectiveCancellationToken).ConfigureAwait(false);
             }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            catch (OperationCanceledException) when (effectiveCancellationToken.IsCancellationRequested)
             {
                 _logger?.LogDebug(
                     "HostBridgeDownloadOrchestrator: download {DownloadId} cancelled.",
@@ -119,9 +287,52 @@ public sealed class HostBridgeDownloadOrchestrator
                     "HostBridgeDownloadOrchestrator: unhandled exception in doWork for download {DownloadId}.",
                     downloadId);
             }
-        }, cancellationToken);
+            finally
+            {
+                tracker.PersistSnapshot();
+                linkedCancellationSource?.Dispose();
+                try
+                {
+                    cancellationRegistration?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    _logger?.LogWarning(ex,
+                        "HostBridgeDownloadOrchestrator: cancellation cleanup failed for download {DownloadId}.",
+                        downloadId);
+                }
+            }
+        }, taskRunCancellationToken);
 
         // Step 6: return immediately — doWork is still running in the background.
         return Task.FromResult(downloadId);
+    }
+
+    private static CancellationToken CreateEffectiveCancellationToken(
+        CancellationToken callerToken,
+        HostBridgeDownloadCancellationRegistration? cancellationRegistration,
+        out CancellationTokenSource? linkedCancellationSource)
+    {
+        linkedCancellationSource = null;
+        if (cancellationRegistration is null)
+        {
+            return callerToken;
+        }
+
+        CancellationToken registeredToken = cancellationRegistration.Token;
+        if (!callerToken.CanBeCanceled)
+        {
+            return registeredToken;
+        }
+
+        if (!registeredToken.CanBeCanceled)
+        {
+            return callerToken;
+        }
+
+        linkedCancellationSource = CancellationTokenSource.CreateLinkedTokenSource(
+            callerToken,
+            registeredToken);
+        return linkedCancellationSource.Token;
     }
 }

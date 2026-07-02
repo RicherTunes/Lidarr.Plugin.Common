@@ -122,11 +122,9 @@ public record ProviderHealthResult
     /// not running), the response time is reported as <c>null</c> rather than
     /// <see cref="TimeSpan.Zero"/> to avoid signalling a misleading "0 ms" latency.
     ///
-    /// <para>Distinct name (not an overload of <see cref="Healthy(TimeSpan?, string?, string?, string?)"/>)
-    /// to satisfy the Roslyn PublicAPI rule "Do not add multiple overloads with optional
-    /// parameters" — both this method and the TimeSpan-based variant have optional
-    /// provider/authMethod/model tail params, which would otherwise make
-    /// <c>Healthy(provider: "...")</c> calls ambiguous.</para>
+    /// <para>Distinct name (not an overload of <see cref="Healthy(TimeSpan?, string?, string?, string?)"/>):
+    /// both this method and the TimeSpan-based variant have optional provider/authMethod/model
+    /// tail params, so a shared name would make <c>Healthy(provider: "...")</c> calls ambiguous.</para>
     /// </summary>
     /// <param name="stopwatch">Stopwatch capturing the health-check duration. Null treated as no measurement.</param>
     /// <param name="provider">Optional provider identifier.</param>

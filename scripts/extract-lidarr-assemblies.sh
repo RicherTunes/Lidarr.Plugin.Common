@@ -71,7 +71,7 @@ OPT=(
   Microsoft.Extensions.Primitives.dll
 )
 
-LIDARR_DOCKER_VERSION="${LIDARR_DOCKER_VERSION:-pr-plugins-3.1.2.4913}"
+LIDARR_DOCKER_VERSION="${LIDARR_DOCKER_VERSION:-nightly-3.1.3.4970}"
 LIDARR_DOCKER_DIGEST="${LIDARR_DOCKER_DIGEST:-}"
 
 TAG_IMAGE="ghcr.io/hotio/lidarr:${LIDARR_DOCKER_VERSION}"
@@ -174,11 +174,11 @@ if [[ ! -f "$OUT_DIR/Lidarr.Core.dll" ]]; then
   echo "Docker-based extraction failed; attempting pinned tar.gz fallback..."
 
   CANDIDATES=()
-  VNUM="${LIDARR_DOCKER_VERSION#pr-plugins-}"
-  if [[ "$VNUM" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    CANDIDATES+=("$VNUM")
+  if [[ "$LIDARR_DOCKER_VERSION" =~ ([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+) ]]; then
+    CANDIDATES+=("${BASH_REMATCH[1]}")
   fi
-  # Known-good secondary fallback (must exist as a GitHub Release asset)
+  # Current published release fallback, then a known-good emergency fallback.
+  CANDIDATES+=("3.1.3.4968")
   CANDIDATES+=("2.13.3.4711")
 
   TAR_OK=false

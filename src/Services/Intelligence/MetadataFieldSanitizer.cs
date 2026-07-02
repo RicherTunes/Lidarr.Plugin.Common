@@ -1,5 +1,6 @@
 using System;
 using System.Text.RegularExpressions;
+using Lidarr.Plugin.Common.Utilities;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -196,7 +197,9 @@ namespace Lidarr.Plugin.Common.Services.Intelligence
 
             if (maxLength > 0 && sanitized.Length > maxLength)
             {
-                sanitized = sanitized.Substring(0, maxLength).TrimEnd();
+                // Grapheme-safe: a naive Substring(0, maxLength) can split an astral codepoint's
+                // surrogate pair and leave a lone surrogate (invalid string, mojibake downstream).
+                sanitized = StringUtilities.TruncateGraphemeSafe(sanitized, maxLength).TrimEnd();
             }
 
             return string.IsNullOrWhiteSpace(sanitized) ? defaultValue : sanitized;

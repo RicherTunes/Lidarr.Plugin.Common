@@ -97,6 +97,21 @@ public class HostBridgeDownloadTrackerTests
     }
 
     [Fact]
+    public void TrackerStore_GetSnapshot_EvictsCancelledPastRetention()
+    {
+        var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+            completedRetention: TimeSpan.FromMilliseconds(50));
+
+        var item = new HostBridgeDownloadItem { DownloadId = "cancelled", Title = "T", Artist = "A" };
+        item.SetStatus(HostBridgeDownloadItemStatus.Cancelled);
+        item.CompletedAt = DateTime.UtcNow.AddMilliseconds(-100);
+        store.AddOrReplace(item);
+
+        var snapshot = store.GetSnapshot().ToList();
+        Assert.Empty(snapshot);
+    }
+
+    [Fact]
     public void TrackerStore_GetSnapshot_KeepsInProgressRegardlessOfAge()
     {
         var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(

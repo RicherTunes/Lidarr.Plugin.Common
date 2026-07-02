@@ -8,6 +8,13 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $lintScript = Join-Path $PSScriptRoot '../ecosystem-parity-lint.ps1'
+$commonRoot = Resolve-Path (Join-Path $PSScriptRoot '..\..')
+$commonVersionProps = Join-Path $commonRoot 'Directory.Build.props'
+$commonVersionPropsContent = Get-Content -LiteralPath $commonVersionProps -Raw
+if ($commonVersionPropsContent -notmatch '<Version>([^<]+)</Version>') {
+    throw "Could not parse Common <Version> from $commonVersionProps"
+}
+$canonicalCommonVersion = $Matches[1]
 $testRoot = $null
 $failed = 0
 $passed = 0
@@ -72,6 +79,39 @@ function New-GoldenRepo {
     # VERSION
     Add-TestFile -RepoPath $repo -RelPath 'VERSION' -Content '1.0.0'
 
+    # plugin.json and manifest.json for VersionContract checks.
+    Add-TestFile -RepoPath $repo -RelPath 'plugin.json' -Content @"
+{
+  "id": "golden",
+  "apiVersion": "1.x",
+  "name": "Golden",
+  "version": "1.0.0",
+  "author": "test",
+  "description": "test plugin",
+  "homepage": "https://example.com",
+  "license": "MIT",
+  "tags": ["test"],
+  "commonVersion": "$canonicalCommonVersion",
+  "minHostVersion": "2.14.2.4786",
+  "targetFramework": "net8.0",
+  "main": "Lidarr.Plugin.Golden.dll",
+  "rootNamespace": "Golden"
+}
+"@
+
+    Add-TestFile -RepoPath $repo -RelPath 'manifest.json' -Content @"
+{
+  "id": "golden",
+  "name": "Golden",
+  "version": "1.0.0",
+  "apiVersion": "1.x",
+  "minHostVersion": "2.14.2.4786",
+  "assemblies": ["Lidarr.Plugin.Golden.dll"],
+  "targetFrameworks": ["net8.0"],
+  "commonVersion": "$canonicalCommonVersion"
+}
+"@
+
     # Directory.Build.props (full template)
     Add-TestFile -RepoPath $repo -RelPath 'Directory.Build.props' -Content @'
 <Project>
@@ -128,8 +168,9 @@ useDefault = true
     Add-TestFile -RepoPath $repo -RelPath '.github/sha-pin-allowlist.json' -Content '{"entries":[]}'
     Add-TestFile -RepoPath $repo -RelPath '.github/ISSUE_TEMPLATE/bug_report.yml' -Content 'name: Bug Report'
     Add-TestFile -RepoPath $repo -RelPath '.github/ISSUE_TEMPLATE/feature_request.yml' -Content 'name: Feature Request'
+    Add-TestFile -RepoPath $repo -RelPath '.gitea/workflows/ci.yml' -Content 'name: CI'
 
-    # Workflows
+    # Optional GitHub mirror workflows.
     foreach ($wf in @('codeql.yml', 'test-and-coverage.yml', 'notify-failure.yml', 'packaging-gates.yml', 'submodule-pin.yml')) {
         Add-TestFile -RepoPath $repo -RelPath ".github/workflows/$wf" -Content "name: $wf"
     }
@@ -166,13 +207,12 @@ try {
     $result = & $lintScript -RepoPath $repo3 -Mode ci *>&1
     Assert-ExitCode -Expected 1 -Actual $LASTEXITCODE -TestName "Missing Directory.Packages.props fails"
 
-    # ─── Test 4: Missing workflow detected ───
-    Write-Host "`n[TEST 4] Missing workflow detected..." -ForegroundColor Cyan
-    $repo4 = New-GoldenRepo -Root $testRoot -Name 'no-codeql'
+    # ─── Test 4: GitHub mirror workflow gaps are optional when Gitea CI exists ───
+    Write-Host "`n[TEST 4] Missing GitHub mirror workflow does not fail Gitea-primary structural parity..." -ForegroundColor Cyan
+    $repo4 = New-GoldenRepo -Root $testRoot -Name 'partial-github-mirror'
     Remove-Item (Join-Path $repo4 '.github/workflows/codeql.yml') -Force
     $result = & $lintScript -RepoPath $repo4 -Mode ci *>&1
-    Assert-ExitCode -Expected 1 -Actual $LASTEXITCODE -TestName "Missing codeql.yml fails"
-    Assert-OutputContains -Output $result -Pattern 'codeql\.yml' -TestName "Output mentions codeql.yml"
+    Assert-ExitCode -Expected 0 -Actual $LASTEXITCODE -TestName "Missing codeql.yml mirror does not fail"
 
     # ─── Test 5: Missing issue templates detected ───
     Write-Host "`n[TEST 5] Missing issue templates detected..." -ForegroundColor Cyan
@@ -235,6 +275,27 @@ try {
     Remove-Item (Join-Path $repo10 '.gitleaks.toml') -Force
     $result = & $lintScript -RepoPath $repo10 -Mode interactive *>&1
     Assert-ExitCode -Expected 0 -Actual $LASTEXITCODE -TestName "Interactive mode non-blocking"
+
+    # ─── Test 11: Gitea-primary repo (no .github/workflows, has .gitea ci.yml) passes ───
+    Write-Host "`n[TEST 11] Gitea-primary repo (no GitHub workflows, has .gitea ci.yml) passes..." -ForegroundColor Cyan
+    $repo11 = New-GoldenRepo -Root $testRoot -Name 'gitea-primary'
+    Remove-Item (Join-Path $repo11 '.github/workflows') -Recurse -Force
+    Add-TestFile -RepoPath $repo11 -RelPath '.gitea/workflows/ci.yml' -Content 'name: CI'
+    $result = & $lintScript -RepoPath $repo11 -Mode ci *>&1
+    Assert-ExitCode -Expected 0 -Actual $LASTEXITCODE -TestName "Gitea-primary repo passes"
+
+    # ─── Test 12: repo with no Gitea CI workflow fails ───
+    Write-Host "`n[TEST 12] Repo with no Gitea CI workflow fails..." -ForegroundColor Cyan
+    $repo12 = New-GoldenRepo -Root $testRoot -Name 'no-ci'
+    Remove-Item (Join-Path $repo12 '.gitea/workflows') -Recurse -Force
+    $result = & $lintScript -RepoPath $repo12 -Mode ci *>&1
+    Assert-ExitCode -Expected 1 -Actual $LASTEXITCODE -TestName "Missing Gitea CI repo fails"
+    Assert-OutputContains -Output $result -Pattern '\.gitea/workflows/ci\.yml' -TestName "Missing Gitea CI violation message"
+
+    # ─── Test 13: CI mode with no scan target must not silently pass ───
+    Write-Host "`n[TEST 13] CI mode without -RepoPath/-AllRepos exits non-zero..." -ForegroundColor Cyan
+    $result = & $lintScript -Mode ci *>&1
+    Assert-ExitCode -Expected 2 -Actual $LASTEXITCODE -TestName "CI mode usage exit code"
 
     # ═══════════════════════════════════════════════════
     Write-Host "`n=================================================" -ForegroundColor Cyan

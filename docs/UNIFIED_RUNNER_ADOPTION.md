@@ -157,10 +157,11 @@ The `lint-ci-uses-runner.ps1` script tracks adoption:
 
 | Repository | Status | Notes |
 |------------|--------|-------|
-| Qobuzarr | ✅ Strict | All workflows use unified runner |
-| Tidalarr | ✅ Strict | Migrated with `-AdditionalFilter "scope!=cli"` |
-| Brainarr | ⚠️ Report-only | Filters updated, workflows not migrated (10 violations) |
-| AppleMusicarr | ⚠️ Report-only | Multiple test projects (16 violations) |
+| Amazonmusicarr | See Gitea CI | Uses the shared plugin lint runner and repo-local `verify-local.ps1` wrapper. |
+| AppleMusicarr | See Gitea CI | Uses the shared plugin lint runner and repo-local `verify-local.ps1` wrapper. |
+| Brainarr | See Gitea CI | Uses the shared plugin lint runner and repo-local `verify-local.ps1` wrapper. |
+| Qobuzarr | See Gitea CI | Uses the shared plugin lint runner and repo-local `verify-local.ps1` wrapper. |
+| Tidalarr | See Gitea CI | Uses the shared plugin lint runner and repo-local `verify-local.ps1` wrapper. |
 
 ## Exceptions That Shouldn't Be Migrated
 

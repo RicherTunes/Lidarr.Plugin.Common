@@ -18,6 +18,6 @@ Track ABI-breaking updates here so plugin authors can plan migrations. Each entr
 
 Guidelines:
 
-- Update this table whenever `PublicAPI.Shipped.txt` removes or changes APIs.
+- Update this table whenever a public type or member is removed or changed (reviewer judgment, paired with the corresponding `CHANGELOG.md` entry).
 - Cross-link to the specific release entry in `CHANGELOG.md`.
 - Reference detailed instructions in [`migration/FROM_LEGACY.md`](FROM_LEGACY.md) or other how-to guides.

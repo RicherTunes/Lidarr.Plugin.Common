@@ -1,5 +1,7 @@
 # Testing with the TestKit
 
+<!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
+
 `Lidarr.Plugin.Common.TestKit` (ships with the repository today; NuGet publishing planned for 1.2) provides fixtures, HTTP handlers, and manifest helpers so plugins can verify their implementations without copy/paste harnesses.
 
 ## AssemblyLoadContext harness

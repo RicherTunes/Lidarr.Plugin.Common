@@ -8,8 +8,7 @@
 ## Build, Test, and Development Commands
 - `dotnet build -c Release` — compiles all targets and enforces analyzers.
 - `dotnet test -c Release --no-build` — runs the full suite; append `-p:IncludeCLIFramework=true` when validating CLI scenarios.
-- `dotnet format src/Lidarr.Plugin.Common.csproj analyzers --verify-no-changes` — ensures analyzers (RS0016/RS0017, etc.) stay clean.
-- `tools/Update-PublicApiBaselines.ps1` — regenerates per-TFM `PublicAPI` baselines after contract updates; commit the resulting files.
+- `dotnet format src/Lidarr.Plugin.Common.csproj analyzers --verify-no-changes` — ensures analyzers stay clean.
 
 ## Coding Style & Naming Conventions
 - Follow the repo `.editorconfig`: 4-space indentation, UTF-8, `var` for obvious types, and PascalCase for public members. Private fields use `_camelCase`; locals remain `camelCase`.

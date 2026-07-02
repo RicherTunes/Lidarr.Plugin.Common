@@ -576,6 +576,9 @@
           "System.Text.Json": "[8.0.6, )"
         }
       },
+      "lidarr.plugin.analyzers": {
+        "type": "Project"
+      },
       "lidarr.plugin.common": {
         "type": "Project",
         "dependencies": {

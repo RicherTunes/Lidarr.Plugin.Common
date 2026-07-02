@@ -101,6 +101,10 @@ public class ScrubTests
     [InlineData("Cookie")]
     [InlineData("Set-Cookie")]
     [InlineData("Proxy-Authorization")]
+    [InlineData("X-Adp-Token")]
+    [InlineData("x-adp-token")]
+    [InlineData("X-Adp-Signature")]
+    [InlineData("x-adp-signature")]
     public void Headers_SensitiveHeader_ValueIsRedacted(string headerName)
     {
         var headers = new Dictionary<string, string> { [headerName] = "Bearer super-secret-token" };
@@ -183,6 +187,9 @@ public class ScrubTests
     [InlineData("https://api.example.com/v1/tracks?authorization=super-secret")]
     [InlineData("https://api.example.com/v1/tracks?bearer=super-secret")]
     [InlineData("https://api.example.com/v1/tracks?auth=super-secret")]
+    [InlineData("https://api.example.com/v1/tracks?sig=super-secret")]
+    [InlineData("https://api.example.com/v1/tracks?signature=super-secret")]
+    [InlineData("https://api.example.com/v1/tracks?request_sig=super-secret")]
     public void Url_KnownSensitiveParam_ValueRedacted(string url)
     {
         var result = Scrub.Url(url);

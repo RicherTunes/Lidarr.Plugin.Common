@@ -10,22 +10,52 @@ You're writing a class that extends Lidarr's `HttpIndexerBase<TSettings>`, `Down
 - `release.Guid.Split(':')` parsing → use `PrefixedReleaseGuidParser`
 - `static ConcurrentDictionary<string, MyDownloadItem>` for in-flight tracking → use `HostBridgeDownloadTrackerStore<T>`
 - `applemusic://search?query=...` placeholder URI roundtrip → use `PlaceholderSearchUri`
+- Settings snapshot code before a fire-and-forget download → use `SettingsSnapshot.Copy` or the `HostBridgeDownloadOrchestrator` overload without an explicit snapshotter
 
 If you write one of these inline, you're forking the algorithm — when the next bug or hardening fix lands, your copy doesn't get it.
+
+## Settings snapshots
+
+For settings made of primitive, enum, nullable, and string properties, prefer the orchestrator overload that omits the explicit snapshotter:
+
+```csharp
+await _orchestrator.StartTrackedDownloadAsync(
+    (MySettings)Definition.Settings,
+    _tracker,
+    CreateItem,
+    ExecuteAsync);
+```
+
+If you need the explicit snapshotter overload, pass `SettingsSnapshot.Copy<T>` directly instead of snapshotting into a local first:
+
+```csharp
+await _orchestrator.StartTrackedDownloadAsync(
+    (MySettings)Definition.Settings,
+    _tracker,
+    SettingsSnapshot.Copy<MySettings>,
+    CreateItem,
+    ExecuteAsync);
+```
+
+Both routes snapshot public read-write non-indexer properties before `Task.Run`, so the background download sees the original values even if the host mutates live settings afterward. If settings contain mutable reference types such as lists, dictionaries, caches, or credential containers, keep using the explicit `snapshotter` overload and deep-copy those fields yourself.
 
 ## Canonical adoption pattern
 
 ```csharp
 public sealed class MyDownloadClient : DownloadClientBase<MySettings>
 {
-    // ONE store per process. Lidarr can re-instantiate the client between queue polls;
-    // the static keeps GetItems() consistent across instances.
-    private static readonly HostBridgeDownloadTrackerStore<HostBridgeDownloadItem> _tracker = new();
+    // ONE store per process. ForPlugin() persists terminal queue state under the
+    // plugin config directory so completed/failed/cancelled items survive a
+    // Lidarr restart long enough for host import, blocklist, or removal.
+    // Queued/downloading entries remain process-local until a plugin implements
+    // a real resumable worker seam.
+    private static readonly HostBridgeDownloadTrackerStore<HostBridgeDownloadItem> _tracker =
+        HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>.ForPlugin("MyPlugin");
 
     public override Task<string> Download(RemoteAlbum remoteAlbum, IIndexer indexer)
     {
-        // SNAPSHOT settings before Task.Run — Definition.Settings is mutable.
-        var snapshot = (MySettings)Definition.Settings; // or build a record-style copy
+        // If you are not using HostBridgeDownloadOrchestrator, snapshot exactly once before Task.Run.
+        var snapshot = SettingsSnapshot.Copy((MySettings)Definition.Settings);
 
         // Extract IDs using the prefix shared with your indexer.
         var albumId = PrefixedReleaseGuidParser.ExtractAlbumId(
@@ -52,7 +82,17 @@ public sealed class MyDownloadClient : DownloadClientBase<MySettings>
         item.SetStatus(HostBridgeDownloadItemStatus.Downloading);
         _tracker.AddOrReplace(item);
 
-        _ = Task.Run(() => ExecuteAsync(item, snapshot));
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await ExecuteAsync(item, snapshot).ConfigureAwait(false);
+            }
+            finally
+            {
+                _tracker.PersistSnapshot();
+            }
+        });
         return Task.FromResult(item.DownloadId);
     }
 
@@ -104,9 +144,17 @@ public sealed class MyIndexer : HttpIndexerBase<MySettings>
 |---|---|---|
 | `PathTraversalGuard` | `SanitizeSegment` + `IsPathWithinRoot` for defense-in-depth path containment | apple `AppleMusicLidarrDownloadClient` (May 2026) |
 | `PrefixedReleaseGuidParser` | `{indexerId}_{scheme}:album:{id}[:extra]` GUID + InfoUrl path extraction | apple + tidalarr (identical algorithm modulo scheme literal) |
-| `HostBridgeDownloadItem` + `HostBridgeDownloadTrackerStore<T>` | Thread-safe per-download tracker + ConcurrentDictionary store with retention sweep | apple + tidalarr (byte-for-byte same pattern) |
-| `HostBridgeDownloadItemStatus` | Status enum for the tracker (Queued/Downloading/Completed/Failed) | new |
+| `HostBridgeDownloadItem` + `HostBridgeDownloadTrackerStore<T>` | Thread-safe per-download tracker + optional write-through JSON persistence for terminal items with retention sweep | apple + tidalarr (byte-for-byte same pattern) |
+| `HostBridgeDownloadItemStatus` | Status enum for the tracker (Queued/Downloading/Completed/Failed/Cancelled) | new |
 | `PlaceholderSearchUri` | `{scheme}://search?query={encoded}` roundtrip | apple + tidalarr |
+
+`HostBridgeDownloadTrackerStore<T>.ForPlugin("PluginName")` is the canonical adoption path for plugins that use `HostBridgeDownloadItem` directly. Common's `HostBridgeDownloadOrchestrator` flushes the final in-place item mutations after `doWork` exits. If a plugin mutates tracked items outside that orchestrator path, call `_tracker.PersistSnapshot()` after status/progress/completion changes that must survive restart.
+
+Persistence is intentionally terminal-state-only. Completed, failed, and cancelled entries are reloaded until retention expiry so the Lidarr host can import, blocklist, or remove them. Queued and downloading entries are dropped during startup and the cleaned snapshot is written back, because the background worker task does not survive process restart. A future resumable-download feature needs an explicit plugin worker seam instead of pretending stale in-progress JSON can finish itself.
+
+`Remove(downloadId, deleteData: true, ...)` is cross-attempt aware: if another queued/downloading item still targets the same canonical output directory, Common removes only the tracker entry and leaves the directory in place for the active attempt. The comparison normalizes trailing separators and `.`/`..`; it is case-sensitive on Linux and case-insensitive on Windows/macOS to match Common's path-guard semantics.
+
+Subclass stores need an `itemFactory` so persisted base fields can be restored into the intended runtime type. The Common DTO does not persist arbitrary subclass-only fields; derive those fields from base data in the factory, or keep restart-critical state on `HostBridgeDownloadItem`.
 
 Related helpers in sibling namespaces:
 

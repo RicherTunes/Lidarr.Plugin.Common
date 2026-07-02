@@ -12,18 +12,18 @@
 
 XML documentation for each interface ships with the package; use your IDE or `dotnet doc` tools until we publish DocFX output.
 
-## Public API enforcement
+## Public API policy
 
-Per-target-framework baselines (`PublicAPI.Shipped.txt`/`PublicAPI.Unshipped.txt`) live under `src/Abstractions/PublicAPI/<tfm>/`. A custom MSBuild target copies them into `obj/` before every compile so `Microsoft.CodeAnalysis.PublicApiAnalyzers` can verify:
+There is no analyzer-enforced baseline (the `Microsoft.CodeAnalysis.PublicApiAnalyzers` gate was removed 2026-06 — see [Public API baselines](reference/PUBLIC_API_BASELINES.md)). Instead:
 
-- No public symbol is removed or renamed without updating the baseline.
-- Additive changes require updating the `Unshipped` file.
+- Public-surface changes are caught in code review and recorded in `CHANGELOG.md`.
+- Consumer plugins compile Common from a pinned source submodule, so removals or signature changes fail at plugin compile time on re-pin.
 - Breaking changes (signature or behavior) must bump the `apiVersion` major and ship with clear migration guidance.
 
 ## Contract
 
 - The host loads `Lidarr.Plugin.Abstractions` once into the default AssemblyLoadContext.
 - Only types defined in this package may cross host ⇄ plugin boundaries.
-- Public API baselines are enforced per TFM; changes must be intentional and reviewed.
+- Public-surface changes must be intentional, reviewed, and recorded in `CHANGELOG.md`.
 - Plugin manifests (`apiVersion`) reference the major version of this package.
 - The Common library must treat Abstractions as an external dependency (no strong naming, no direct internals).

@@ -1049,6 +1049,70 @@ namespace Lidarr.Plugin.Common.Tests.Services.Caching
 
         #endregion
 
+        #region Pattern Dictionary Bounding Tests
+
+        [Fact]
+        public void Patterns_AreBounded_WhenManyDistinctPatternKeysAreRecorded()
+        {
+            // Arrange — small cap so the test is fast. RecordAccessPattern runs on every Set with a
+            // pattern key, populating the parallel _patterns dictionary. Historically _patterns grew
+            // without bound (only Clear()/Dispose() cleared it), leaking heap over long uptimes.
+            var options = new SmartCacheOptions
+            {
+                MaxCacheSize = 50,
+                EvictionBatchSize = 10
+            };
+            var cache = new SmartCache<string, string>(key => key, options);
+
+            // Act — drive far more distinct pattern keys than the cap.
+            for (int i = 0; i < 5000; i++)
+            {
+                cache.Set($"key{i}", $"value{i}", CacheEntryPriority.Normal, patternKey: $"pattern:{i}");
+            }
+
+            // Assert — _patterns must stay bounded (≈ cap), not grow to 5000.
+            var stats = cache.GetStatistics();
+            Assert.True(
+                stats.UniquePatterns <= options.MaxCacheSize,
+                $"_patterns must be bounded by MaxCacheSize ({options.MaxCacheSize}); was {stats.UniquePatterns}.");
+        }
+
+        [Fact]
+        public void Patterns_FrequentlyAccessedPattern_SurvivesEvictionOverOneOffs()
+        {
+            // Arrange — a frequently-accessed pattern should outlive one-off patterns when the
+            // dictionary is trimmed (eviction must drop the lowest-value entries, not the popular one).
+            var options = new SmartCacheOptions
+            {
+                MaxCacheSize = 50,
+                EvictionBatchSize = 10
+            };
+            var cache = new SmartCache<string, string>(key => key, options);
+
+            // Make "hot:pattern" highly accessed first.
+            for (int i = 0; i < 100; i++)
+            {
+                cache.Set($"hotkey{i}", $"value{i}", CacheEntryPriority.Normal, patternKey: "hot:pattern");
+            }
+
+            // Flood with many one-off patterns to force pattern-dictionary eviction.
+            for (int i = 0; i < 5000; i++)
+            {
+                cache.Set($"coldkey{i}", $"value{i}", CacheEntryPriority.Normal, patternKey: $"cold:{i}");
+            }
+
+            // Assert — the frequently-accessed pattern survived the trimming.
+            Assert.True(
+                cache.IsPopularPattern("hot:pattern"),
+                "Frequently-accessed pattern should survive eviction over one-off patterns.");
+
+            // And the dictionary is still bounded.
+            var stats = cache.GetStatistics();
+            Assert.True(stats.UniquePatterns <= options.MaxCacheSize);
+        }
+
+        #endregion
+
         #region ValueClone Hook (Phase 5e)
 
         [Fact]

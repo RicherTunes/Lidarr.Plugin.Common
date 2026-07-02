@@ -40,7 +40,7 @@ function Get-HostAssemblyVersions {
         Path to directory containing host assemblies (e.g., ext/Lidarr/_output/net8.0).
 
     .PARAMETER ExtractFrom
-        Docker image tag to extract assemblies from (e.g., pr-plugins-3.1.1.4884).
+        Docker image tag to extract assemblies from (e.g., nightly-3.1.3.4970).
         If specified, extracts assemblies to a cached directory based on the tag.
         Reuses cached assemblies if they exist (use -ForceExtract to re-extract).
 
@@ -59,7 +59,7 @@ function Get-HostAssemblyVersions {
         Get-HostAssemblyVersions -HostAssembliesDir "ext/Lidarr/_output/net8.0"
 
     .EXAMPLE
-        Get-HostAssemblyVersions -ExtractFrom "pr-plugins-3.1.1.4884"
+        Get-HostAssemblyVersions -ExtractFrom "nightly-3.1.3.4970"
     #>
     [CmdletBinding()]
     param(
@@ -519,7 +519,7 @@ function Test-HostVersionCompatibility {
         Test-HostVersionCompatibility -RepoRoot "." -HostAssembliesDir "ext/Lidarr/_output/net8.0"
 
     .EXAMPLE
-        Test-HostVersionCompatibility -RepoRoot "." -ExtractFrom "pr-plugins-3.1.1.4884" -Strict
+        Test-HostVersionCompatibility -RepoRoot "." -ExtractFrom "nightly-3.1.3.4970" -Strict
     #>
     [CmdletBinding()]
     param(
