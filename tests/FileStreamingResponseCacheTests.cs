@@ -812,6 +812,35 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public void Set_WhenExistingEntryHasFutureTimestamp_DoesNotEvictNewlyWrittenEntry()
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "cache-limit-current-write-" + Guid.NewGuid().ToString("N"));
+            Environment.SetEnvironmentVariable("ARR_RESP_CACHE_MAX_ENTRIES", "1");
+            try
+            {
+                var cache = new FileStreamingResponseCache(folder, TimeSpan.FromHours(1));
+                var parameters = new Dictionary<string, string>();
+
+                cache.Set("/api/old", parameters,
+                    new CachedHttpResponse { Body = Encoding.UTF8.GetBytes("old") });
+                var oldPath = CachePathFor(cache, folder, "/api/old", parameters);
+                File.SetLastWriteTimeUtc(oldPath, DateTime.UtcNow.AddMinutes(5));
+
+                cache.Set("/api/new", parameters,
+                    new CachedHttpResponse { Body = Encoding.UTF8.GetBytes("new") });
+
+                var result = cache.Get<CachedHttpResponse>("/api/new", parameters);
+                Assert.NotNull(result);
+                Assert.Equal("new", Encoding.UTF8.GetString(result.Body));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("ARR_RESP_CACHE_MAX_ENTRIES", null);
+                try { Directory.Delete(folder, recursive: true); } catch { }
+            }
+        }
+
+        [Fact]
         public void EnforceLimits_EntryCountOverflow_TrimsToCap_DoesNotWipeAll()
         {
             // Regression (harden campaign): the entry-count overflow path tested files.Count — a
@@ -933,6 +962,16 @@ namespace Lidarr.Plugin.Common.Tests
                     catch { }
                 }
             }
+        }
+
+        private static string CachePathFor(
+            FileStreamingResponseCache cache,
+            string root,
+            string endpoint,
+            Dictionary<string, string> parameters)
+        {
+            var key = cache.GenerateCacheKey(endpoint, parameters);
+            return Path.Combine(root, key[..2], key + ".json");
         }
 
         #endregion
