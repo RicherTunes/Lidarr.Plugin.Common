@@ -808,14 +808,6 @@ public abstract partial class EcosystemParityTestBase
     {
         if (!Directory.Exists(PluginSourceRoot)) return Skipped();
 
-        var excluded = new[]
-        {
-            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
-        };
         // Public top-level (or nested — counted, which makes multi-type files exceed 1 and skip) type.
         var typeDecl = new System.Text.RegularExpressions.Regex(
             @"(?m)^\s*(?:\[[^\]]*\]\s*)*public\s+(?:sealed\s+|abstract\s+|static\s+|partial\s+|readonly\s+|unsafe\s+)*(?:class|interface|record|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)",
@@ -825,9 +817,8 @@ public abstract partial class EcosystemParityTestBase
             System.Text.RegularExpressions.RegexOptions.Compiled);
 
         var offenders = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        foreach (var file in EnumerateCSharpFiles(PluginSourceRoot, includeTests: false))
         {
-            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
             var fileName = Path.GetFileNameWithoutExtension(file);
             if (fileName.Contains('.')) continue; // dotted (partial splits / *.Designer / *.g) — skip
             string text;
@@ -843,10 +834,11 @@ public abstract partial class EcosystemParityTestBase
             // type (any accessibility) is itself named after the file, the file IS correctly named and
             // the public type is a nested helper (e.g. an `internal *HealthDiagnostics` whose only
             // public member is a nested `Capabilities`). Only flag when no top-level type matches the
-            // file name. (^-anchored = top-level in the file-scoped-namespace style these repos use.)
+            // file name. Accept file-scoped namespace style (column 0) and normal block-namespace
+            // indentation (up to one 4-space indent), but avoid deeply nested helper types.
             var declaresFileNameTopLevelType = System.Text.RegularExpressions.Regex.IsMatch(
                 text,
-                $@"(?m)^(?:\[[^\]]*\]\s*)*(?:(?:public|internal|private|protected|file|sealed|abstract|static|partial|readonly|unsafe)\s+)*(?:class|interface|record|struct|enum)\s+{System.Text.RegularExpressions.Regex.Escape(fileName)}\b");
+                $@"(?m)^[ \t]{{0,4}}(?:\[[^\]]*\]\s*)*(?:(?:public|internal|private|protected|file|sealed|abstract|static|partial|readonly|unsafe)\s+)*(?:class|interface|record|struct|enum)\s+{System.Text.RegularExpressions.Regex.Escape(fileName)}\b");
             if (declaresFileNameTopLevelType) continue;
 
             offenders.Add($"{Path.GetRelativePath(RepoRootPath, file)} (file '{fileName}' != type '{typeName}')");

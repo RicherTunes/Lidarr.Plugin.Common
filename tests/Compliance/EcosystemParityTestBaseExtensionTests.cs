@@ -937,6 +937,17 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     }
 
     [Fact]
+    public void FileClassParity_RepoRootFallbackExcludesTestProjects()
+    {
+        WriteSrcFile(Path.Combine(_tempRepo, "Plugin"), "PluginEntry.cs", "namespace N;\npublic sealed class PluginEntry { }");
+        WriteSrcFile(Path.Combine(_tempRepo, "tests", "Plugin.Tests"), "Helpers.cs", "namespace N;\npublic sealed class VoidResult { }");
+        WriteSrcFile(Path.Combine(_tempRepo, "Plugin.Tests"), "RegistryTestCollection.cs", "namespace N;\npublic sealed class RegistryModelTestsCollection { }");
+
+        var h = new Harness(_tempRepo) { SourceRootValue = _tempRepo };
+
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+    [Fact]
     public void FileClassParity_InternalPrimaryWithPublicNestedHelper_Passes()
     {
         // A file whose TOP-LEVEL type matches the file name (here `internal`) is correctly named even
@@ -946,6 +957,17 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         WriteSrcFile(src, "QobuzHealthDiagnostics.cs",
             "namespace N;\ninternal static class QobuzHealthDiagnostics\n{\n    public static class Capabilities { }\n}");
         var h = new Harness(_tempRepo) { SourceRootValue = src };
+        Assert.True(h.RunFileClassNameParity().Passed);
+    }
+
+    [Fact]
+    public void FileClassParity_BlockNamespaceInternalPrimaryWithPublicNestedHelper_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "src");
+        WriteSrcFile(src, "TokenBudgetResolver.cs",
+            "namespace N\n{\n    internal sealed class TokenBudgetResolver\n    {\n        public sealed record PromptBudget;\n    }\n}");
+        var h = new Harness(_tempRepo) { SourceRootValue = src };
+
         Assert.True(h.RunFileClassNameParity().Passed);
     }
 
@@ -1116,5 +1138,30 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         // No assembly + no CLAUDE.md => the other 15 skip (Pass); Check_EnforcesAlbumCompletionPolicy
         // runs unconditionally (it asserts the shared rule directly, no assembly needed) and passes.
         Assert.True(report.AllPassed);
+    }
+
+    [Fact]
+    public void RunAllParityChecks_IncludesEveryBehaviorContractCheck()
+    {
+        var h = new Harness(_tempRepo) { AssemblyValue = null };
+
+        var all = h.RunAllParityChecks();
+        var behavior = h.RunBehaviorContractChecks();
+
+        var missing = behavior.Results.Keys
+            .Where(key => !all.Results.ContainsKey(key))
+            .OrderBy(static key => key, StringComparer.Ordinal)
+            .ToArray();
+
+        Assert.Empty(missing);
+    }
+
+    [Fact]
+    public void EcosystemParityBase_ExposesInheritedAggregateFact()
+    {
+        var method = typeof(EcosystemParityTestBase).GetMethod("AllParityChecksPass");
+
+        Assert.NotNull(method);
+        Assert.NotNull(method.GetCustomAttribute<FactAttribute>());
     }
 }
