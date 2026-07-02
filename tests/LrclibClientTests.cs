@@ -139,7 +139,9 @@ public sealed class LrclibClientTests
             albumName: "High Voltage & Beyond",
             durationSeconds: 200);
 
-        var uri = handler.LastRequestUri!;
+        // A 404 now triggers the /api/search fallback (a second request), so assert on the
+        // FIRST request — the /api/get whose album_name+escaping this test exercises.
+        var uri = handler.FirstRequestUri!;
         // & in album must be encoded, NOT bleed into a separate query parameter.
         Assert.Contains("album_name=High+Voltage+%26+Beyond", uri.Query, StringComparison.OrdinalIgnoreCase);
         // / in artist must be encoded. (%2F / %2f vary by URI implementation; case-insensitive.)
@@ -221,6 +223,7 @@ public sealed class LrclibClientTests
         private readonly bool _blockUntilCancelled;
 
         public Uri? LastRequestUri { get; private set; }
+        public Uri? FirstRequestUri { get; private set; }
         public System.Net.Http.Headers.HttpRequestHeaders? LastRequestHeaders { get; private set; }
 
         public StubHandler(
@@ -238,6 +241,7 @@ public sealed class LrclibClientTests
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             LastRequestUri = request.RequestUri;
+            FirstRequestUri ??= request.RequestUri;
             LastRequestHeaders = request.Headers;
 
             if (_throwOnSend is not null) throw _throwOnSend;
