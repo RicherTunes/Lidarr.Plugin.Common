@@ -8,23 +8,23 @@
 
 **Tech Stack:** .NET / C# (xUnit, file-scoped namespaces), PowerShell, git worktrees. Spec: `docs/superpowers/specs/2026-06-11-perf-program-design.md` (rev 2).
 
-**Repos:** `lidarr.plugin.common` (Common), `qobuzarr`, `tidalarr`. All branches off `gitea/main` after `git fetch gitea`. Gitea pushes are currently FAILING (server disk full) — commit locally; push when unblocked.
+**Repos:** `lidarr.plugin.common` (Common), `qobuzarr`, `tidalarr`. All branches off `gitea/main` after `git fetch gitea`. Historical note: when this plan was written on 2026-06-11, Gitea pushes were failing because the server disk was full. As of 2026-07-02, Gitea accepts pushes again; keep using Gitea as the primary CI/merge gate.
 
 ---
 
-### Task 1: Gitea canary push (BLOCKED on server disk space — user action)
+### Task 1: Gitea canary push (RESOLVED 2026-07-02)
 
 **Files:** none (git only)
 
-- [ ] **Step 1: After the user frees disk on 192.168.2.59, retry the canary**
+- [x] **Step 1: Retry the canary once disk space is available**
 
 Run: `git -C C:\r\Alex\github\.claude-work\common-perf-spec push -u gitea docs/perf-program-2026-06`
-Expected: branch accepted. (2026-06-11 attempt failed: `remote: fatal: unable to write loose object file: No space left on device`.)
+Expected: branch accepted. The 2026-06-11 attempt failed with `remote: fatal: unable to write loose object file: No space left on device`; the 2026-07-02 Gitea push path is working.
 
-- [ ] **Step 2: Verify**
+- [x] **Step 2: Verify**
 
 Run: `git -C C:\r\Alex\github\lidarr.plugin.common ls-remote --heads gitea docs/perf-program-2026-06`
-Expected: one ref line. Until this passes, ALL work in this program stays local-only.
+Expected: one ref line. Once this passes, work may proceed through normal Gitea PRs instead of staying local-only.
 
 ### Task 2: Prior-art triage — Common branches on the limiter files
 
@@ -326,6 +326,6 @@ git -C C:\r\Alex\github\.claude-work\common-limiter-obs commit -m "feat(http): l
 
 ## Execution notes
 
-- Order: Task 2 → (3, 4, 5 in parallel) → 6 → 7. Task 1 fires whenever the user frees server disk.
+- Order: Task 2 → (3, 4, 5 in parallel) → 6 → 7. Task 1 is resolved; future work should push through Gitea PRs.
 - Tasks 2/3/4 are read-only research — safe for parallel subagents. Tasks 5/6 are small TDD code tasks in isolated worktrees.
-- Everything commits locally; NOTHING pushes until Task 1's canary passes.
+- Commit locally first, then push through Gitea once local verification passes.
