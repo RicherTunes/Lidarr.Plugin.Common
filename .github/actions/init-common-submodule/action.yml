@@ -1,0 +1,87 @@
+name: 'Init Common Submodule'
+description: 'Initialize ext/Lidarr.Plugin.Common when the caller repository declares it as a submodule.'
+author: 'RicherTunes'
+
+inputs:
+  token:
+    description: 'Optional token used to authenticate GitHub submodule access.'
+    required: false
+    default: ''
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Initialize Common submodule
+      shell: bash
+      env:
+        INPUT_TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+
+        common_path="ext/Lidarr.Plugin.Common"
+        lan_url="http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common.git"
+        github_url="https://github.com/RicherTunes/Lidarr.Plugin.Common.git"
+
+        submodule_name=""
+        if [ -f .gitmodules ]; then
+          submodule_name="$(
+            git config -f .gitmodules --get-regexp '^submodule\..*\.path$' \
+              | awk -v target="$common_path" '$2 == target {
+                  key = $1
+                  sub(/^submodule\./, "", key)
+                  sub(/\.path$/, "", key)
+                  print key
+                  exit
+                }' || true
+          )"
+        fi
+
+        index_mode="$(git ls-files --stage -- "$common_path" | awk 'NR == 1 { print $1 }')"
+
+        if [ -z "$submodule_name" ]; then
+          if [ "$index_mode" = "160000" ]; then
+            echo "::error::Found gitlink at $common_path, but .gitmodules has no matching submodule entry."
+            exit 1
+          fi
+
+          echo "No submodule declared at $common_path; skipping Common submodule initialization."
+          exit 0
+        fi
+
+        echo "Initializing Common submodule at $common_path."
+
+        if [ -n "${INPUT_TOKEN:-}" ]; then
+          echo "::add-mask::${INPUT_TOKEN}"
+        fi
+
+        git submodule init -- "$common_path"
+
+        submodule_url="$(git config --get "submodule.${submodule_name}.url" || true)"
+        if [ "${GITHUB_SERVER_URL:-}" = "https://github.com" ] && [ "$submodule_url" = "$lan_url" ]; then
+          echo "Rewriting Common submodule URL from LAN Gitea to GitHub."
+          git config "submodule.${submodule_name}.url" "$github_url"
+        fi
+
+        if [ -n "${INPUT_TOKEN:-}" ]; then
+          GIT_CONFIG_PARAMETERS="'url.https://x-access-token:${INPUT_TOKEN}@github.com/.insteadOf=https://github.com/'" \
+            git submodule update --init --recursive -- "$common_path"
+        else
+          git submodule update --init --recursive -- "$common_path"
+        fi
+
+        if [ ! -d "$common_path" ]; then
+          echo "::error::Submodule update completed, but $common_path does not exist."
+          exit 1
+        fi
+
+        if [ ! -d "$common_path/scripts" ]; then
+          echo "::error::Initialized Common submodule at $common_path, but scripts/ is missing."
+          exit 1
+        fi
+
+        if ! find "$common_path/scripts" -mindepth 1 -maxdepth 1 -type f -print -quit | grep -q .; then
+          echo "::error::Initialized Common submodule at $common_path, but scripts/ contains no files."
+          exit 1
+        fi
+
+        echo "Common submodule is ready."

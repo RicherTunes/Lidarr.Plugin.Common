@@ -147,8 +147,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
             ("https://test/c1", data),
             ("https://test/c2", data)));
 
-        var progressEvents = new List<ChunkedAssemblyProgress>();
-        var progress = new Progress<ChunkedAssemblyProgress>(p => progressEvents.Add(p));
+        var progress = new RecordingProgress();
 
         var sut = new ChunkedHttpAssembler(http, mediaUriPolicy: new RemoteMediaUriPolicy { AllowPrivateNetworks = true });
         await sut.AssembleAsync(
@@ -161,12 +160,7 @@ public class ChunkedHttpAssemblerTests : IDisposable
             OutputPath(),
             new ChunkedAssemblyOptions { MaxConcurrency = 1, Progress = progress });
 
-        // Progress<T> dispatches asynchronously; allow a brief settle.
-        var deadline = DateTime.UtcNow.AddSeconds(2);
-        while (progressEvents.Count < 3 && DateTime.UtcNow < deadline)
-        {
-            await Task.Delay(20);
-        }
+        var progressEvents = progress.Events;
 
         Assert.Equal(3, progressEvents.Count);
         Assert.Equal(3, progressEvents[2].CompletedChunks);
@@ -249,6 +243,15 @@ public class ChunkedHttpAssemblerTests : IDisposable
     {
         await Task.CompletedTask;
         Assert.Throws<ArgumentException>(() => new ChunkSpec(0, ""));
+    }
+
+    private sealed class RecordingProgress : IProgress<ChunkedAssemblyProgress>
+    {
+        private readonly List<ChunkedAssemblyProgress> _events = new();
+
+        public IReadOnlyList<ChunkedAssemblyProgress> Events => _events;
+
+        public void Report(ChunkedAssemblyProgress value) => _events.Add(value);
     }
 
     /// <summary>Returns each registered URL's payload as 200 OK.</summary>

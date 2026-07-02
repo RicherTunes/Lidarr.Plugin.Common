@@ -49,7 +49,7 @@ Describe 'PREFLIGHT: Config validation' {
                 MainDll             = 'Test.dll'
                 HostAssembliesPath  = '$tempDir'
                 CommonPath          = '$tempDir/nonexistent-common'
-                LidarrDockerVersion = 'pr-plugins-3.1.2.4913'
+                LidarrDockerVersion = 'nightly-3.1.3.4970'
                 ExpectedContentsFile = 'packaging/expected-contents.txt'
             } -SkipExtract 2>&1
         " | Out-String
@@ -67,8 +67,10 @@ Describe 'PREFLIGHT: Host path auto-detection' {
         $fakeCommon = Join-Path $tempDir 'common'
         New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'tools') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'scripts/lib') -Force | Out-Null
         Set-Content -Path (Join-Path $fakeCommon 'tools/PluginPack.psm1') -Value '# stub'
         Set-Content -Path (Join-Path $fakeCommon 'scripts/generate-expected-contents.ps1') -Value '# stub'
+        Set-Content -Path (Join-Path $fakeCommon 'scripts/lib/test-trait-policy.psm1') -Value 'function Get-LocalCiDeterministicFilter { "State!=Quarantined" }; Export-ModuleMember -Function Get-LocalCiDeterministicFilter'
 
         try {
             $output = & pwsh -NoProfile -Command "
@@ -80,7 +82,7 @@ Describe 'PREFLIGHT: Host path auto-detection' {
                     MainDll             = 'Test.dll'
                     HostAssembliesPath  = 'nonexistent/path'
                     CommonPath          = '$fakeCommon'
-                    LidarrDockerVersion = 'pr-plugins-3.1.2.4913'
+                    LidarrDockerVersion = 'nightly-3.1.3.4970'
                     ExpectedContentsFile = 'packaging/expected-contents.txt'
                 } -SkipExtract 2>&1
             " | Out-String
@@ -105,9 +107,11 @@ Describe 'Config contract: all required keys' {
         $fakeHost = Join-Path $tempDir 'host'
         New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'tools') -Force | Out-Null
         New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'scripts') -Force | Out-Null
+        New-Item -ItemType Directory -Path (Join-Path $fakeCommon 'scripts/lib') -Force | Out-Null
         New-Item -ItemType Directory -Path $fakeHost -Force | Out-Null
         Set-Content -Path (Join-Path $fakeCommon 'tools/PluginPack.psm1') -Value '# stub'
         Set-Content -Path (Join-Path $fakeCommon 'scripts/generate-expected-contents.ps1') -Value '# stub'
+        Set-Content -Path (Join-Path $fakeCommon 'scripts/lib/test-trait-policy.psm1') -Value 'function Get-LocalCiDeterministicFilter { "State!=Quarantined" }; Export-ModuleMember -Function Get-LocalCiDeterministicFilter'
 
         try {
             $output = & pwsh -NoProfile -Command "
@@ -119,7 +123,7 @@ Describe 'Config contract: all required keys' {
                     MainDll             = 'Test.dll'
                     HostAssembliesPath  = '$fakeHost'
                     CommonPath          = '$fakeCommon'
-                    LidarrDockerVersion = 'pr-plugins-3.1.2.4913'
+                    LidarrDockerVersion = 'nightly-3.1.3.4970'
                     ExpectedContentsFile = 'packaging/expected-contents.txt'
                 } -SkipExtract -SkipTests 2>&1
             " | Out-String
@@ -173,5 +177,54 @@ Describe 'Warning budget hooks' {
         $content | Should -Match '\$totalWarnings\s*='
         $content | Should -Match 'WARNING BUDGET'
         $content | Should -Match 'build=\$\(\$script:BuildWarningCount\)'
+    }
+}
+
+Describe 'Deterministic MSBuild invocation' {
+
+    It 'Serializes restore and build stages to avoid duplicate ProjectReference file locks' {
+        $content = Get-Content -LiteralPath $script:LocalCiScript -Raw
+
+        $content | Should -Match '\$script:DotnetNoServerArgs\s*='
+        $content | Should -Match '\$script:SerializedMsbuildArgs\s*='
+        $content | Should -Match '--disable-build-servers'
+        $content | Should -Match '-m:1'
+        $content | Should -Match '-p:BuildInParallel=false'
+        $content | Should -Match '-p:UseSharedCompilation=false'
+
+        $content | Should -Match '\$restoreArgs\s*=\s*@\(\$restoreTarget\)\s*\+\s*\$script:DotnetNoServerArgs\s*\+\s*\$script:SerializedMsbuildArgs'
+        $content | Should -Match '\$buildArgs\s*=\s*@\(\$pluginCsproj,\s*''-c'',\s*\$Configuration,\s*''--no-restore''\)\s*\+\s*\$script:DotnetNoServerArgs\s*\+\s*\$script:SerializedMsbuildArgs'
+        $content | Should -Match '\$testRestoreArgs\s*=\s*@\(\$testProj\)\s*\+\s*\$script:DotnetNoServerArgs\s*\+\s*\$script:SerializedMsbuildArgs'
+        $content | Should -Match '\$testBuildArgs\s*=\s*@\(\$testProj,\s*''-c'',\s*\$Configuration,\s*''--no-restore''\)\s*\+\s*\$script:DotnetNoServerArgs\s*\+\s*\$script:SerializedMsbuildArgs'
+        $content | Should -Match '\$testArgs\s*=\s*@\(\$testProj,\s*''--no-build'',\s*''-c'',\s*\$Configuration\)\s*\+\s*\$script:DotnetNoServerArgs'
+    }
+}
+
+Describe 'Deterministic coverage guard' {
+
+    It 'Can require the deterministic filter to match at least one test' {
+        $content = Get-Content -LiteralPath $script:LocalCiScript -Raw
+
+        $content | Should -Match 'RequireHermeticTests'
+        $content | Should -Match 'RequireDeterministicTests'
+        $content | Should -Match '\$requireDeterministicTests\s*=\s*\[bool\]\(\$Config\[''RequireDeterministicTests''\]\s*-or\s*\$Config\[''RequireHermeticTests''\]\)'
+        $content | Should -Match 'No test projects configured while RequireDeterministicTests is enabled'
+        $content | Should -Match 'Get-LocalCiDeterministicFilter'
+        $content | Should -Match '\$totalMatched\s*=\s*\$totalPassed\s*\+\s*\$totalFailed\s*\+\s*\$totalSkipped'
+        $content | Should -Match 'No tests matched deterministic CI filter'
+    }
+}
+
+Describe 'Packaging test path wiring' {
+
+    It 'Exports the built package zip path so Category=Packaging tests can find it' {
+        # PluginPackagingPolicyTests resolve the zip via the shared TestKit's
+        # PackagingTestPaths, which reads PLUGIN_PACKAGE_PATH first. The deterministic
+        # tests stage must export that env var from the PACKAGE stage's $script:zipPath
+        # before running tests, or the policy tests throw "package not found".
+        $content = Get-Content -LiteralPath $script:LocalCiScript -Raw
+
+        $content | Should -Match '\$env:PLUGIN_PACKAGE_PATH\s*=\s*\(Resolve-Path -LiteralPath \$script:zipPath\)\.Path'
+        $content | Should -Match 'if\s*\(\$script:zipPath\s*-and\s*\(Test-Path -LiteralPath \$script:zipPath\)\)'
     }
 }

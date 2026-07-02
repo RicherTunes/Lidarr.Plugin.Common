@@ -29,6 +29,11 @@ project.lock.json
 project.fragment.lock.json
 artifacts/
 
+# Build-tool analyzer project lockfile: tools/Analyzers is a build-only Roslyn analyzer (not a shipped
+# package), so its restore-generated packages.lock.json is intentionally untracked (the 4 shipped projects
+# DO track theirs). Prevents it showing as a dirty/untracked file in consumers' Common submodule. (F12)
+tools/Analyzers/**/packages.lock.json
+
 # NuGet
 *.nupkg
 *.snupkg
@@ -101,3 +106,8 @@ coverage*/
 *.coverage
 *.cobertura.xml
 dist/
+
+# Local CI / review scratch artifacts (never committed — see external-audit branch-hygiene note)
+testResults.xml
+_pkgcheck/
+.glm-delegate-diff/

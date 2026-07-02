@@ -1,0 +1,607 @@
+name: Release Plugin (Reusable)
+# Reusable workflow — call from each plugin's release.yml with `uses:` syntax.
+# Baseline: brainarr's 434-LOC release.yml (cosign, SBOM, SHA256, latest-tag,
+# build verify, skip-if-exists guard, release-notes generator).
+#
+# TODO: replace `@main` pin with merge-commit SHA after PR #514 merges.
+
+on:
+  workflow_call:
+    inputs:
+      # ── Required ─────────────────────────────────────────────────────────
+      plugin_name:
+        description: 'Human-readable plugin name (e.g. "Brainarr")'
+        required: true
+        type: string
+      plugin_dll:
+        description: 'Expected merged DLL filename (e.g. "Lidarr.Plugin.Brainarr.dll")'
+        required: true
+        type: string
+      main_csproj:
+        description: 'Repo-relative path to the plugin csproj (e.g. "Brainarr.Plugin/Brainarr.Plugin.csproj")'
+        required: true
+        type: string
+      lidarr_path_msbuild_prop:
+        description: 'MSBuild property name for the Lidarr assemblies path (e.g. "LidarrPath")'
+        required: true
+        type: string
+
+      # ── Optional — packaging / build knobs ───────────────────────────────
+      pack_script:
+        description: |
+          Repo-relative path to a per-plugin pack script (e.g. "scripts/pack-plugin.ps1").
+          When set, the script is invoked instead of the built-in inline packaging logic.
+          The script receives: -Configuration Release -OutDir artifacts -Version <version>
+        required: false
+        type: string
+        default: ''
+      dll_search_dirs:
+        description: |
+          Colon-separated list of directories (relative to repo root) to search for the
+          merged DLL when pack_script is empty. Default covers the most common layouts.
+        required: false
+        type: string
+        default: 'bin:src/*/bin:*/bin'
+      dotnet_version:
+        description: '.NET SDK version constraint (e.g. "8.0.x")'
+        required: false
+        type: string
+        default: '8.0.x'
+      lidarr_docker_version:
+        description: 'Lidarr plugins-branch Docker tag used to extract host assemblies'
+        required: false
+        type: string
+        default: 'nightly-3.1.3.4970'
+
+      # ── Optional — feature flags ──────────────────────────────────────────
+      include_cosign:
+        description: 'Sign the release ZIP with Cosign (keyless)'
+        required: false
+        type: boolean
+        default: true
+      include_sbom:
+        description: 'Generate and attach an SPDX JSON SBOM'
+        required: false
+        type: boolean
+        default: true
+      include_wiki_update:
+        description: 'Attempt to update the repo wiki after release'
+        required: false
+        type: boolean
+        default: false
+      include_latest_tag:
+        description: 'Move the floating "latest" git tag to this release'
+        required: false
+        type: boolean
+        default: true
+
+      # ── Optional — forbidden-DLL guard ───────────────────────────────────
+      forbidden_dlls_extra:
+        description: |
+          Comma-separated list of ADDITIONAL DLL filenames to forbid from the release
+          package. The base set (FluentValidation, NLog, System.Text.Json, Microsoft.Extensions.*,
+          Lidarr.Plugin.Common, Lidarr.Plugin.Abstractions, Lidarr.Core, Lidarr.Common,
+          Lidarr.Http, Lidarr.Api.V1, Newtonsoft.Json) is always enforced.
+        required: false
+        type: string
+        default: ''
+
+      # ── Optional — release metadata ───────────────────────────────────────
+      release_name_template:
+        description: |
+          Go-template-style release name. Use {plugin_name} and {version} as placeholders.
+          Default produces e.g. "Brainarr v1.2.0".
+        required: false
+        type: string
+        default: '{plugin_name} {version}'
+      minimum_lidarr_version:
+        description: 'Minimum Lidarr version string included in generated release notes (e.g. "2.13.2.4685")'
+        required: false
+        type: string
+        default: ''
+
+      # ── Optional — runner ─────────────────────────────────────────────────
+      runner:
+        description: 'GitHub Actions runner label'
+        required: false
+        type: string
+        default: 'ubuntu-latest'
+
+      # ── Optional — version inputs (mirrors workflow_dispatch) ─────────────
+      version:
+        description: 'Release version override (e.g. "v1.2.0"); falls back to git tag'
+        required: false
+        type: string
+        default: ''
+      draft:
+        description: 'Create as draft release'
+        required: false
+        type: boolean
+        default: false
+
+    secrets:
+      SUBMODULES_TOKEN:
+        description: 'PAT for private submodule checkout (passed through to init-common-submodule)'
+        required: false
+
+permissions:
+  contents: write     # Required for creating releases and moving tags
+  id-token: write     # Required for keyless Cosign signing
+
+jobs:
+  create-release:
+    name: Create Release
+    runs-on: ${{ inputs.runner }}
+
+    steps:
+    # ── Checkout ─────────────────────────────────────────────────────────────
+    - name: Checkout
+      uses: actions/checkout@v6  # TODO: pin to SHA after PR #514
+      with:
+        fetch-depth: 0
+        submodules: false
+        token: ${{ github.token }}
+
+    - name: Init Common submodule
+      uses: ./.github/actions/init-common-submodule
+      with:
+        token: ${{ secrets.SUBMODULES_TOKEN }}
+
+    # ── Toolchain ────────────────────────────────────────────────────────────
+    - name: Setup .NET
+      uses: actions/setup-dotnet@v5  # TODO: pin to SHA after PR #514
+      with:
+        dotnet-version: ${{ inputs.dotnet_version }}
+
+    # ── Patch submodule NuGet mapping (TagLibSharp-Lidarr) ───────────────────
+    - name: Patch submodule NuGet mapping (TagLibSharp-Lidarr)
+      shell: bash
+      run: |
+        set -euo pipefail
+        CFG="ext/Lidarr.Plugin.Common/NuGet.config"
+        if [ -f "$CFG" ]; then
+          grep -q 'TagLibSharp-Lidarr' "$CFG" || \
+            sed -i '/<packageSource key="lidarr-taglib">/a \\      <package pattern="TagLibSharp-Lidarr*" />' "$CFG"
+        fi
+
+    # ── Read optional pinned digest ───────────────────────────────────────────
+    - name: Read pinned Lidarr digest (if available)
+      id: digest
+      shell: bash
+      run: |
+        if [ -f .github/lidarr_digest.txt ]; then
+          DIG=$(cat .github/lidarr_digest.txt | tr -d '\n')
+          if [[ "$DIG" == sha256:* ]]; then
+            echo "LIDARR_DOCKER_DIGEST=$DIG" >> "$GITHUB_ENV"
+          fi
+        fi
+
+    # ── Extract Lidarr host assemblies ────────────────────────────────────────
+    - name: Extract Lidarr assemblies (plugins Docker)
+      shell: bash
+      env:
+        LIDARR_DOCKER_VERSION: ${{ inputs.lidarr_docker_version }}
+      run: |
+        set -euo pipefail
+        # Use the repo's own extraction script when available; fall back to inline.
+        if [ -f scripts/extract-lidarr-assemblies.sh ]; then
+          bash scripts/extract-lidarr-assemblies.sh --mode minimal --output-dir ext/Lidarr-docker/_output/net8.0
+        elif [ -f scripts/extract-lidarr-net6.sh ]; then
+          bash scripts/extract-lidarr-net6.sh
+        else
+          # Inline fallback: Docker pull-with-retry + cp
+          mkdir -p ext/Lidarr-docker/_output/net8.0
+          IMAGE="ghcr.io/hotio/lidarr:${LIDARR_DOCKER_VERSION}"
+          n=0
+          until [ "$n" -ge 3 ]; do
+            docker pull "$IMAGE" && break
+            n=$((n+1))
+            echo "Pull failed ($n/3). Retrying in 10s..." && sleep 10
+          done
+          cid=$(docker create "$IMAGE")
+          docker cp "$cid:/app" ext/Lidarr-docker/_extracted \
+            || docker cp "$cid:/opt/lidarr" ext/Lidarr-docker/_extracted
+          docker rm "$cid" >/dev/null
+          find ext/Lidarr-docker/_extracted -type f -name "*.dll" \
+            -exec cp {} ext/Lidarr-docker/_output/net8.0 \;
+          [ -f ext/Lidarr-docker/_output/net8.0/Lidarr.dll ] \
+            || { echo "[ERROR] Missing Lidarr.dll after extraction."; exit 1; }
+        fi
+
+    - name: Verify assemblies and export LIDARR_PATH
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Use the repo's check script when present, otherwise do a basic presence check.
+        if [ -f scripts/ci/check-assemblies.sh ]; then
+          bash scripts/ci/check-assemblies.sh ext/Lidarr-docker/_output/net8.0
+        else
+          [ -f ext/Lidarr-docker/_output/net8.0/Lidarr.dll ] \
+            || { echo "[ERROR] Missing Lidarr.dll — assembly extraction failed."; exit 1; }
+        fi
+        echo "LIDARR_PATH=${{ github.workspace }}/ext/Lidarr-docker/_output/net8.0" >> "$GITHUB_ENV"
+
+    # ── Determine version ─────────────────────────────────────────────────────
+    - name: Determine Version & Metadata
+      id: version
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+      run: |
+        set -euo pipefail
+        if [ -n "$INPUT_VERSION" ]; then
+          VERSION="$INPUT_VERSION"
+        else
+          VERSION="${GITHUB_REF#refs/tags/}"
+        fi
+
+        echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+        VERSION_NUM="${VERSION#v}"
+        echo "version_num=$VERSION_NUM" >> "$GITHUB_OUTPUT"
+
+        if [[ "$VERSION" =~ -alpha|-beta|-rc ]]; then
+          echo "prerelease=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "prerelease=false" >> "$GITHUB_OUTPUT"
+        fi
+
+        PREVIOUS_TAG=$(git describe --tags --abbrev=0 HEAD~1 2>/dev/null || echo "")
+        echo "previous_tag=$PREVIOUS_TAG" >> "$GITHUB_OUTPUT"
+
+    # ── Skip-if-exists guard ──────────────────────────────────────────────────
+    - name: Check if Release already exists
+      id: check_release
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        TAG="${{ steps.version.outputs.version }}"
+        CODE=$(curl -s -o /dev/null -w "%{http_code}" \
+          -H "Authorization: Bearer $GITHUB_TOKEN" \
+          -H "Accept: application/vnd.github+json" \
+          "https://api.github.com/repos/${{ github.repository }}/releases/tags/$TAG")
+        if [ "$CODE" = "200" ]; then
+          echo "exists=true" >> "$GITHUB_OUTPUT"
+          echo "Release $TAG already exists; downstream steps will be skipped."
+        else
+          echo "exists=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    # ── Version stamp ─────────────────────────────────────────────────────────
+    - name: Update Version in Project Files
+      if: steps.check_release.outputs.exists == 'false'
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION_NUM="${{ steps.version.outputs.version_num }}"
+        if [ -f plugin.json ]; then
+          sed -i "s/\"version\": \".*\"/\"version\": \"$VERSION_NUM\"/" plugin.json
+        fi
+        if [ -f manifest.json ]; then
+          sed -i "0,/\"version\": \".*\"/s//\"version\": \"$VERSION_NUM\"/" manifest.json
+        fi
+        find . -name "*.csproj" -exec grep -l "AssemblyVersion\|FileVersion\|AssemblyInformationalVersion" {} \; \
+          | while read f; do
+            sed -i "s/<AssemblyVersion>.*<\/AssemblyVersion>/<AssemblyVersion>${VERSION_NUM}.0<\/AssemblyVersion>/" "$f"
+            sed -i "s/<FileVersion>.*<\/FileVersion>/<FileVersion>${VERSION_NUM}.0<\/FileVersion>/" "$f"
+            sed -i "s/<AssemblyInformationalVersion>.*<\/AssemblyInformationalVersion>/<AssemblyInformationalVersion>${VERSION_NUM}<\/AssemblyInformationalVersion>/" "$f"
+          done
+
+    # ── Build ─────────────────────────────────────────────────────────────────
+    - name: Build Plugin
+      if: steps.check_release.outputs.exists == 'false'
+      shell: bash
+      run: |
+        set -euo pipefail
+        dotnet restore "${{ inputs.main_csproj }}"
+        dotnet build "${{ inputs.main_csproj }}" \
+          --configuration Release \
+          --no-restore \
+          -p:${{ inputs.lidarr_path_msbuild_prop }}="${{ github.workspace }}/ext/Lidarr-docker/_output/net8.0" \
+          -p:RunAnalyzersDuringBuild=false \
+          -p:EnableNETAnalyzers=false \
+          -p:TreatWarningsAsErrors=false \
+          -m:1
+
+    # ── Package (per-plugin script OR inline) ─────────────────────────────────
+    - name: Package Plugin (per-plugin script)
+      if: steps.check_release.outputs.exists == 'false' && inputs.pack_script != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        # Determine script interpreter from extension.
+        SCRIPT="${{ inputs.pack_script }}"
+        case "$SCRIPT" in
+          *.ps1) pwsh "$SCRIPT" \
+                   -Configuration Release \
+                   -OutDir artifacts \
+                   -Version "${{ steps.version.outputs.version }}" ;;
+          *)     bash "$SCRIPT" \
+                   Release artifacts "${{ steps.version.outputs.version }}" ;;
+        esac
+
+    - name: Package Plugin (inline)
+      if: steps.check_release.outputs.exists == 'false' && inputs.pack_script == ''
+      shell: bash
+      run: |
+        # ── Locate merged DLL ────────────────────────────────────────────────
+        PLUGIN_DLL="${{ inputs.plugin_dll }}"
+        DLL=""
+        IFS=':' read -ra DIRS <<< "${{ inputs.dll_search_dirs }}"
+        for pattern in "${DIRS[@]}"; do
+          # Expand glob (single-level wildcard for src/*/bin style)
+          for dir in $pattern; do
+            candidate="$dir/$PLUGIN_DLL"
+            if [ -f "$candidate" ]; then
+              DLL="$candidate"
+              break 2
+            fi
+          done
+        done
+
+        if [ -z "$DLL" ]; then
+          echo "❌ Merged plugin DLL not found: $PLUGIN_DLL" >&2
+          echo "   Searched: ${{ inputs.dll_search_dirs }}" >&2
+          find . -maxdepth 5 -name "$PLUGIN_DLL" 2>/dev/null | sed 's/^/  /' >&2 || true
+          exit 1
+        fi
+
+        DLL_SIZE=$(stat -c%s "$DLL")
+        echo "Merged plugin DLL: $DLL ($DLL_SIZE bytes)"
+        if [ "$DLL_SIZE" -lt 2000000 ]; then
+          echo "❌ DLL is suspiciously small ($DLL_SIZE bytes) — ILRepack may not have merged Common + Abstractions." >&2
+          exit 1
+        fi
+
+        # ── Collect package files ────────────────────────────────────────────
+        BIN_DIR=$(dirname "$DLL")
+        mkdir -p package
+        cp "$DLL" package/
+
+        for meta in plugin.json manifest.json .lidarr.plugin; do
+          if   [ -f "$BIN_DIR/$meta" ]; then cp "$BIN_DIR/$meta" package/
+          elif [ -f "$meta" ];          then cp "$meta" package/
+          fi
+        done
+
+        # ── Forbidden-DLL guard ─────────────────────────────────────────────
+        # Base set (always enforced) + caller-supplied extras.
+        BASE_FORBIDDEN="FluentValidation.dll NLog.dll System.Text.Json.dll Newtonsoft.Json.dll \
+          Microsoft.Extensions.Logging.Abstractions.dll \
+          Microsoft.Extensions.DependencyInjection.Abstractions.dll \
+          Microsoft.Extensions.Caching.Abstractions.dll \
+          Microsoft.Extensions.Caching.Memory.dll \
+          Microsoft.Extensions.Options.dll Microsoft.Extensions.Primitives.dll \
+          Lidarr.Plugin.Common.dll Lidarr.Plugin.Abstractions.dll \
+          Lidarr.Core.dll Lidarr.Common.dll Lidarr.Http.dll Lidarr.Api.V1.dll"
+
+        EXTRA_FORBIDDEN="$(echo '${{ inputs.forbidden_dlls_extra }}' | tr ',' ' ')"
+
+        for forbidden in $BASE_FORBIDDEN $EXTRA_FORBIDDEN; do
+          [ -z "$forbidden" ] && continue
+          if [ -f "package/$forbidden" ]; then
+            echo "❌ FORBIDDEN host assembly in package: $forbidden" >&2
+            exit 1
+          fi
+        done
+
+        echo "Package contents:"
+        ls -la package/
+
+        # ── Zip (filename MUST contain net8.0.zip for Lidarr's PluginService) ─
+        PLUGIN_NAME="${{ inputs.plugin_name }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        ZIP_NAME="${PLUGIN_NAME}-${VERSION}.net8.0.zip"
+        cd package && zip -r "../${ZIP_NAME}" . && cd ..
+        echo "RELEASE_ZIP=${ZIP_NAME}" >> "$GITHUB_ENV"
+
+    # Resolve zip name from per-plugin script path (artifacts/ convention)
+    - name: Resolve packaged asset path (script mode)
+      if: steps.check_release.outputs.exists == 'false' && inputs.pack_script != ''
+      shell: bash
+      run: |
+        set -euo pipefail
+        PLUGIN_NAME="${{ inputs.plugin_name }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        # Look for the versioned zip under artifacts/ first, then root.
+        SLUG="v${VERSION#v}"
+        for candidate in \
+          "artifacts/${PLUGIN_NAME}-${SLUG}.net8.0.zip" \
+          "artifacts/${PLUGIN_NAME}-${VERSION}.net8.0.zip" \
+          "${PLUGIN_NAME}-${SLUG}.net8.0.zip" \
+          "${PLUGIN_NAME}-${VERSION}.net8.0.zip"; do
+          if [ -f "$candidate" ]; then
+            echo "RELEASE_ZIP=$candidate" >> "$GITHUB_ENV"
+            break
+          fi
+        done
+        [ -n "$RELEASE_ZIP" ] || { echo "❌ Could not locate release zip after pack_script."; exit 1; }
+
+    # ── SHA256 ────────────────────────────────────────────────────────────────
+    - name: Generate SHA256 checksum
+      if: steps.check_release.outputs.exists == 'false'
+      shell: bash
+      run: sha256sum "$RELEASE_ZIP" > "${RELEASE_ZIP}.sha256"
+
+    # ── SBOM ──────────────────────────────────────────────────────────────────
+    - name: Generate SBOM (SPDX JSON)
+      if: steps.check_release.outputs.exists == 'false' && inputs.include_sbom == true
+      uses: anchore/sbom-action@v0  # TODO: pin to SHA after PR #514
+      with:
+        path: .
+        format: spdx-json
+        output-file: sbom.spdx.json
+
+    # ── Cosign ────────────────────────────────────────────────────────────────
+    - name: Install Cosign
+      if: steps.check_release.outputs.exists == 'false' && inputs.include_cosign == true
+      uses: sigstore/cosign-installer@v3  # TODO: pin to SHA after PR #514
+
+    - name: Sign ZIP with Cosign (keyless)
+      if: steps.check_release.outputs.exists == 'false' && inputs.include_cosign == true
+      env:
+        COSIGN_EXPERIMENTAL: "true"
+      run: |
+        cosign sign-blob \
+          --yes \
+          --output-signature "${RELEASE_ZIP}.sig" \
+          "$RELEASE_ZIP"
+
+    # ── Release notes ─────────────────────────────────────────────────────────
+    - name: Generate Release Notes
+      if: steps.check_release.outputs.exists == 'false'
+      id: release_notes
+      shell: bash
+      run: |
+        set -euo pipefail
+        PLUGIN_NAME="${{ inputs.plugin_name }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        PREVIOUS_TAG="${{ steps.version.outputs.previous_tag }}"
+        MIN_VERSION="${{ inputs.minimum_lidarr_version }}"
+
+        # Use per-plugin script when available (e.g. brainarr's generator)
+        if [ -f .github/scripts/generate-release-notes.sh ]; then
+          chmod +x .github/scripts/generate-release-notes.sh
+          LIDARR_DOCKER_VERSION="${{ inputs.lidarr_docker_version }}" \
+            ./.github/scripts/generate-release-notes.sh "$VERSION" "$PREVIOUS_TAG"
+        elif [ -f scripts/extract-release-notes.ps1 ]; then
+          # apple-style CHANGELOG extraction (PowerShell)
+          pwsh scripts/extract-release-notes.ps1 -Tag "$VERSION" -OutFile release_notes.md
+        else
+          # Generic inline generator
+          INCLUDE_COSIGN="${{ inputs.include_cosign }}"
+          INCLUDE_SBOM="${{ inputs.include_sbom }}"
+          {
+            echo "## ${PLUGIN_NAME} ${VERSION}"
+            echo ""
+            echo "### Installation"
+            echo "1. In Lidarr go to **Settings → Plugins**, click **Add Plugin**"
+            echo "2. Enter \`https://github.com/${{ github.repository }}\`"
+            echo "3. Click **Install** and restart Lidarr when prompted"
+            echo ""
+            echo "### Compatibility"
+            [ -n "$MIN_VERSION" ] && echo "- Lidarr: ${MIN_VERSION}+ (plugins branch)"
+            echo "- .NET: 8.0"
+            echo ""
+            echo "### Security"
+            echo "- SHA256 checksum provided for integrity verification"
+            [ "$INCLUDE_COSIGN" = "true" ] && echo "- Cosign signature for artifact authenticity"
+            [ "$INCLUDE_SBOM"   = "true" ] && echo "- SBOM (Software Bill of Materials) included"
+            echo ""
+            echo "### Changes"
+            echo "See [commit history](https://github.com/${{ github.repository }}/commits/${VERSION}) for details."
+            if [ -n "$PREVIOUS_TAG" ]; then
+              echo ""
+              echo "**Full Changelog:** [${PREVIOUS_TAG}...${VERSION}](https://github.com/${{ github.repository }}/compare/${PREVIOUS_TAG}...${VERSION})"
+            fi
+          } > release_notes.md
+        fi
+
+    # ── Upload build artifact ─────────────────────────────────────────────────
+    - name: Upload Build Artifacts
+      if: steps.check_release.outputs.exists == 'false'
+      uses: actions/upload-artifact@v7  # TODO: pin to SHA after PR #514
+      with:
+        name: ${{ inputs.plugin_name }}-plugin-${{ steps.version.outputs.version }}
+        path: |
+          ${{ env.RELEASE_ZIP }}
+          ${{ env.RELEASE_ZIP }}.sha256
+        retention-days: 90
+
+    # ── Compute release display name ─────────────────────────────────────────
+    - name: Compute release display name
+      if: steps.check_release.outputs.exists == 'false'
+      id: release_name
+      shell: bash
+      run: |
+        TEMPLATE="${{ inputs.release_name_template }}"
+        PLUGIN="${{ inputs.plugin_name }}"
+        VERSION="${{ steps.version.outputs.version }}"
+        NAME="${TEMPLATE/\{plugin_name\}/$PLUGIN}"
+        NAME="${NAME/\{version\}/$VERSION}"
+        echo "name=$NAME" >> "$GITHUB_OUTPUT"
+
+    # ── Build release asset file list ────────────────────────────────────────
+    - name: Compute release asset list
+      if: steps.check_release.outputs.exists == 'false'
+      id: asset_list
+      shell: bash
+      run: |
+        set -euo pipefail
+        FILES="${RELEASE_ZIP}
+        ${RELEASE_ZIP}.sha256"
+        if [ "${{ inputs.include_cosign }}" = "true" ] && [ -f "${RELEASE_ZIP}.sig" ]; then
+          FILES="${FILES}
+        ${RELEASE_ZIP}.sig"
+        fi
+        if [ "${{ inputs.include_sbom }}" = "true" ] && [ -f sbom.spdx.json ]; then
+          FILES="${FILES}
+        sbom.spdx.json"
+        fi
+        echo "files<<EOF" >> "$GITHUB_OUTPUT"
+        echo "$FILES" >> "$GITHUB_OUTPUT"
+        echo "EOF" >> "$GITHUB_OUTPUT"
+
+    # ── Create GitHub release ─────────────────────────────────────────────────
+    - name: Create GitHub Release
+      if: steps.check_release.outputs.exists == 'false'
+      uses: softprops/action-gh-release@v3  # TODO: pin to SHA after PR #514
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.version.outputs.version }}
+        name: ${{ steps.release_name.outputs.name }}
+        body_path: release_notes.md
+        draft: ${{ inputs.draft }}
+        prerelease: ${{ steps.version.outputs.prerelease == 'true' }}
+        generate_release_notes: false
+        files: ${{ steps.asset_list.outputs.files }}
+
+    # ── Move latest tag ───────────────────────────────────────────────────────
+    - name: Move 'latest' tag to this release
+      if: >
+        steps.check_release.outputs.exists == 'false' &&
+        inputs.include_latest_tag == true &&
+        github.ref_type == 'tag'
+      shell: bash
+      env:
+        VERSION_TAG: ${{ steps.version.outputs.version }}
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        set -euo pipefail
+        git config --global url."https://x-access-token:${GITHUB_TOKEN}@github.com/".insteadOf "https://github.com/"
+        git fetch --tags --force
+        git tag -f latest "$VERSION_TAG"
+        git push origin :refs/tags/latest || true
+        git push origin latest
+
+    # ── Wiki update (optional) ────────────────────────────────────────────────
+    - name: Update Wiki Documentation
+      if: steps.check_release.outputs.exists == 'false' && inputs.include_wiki_update == true
+      shell: bash
+      run: |
+        set -euo pipefail
+        git clone "https://github.com/${{ github.repository }}.wiki.git" wiki-repo 2>/dev/null || {
+          echo "Wiki repository does not exist yet — skipping wiki update."
+          exit 0
+        }
+        cd wiki-repo
+        cp ../wiki-content/*.md . 2>/dev/null || true
+        git diff --quiet && { echo "No wiki updates needed."; exit 0; }
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        git add .
+        git commit -m "docs: update wiki for release ${{ steps.version.outputs.version }}"
+        git push origin master 2>/dev/null || git push origin main 2>/dev/null
+        cd ..
+        rm -rf wiki-repo
+
+    # ── Summary ───────────────────────────────────────────────────────────────
+    - name: Release Summary
+      if: always()
+      run: |
+        echo "Release: ${{ inputs.plugin_name }} ${{ steps.version.outputs.version }}"
+        echo "URL: https://github.com/${{ github.repository }}/releases/tag/${{ steps.version.outputs.version }}"
+        echo "Prerelease: ${{ steps.version.outputs.prerelease }}"
+        echo "Skipped (already existed): ${{ steps.check_release.outputs.exists }}"

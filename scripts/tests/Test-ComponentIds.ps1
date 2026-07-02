@@ -76,7 +76,7 @@ try {
     Set-E2EPreferredComponentId -State $state -InstanceKey $instanceKey -LidarrUrl "http://localhost:8686" -ContainerName "lidarr-test" -PluginName "Brainarr" -Type "importlist" -Id 301
 
     Set-E2EComponentIdsInstanceHostFingerprint -State $state -InstanceKey $instanceKey -LidarrUrl "http://localhost:8686" -ContainerName "lidarr-test" `
-        -LidarrVersion "3.1.1.4884" -LidarrBranch "plugins" -ImageTag "ghcr.io/hotio/lidarr:pr-plugins-3.1.1.4884" -ImageDigest "sha256:deadbeef" -ImageId "sha256:deadbeef" `
+        -LidarrVersion "3.1.3.4970" -LidarrBranch "plugins" -ImageTag "ghcr.io/hotio/lidarr:nightly-3.1.3.4970" -ImageDigest "sha256:deadbeef" -ImageId "sha256:deadbeef" `
         -ContainerId "abc123def456" -ContainerStartedAt "2025-01-01T00:00:00.0000000Z"
 
     # Write should be best-effort and return structured result on success
@@ -89,7 +89,7 @@ try {
     Write-TestResult -TestName "Round-trip preserves Brainarr importListId" -Passed ((Get-E2EPreferredComponentId -State $roundTrip -InstanceKey $instanceKey -PluginName "Brainarr" -Type "importlist") -eq 301)
 
     $instanceState = $roundTrip.instances[$instanceKey]
-    Write-TestResult -TestName "Round-trip preserves host lidarrVersion fingerprint" -Passed ($instanceState.lidarrVersion -eq "3.1.1.4884")
+    Write-TestResult -TestName "Round-trip preserves host lidarrVersion fingerprint" -Passed ($instanceState.lidarrVersion -eq "3.1.3.4970")
     Write-TestResult -TestName "Round-trip preserves host lidarrBranch fingerprint" -Passed ($instanceState.lidarrBranch -eq "plugins")
     Write-TestResult -TestName "Round-trip preserves host imageDigest fingerprint" -Passed ($instanceState.imageDigest -eq "sha256:deadbeef")
     Write-TestResult -TestName "Round-trip preserves host containerId fingerprint" -Passed ($instanceState.containerId -eq "abc123def456")

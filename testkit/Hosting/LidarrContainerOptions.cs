@@ -8,7 +8,7 @@ namespace Lidarr.Plugin.Common.TestKit.Hosting;
 /// E2E orchestrator powers every streaming plugin.
 /// </summary>
 /// <param name="DockerImage">
-/// Lidarr Docker image tag, e.g. <c>ghcr.io/hotio/lidarr:pr-plugins-3.1.2.4913</c>.
+/// Lidarr Docker image tag, e.g. <c>ghcr.io/hotio/lidarr:nightly-3.1.3.4970</c>.
 /// MUST be a .NET 8 plugins-branch build (<c>pr-plugins-3.x</c>) — .NET 6 images
 /// (<c>pr-plugins-2.x</c>) crash-loop on plugin load.
 /// </param>

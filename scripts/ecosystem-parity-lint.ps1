@@ -3,8 +3,8 @@
 .SYNOPSIS
     Ecosystem parity lint — detects structural gaps in plugin repos against the canonical spec.
 .DESCRIPTION
-    Reads parity-spec.json and scans a plugin repo for missing files, incorrect global.json,
-    missing workflows, and other structural violations. Mirrors parity-lint.ps1 pattern.
+    Reads parity-spec.json and scans a plugin repo for missing files, missing Gitea CI,
+    incorrect global.json, and other structural violations. Mirrors parity-lint.ps1 pattern.
 .PARAMETER RepoPath
     Path to a single plugin repo to scan.
 .PARAMETER AllRepos
@@ -107,33 +107,16 @@ function Test-RequiredDirectories {
 function Test-RequiredWorkflows {
     param([string]$RepoPath, [string]$RepoName)
     $violations = @()
-    $workflowDir = Join-Path $RepoPath '.github/workflows'
-    if (-not (Test-Path $workflowDir)) {
-        # Gitea-primary repos deliberately drop .github/workflows (GitHub Actions out of
-        # credits). Deleting GitHub CI must not be a free pass out of all CI requirements:
-        # the repo must then carry the Gitea CI workflow instead.
-        $giteaCi = Join-Path $RepoPath '.gitea/workflows/ci.yml'
-        if (-not (Test-Path $giteaCi)) {
-            $violations += [PSCustomObject]@{
-                Repo = $RepoName
-                Category = 'MissingWorkflow'
-                Path = '.gitea/workflows/ci.yml'
-                Message = "Repo has no CI workflows at all: .github/workflows is absent and .gitea/workflows/ci.yml is missing"
-                Severity = 'error'
-            }
-        }
-        return $violations
-    }
-    foreach ($req in $spec.requiredWorkflows) {
-        $wfPath = Join-Path $workflowDir $req.file
-        if (-not (Test-Path $wfPath)) {
-            $violations += [PSCustomObject]@{
-                Repo = $RepoName
-                Category = 'MissingWorkflow'
-                Path = ".github/workflows/$($req.file)"
-                Message = "Missing required workflow: $($req.file) ($($req.description))"
-                Severity = 'error'
-            }
+
+    $required = $spec.requiredCiWorkflow
+    $workflowPath = Join-Path $RepoPath $required.path
+    if (-not (Test-Path $workflowPath)) {
+        $violations += [PSCustomObject]@{
+            Repo = $RepoName
+            Category = 'MissingWorkflow'
+            Path = $required.path
+            Message = "Missing required CI workflow: $($required.path) ($($required.description))"
+            Severity = 'error'
         }
     }
     return $violations
@@ -269,19 +252,18 @@ function Test-DirectoryPackagesProps {
 
 function Get-CanonicalCommonVersion {
     param([string]$CommonRootPath)
-    $csprojRel = $script:Spec.versionContract.commonVersionSource
-    $csprojAbs = Join-Path $CommonRootPath $csprojRel
-    if (-not (Test-Path $csprojAbs)) {
-        throw "Common csproj not found at $csprojAbs (versionContract.commonVersionSource)"
+    $sourceRel = $script:Spec.versionContract.commonVersionSource
+    $sourceAbs = Join-Path $CommonRootPath $sourceRel
+    if (-not (Test-Path $sourceAbs)) {
+        throw "Common version source not found at $sourceAbs (versionContract.commonVersionSource)"
     }
-    $content = Get-Content $csprojAbs -Raw
+    $content = Get-Content $sourceAbs -Raw
     if ($content -match '<Version>([^<]+)</Version>') {
         return $matches[1]
     }
-    # Wave 6D: <Version> moved to Directory.Build.props as the single source of truth
-    # for both Lidarr.Plugin.Common and Lidarr.Plugin.Abstractions. Fall back to reading
-    # the props file from the canonical Common root. Probing this way keeps the script
-    # forward-compatible for both layouts.
+
+    # Compatibility for older Common submodule pins whose parity spec still points
+    # at the csproj after the version moved to Directory.Build.props.
     $propsPath = Join-Path $CommonRootPath 'Directory.Build.props'
     if (Test-Path $propsPath) {
         $propsContent = Get-Content $propsPath -Raw
@@ -289,7 +271,8 @@ function Get-CanonicalCommonVersion {
             return $matches[1]
         }
     }
-    throw "Could not parse <Version> from $csprojAbs or fallback $propsPath"
+
+    throw "Could not parse <Version> from $sourceAbs or fallback $propsPath"
 }
 
 function Test-VersionContract {
@@ -334,7 +317,7 @@ function Test-VersionContract {
         if (-not $pluginCommonVer -or $pluginCommonVer -ne $CanonicalCommonVersion) {
             $violations += [PSCustomObject]@{
                 Repo = $RepoName; Category = 'VersionContract'; Path = $pjRel
-                Message = "plugin.json commonVersion is '$pluginCommonVer', expected canonical '$CanonicalCommonVersion' from Common csproj"
+                Message = "plugin.json commonVersion is '$pluginCommonVer', expected canonical '$CanonicalCommonVersion' from Common version source"
                 Severity = 'error'
             }
         }

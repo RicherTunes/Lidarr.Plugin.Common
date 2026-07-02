@@ -1,4 +1,5 @@
 using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Utilities;
@@ -36,6 +37,39 @@ namespace Lidarr.Plugin.Common.Tests.Hosting
             // Assert: after Shutdown, the gate entries are cleared.
             var found = HostGateRegistry.TryGetState("shutdown-tick-host.test", out _);
             Assert.False(found, "Gates should be cleared after Shutdown().");
+        }
+
+        [Fact]
+        public void Shutdown_ThenGet_ReArmsIdleSweeper()
+        {
+            // Arrange: touch the registry, then shut down so the sweeper is disposed.
+            _ = HostGateRegistry.Get("rearm-host.test", 3);
+            HostGateRegistry.Shutdown();
+            Assert.False(HostGateRegistry.IsSweeperActive,
+                "Sweeper should be disposed immediately after Shutdown().");
+
+            // Act: the documented contract is that the timer is re-created lazily on first access.
+            // Lidarr keeps the host process alive across plugin reloads, so a Get() after a prior
+            // unload's Shutdown() must re-arm the sweeper — otherwise every gate added afterwards
+            // (each owning a SemaphoreSlim) accumulates forever with no eviction.
+            _ = HostGateRegistry.Get("rearm-host-2.test", 3);
+
+            // Assert: the idle-gate sweeper is running again.
+            Assert.True(HostGateRegistry.IsSweeperActive,
+                "Get() after Shutdown() must re-arm the idle-gate sweeper (else gates leak after the first reload).");
+        }
+
+        [Fact]
+        public void Shutdown_ThenGetAggregate_ReArmsIdleSweeper()
+        {
+            _ = HostGateRegistry.GetAggregate("rearm-agg-host.test", 3);
+            HostGateRegistry.Shutdown();
+            Assert.False(HostGateRegistry.IsSweeperActive);
+
+            _ = HostGateRegistry.GetAggregate("rearm-agg-host-2.test", 3);
+
+            Assert.True(HostGateRegistry.IsSweeperActive,
+                "GetAggregate() after Shutdown() must re-arm the idle-gate sweeper.");
         }
 
         [Fact]
@@ -85,6 +119,47 @@ namespace Lidarr.Plugin.Common.Tests.Hosting
             });
             Assert.Null(aggEx);
             Assert.NotNull(aggSem);
+        }
+
+        [Fact]
+        public async Task ConcurrentGetAndShutdown_DoesNotLeaveRegisteredGateWithoutSweeper()
+        {
+            // Regression: Get() used to arm the sweeper before inserting/touching the gate.
+            // Shutdown() could then dispose/null the sweeper and finish draining dictionaries
+            // before a racing Get() inserted its gate, leaving a registered SemaphoreSlim with
+            // no idle sweeper until some later access happened to re-arm it.
+            const int attempts = 200;
+            const int readersPerAttempt = 12;
+
+            for (var attempt = 0; attempt < attempts; attempt++)
+            {
+                HostGateRegistry.Shutdown();
+                using var start = new ManualResetEventSlim(false);
+                string hostPrefix = $"race-{attempt}-";
+
+                var getTasks = Enumerable.Range(0, readersPerAttempt)
+                    .Select(i => Task.Run(() =>
+                    {
+                        start.Wait();
+                        _ = HostGateRegistry.Get(hostPrefix + i, 1);
+                    }))
+                    .ToArray();
+
+                var shutdownTask = Task.Run(() =>
+                {
+                    start.Wait();
+                    HostGateRegistry.Shutdown();
+                });
+
+                start.Set();
+                await Task.WhenAll(getTasks.Append(shutdownTask));
+
+                var anyGateRemains = Enumerable.Range(0, readersPerAttempt)
+                    .Any(i => HostGateRegistry.TryGetState(hostPrefix + i, out _));
+
+                Assert.False(anyGateRemains && !HostGateRegistry.IsSweeperActive,
+                    "A racing Get() must not leave gate entries behind without an active idle sweeper.");
+            }
         }
     }
 

@@ -6,7 +6,7 @@
 
 Common is consumed via **Git submodule** (primary) — NOT NuGet packages.
 
-All 4 plugin repos reference Common as `ext/Lidarr.Plugin.Common` submodule. This is the supported, tested, and promoted path. NuGet packages are published as a convenience for external consumers but are not required for the plugin ecosystem.
+All 5 active plugin repos reference Common as an `ext/Lidarr.Plugin.Common` submodule. This is the supported, tested, and promoted path. NuGet packages are published as a convenience for external consumers but are not required for the plugin ecosystem.
 
 ### NuGet Status
 
@@ -53,7 +53,7 @@ Required when:
 After tagging a Common release:
 
 1. **Release workflow** runs automatically (builds, tests, packs, signs, creates GitHub Release)
-2. **Bump submodule** in all 4 plugin repos to the release tag
+2. **Bump submodule** in all 5 plugin repos to the release tag
 3. **Run CI** in each plugin repo to verify compatibility
 4. **Verify** runtime tests green across all plugins
 5. **Update** each plugin's `ext-common-sha.txt` to the release commit
@@ -107,5 +107,5 @@ Once `NUGET_API_KEY` secret is set, the release workflow automatically publishes
 ## Current Baseline
 
 - Common: v1.7.1 (2026-03-27)
-- Host target: pr-plugins-3.1.2.4913 (net8.0)
-- All plugins on SHA `aae92da`
+- Host target: nightly-3.1.3.4970 (net8.0)
+- Historical baseline: original plugin set on SHA `aae92da`. Current five-plugin pin truth lives in each repo's `ext-common-sha.txt` and Common's `scripts/ci/ecosystem-repos.json`.
