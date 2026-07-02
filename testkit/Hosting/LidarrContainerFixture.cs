@@ -240,7 +240,8 @@ public class LidarrContainerFixture : IAsyncLifetime
         }
     }
 
-    private static (int ExitCode, string Output) RunDocker(string arguments)
+    /// <summary>Runs a Docker CLI command. Virtual so unit tests can avoid invoking the host binary.</summary>
+    protected virtual (int ExitCode, string Output) RunDocker(string arguments)
     {
         using Process process = new();
         process.StartInfo = new ProcessStartInfo
