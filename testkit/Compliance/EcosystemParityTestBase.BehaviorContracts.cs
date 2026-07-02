@@ -808,14 +808,6 @@ public abstract partial class EcosystemParityTestBase
     {
         if (!Directory.Exists(PluginSourceRoot)) return Skipped();
 
-        var excluded = new[]
-        {
-            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
-        };
         // Public top-level (or nested — counted, which makes multi-type files exceed 1 and skip) type.
         var typeDecl = new System.Text.RegularExpressions.Regex(
             @"(?m)^\s*(?:\[[^\]]*\]\s*)*public\s+(?:sealed\s+|abstract\s+|static\s+|partial\s+|readonly\s+|unsafe\s+)*(?:class|interface|record|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)",
@@ -825,9 +817,8 @@ public abstract partial class EcosystemParityTestBase
             System.Text.RegularExpressions.RegexOptions.Compiled);
 
         var offenders = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        foreach (var file in EnumerateCSharpFiles(PluginSourceRoot, includeTests: false))
         {
-            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
             var fileName = Path.GetFileNameWithoutExtension(file);
             if (fileName.Contains('.')) continue; // dotted (partial splits / *.Designer / *.g) — skip
             string text;
