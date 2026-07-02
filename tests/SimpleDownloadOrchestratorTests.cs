@@ -409,6 +409,7 @@ namespace Lidarr.Plugin.Common.Tests
         public async Task DownloadAlbumAsync_NoTrackIds_ReturnsFailure()
         {
             using var http = new HttpClient(new FakeRangeHandler(totalBytes: 1, supportRange: false));
+            var capturingLogger = new CapturingLogger();
 
             var orch = new SimpleDownloadOrchestrator(
                 serviceName: "Test",
@@ -416,7 +417,8 @@ namespace Lidarr.Plugin.Common.Tests
                 getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 10 }),
                 getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
                 getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string>()),
-                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin"))
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin")),
+                logger: capturingLogger
             );
 
             var dir = Path.Combine(Path.GetTempPath(), $"orch_test_album_empty_{Guid.NewGuid():N}");
@@ -426,6 +428,9 @@ namespace Lidarr.Plugin.Common.Tests
                 Assert.False(result.Success);
                 Assert.Contains("No track IDs returned", result.ErrorMessage ?? string.Empty);
                 Assert.Empty(result.FilePaths);
+                Assert.Equal(1, capturingLogger.WarningCount);
+                Assert.Contains("a1", capturingLogger.LastWarningMessage);
+                Assert.Contains("No track IDs returned", capturingLogger.LastWarningMessage);
             }
             finally
             {
@@ -498,6 +503,40 @@ namespace Lidarr.Plugin.Common.Tests
                 TryDelete(temp);
                 TryDelete(temp + ".partial");
                 TryDelete(temp + ".partial.resume.json");
+            }
+        }
+
+        [Fact]
+        public async Task DownloadAlbumAsync_UnsuccessfulAlbum_LogsWarningNamingAlbumAndReason()
+        {
+            // 0-byte stream => the only track fails => album is incomplete => result.Success=false.
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 0, supportRange: false));
+            var capturingLogger = new CapturingLogger();
+            var orch = new SimpleDownloadOrchestrator(
+                serviceName: "TestService",
+                httpClient: http,
+                getAlbumAsync: id => Task.FromResult(new StreamingAlbum { Id = id, Title = "A", Artist = new StreamingArtist { Name = "X" }, TrackCount = 1 }),
+                getTrackAsync: id => Task.FromResult(new StreamingTrack { Id = id, Title = "T", Artist = new StreamingArtist { Name = "X" }, Album = new StreamingAlbum { Title = "A", Artist = new StreamingArtist { Name = "X" } }, TrackNumber = 1 }),
+                getAlbumTrackIdsAsync: id => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin")),
+                logger: capturingLogger
+            );
+
+            var dir = Path.Combine(Path.GetTempPath(), $"orch_album_warn_{Guid.NewGuid():N}");
+            Directory.CreateDirectory(dir);
+            try
+            {
+                var result = await orch.DownloadAlbumAsync("album99", dir, new StreamingQuality { Bitrate = 320 });
+
+                Assert.False(result.Success);
+                // An unsuccessful album must not fail silently: a warning naming the album + reason is logged.
+                Assert.Equal(1, capturingLogger.WarningCount);
+                Assert.Contains("album99", capturingLogger.LastWarningMessage);
+                Assert.Contains("Downloaded file is empty", capturingLogger.LastWarningMessage);
+            }
+            finally
+            {
+                TryDeleteDir(dir);
             }
         }
 
