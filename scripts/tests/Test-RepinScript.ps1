@@ -11,6 +11,7 @@
     - Uppercase SHAs are normalized to lowercase
     - Sentinel file is always written to repo root regardless of cwd
     - -VerifyOnly correctly detects sentinel-submodule mismatch from any cwd
+    - The shell repin script is UTF-8 without BOM so bash can parse the shebang
 #>
 
 $ErrorActionPreference = 'Stop'
@@ -19,6 +20,7 @@ Set-StrictMode -Version Latest
 $ScriptDir = $PSScriptRoot
 $RepoRoot  = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $RepinPs1  = Join-Path $RepoRoot "scripts/repin-common-submodule.ps1"
+$RepinSh   = Join-Path $RepoRoot "scripts/repin-common-submodule.sh"
 $FixtureDir = Join-Path $ScriptDir "fixtures"
 $SampleWorkflow = Join-Path $FixtureDir "repin-workflow-sample.yml"
 
@@ -56,6 +58,15 @@ function Test-Assertion {
         $script:failed++
         return $false
     }
+}
+
+# =====================================================================
+Write-Host "Script Encoding Tests:" -ForegroundColor White
+# =====================================================================
+
+Test-Assertion "Shell repin script has no UTF-8 BOM" {
+    $bytes = [System.IO.File]::ReadAllBytes($RepinSh)
+    -not ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
 }
 
 # --- Setup: create a temp directory that mimics a plugin repo ---
