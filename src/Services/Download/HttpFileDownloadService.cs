@@ -177,7 +177,7 @@ namespace Lidarr.Plugin.Common.Services.Download
 
             File.Move(partialPath, filePath, overwrite: true);
 
-            AudioMagicBytesValidator.ValidateAudioMagicBytes(filePath);
+            DownloadPayloadValidator.ValidateFileOrThrow(filePath);
 
             // Validate file (basic; no size/hash guarantees from server)
             if (!ValidationUtilities.ValidateDownloadedFile(filePath))
