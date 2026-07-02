@@ -41,8 +41,10 @@ namespace Lidarr.Plugin.Common.Services.Storage
     /// </para>
     /// <para>
     /// Errors during load (corrupted JSON, IO failures) reset the in-memory state to empty
-    /// and log a warning. Errors during save are logged but do not throw, matching the
-    /// behavior of similar stores that prefer "best-effort" persistence.
+    /// and log a warning. Errors during save are logged; by default they do not throw,
+    /// matching the behavior of similar stores that prefer "best-effort" persistence.
+    /// Durable state machines can set <see cref="JsonFileStoreOptions{TKey}.ThrowOnSaveFailure"/>
+    /// to propagate save failures and roll back the in-memory mutation.
     /// </para>
     /// </remarks>
     public sealed class JsonFileStore<TKey, TValue>
