@@ -733,7 +733,8 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
     // --- Check_DownloadClientUsesCommonPayloadValidator ---
     //
     // Audio-payload validation is consolidated on Common's DownloadPayloadValidator; a download-client
-    // plugin must not use the legacy AudioMagicBytesValidator nor declare its own *PayloadValidator fork.
+    // plugin must show positive Common validation evidence and must not use the legacy
+    // AudioMagicBytesValidator nor declare its own *PayloadValidator fork.
 
     [Fact]
     public void PayloadValidator_NoAssembly_ReturnsSkipped()
@@ -768,6 +769,41 @@ public class EcosystemParityTestBaseExtensionTests : IDisposable
         };
         var r = h.RunPayloadValidator();
         Assert.True(r.Passed, string.Join("; ", r.Errors));
+    }
+
+    [Fact]
+    public void PayloadValidator_UsesCommonDownloadService_Passes()
+    {
+        var src = Path.Combine(_tempRepo, "pv-common-service");
+        WriteSrcFile(src, "FooDownloadClient.cs",
+            "namespace P;\npublic class FooDownloadClient : DownloadClientBase<FooSettings>\n{\n" +
+            "    object Build() => new SimpleDownloadOrchestrator();\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunPayloadValidator();
+        Assert.True(r.Passed, string.Join("; ", r.Errors));
+    }
+
+    [Fact]
+    public void PayloadValidator_DownloadClientWithoutCommonValidator_Fails()
+    {
+        var src = Path.Combine(_tempRepo, "pv-missing");
+        WriteSrcFile(src, "FooDownloadClient.cs",
+            "namespace P;\npublic class FooDownloadClient : DownloadClientBase<FooSettings>\n{\n" +
+            "    void Save(System.ReadOnlySpan<byte> b) { }\n}\n");
+        var h = new Harness(_tempRepo)
+        {
+            AssemblyValue = typeof(EcosystemParityTestBaseExtensionTests).Assembly,
+            TypesValue = new[] { typeof(FakeDownloadClient) },
+            SourceRootValue = src,
+        };
+        var r = h.RunPayloadValidator();
+        Assert.False(r.Passed);
+        Assert.Contains(r.Errors, e => e.Contains("DownloadPayloadValidator"));
     }
 
     [Fact]
