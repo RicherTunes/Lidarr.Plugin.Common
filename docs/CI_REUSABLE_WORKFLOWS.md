@@ -3,14 +3,16 @@
 
 **Generated**: 2026-05-23
 **Agent**: ci-cd-agent (Phase 1.5)
-**Status**: SUPERSEDED for Gitea-primary plugin CI — historical proposal only
+**Status**: HISTORICAL for Gitea-primary plugin CI — current mirrors are per-repo CI entrypoints guarded by Common contract tests
 
 As of 2026-07-01, plugin repos are Gitea-primary and the Common ecosystem
-contract enforces zero plugin-root GitHub Actions workflows. Do not implement
-the plugin-facing `.github/workflows/*` proposals below as active plugin CI.
+contract enforces exactly one guarded plugin-root GitHub CI mirror. Do not
+implement the reusable-workflow proposals below as the current plugin CI shape.
 The current consolidation point is the shared script runner
 `scripts/ci/run-plugin-lint-gates.ps1`, invoked from each plugin's
-`.gitea/workflows/ci.yml`.
+`.gitea/workflows/ci.yml` and `.github/workflows/ci.yml`; Common's
+ecosystem contract verifies the mirror count, parity gates, and GitHub-only
+job guards.
 
 ---
 

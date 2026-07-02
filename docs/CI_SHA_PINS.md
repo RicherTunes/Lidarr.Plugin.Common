@@ -3,22 +3,25 @@
 **Updated**: 2026-07-01
 
 The May 2026 cross-repo GitHub Actions pin inventory is retired. Plugin repos
-are now Gitea-primary and the active ecosystem contract enforces zero
-plugin-root GitHub Actions workflows.
+are Gitea-primary and the active ecosystem contract enforces exactly one
+guarded GitHub CI mirror per plugin.
 
-The active scope is `lidarr.plugin.common/.github/workflows`: Common still owns
-GitHub-side release/security workflows, and those workflows must keep
-third-party `uses:` references pinned or intentionally exempted by policy.
+The active scope is Common-owned CI policy plus each plugin's guarded
+`.github/workflows/ci.yml` mirror. Common still owns GitHub-side
+release/security workflows, and those workflows must keep third-party `uses:`
+references pinned or intentionally exempted by policy.
 
 ## Current Plugin Rule
 
 - Plugin repos run merge-gating CI in `.gitea/workflows/ci.yml`.
-- Plugin repos must not carry plugin-root `.github/workflows/*.yml` or
-  `.github/workflows/*.yaml` files.
-- `scripts/ci/ecosystem-repos.json` records `mirrorWorkflows: 0` for every
+- Plugin repos carry exactly one guarded GitHub CI mirror at
+  `.github/workflows/ci.yml`.
+- `scripts/ci/ecosystem-repos.json` records `mirrorWorkflows: 1` for every
   active plugin.
 - `scripts/ci/verify-ecosystem-ci-contract.ps1 -CI` fails if a plugin adds an
-  undeclared GitHub workflow mirror.
+  undeclared GitHub workflow mirror, omits a mirror, drops the shared lint
+  runner/pin/secret-scan/verify-local gates, or leaves any mirror job without
+  `if: ${{ github.server_url == 'https://github.com' }}`.
 
 ## Current Common Rule
 
@@ -33,5 +36,5 @@ third-party `uses:` references pinned or intentionally exempted by policy.
 ## Do Not Use
 
 `scripts/bulk-update-workflow-pins.sh` is deprecated. It used to mutate plugin
-`.github/workflows` files, but those mirrors no longer exist and must not be
-recreated as part of Common promotion.
+`.github/workflows` files in bulk, but plugin mirror changes now need per-repo
+review and the Common ecosystem contract rather than a broad text rewrite.
