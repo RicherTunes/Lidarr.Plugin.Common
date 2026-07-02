@@ -32,6 +32,12 @@ public static class DiagnosticErrorCodes
     /// <summary>Requested resource (track, album, catalog item) not found.</summary>
     public const string NotFound = "NOT_FOUND";
 
+    /// <summary>Requested provider model was not found or is unsupported.</summary>
+    public const string ModelNotFound = "MODEL_NOT_FOUND";
+
+    /// <summary>Provider initialization failed before a request could be sent.</summary>
+    public const string ProviderInitFailed = "PROVIDER_INIT_FAILED";
+
     /// <summary>Server returned an unexpected error (5xx).</summary>
     public const string ServerError = "SERVER_ERROR";
 }

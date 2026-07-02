@@ -19,5 +19,20 @@ namespace Lidarr.Plugin.Common.Tests
             Assert.Equal("stream_probe", DiagnosticTypes.StreamProbe);
             Assert.Equal("catalog_access", DiagnosticTypes.CatalogAccess);
         }
+
+        [Fact]
+        public void CanonicalDiagnosticErrorCodeValues_AreStable()
+        {
+            Assert.Equal("AUTH_FAILED", DiagnosticErrorCodes.AuthFailed);
+            Assert.Equal("CONNECTION_FAILED", DiagnosticErrorCodes.ConnectionFailed);
+            Assert.Equal("RATE_LIMITED", DiagnosticErrorCodes.RateLimited);
+            Assert.Equal("TIMEOUT", DiagnosticErrorCodes.Timeout);
+            Assert.Equal("REGION_BLOCKED", DiagnosticErrorCodes.RegionBlocked);
+            Assert.Equal("VALIDATION_FAILED", DiagnosticErrorCodes.ValidationFailed);
+            Assert.Equal("NOT_FOUND", DiagnosticErrorCodes.NotFound);
+            Assert.Equal("SERVER_ERROR", DiagnosticErrorCodes.ServerError);
+            Assert.Equal("MODEL_NOT_FOUND", DiagnosticErrorCodes.ModelNotFound);
+            Assert.Equal("PROVIDER_INIT_FAILED", DiagnosticErrorCodes.ProviderInitFailed);
+        }
     }
 }
