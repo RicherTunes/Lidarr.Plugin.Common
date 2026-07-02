@@ -19,12 +19,12 @@
 - [x] **Step 1: Retry the canary once disk space is available**
 
 Run: `git -C C:\r\Alex\github\.claude-work\common-perf-spec push -u gitea docs/perf-program-2026-06`
-Expected: branch accepted. The 2026-06-11 attempt failed with `remote: fatal: unable to write loose object file: No space left on device`; the 2026-07-02 Gitea push path is working.
+Expected: branch accepted. The 2026-06-11 attempt failed with `remote: fatal: unable to write loose object file: No space left on device`; the 2026-07-02 Gitea push path is working and PRs should use normal Gitea CI.
 
 - [x] **Step 2: Verify**
 
 Run: `git -C C:\r\Alex\github\lidarr.plugin.common ls-remote --heads gitea docs/perf-program-2026-06`
-Expected: one ref line. Once this passes, work may proceed through normal Gitea PRs instead of staying local-only.
+Expected: one ref line. This has passed; work should proceed through normal Gitea PRs instead of staying local-only.
 
 ### Task 2: Prior-art triage — Common branches on the limiter files
 
@@ -90,7 +90,10 @@ Columns: traffic class | client | example URI | bucket key | shared with search?
 
 One paragraph: does a shared bucket exist where bulk metadata traffic can queue ahead of search (yes/no, which), and does qobuz search bypass mean the limiter cannot be the qobuz bottleneck (expected: yes). This paragraph IS the Phase-2d gate input. Commit the evidence doc.
 
-### Task 5: Characterization tests — pin current within-bucket queuing + cross-bucket independence
+### Task 5: Characterization tests — pin current within-bucket queuing + cross-bucket independence (DONE via Common #85, `b4a34d5`)
+
+Status note: the checklist below is the original TDD recipe. It is retained as
+implementation evidence; do not create a second copy of this branch/tests.
 
 **Files:**
 - Create: `tests/Services/Performance/UniversalAdaptiveRateLimiterQueuingCharacterizationTests.cs` (new worktree `C:\r\Alex\github\.claude-work\common-limiter-chartests`, branch `test/limiter-queuing-characterization` off `gitea/main`)
@@ -173,21 +176,24 @@ public sealed class UniversalAdaptiveRateLimiterQueuingCharacterizationTests
 }
 ```
 
-- [ ] **Step 3: Run them**
+- [x] **Step 3: Run them**
 
 Run: `dotnet test C:\r\Alex\github\.claude-work\common-limiter-chartests\tests --filter "FullyQualifiedName~QueuingCharacterization" -v minimal`
 Expected: 2 passed. If the same-bucket test FAILS, the spec's residual starvation mechanism is wrong too — stop and re-evaluate before Phase 2d.
 
-- [ ] **Step 4: Commit**
+- [x] **Step 4: Commit**
 
 ```powershell
 git -C C:\r\Alex\github\.claude-work\common-limiter-chartests add tests/Services/Performance/UniversalAdaptiveRateLimiterQueuingCharacterizationTests.cs
 git -C C:\r\Alex\github\.claude-work\common-limiter-chartests commit -m "test: characterize limiter slot-claim queuing (within-bucket FIFO, cross-bucket independence)"
 ```
 
-### Task 6: Handler-level observability — adaptation + periodic stats logging (TDD)
+### Task 6: Handler-level observability — adaptation + periodic stats logging (TDD) (DONE via Common #84, `f27c3b9`)
 
-The limiter itself logs nothing and its stats surface is unread. Lowest-risk fix: log from `AdaptiveRateLimitingHandler`, which already has the optional `ILogger` and brackets every gated request. Limitation (accepted for Phase 0): qobuzarr's direct `WaitIfNeededAsync`/`RecordResponse` call sites are not covered — they are being consolidated in Phase 2b anyway.
+The limiter itself did not log enough for live baselines, and its stats surface was not consumed by plugins. Common #84 added handler-level adaptation and periodic stats logging from `AdaptiveRateLimitingHandler`, which already has the optional `ILogger` and brackets every gated request. Limitation (accepted for Phase 0): qobuzarr's direct `WaitIfNeededAsync`/`RecordResponse` call sites are not covered — they are being consolidated in Phase 2b anyway.
+
+Status note: the checklist below is the original TDD recipe. It is retained as
+implementation evidence; the production hook already lives on `gitea/main`.
 
 **Files:**
 - Modify: `src/Services/Http/AdaptiveRateLimitingHandler.cs` (new worktree `C:\r\Alex\github\.claude-work\common-limiter-obs`, branch `feat/limiter-observability` off `gitea/main` — AFTER Task 2 decides the fate of `refactor/adaptive-ratelimit-dedup`, which edits this file)
@@ -301,12 +307,12 @@ if (Interlocked.Increment(ref _responseCount) % 100 == 0)
 
 Add the field: `private long _responseCount;`. Match the file's existing null-logger convention.
 
-- [ ] **Step 5: Run tests to verify pass, then run the full Common suite**
+- [x] **Step 5: Run tests to verify pass, then run the full Common suite**
 
 Run: `dotnet test C:\r\Alex\github\.claude-work\common-limiter-obs\tests -v minimal`
 Expected: all green (this is the no-regression gate).
 
-- [ ] **Step 6: Commit**
+- [x] **Step 6: Commit**
 
 ```powershell
 git -C C:\r\Alex\github\.claude-work\common-limiter-obs add -A
@@ -320,7 +326,7 @@ git -C C:\r\Alex\github\.claude-work\common-limiter-obs commit -m "feat(http): l
 
 - [ ] **Step 1: Write the gate decision** — combining Task 4's bucket map and Task 5's pinned queuing behavior: proceed / re-scope / drop Phase 2d, and what the Phase-1 harness must demonstrate live.
 - [ ] **Step 2: Write the Phase-1 (harness) implementation plan as a new doc** following the rev-2 spec's Phase-1 section, parameterized by the evidence (which buckets to watch, which log lines to parse — now defined by Task 6's format).
-- [ ] **Step 3: Commit; push everything once Task 1 unblocks.**
+- [ ] **Step 3: Commit and push through the normal Gitea PR path.**
 
 ---
 

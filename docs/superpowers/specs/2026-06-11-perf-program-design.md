@@ -34,8 +34,10 @@ The real, verified problems in this area are:
    literal `"/album/search"` in `LidarrAlbumRetriever.cs:172`; `host:firstSeg`
    in the handler), splitting one logical endpoint across buckets that cannot
    see each other and creating unbounded bucket cardinality.
-4. The limiter has **no observability**: zero logging, and its in-proc stats
-   surface (`GetServiceStats`/`GetGlobalStats`) is exposed nowhere.
+4. Baseline capture depends on the Common #84 observability hooks: adaptation
+   and periodic limiter stats are now logged by `AdaptiveRateLimitingHandler`,
+   but direct plugin limiter call sites still need consolidation before the
+   whole upstream surface is measured uniformly.
 
 Separately, an exploration sweep surfaced perf-hotspot candidates; adversarial
 re-verification already culled them (one refuted, one hazardous-as-proposed,
@@ -65,9 +67,9 @@ rate ~50–60%: **nothing is fixed without verification and a baseline implicati
 
 ## Phase 0 — Ground truth + unblocking (NEW; gates everything)
 
-1. **Canary push:** push this spec branch to Gitea. Pushes were blocked
-   server-side as of 2026-06-10 (unpacker error / full disk), but the Gitea
-   push path is verified working again as of 2026-07-02.
+1. **Canary push:** resolved 2026-07-02. Pushes were blocked server-side as of
+   2026-06-10 (unpacker error / full disk), but the Gitea push path is verified
+   working again; keep normal Gitea PRs and CI as the landing path.
 2. **Prior-art triage:** two unmerged Common branches sit on the exact files
    this program touches — `perf/ratelimiter-lane` (9d1e8f3, same fairness
    topic) and `refactor/adaptive-ratelimit-dedup` (5d82071, edits
@@ -266,7 +268,8 @@ at arc boundaries, kept green by the DIM rule.
 process+integration). Accepted, all independently verified against code:
 per-endpoint not per-service budgets; qobuz search bypasses limiter; slot-claim
 structure can't take priorities without a dispatcher rewrite; TidalRateLimiter
-override breaks naive interface change (→ DIM); no limiter observability;
+override breaks naive interface change (→ DIM); limiter observability was
+missing at review time and later landed in Common #84 (`f27c3b9`);
 real-account volume caps; reset/repeatability/isolation requirements;
 prior-art branch collisions; Phase-3 list corrections (1 confirmed, 1
 re-scoped, 1 demoted, 1 refuted). Rejected: none — every BLOCKER/MAJOR
