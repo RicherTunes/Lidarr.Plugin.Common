@@ -73,8 +73,8 @@ module, a metrics module, an orchestrator script. Reports land in
 - [ ] One full dry scenario rep against a dedicated container with the
       non-measured plugin disabled, 2-album corpus, verifying the report
       renders and the log parser finds the Phase-0 instrumentation lines
-      (requires the observability branch deployed to that container — hence
-      baselines wait on Gitea landing + a container rebuild).
+      (requires the observability change deployed to that container — hence
+      baselines wait on a container rebuild after Common #84).
 - [ ] Corpus validation: each corpus album imports cleanly once (edition
       match), else replaced — this is what makes grab→import a usable metric.
 
@@ -89,10 +89,10 @@ module, a metrics module, an orchestrator script. Reports land in
 ### Sequencing note
 
 Baselines (the actual P1 deliverable) additionally require, in order:
-1. Gitea disk freed (user) → canary push.
+1. Gitea canary green (resolved 2026-07-02; keep Gitea as the primary gate).
 2. `fix/response-cache-endpoint-matching` (qobuz) + `feat/adopt-query-optimizer`
    (tidal) landed (LAND-BEFORE-BASELINE verdicts).
-3. `feat/limiter-observability` landed + plugins re-pinned + container image
+3. Limiter observability landed in Common (#84, `f27c3b9`) + plugins re-pinned + container image
    rebuilt (so the log parser has its instrumentation).
 Harness construction and smoke (gates 1–2 above minus instrumentation
 assertions) proceed now, locally.

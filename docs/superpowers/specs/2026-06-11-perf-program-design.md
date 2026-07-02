@@ -65,9 +65,9 @@ rate ~50–60%: **nothing is fixed without verification and a baseline implicati
 
 ## Phase 0 — Ground truth + unblocking (NEW; gates everything)
 
-1. **Canary push:** push this spec branch to Gitea — pushes were blocked
-   server-side as of 2026-06-10 (unpacker error); `gitea/main` tips dated
-   2026-06-10 17:51 suggest it's resolved, but unverified from this checkout.
+1. **Canary push:** push this spec branch to Gitea. Pushes were blocked
+   server-side as of 2026-06-10 (unpacker error / full disk), but the Gitea
+   push path is verified working again as of 2026-07-02.
 2. **Prior-art triage:** two unmerged Common branches sit on the exact files
    this program touches — `perf/ratelimiter-lane` (9d1e8f3, same fairness
    topic) and `refactor/adaptive-ratelimit-dedup` (5d82071, edits
@@ -219,7 +219,7 @@ phase: TDD, one concern per PR, adversarial review, lands on Gitea.
 
 | P | Charter | Maps to |
 |---|---|---|
-| 0 | Ground truth + unblocking (canary push, prior-art triage, bucket map, characterization tests, limiter observability). **DONE except canary (Gitea disk) + Phase-1 plan doc.** | old Phase 0 |
+| 0 | Ground truth + unblocking (canary push, prior-art triage, bucket map, characterization tests, limiter observability). **Canary resolved 2026-07-02; limiter observability landed in Common #84 (`f27c3b9`).** | old Phase 0 |
 | 1 | Load harness + baselines on dedicated e2e containers; live = second-scale effects only | old Phase 1 |
 | 2 | qobuz search gating — route `QobuzIndexer` traffic through the limiter | old 2a |
 | 3 | qobuz endpoint-key consolidation — one canonical key builder | old 2b |

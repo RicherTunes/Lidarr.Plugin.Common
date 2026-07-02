@@ -2,20 +2,20 @@
 
 Date: 2026-06-11. Companion to `2026-06-11-perf-program-design.md` (rev 2).
 
-## Gitea canary (Task 1) — BLOCKED
+## Gitea canary (Task 1) — RESOLVED 2026-07-02
 
 Push attempt 2026-06-11 failed with the server's own diagnosis:
 `remote: fatal: unable to write loose object file: No space left on device`.
 The 2026-06-10 "unpacker error" suspicion is confirmed: the Gitea data volume
-on 192.168.2.59 is full. **User action required.** All program work proceeds
-local-only until a canary push succeeds.
+on 192.168.2.59 was full. As of 2026-07-02, Gitea accepts pushes again and
+program work should proceed through normal Gitea PRs with CI as the merge gate.
 
 ## Prior-art triage (Task 2)
 
 | Branch | Tip | Verdict | Rationale |
 |---|---|---|---|
-| `perf/ratelimiter-lane` | 9d1e8f3 | **CLOSE** | Two-dot diff vs `gitea/main` on `UniversalAdaptiveRateLimiter.cs` is EMPTY — the slot-claim redesign it introduces is already on main (squash-merged; stale ref). Delete the branch when Gitea is writable. |
-| `refactor/adaptive-ratelimit-dedup` | 5d82071 | **LAND when unblocked** | Live −32 LOC cleanup: handler delegates `BuildEndpointKey`/`ResolveRetryAfter` to `RateLimitHeaderUtilities` (which already exists on main with tests). No behavior change. Land before (or rebase with) the observability PR — both touch `AdaptiveRateLimitingHandler.cs`. |
+| `perf/ratelimiter-lane` | 9d1e8f3 | **CLOSE** | Two-dot diff vs `gitea/main` on `UniversalAdaptiveRateLimiter.cs` is EMPTY — the slot-claim redesign it introduces is already on main (squash-merged; stale ref). Delete the stale branch when convenient. |
+| `refactor/adaptive-ratelimit-dedup` | 5d82071 | **LAND after rebase/review** | Live -32 LOC cleanup: handler delegates `BuildEndpointKey`/`ResolveRetryAfter` to `RateLimitHeaderUtilities` (which already exists on main with tests). No behavior change. Rebase after the observability PR because both touch `AdaptiveRateLimitingHandler.cs`. |
 
 ## Plugin in-flight branches (Task 3)
 
@@ -80,4 +80,4 @@ confirms user-visible magnitude and provides the before/after headline, but
 the design no longer hangs on it.
 
 Order of operations stands: 2a/2b (correctness) and 2c (TimeProvider seam)
-first; 2d dispatcher after; everything blocked on Gitea disk for landing.
+first; 2d dispatcher after; Gitea is no longer a landing blocker.
