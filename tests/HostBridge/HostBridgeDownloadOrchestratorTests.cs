@@ -147,6 +147,50 @@ public class HostBridgeDownloadOrchestratorTests
         Assert.Equal("/original", pathInDoWork);
     }
 
+    [Fact]
+    public async Task StartTrackedDownloadAsync_DefaultSnapshotter_SnapshotsBeforeTaskRun()
+    {
+        var orchestrator = MakeOrchestrator();
+        var tracker = MakeTracker();
+        var settings = new TestSettings
+        {
+            ProbeOnly = false,
+            DownloadPath = "/original",
+            Concurrency = 2
+        };
+
+        var doWorkSawProbeOnly = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var doWorkSawPath = new TaskCompletionSource<string?>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var doWorkSawConcurrency = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var doWorkCanReadSnapshot = new SemaphoreSlim(0, 1);
+
+        _ = await orchestrator.StartTrackedDownloadAsync(
+            settings,
+            tracker,
+            ItemFactory(),
+            doWork: async (snap, _, __, ct) =>
+            {
+                await doWorkCanReadSnapshot.WaitAsync(ct);
+                doWorkSawProbeOnly.TrySetResult(snap.ProbeOnly);
+                doWorkSawPath.TrySetResult(snap.DownloadPath);
+                doWorkSawConcurrency.TrySetResult(snap.Concurrency);
+            });
+
+        settings.ProbeOnly = true;
+        settings.DownloadPath = "/changed";
+        settings.Concurrency = 8;
+
+        doWorkCanReadSnapshot.Release();
+
+        bool probeOnlyInDoWork = await doWorkSawProbeOnly.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        string? pathInDoWork = await doWorkSawPath.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        int concurrencyInDoWork = await doWorkSawConcurrency.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(probeOnlyInDoWork, "doWork should see ProbeOnly=false from the Common snapshot, not the mutated live settings.");
+        Assert.Equal("/original", pathInDoWork);
+        Assert.Equal(2, concurrencyInDoWork);
+    }
+
     // ---------------------------------------------------------------------------
     // Test 3: Tracker contains the item BEFORE the method returns
     // ---------------------------------------------------------------------------
