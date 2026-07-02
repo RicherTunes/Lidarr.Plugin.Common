@@ -45,8 +45,10 @@
          workflow structure (`on:` + `jobs:`).
 
     Cross-plugin SHA agreement is also evaluated: if passing plugins pin different
-    Common SHAs, the verifier fails. ALC/package drift is an ecosystem-wide runtime
-    risk, not an advisory condition.
+    Common SHAs, the verifier fails by default. Common's push-to-main workflow may
+    opt into warning mode for that one check so a multi-repo re-pin train does not
+    leave Common main red while plugin main branches are being updated; scheduled,
+    manual, and local strict runs should keep the default failure behavior.
 
     An optional -CheckBranchProtection switch queries the Gitea API for each repo's
     branch protections (requires a Gitea token via git credential fill; off by default).
@@ -63,6 +65,12 @@
     Optional: query Gitea API for branch protections and assert required status checks.
     Requires a token accessible via `git credential fill` for host 192.168.2.59:3001.
     Off by default so the core script runs offline.
+
+.PARAMETER WarnOnDivergentPins
+    Optional: downgrade cross-plugin Common SHA divergence from failure to warning.
+    Intended only for Common push-to-main CI during a transient multi-repo re-pin
+    train. Within-plugin pin drift and all workflow/lint contract failures remain
+    hard failures.
 
 .PARAMETER ManifestPath
     Override the manifest file location (default: ecosystem-repos.json in the same
@@ -92,6 +100,8 @@ param(
     [switch]$CI,
 
     [switch]$CheckBranchProtection,
+
+    [switch]$WarnOnDivergentPins,
 
     [string]$ManifestPath,
 
@@ -1026,13 +1036,20 @@ foreach ($plugin in $plugins) {
 $agrResult = Test-CommonPinAgreement -Shas @($passingShas)
 if ($agrResult.Diverged) {
     Write-Host ''
-    Write-Host 'FAIL: Passing plugins pin different Common SHAs:' -ForegroundColor Red
+    $label = if ($WarnOnDivergentPins) { 'WARN' } else { 'FAIL' }
+    $color = if ($WarnOnDivergentPins) { 'Yellow' } else { 'Red' }
+    Write-Host "${label}: Passing plugins pin different Common SHAs:" -ForegroundColor $color
     foreach ($sha in $agrResult.UniqueShas) {
         $owners = @($results | Where-Object { $_.PinSha -eq $sha } | Select-Object -ExpandProperty RepoDir)
-        Write-Host "  $sha  ($($owners -join ', '))" -ForegroundColor Red
+        Write-Host "  $sha  ($($owners -join ', '))" -ForegroundColor $color
     }
-    Write-Host 'All active plugins must be re-pinned before the ecosystem ALC/package proof is considered valid.' -ForegroundColor Red
-    $anyFail = $true
+    if ($WarnOnDivergentPins) {
+        Write-Host 'Transient re-pin window accepted for this run; scheduled/manual strict runs still fail on divergence.' -ForegroundColor Yellow
+    }
+    else {
+        Write-Host 'All active plugins must be re-pinned before the ecosystem ALC/package proof is considered valid.' -ForegroundColor Red
+        $anyFail = $true
+    }
 }
 
 # ============================================================

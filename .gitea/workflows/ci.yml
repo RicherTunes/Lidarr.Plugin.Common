@@ -199,7 +199,13 @@ jobs:
               }
           }
 
-          & ./scripts/ci/verify-ecosystem-ci-contract.ps1 -EcosystemRoot .. -CI
+          $verifierArgs = @("-EcosystemRoot", "..", "-CI")
+          if ($env:GITHUB_EVENT_NAME -eq "push" -and $env:GITHUB_REF_NAME -eq "main") {
+              Write-Host "Common main push detected; divergent plugin Common pins will warn during transient re-pin windows."
+              $verifierArgs += "-WarnOnDivergentPins"
+          }
+
+          & ./scripts/ci/verify-ecosystem-ci-contract.ps1 @verifierArgs
           if ($LASTEXITCODE -ne 0) {
               exit $LASTEXITCODE
           }
