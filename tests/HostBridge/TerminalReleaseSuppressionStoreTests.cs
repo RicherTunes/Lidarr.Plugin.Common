@@ -113,6 +113,21 @@ public sealed class TerminalReleaseSuppressionStoreTests : IDisposable
         Assert.Equal(0, sut.Count);
     }
 
+    [Fact]
+    public async Task ClearAsync_RemovesSuppressionAndPersists()
+    {
+        var path = PathFor();
+        var first = new TerminalReleaseSuppressionStore(path, "Qobuzarr");
+        await first.SuppressAsync("album-clear", "track-1", "Restricted");
+
+        var removed = await first.ClearAsync("album-clear");
+        var second = new TerminalReleaseSuppressionStore(path, "Qobuzarr");
+
+        Assert.True(removed);
+        Assert.False(first.IsSuppressed("album-clear"));
+        Assert.False(second.IsSuppressed("album-clear"));
+    }
+
     private sealed class ManualTimeProvider : TimeProvider
     {
         private DateTimeOffset _utcNow;
