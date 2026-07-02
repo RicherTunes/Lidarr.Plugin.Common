@@ -14,8 +14,11 @@ namespace Lidarr.Plugin.Common.Tests.Hosting
     /// SettingsBinder.Populate with no surrounding try/catch).
     ///
     /// These tests cover each supported type conversion via ConvertValue (exercised
-    /// indirectly through Populate, since ConvertValue itself is private) and,
-    /// crucially, characterize the malformed-input behavior.
+    /// indirectly through Populate, since ConvertValue itself is private) and the
+    /// malformed-input behavior: Populate now skips any single field it cannot convert
+    /// (keeping the property's prior value) rather than throwing past the ISettingsProvider
+    /// boundary and aborting the entire settings save, and a null value for a Nullable&lt;T&gt;
+    /// field is preserved as null instead of being coerced to default(T).
     /// </summary>
     public class SettingsBinderTests
     {
@@ -183,26 +186,16 @@ namespace Lidarr.Plugin.Common.Tests.Hosting
         }
 
         [Fact]
-        public void DEFECT_Populate_NullValue_ForNullableValueType_SilentlyCoercesToDefaultInsteadOfNull()
+        public void Populate_NullValue_ForNullableValueType_PreservesNull()
         {
-            // DEFECT (silent data corruption, no exception): ConvertValue unwraps the
-            // Nullable<T> to its underlying type BEFORE checking `value is null`
-            // (destinationType = Nullable.GetUnderlyingType(destinationType) ?? destinationType
-            // runs first, then `if (value is null) return destinationType.IsValueType ?
-            // Activator.CreateInstance(destinationType) : null;`). By the time the null
-            // check runs, destinationType is already the unwrapped value type (e.g. `int`,
-            // not `int?`), which IS a value type, so Activator.CreateInstance produces its
-            // default (0) instead of returning null. There is no way to clear a nullable
-            // settings field back to null through SettingsBinder.Populate -- sending null
-            // silently zeroes it instead. Unlike the FormatException-class defects above,
-            // this one is silent: no exception, just wrong persisted data.
+            // A Nullable<T> settings field can be cleared: sending null yields null. Previously
+            // ConvertValue unwrapped Nullable<T> to T before the null check, coercing null to
+            // default(T) = 0 — silently corrupting the value and making the field unclearable.
             IReadOnlyDictionary<string, object?> values = new Dictionary<string, object?> { ["NullableCount"] = null };
             var target = new SampleSettings { NullableCount = 5 };
             SettingsBinder.Populate(values, target);
 
-            // Documents the ACTUAL (defective) behavior: null → 0, not null → null.
-            Assert.Equal(0, target.NullableCount);
-            Assert.NotNull(target.NullableCount);
+            Assert.Null(target.NullableCount);
         }
 
         [Fact]
@@ -251,78 +244,92 @@ namespace Lidarr.Plugin.Common.Tests.Hosting
         // ---------------------------------------------------------------
 
         [Fact]
-        public void DEFECT_Populate_NonNumericStringForIntField_ThrowsUnguardedFormatException()
+        public void Populate_NonNumericStringForIntField_SkipsFieldGracefully()
         {
             IReadOnlyDictionary<string, object?> values = new Dictionary<string, object?> { ["Count"] = "not-a-number" };
-            var target = new SampleSettings();
+            var target = new SampleSettings { Count = 42 };
 
-            // Convert.ChangeType("not-a-number", typeof(int), ...) throws FormatException.
-            // This is NOT caught anywhere between here and the ISettingsProvider boundary.
-            var ex = Assert.Throws<FormatException>(() => SettingsBinder.Populate(values, target));
-            Assert.NotNull(ex);
+            // A malformed value no longer aborts the whole bind: Populate skips just that field
+            // (keeping its prior value) instead of throwing FormatException past the boundary.
+            var exception = Record.Exception(() => SettingsBinder.Populate(values, target));
+            Assert.Null(exception);
+            Assert.Equal(42, target.Count);
         }
 
         [Fact]
-        public void DEFECT_Populate_OutOfRangeStringForIntField_ThrowsUnguardedOverflowException()
+        public void Populate_OutOfRangeStringForIntField_SkipsFieldGracefully()
         {
             IReadOnlyDictionary<string, object?> values = new Dictionary<string, object?> { ["Count"] = "99999999999999999999" };
-            var target = new SampleSettings();
+            var target = new SampleSettings { Count = 7 };
 
-            var ex = Assert.Throws<OverflowException>(() => SettingsBinder.Populate(values, target));
-            Assert.NotNull(ex);
+            var exception = Record.Exception(() => SettingsBinder.Populate(values, target));
+            Assert.Null(exception);
+            Assert.Equal(7, target.Count);
         }
 
         [Fact]
-        public void DEFECT_Populate_InvalidEnumString_ThrowsUnguardedArgumentException()
+        public void Populate_InvalidEnumString_SkipsFieldGracefully()
         {
             IReadOnlyDictionary<string, object?> values = new Dictionary<string, object?> { ["Mode"] = "NotARealEnumValue" };
-            var target = new SampleSettings();
+            var target = new SampleSettings { Mode = SampleEnum.Second };
 
-            // Enum.Parse(enumType, "NotARealEnumValue", ignoreCase: true) throws ArgumentException.
-            Assert.Throws<ArgumentException>(() => SettingsBinder.Populate(values, target));
+            var exception = Record.Exception(() => SettingsBinder.Populate(values, target));
+            Assert.Null(exception);
+            Assert.Equal(SampleEnum.Second, target.Mode);
         }
 
         [Fact]
-        public void DEFECT_Populate_MalformedGuidString_NonJson_ThrowsUnguardedFormatException()
+        public void Populate_MalformedGuidString_NonJson_SkipsFieldGracefully()
         {
-            // Note: this differs from the JsonElement path (which uses Guid.TryParse and
-            // falls back to Guid.Empty). A plain string value for the same field is NOT
-            // defended the same way -- ConvertValue calls Guid.Parse directly.
+            // The plain-string Guid path calls Guid.Parse (throws), unlike the JsonElement path
+            // (Guid.TryParse → Guid.Empty). The throw is now caught at the Populate loop, so the
+            // field keeps its prior value rather than aborting the whole bind.
+            var sentinel = Guid.NewGuid();
             IReadOnlyDictionary<string, object?> values = new Dictionary<string, object?> { ["Identifier"] = "not-a-guid" };
-            var target = new SampleSettings();
+            var target = new SampleSettings { Identifier = sentinel };
 
-            Assert.Throws<FormatException>(() => SettingsBinder.Populate(values, target));
+            var exception = Record.Exception(() => SettingsBinder.Populate(values, target));
+            Assert.Null(exception);
+            Assert.Equal(sentinel, target.Identifier);
         }
 
         [Fact]
-        public void DEFECT_Populate_MalformedTimeSpanString_ThrowsUnguardedFormatException()
+        public void Populate_MalformedTimeSpanString_SkipsFieldGracefully()
         {
             IReadOnlyDictionary<string, object?> values = new Dictionary<string, object?> { ["Interval"] = "not-a-timespan" };
-            var target = new SampleSettings();
+            var target = new SampleSettings { Interval = TimeSpan.FromMinutes(9) };
 
-            Assert.Throws<FormatException>(() => SettingsBinder.Populate(values, target));
+            var exception = Record.Exception(() => SettingsBinder.Populate(values, target));
+            Assert.Null(exception);
+            Assert.Equal(TimeSpan.FromMinutes(9), target.Interval);
         }
 
         [Fact]
-        public void DEFECT_Populate_MalformedDateTimeString_ThrowsUnguardedFormatException()
+        public void Populate_MalformedDateTimeString_SkipsFieldGracefully()
         {
+            var sentinel = new DateTime(2020, 1, 2, 3, 4, 5, DateTimeKind.Utc);
             IReadOnlyDictionary<string, object?> values = new Dictionary<string, object?> { ["Timestamp"] = "not-a-date" };
-            var target = new SampleSettings();
+            var target = new SampleSettings { Timestamp = sentinel };
 
-            Assert.Throws<FormatException>(() => SettingsBinder.Populate(values, target));
+            var exception = Record.Exception(() => SettingsBinder.Populate(values, target));
+            Assert.Null(exception);
+            Assert.Equal(sentinel, target.Timestamp);
         }
 
         [Fact]
-        public void DEFECT_Populate_JsonElementMalformedDateTimeString_ThrowsUnguarded_UnlikeTheGuidPath()
+        public void Populate_JsonElementMalformedDateTimeString_SkipsFieldGracefully()
         {
-            // Unlike the Guid JSON path (which is defensive), the DateTime JSON path calls
-            // DateTime.Parse directly with no try/catch -- inconsistent defensiveness within
-            // the same ConvertJsonElement switch statement.
+            // The DateTime JSON path calls DateTime.Parse (throws), unlike the defensive Guid
+            // JSON path. The throw is now caught at the Populate loop, so the field keeps its
+            // prior value instead of aborting the whole bind.
+            var sentinel = new DateTime(2019, 6, 7, 8, 9, 10, DateTimeKind.Utc);
             using var doc = JsonDocument.Parse("\"not-a-date\"");
             IReadOnlyDictionary<string, object?> values = new Dictionary<string, object?> { ["Timestamp"] = doc.RootElement.Clone() };
-            var target = new SampleSettings();
+            var target = new SampleSettings { Timestamp = sentinel };
 
-            Assert.Throws<FormatException>(() => SettingsBinder.Populate(values, target));
+            var exception = Record.Exception(() => SettingsBinder.Populate(values, target));
+            Assert.Null(exception);
+            Assert.Equal(sentinel, target.Timestamp);
         }
     }
 }

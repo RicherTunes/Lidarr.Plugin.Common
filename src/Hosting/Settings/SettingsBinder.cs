@@ -68,8 +68,18 @@ internal static class SettingsBinder
                 continue;
             }
 
-            var converted = ConvertValue(incoming, property.PropertyType);
-            property.SetValue(target, converted);
+            try
+            {
+                var converted = ConvertValue(incoming, property.PropertyType);
+                property.SetValue(target, converted);
+            }
+            catch (Exception ex) when (ex is FormatException or OverflowException or ArgumentException or InvalidCastException or NotSupportedException)
+            {
+                // A single malformed settings value must not abort binding for every OTHER field
+                // (which would otherwise break settings save/load wholesale). Skip it — the
+                // property keeps its existing value, a graceful outcome the user can observe.
+                // The offending value is deliberately not surfaced (it may contain a secret).
+            }
         }
     }
 
@@ -132,10 +142,20 @@ internal static class SettingsBinder
 
     private static object? ConvertValue(object? value, Type destinationType)
     {
-        destinationType = Nullable.GetUnderlyingType(destinationType) ?? destinationType;
+        var underlyingType = Nullable.GetUnderlyingType(destinationType);
+        var isNullable = underlyingType is not null;
+        destinationType = underlyingType ?? destinationType;
 
         if (value is null)
         {
+            // A Nullable<T> target must stay null. Previously the nullable was unwrapped to T
+            // BEFORE this null check, so null was coerced to default(T) (e.g. 0) — silently
+            // corrupting the value and making a nullable settings field impossible to clear.
+            if (isNullable)
+            {
+                return null;
+            }
+
             return destinationType.IsValueType ? Activator.CreateInstance(destinationType) : null;
         }
 
