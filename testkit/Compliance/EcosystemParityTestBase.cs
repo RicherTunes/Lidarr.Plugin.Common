@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Xml.Linq;
+using Xunit;
 
 namespace Lidarr.Plugin.Common.TestKit.Compliance;
 
@@ -450,6 +451,17 @@ public abstract partial class EcosystemParityTestBase : IDisposable
     #region Aggregator
 
     /// <summary>
+    /// Inherited fail-by-default parity gate. Every plugin parity class that inherits this base
+    /// runs the full aggregate without hand-copying one fact per check.
+    /// </summary>
+    [Fact]
+    public void AllParityChecksPass()
+    {
+        var report = RunAllParityChecks();
+        Assert.True(report.AllPassed, FormatParityFailures(report));
+    }
+
+    /// <summary>
     /// Runs all ecosystem parity checks and returns aggregated results.
     /// </summary>
     public virtual ComplianceReport RunAllParityChecks()
@@ -495,8 +507,25 @@ public abstract partial class EcosystemParityTestBase : IDisposable
             [nameof(Check_UsesCommonPluginConfigRoots)] = Check_UsesCommonPluginConfigRoots(),
         };
 
+        foreach (var check in RunBehaviorContractChecks().Results)
+            results[check.Key] = check.Value;
+
         var passed = results.Values.Count(r => r.Passed);
         return new ComplianceReport(results, passed, results.Count);
+    }
+
+    private static string FormatParityFailures(ComplianceReport report)
+    {
+        var failures = report.Results
+            .Where(static result => !result.Value.Passed)
+            .Select(result =>
+                $"{result.Key}: {(result.Value.Errors.Count == 0 ? "<no details>" : string.Join("; ", result.Value.Errors))}")
+            .OrderBy(static line => line, StringComparer.Ordinal)
+            .ToArray();
+
+        return failures.Length == 0
+            ? $"Ecosystem parity failed: {report.PassedCount}/{report.TotalCount} checks passed."
+            : $"Ecosystem parity failed: {report.PassedCount}/{report.TotalCount} checks passed. Failures: {string.Join(" | ", failures)}";
     }
 
     #endregion
