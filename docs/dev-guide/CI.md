@@ -13,7 +13,7 @@ The `ecosystem-contract` job is the live five-repo guard. On Common `main` pushe
 pwsh scripts/ci/verify-ecosystem-ci-contract.ps1 -EcosystemRoot .. -CI
 ```
 
-That check fails on within-plugin pin drift (`ext-common-sha.txt` vs submodule gitlink), cross-plugin Common SHA divergence, missing Gitea lint/verify wiring, stale GitHub mirror-workflow expectations, unguarded GitHub mirror jobs, fallback lint subsets, and corrupt workflow files. PRs still run the hermetic self-tests for this guard; the live cross-repo check is main/dispatch/schedule scoped because a single Common PR cannot atomically update every plugin pin.
+That check fails on within-plugin pin drift (`ext-common-sha.txt` vs submodule gitlink), missing Gitea lint/verify wiring, stale GitHub mirror-workflow expectations, unguarded GitHub mirror jobs, fallback lint subsets, and corrupt workflow files. Manual dispatch, scheduled runs, and local strict runs also fail on cross-plugin Common SHA divergence. The Common push-to-main run downgrades only that cross-plugin divergence check to a warning so a multi-repo re-pin train does not leave Common `main` red while plugin `main` branches are being updated. PRs still run the hermetic self-tests for this guard; the live cross-repo check is main/dispatch/schedule scoped because a single Common PR cannot atomically update every plugin pin.
 
 Key local checks:
 
@@ -45,7 +45,7 @@ The active repo list and mirror-workflow expectations live in:
 
 Update that manifest when adding a sixth plugin, adding/removing GitHub workflow mirrors, or changing which repos are Gitea-primary. Active plugin mirrors must keep every job guarded with `if: ${{ github.server_url == 'https://github.com' }}` so Gitea remains the primary merge gate without executing duplicate GitHub jobs.
 
-All active plugins must converge on one Common SHA. Temporary cross-repo re-pin windows are allowed while PRs are in flight, but the live Common guard treats a divergent merged ecosystem as a failure because it invalidates the multi-plugin ALC/package proof.
+All active plugins must converge on one Common SHA. Temporary cross-repo re-pin windows are allowed while PRs are in flight. Common push-to-main CI warns on cross-plugin divergence during that window, but manual dispatch, scheduled, and local strict ecosystem-contract runs treat a divergent merged ecosystem as a failure because it invalidates the multi-plugin ALC/package proof.
 
 ## Releases
 
