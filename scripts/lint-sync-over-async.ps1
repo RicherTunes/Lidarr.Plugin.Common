@@ -187,6 +187,37 @@ function Invoke-Scan {
                 $violations += $match
             }
         }
+
+        # Multiline-split form: `.GetAwaiter()` and `.GetResult()` separated by a newline. The per-line
+        # scan above misses these, yet they are exactly as deadlock-prone (an auto-formatter can split a
+        # long line, or an author can split it to evade the gate). Scan the raw file content; the mandatory
+        # `\r?\n` makes this match ONLY the split form, so it never double-counts the single-line matches.
+        $raw = Get-Content -LiteralPath $file.FullName -Raw
+        if ($raw) {
+            foreach ($m in ([regex]'\.GetAwaiter\(\)\s*\r?\n\s*\.GetResult\(\)').Matches($raw)) {
+                $lineNum = ([regex]::Matches($raw.Substring(0, $m.Index), "`n")).Count + 1
+                $match = @{
+                    File = $relativePath
+                    Line = $lineNum
+                    Content = '.GetAwaiter() / .GetResult() split across lines'
+                }
+
+                $allowEntry = Test-Allowlisted $relativePath $Allowlist
+                if ($allowEntry) { $suppressed += $match; continue }
+
+                if ($DiffLines -and $DiffLines.Count -gt 0) {
+                    $diffFile = $relativePath -replace '\\', '/'
+                    if (-not $DiffLines.ContainsKey($diffFile)) { continue }
+                    $isNew = $false
+                    foreach ($addedLine in $DiffLines[$diffFile]) {
+                        if ($addedLine -match '\.GetAwaiter\(\)' -or $addedLine -match '\.GetResult\(\)') { $isNew = $true; break }
+                    }
+                    if (-not $isNew) { continue }
+                }
+
+                $violations += $match
+            }
+        }
     }
 
     return @{ Violations = $violations; Suppressed = $suppressed }
@@ -253,17 +284,28 @@ function Invoke-SelfTest {
             $failed++
         }
 
-        # Test 5: Multiline .GetAwaiter()\n.GetResult() (less common but valid)
+        # Test 5: Multiline .GetAwaiter()\n.GetResult() MUST be flagged — an auto-formatter (or an
+        # author evading the gate) can split the call across lines, and it is exactly as deadlock-prone
+        # as the single-line form. The gate now scans full file content, not just per-line.
         Remove-Item $testFile2 -Force
         $multiFile = Join-Path $srcDir 'Multi.cs'
         Set-Content $multiFile "var x = task.GetAwaiter()`n    .GetResult();"
         $result = Invoke-Scan -RepoRoot $tempDir -Allowlist @() -DiffLines @{}
-        # This is a single-line regex so multiline won't match — that's OK, it catches the common pattern
-        if ($result.Violations.Count -eq 0) {
-            Write-Host '  [PASS] Test 5: Multiline split not flagged (by design — single-line scan)' -ForegroundColor Green
+        if ($result.Violations.Count -ge 1) {
+            Write-Host '  [PASS] Test 5: Multiline split .GetAwaiter()/.GetResult() is flagged' -ForegroundColor Green
             $passed++
         } else {
-            Write-Host "  [FAIL] Test 5: Expected 0 violations for multiline split" -ForegroundColor Red
+            Write-Host "  [FAIL] Test 5: Expected the multiline split to be flagged, got 0 violations" -ForegroundColor Red
+            $failed++
+        }
+
+        # Test 5b: an allowlisted file must still suppress the multiline split form.
+        $result5b = Invoke-Scan -RepoRoot $tempDir -Allowlist @(@{ file = 'src/Multi.cs'; reason = 'test'; category = 'A' }) -DiffLines @{}
+        if ($result5b.Violations.Count -eq 0 -and $result5b.Suppressed.Count -ge 1) {
+            Write-Host '  [PASS] Test 5b: Multiline split respects the allowlist' -ForegroundColor Green
+            $passed++
+        } else {
+            Write-Host "  [FAIL] Test 5b: allowlisted multiline split should be suppressed, not flagged" -ForegroundColor Red
             $failed++
         }
 
