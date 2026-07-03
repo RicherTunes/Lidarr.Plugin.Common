@@ -107,8 +107,8 @@
          8.0.0 — manifests as "Could not load ... Version=9.0.0.0" during plugin
          discovery, blocking multi-plugin loading. -->
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.25" />
-    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.25" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.28" />
+    <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.28" />
   </ItemGroup>
   <!-- CLI Framework Dependencies - Optional for development/testing only -->
   <!-- Production consumers: exclude pre-release dependencies by default -->
