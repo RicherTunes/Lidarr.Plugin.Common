@@ -164,16 +164,16 @@ namespace Lidarr.Plugin.Common.Tests.Hosting
         }
 
         [Fact]
-        public void Populate_JsonElementMalformedGuidString_FallsBackToGuidEmpty()
+        public void Populate_JsonElementMalformedGuidString_SkipsFieldGracefully()
         {
-            // Guid is special-cased inside ConvertJsonElement with Guid.TryParse, unlike
-            // every other JSON-string conversion path -- this is the one path that is
-            // already defensive against malformed input.
+            // JsonElement Guid conversion must match the rest of the malformed-input
+            // contract: skip the field and preserve the existing value.
+            var sentinel = Guid.NewGuid();
             using var doc = JsonDocument.Parse("\"not-a-guid\"");
             IReadOnlyDictionary<string, object?> values = new Dictionary<string, object?> { ["Identifier"] = doc.RootElement.Clone() };
-            var target = new SampleSettings { Identifier = Guid.NewGuid() };
+            var target = new SampleSettings { Identifier = sentinel };
             SettingsBinder.Populate(values, target);
-            Assert.Equal(Guid.Empty, target.Identifier);
+            Assert.Equal(sentinel, target.Identifier);
         }
 
         [Fact]
