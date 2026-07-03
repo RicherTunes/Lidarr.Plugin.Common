@@ -37,12 +37,27 @@ namespace Lidarr.Plugin.Common.Services.Download
         public static RemoteMediaUriPolicy Strict { get; } = new();
     }
 
-    /// <summary>Outcome of a guard check.</summary>
-    public readonly record struct UriGuardResult(bool IsAllowed, string? Reason)
+    /// <summary>
+    /// Outcome of a guard check.
+    /// <para><see cref="IsTransient"/> distinguishes a <b>transient</b> block (DNS resolution itself FAILED, so
+    /// the destination could not be confirmed safe — a network/DNS blip, not a hostile target) from a HARD
+    /// security block (non-https scheme, userinfo, cloud-metadata host, allowed-suffix miss, or an address that
+    /// resolved to a private/loopback/link-local/reserved IP). A transient result is <see cref="IsAllowed"/> =
+    /// false (we still refuse to fetch on an unconfirmed host) but callers should surface it as a RETRYABLE
+    /// network error rather than a permanent refusal — the SSRF guarantee is that we only relax the case where
+    /// resolution FAILED, never a case where we resolved to something unsafe.</para>
+    /// </summary>
+    public readonly record struct UriGuardResult(bool IsAllowed, string? Reason, bool IsTransient = false)
     {
-        public static UriGuardResult Allowed { get; } = new(true, null);
+        public static UriGuardResult Allowed { get; } = new(true, null, false);
 
-        public static UriGuardResult Blocked(string reason) => new(false, reason);
+        /// <summary>A hard, permanent block (security rejection). Never transient.</summary>
+        public static UriGuardResult Blocked(string reason) => new(false, reason, false);
+
+        /// <summary>A transient block: resolution failed so safety could not be confirmed, but this is a
+        /// network/DNS failure, not a hostile private-IP target. <see cref="IsAllowed"/> stays false;
+        /// <see cref="IsTransient"/> is true so callers can retry instead of permanently failing.</summary>
+        public static UriGuardResult Transient(string reason) => new(false, reason, true);
     }
 
     /// <summary>
@@ -56,6 +71,15 @@ namespace Lidarr.Plugin.Common.Services.Download
     /// address between this check and the actual connect (DNS rebinding). For full protection, also disable
     /// automatic redirects and re-validate the resolved address at connection time. This guard removes the
     /// large, easy SSRF surface (literal-IP and naive-DNS targets) and is the shared policy plugins build on.</para>
+    ///
+    /// <para><b>Transient vs. unsafe:</b> a DNS-resolution FAILURE (the resolver throws, or returns no addresses)
+    /// is reported as a <see cref="UriGuardResult.Transient(string)"/> result — <see cref="UriGuardResult.IsAllowed"/>
+    /// stays false (we still refuse to fetch on a host we could not confirm), but <see cref="UriGuardResult.IsTransient"/>
+    /// is true so download callers surface it as a RETRYABLE network error instead of a permanent refusal.
+    /// This is safe because it relaxes <b>only</b> the case where resolution failed: a host that successfully
+    /// resolves to a private/loopback/link-local/reserved address is a confirmed-unsafe target and remains a hard
+    /// <see cref="UriGuardResult.Blocked(string)"/> (never transient). Treating a resolution blip as permanent
+    /// otherwise fails downloads whenever a CDN host intermittently fails to resolve.</para>
     /// </summary>
     public static class RemoteMediaUriGuard
     {
@@ -148,12 +172,18 @@ namespace Lidarr.Plugin.Common.Services.Download
                 }
                 catch (Exception ex) when (ex is SocketException or ArgumentException)
                 {
-                    return UriGuardResult.Blocked("URL host could not be resolved.");
+                    // Resolution FAILED — we cannot confirm the host is safe, but this is a DNS/network failure,
+                    // not a resolved-to-private (hostile) target. Classify TRANSIENT so callers retry rather than
+                    // permanently failing the download on a DNS blip. (A resolved-to-private address below is a
+                    // hard Blocked — security is never relaxed for a confirmed-unsafe target.)
+                    return UriGuardResult.Transient("URL host could not be resolved.");
                 }
 
                 if (resolved.Length == 0)
                 {
-                    return UriGuardResult.Blocked("URL host resolved to no addresses.");
+                    // Same reasoning: no addresses came back → resolution effectively failed → transient, not a
+                    // confirmed-unsafe destination.
+                    return UriGuardResult.Transient("URL host resolved to no addresses.");
                 }
 
                 foreach (var addr in resolved)

@@ -49,11 +49,15 @@ namespace Lidarr.Plugin.Common.Services.Download
                 // Validate the target BEFORE issuing the request — refuse a private/internal/non-https host
                 // up-front rather than only catching it on the response. This covers the FIRST hop (the initial
                 // URL) too, so a direct request to an internal host is never sent at all (R2-01 follow-up).
-                if (current.RequestUri is { } targetUri && !RemoteMediaUriGuard.Validate(targetUri, policy).IsAllowed)
+                if (current.RequestUri is { } targetUri)
                 {
-                    if (current != request) current.Dispose();
-                    throw new InvalidOperationException(
-                        $"Refusing media request to an unsafe URL: {Redact(targetUri)}.");
+                    var guard = RemoteMediaUriGuard.Validate(targetUri, policy);
+                    if (!guard.IsAllowed)
+                    {
+                        if (current != request) current.Dispose();
+                        throw UnsafeError(guard, targetUri,
+                            $"Refusing media request to an unsafe URL: {Redact(targetUri)}.");
+                    }
                 }
 
                 var response = await client.SendAsync(current, completionOption, cancellationToken).ConfigureAwait(false);
@@ -61,11 +65,15 @@ namespace Lidarr.Plugin.Common.Services.Download
                 // Defense-in-depth: if the client auto-followed redirects internally, RequestMessage.RequestUri
                 // is the final landing URI. Refuse it before the caller consumes the body.
                 var finalUri = response.RequestMessage?.RequestUri;
-                if (finalUri is not null && !RemoteMediaUriGuard.Validate(finalUri, policy).IsAllowed)
+                if (finalUri is not null)
                 {
-                    response.Dispose();
-                    throw new InvalidOperationException(
-                        $"Refusing media response from a redirected unsafe URL: {Redact(finalUri)}.");
+                    var finalGuard = RemoteMediaUriGuard.Validate(finalUri, policy);
+                    if (!finalGuard.IsAllowed)
+                    {
+                        response.Dispose();
+                        throw UnsafeError(finalGuard, finalUri,
+                            $"Refusing media response from a redirected unsafe URL: {Redact(finalUri)}.");
+                    }
                 }
 
                 var status = (int)response.StatusCode;
@@ -84,10 +92,11 @@ namespace Lidarr.Plugin.Common.Services.Download
                 }
 
                 var target = location.IsAbsoluteUri ? location : new Uri(current.RequestUri!, location);
-                if (!RemoteMediaUriGuard.Validate(target, policy).IsAllowed)
+                var targetGuard = RemoteMediaUriGuard.Validate(target, policy);
+                if (!targetGuard.IsAllowed)
                 {
                     response.Dispose();
-                    throw new InvalidOperationException(
+                    throw UnsafeError(targetGuard, target,
                         $"Refusing redirect to an unsafe media URL: {Redact(target)}.");
                 }
 
@@ -124,6 +133,18 @@ namespace Lidarr.Plugin.Common.Services.Download
                    string.Equals(left.Scheme, right.Scheme, StringComparison.OrdinalIgnoreCase) &&
                    string.Equals(left.DnsSafeHost, right.DnsSafeHost, StringComparison.OrdinalIgnoreCase) &&
                    left.Port == right.Port;
+        }
+
+        /// <summary>Maps a blocked guard result to the right exception: a TRANSIENT block (DNS resolution failed —
+        /// safety unconfirmed, but not a hostile target) becomes a RETRYABLE <see cref="HttpRequestException"/>;
+        /// a hard security block stays a permanent <see cref="InvalidOperationException"/> with the refusal
+        /// message. The SSRF guarantee is unchanged — only a resolution FAILURE is treated as retryable, never a
+        /// resolved-to-private target.</summary>
+        private static Exception UnsafeError(UriGuardResult guard, Uri uri, string permanentMessage)
+        {
+            return guard.IsTransient
+                ? new HttpRequestException($"Transient resolution failure for media URL {Redact(uri)}: {guard.Reason}")
+                : new InvalidOperationException(permanentMessage);
         }
 
         private static string Redact(Uri uri) => $"{uri.Scheme}://{uri.Host}";

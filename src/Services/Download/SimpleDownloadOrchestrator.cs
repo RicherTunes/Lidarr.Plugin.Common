@@ -487,10 +487,8 @@ namespace Lidarr.Plugin.Common.Services.Download
             var (url, extension) = await _getStreamAsync(trackId, quality).ConfigureAwait(false);
             if (string.IsNullOrWhiteSpace(url)) return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = "Empty stream URL" };
 
-            // SSRF guard: validate the resolved stream URL before fetch (provider-controlled).
-            var uriGuard = RemoteMediaUriGuard.Validate(url, _mediaUriPolicy);
-            if (!uriGuard.IsAllowed) return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Unsafe stream URL: {uriGuard.Reason}" };
-
+            // NOTE: the SSRF guard for `url` runs INSIDE the retry loop below (top of each attempt) so a transient
+            // DNS-resolution failure is retried rather than permanently failing the track. See the guard there.
             if (!string.IsNullOrWhiteSpace(extension)) outputPath = Path.ChangeExtension(outputPath, extension.TrimStart('.'));
 
             try
@@ -514,6 +512,22 @@ namespace Lidarr.Plugin.Common.Services.Download
                 {
                     try
                     {
+                        // SSRF guard: validate the resolved stream URL before EVERY attempt (provider-controlled).
+                        // A DNS-resolution blip yields a TRANSIENT result — throw a retryable HttpRequestException
+                        // so the loop re-validates (re-resolves) on the next attempt instead of permanently failing
+                        // the track on a DNS blip. A hard security block (private IP, non-https, metadata host, or a
+                        // host that resolves to a private address) throws a permanent InvalidOperationException that
+                        // is NOT retried — SSRF is never relaxed for a confirmed-unsafe target. The guard runs INSIDE
+                        // the retry loop (not once before it) so a transient throw re-runs the guard rather than
+                        // connecting to an unconfirmed host.
+                        var uriGuard = RemoteMediaUriGuard.Validate(url, _mediaUriPolicy);
+                        if (!uriGuard.IsAllowed)
+                        {
+                            if (uriGuard.IsTransient)
+                                throw new HttpRequestException($"Transient resolution failure for stream URL: {uriGuard.Reason}");
+                            throw new InvalidOperationException($"Unsafe stream URL: {uriGuard.Reason}");
+                        }
+
                         long existingBytes = 0;
                         string? etag = null;
                         DateTimeOffset? lastModified = null;
