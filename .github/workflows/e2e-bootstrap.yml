@@ -140,7 +140,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # GitHub-hosted runners already have pwsh - skip apt install entirely
       # (kept for local act runs where pwsh may not be present)
@@ -259,7 +259,7 @@ jobs:
 
       - name: Checkout Qobuzarr
         if: contains(inputs.plugins, 'Qobuzarr')
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RicherTunes/Qobuzarr
           ref: main
@@ -269,7 +269,7 @@ jobs:
 
       - name: Checkout Tidalarr
         if: contains(inputs.plugins, 'Tidalarr')
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RicherTunes/Tidalarr
           ref: main
@@ -279,7 +279,7 @@ jobs:
 
       - name: Checkout Brainarr
         if: contains(inputs.plugins, 'Brainarr')
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RicherTunes/Brainarr
           ref: main
@@ -350,7 +350,7 @@ jobs:
 
       - name: Checkout patched Lidarr host
         if: steps['host-override'].outputs.use_override == 'true' && steps['cache-host-override'].outputs.cache-hit != 'true'
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: ${{ inputs.lidarr_override_repo || 'RicherTunes/Lidarr' }}
           ref: ${{ inputs.lidarr_override_ref || '1e741479fad766584e196187c61bea302085704a' }}
@@ -1619,7 +1619,7 @@ jobs:
       CANARY_TAG: pr-plugins  # Moving tag - always latest plugins branch build
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # GitHub-hosted runners already have pwsh - skip apt install entirely
       - name: Install PowerShell
@@ -1653,7 +1653,7 @@ jobs:
 
       - name: Checkout Qobuzarr
         if: contains(inputs.plugins, 'Qobuzarr')
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RicherTunes/Qobuzarr
           ref: main
@@ -1663,7 +1663,7 @@ jobs:
 
       - name: Checkout Tidalarr
         if: contains(inputs.plugins, 'Tidalarr')
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RicherTunes/Tidalarr
           ref: main
@@ -1673,7 +1673,7 @@ jobs:
 
       - name: Checkout Brainarr
         if: contains(inputs.plugins, 'Brainarr')
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RicherTunes/Brainarr
           ref: main

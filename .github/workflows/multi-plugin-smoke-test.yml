@@ -344,7 +344,7 @@ jobs:
 
       - name: Checkout Lidarr.Plugin.Common
         if: ${{ steps.pat.outputs.skip != 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup .NET SDKs
         if: ${{ steps.pat.outputs.skip != 'true' }}
@@ -411,7 +411,7 @@ jobs:
 
       - name: Checkout Qobuzarr
         if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_qobuzarr == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RicherTunes/Qobuzarr
           ref: ${{ inputs.qobuzarr_ref }}
@@ -421,7 +421,7 @@ jobs:
 
       - name: Checkout Tidalarr
         if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_tidalarr == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RicherTunes/Tidalarr
           ref: ${{ inputs.tidalarr_ref }}
@@ -431,7 +431,7 @@ jobs:
 
       - name: Checkout Brainarr
         if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_brainarr == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RicherTunes/Brainarr
           ref: ${{ steps.plugin_meta.outputs.brainarr_ref }}
@@ -441,7 +441,7 @@ jobs:
 
       - name: Checkout AppleMusicarr
         if: ${{ steps.pat.outputs.skip != 'true' && steps.plugin_meta.outputs.include_applemusicarr == 'true' }}
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: RicherTunes/AppleMusicarr
           ref: ${{ steps.plugin_meta.outputs.applemusicarr_ref }}
