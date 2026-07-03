@@ -52,7 +52,6 @@ public sealed class PackageClosureTests
                 [
                     @"C:\R\Alex\github\brainarr\Brainarr.Plugin\bin",
                     @"C:\R\Alex\github\brainarr\_plugins\Brainarr.Plugin",
-                    @"C:\R\Alex\github\brainarr\Brainarr.Tests\bin\Release\net8.0",
                 ]),
 
             ["qobuzarr"] = new PluginPackageSpec(
@@ -61,7 +60,6 @@ public sealed class PackageClosureTests
                 [
                     @"C:\R\Alex\github\qobuzarr\bin",
                     @"C:\R\Alex\github\qobuzarr\plugin-dist",
-                    @"C:\R\Alex\github\qobuzarr\tests\Qobuzarr.Tests\bin\Release\net8.0",
                 ]),
 
             ["tidalarr"] = new PluginPackageSpec(
@@ -69,7 +67,6 @@ public sealed class PackageClosureTests
                 CandidateDirs:
                 [
                     @"C:\R\Alex\github\tidalarr\src\Tidalarr\bin",
-                    @"C:\R\Alex\github\tidalarr\tests\Tidalarr.Tests\bin\Release\net8.0",
                 ]),
 
             ["applemusicarr"] = new PluginPackageSpec(
@@ -77,13 +74,27 @@ public sealed class PackageClosureTests
                 CandidateDirs:
                 [
                     @"C:\R\Alex\github\applemusicarr\src\AppleMusicarr.Plugin\bin\Release\net8.0",
-                    @"C:\R\Alex\github\applemusicarr\src\AppleMusicarr.Cli\bin\Release\net8.0",
                 ]),
         };
 
     // ─────────────────────────────────────────────────────────────────────────
     // Deliverable B — Main theory: forbidden assembly check
     // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void PluginPackageSpecs_DoNotScanTestOrCliBuildOutputs()
+    {
+        var invalidCandidates = PluginSpecs
+            .SelectMany(kvp => kvp.Value.CandidateDirs.Select(dir => $"{kvp.Key}: {dir}"))
+            .Where(candidate =>
+                candidate.Contains(@"\tests\", StringComparison.OrdinalIgnoreCase) ||
+                candidate.Contains(".Tests", StringComparison.OrdinalIgnoreCase) ||
+                candidate.Contains(".Cli", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(candidate => candidate, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        Assert.Empty(invalidCandidates);
+    }
 
     /// <summary>
     /// For each plugin, enumerates all DLLs in its canonical build output directory

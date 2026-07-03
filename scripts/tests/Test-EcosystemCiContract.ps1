@@ -126,6 +126,10 @@ on:
     branches: [main]
   pull_request:
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gitleaks detect --source . --redact --exit-code 1
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -139,6 +143,10 @@ on:
     branches: [main]
   pull_request:
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gitleaks detect --source . --redact --exit-code 1
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -151,6 +159,10 @@ on:
   push:
     branches: [main]
 jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - run: gitleaks detect --source . --redact --exit-code 1
   build:
     runs-on: ubuntu-latest
     steps:
@@ -573,6 +585,20 @@ jobs:
     Test-Assertion 'GitHub CI mirror: full mirror ci.yml returns Ok=$true' {
         $r = Test-GitHubCiMirrorContract -PluginDir $DirF -Expected 1
         $r.Ok -eq $true
+    }
+
+    Test-Assertion 'GitHub CI mirror: missing Gitea job shape peer returns Ok=$false' {
+        $tmpDir = Join-Path $TempDir 'plugin-ghmirror-missing-gitea-job-peer'
+        New-FakePlugin -Dir $tmpDir -SentinelSha $FakeCommonSha -WireDocRefs $true -GithubWorkflowCount 0
+        Add-Content -LiteralPath (Join-Path $tmpDir '.gitea/workflows/ci.yml') @'
+  sdk-compile:
+    runs-on: ubuntu-latest
+    steps:
+      - run: dotnet build sdk-probe.csproj
+'@
+        Set-FakeGithubCiMirror -Dir $tmpDir
+        $r = Test-GitHubCiMirrorContract -PluginDir $tmpDir -Expected 1
+        $r.Ok -eq $false -and $r.Reason -match 'sdk-compile|job shape|Gitea'
     }
 
     Test-Assertion 'GitHub CI mirror: workflow count without ci.yml returns Ok=$false' {
