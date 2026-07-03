@@ -25,10 +25,30 @@ namespace Lidarr.Plugin.Common.Services.Download
         /// </summary>
         /// <param name="httpClient">The HttpClient to use for downloads. Should be configured with appropriate timeouts and connection limits.</param>
         /// <param name="logger">Optional logger for diagnostic output</param>
+        public HttpFileDownloadService(HttpClient httpClient, ILogger<HttpFileDownloadService>? logger = null)
+            : this(httpClient, logger, mediaUriPolicy: null)
+        {
+        }
+
+        /// <summary>
+        /// Creates a new HttpFileDownloadService with an explicit media URL validation policy.
+        /// </summary>
+        /// <param name="httpClient">The HttpClient to use for downloads. Should be configured with automatic redirects disabled.</param>
+        /// <param name="mediaUriPolicy">Policy for validating media URLs and redirects.</param>
+        public HttpFileDownloadService(HttpClient httpClient, RemoteMediaUriPolicy mediaUriPolicy)
+            : this(httpClient, logger: null, mediaUriPolicy: mediaUriPolicy)
+        {
+        }
+
+        /// <summary>
+        /// Creates a new HttpFileDownloadService with an explicit logger and media URL validation policy.
+        /// </summary>
+        /// <param name="httpClient">The HttpClient to use for downloads. Should be configured with automatic redirects disabled.</param>
+        /// <param name="logger">Optional logger for diagnostic output.</param>
         /// <param name="mediaUriPolicy">SSRF policy applied to every download URL before fetch. Defaults to
         /// <see cref="RemoteMediaUriPolicy.Strict"/> (https-only, public destinations). Pass a relaxed policy
         /// only for explicitly-local providers (e.g. a self-hosted endpoint).</param>
-        public HttpFileDownloadService(HttpClient httpClient, ILogger<HttpFileDownloadService>? logger = null, RemoteMediaUriPolicy? mediaUriPolicy = null)
+        public HttpFileDownloadService(HttpClient httpClient, ILogger<HttpFileDownloadService>? logger, RemoteMediaUriPolicy? mediaUriPolicy)
         {
             _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
             _logger = logger ?? Microsoft.Extensions.Logging.Abstractions.NullLogger<HttpFileDownloadService>.Instance;
@@ -157,7 +177,7 @@ namespace Lidarr.Plugin.Common.Services.Download
 
             File.Move(partialPath, filePath, overwrite: true);
 
-            AudioMagicBytesValidator.ValidateAudioMagicBytes(filePath);
+            DownloadPayloadValidator.ValidateFileOrThrow(filePath);
 
             // Validate file (basic; no size/hash guarantees from server)
             if (!ValidationUtilities.ValidateDownloadedFile(filePath))

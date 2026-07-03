@@ -187,7 +187,7 @@ check_lidarr_assemblies() {
 # Extract Lidarr assemblies from Docker
 extract_lidarr_from_docker() {
     local output_dir="${1:-ext/Lidarr/_output/net8.0}"
-    local docker_version="${2:-pr-plugins-3.1.1.4884}"
+    local docker_version="${2:-nightly-3.1.3.4970}"
 
     log_step "Extracting Lidarr assemblies from Docker..."
 

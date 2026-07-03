@@ -2,7 +2,7 @@
 
 Consistent docs are easier to maintain and automate. Follow these rules for every update.
 
-This guide applies to all Lidarr streaming plugins (Brainarr, Tidalarr, Qobuzarr) and the shared library.
+This guide applies to all RicherTunes Lidarr plugins (Amazonmusicarr, AppleMusicarr, Brainarr, Qobuzarr, Tidalarr) and the shared library.
 
 ## Tone
 

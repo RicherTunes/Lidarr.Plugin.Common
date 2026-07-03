@@ -72,7 +72,8 @@ public class LidarrContainerFixture : IAsyncLifetime
         if (!IsHostBridgeBuild(dllPath))
         {
             SkipReason = "Plugin built without host-bridge artifacts. " +
-                         "E2E requires Lidarr.Plugin.Abstractions.dll to sit alongside the plugin DLL.";
+                         "E2E requires a host-bridge-capable build: either merged/internalized Abstractions " +
+                         "or a legacy Abstractions sidecar.";
             return;
         }
 
@@ -240,7 +241,8 @@ public class LidarrContainerFixture : IAsyncLifetime
         }
     }
 
-    private static (int ExitCode, string Output) RunDocker(string arguments)
+    /// <summary>Runs a Docker CLI command. Virtual so unit tests can avoid invoking the host binary.</summary>
+    protected virtual (int ExitCode, string Output) RunDocker(string arguments)
     {
         using Process process = new();
         process.StartInfo = new ProcessStartInfo

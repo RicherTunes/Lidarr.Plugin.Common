@@ -41,6 +41,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         private readonly string _serviceName;
         private readonly ILogger? _logger;
         private readonly TimeSpan _maxRetryAfterDelay;
+        private long _responseCount;
 
         /// <summary>
         /// Initialises the handler.
@@ -77,7 +78,7 @@ namespace Lidarr.Plugin.Common.Services.Http
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
-            string endpointKey = BuildEndpointKey(request);
+            string endpointKey = RateLimitHeaderUtilities.BuildHostFirstSegmentKey(request);
 
             // Pre-send: wait for the limiter to permit this request.
             try
@@ -92,9 +93,29 @@ namespace Lidarr.Plugin.Common.Services.Http
             HttpResponseMessage response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
             // Post-send: feed the response back to the limiter for adaptive adjustment.
+            // The limiter adapts its budget silently, so bracket RecordResponse with
+            // budget reads and surface any change; this log line is the only
+            // adaptation-event observability and load-test tooling parses its shape.
             try
             {
+                int oldRpm = _limiter.GetCurrentLimit(_serviceName, endpointKey);
                 _limiter.RecordResponse(_serviceName, endpointKey, response);
+                int newRpm = _limiter.GetCurrentLimit(_serviceName, endpointKey);
+
+                if (newRpm != oldRpm)
+                {
+                    _logger?.LogInformation(
+                        "{Service}/{Endpoint} rate-limit budget adapted {OldRpm} -> {NewRpm} (status {Status})",
+                        _serviceName, endpointKey, oldRpm, newRpm, (int)response.StatusCode);
+                }
+
+                if (Interlocked.Increment(ref _responseCount) % 100 == 0)
+                {
+                    var stats = _limiter.GetServiceStats(_serviceName);
+                    _logger?.LogInformation(
+                        "{Service} limiter stats: {Requests} req, {Errors} err, {RateLimitHits} 429s",
+                        _serviceName, stats.TotalRequests, stats.TotalErrors, stats.TotalRateLimitHits);
+                }
             }
             catch (ObjectDisposedException) { /* limiter shut down mid-request */ }
 
@@ -102,7 +123,7 @@ namespace Lidarr.Plugin.Common.Services.Http
             if (response.StatusCode == HttpStatusCode.TooManyRequests
                 && response.Headers.RetryAfter is { } retryAfter)
             {
-                TimeSpan delay = ResolveRetryAfter(retryAfter);
+                TimeSpan delay = RateLimitHeaderUtilities.ResolveRetryAfter(retryAfter);
                 // Clamp: a far-future Retry-After Date (or an enormous Delta) yields a delay beyond
                 // Task.Delay's ~49.7-day limit, which throws ArgumentOutOfRangeException — and that
                 // escapes the OperationCanceledException-only catch below, turning a 429 into a hard
@@ -125,38 +146,6 @@ namespace Lidarr.Plugin.Common.Services.Http
             }
 
             return response;
-        }
-
-        /// <summary>
-        /// Derives a stable endpoint key from the request URI.
-        /// Uses <c>host:firstPathSegment</c> to balance specificity vs. cardinality:
-        /// <list type="bullet">
-        /// <item><description><c>api.tidal.com/v1/search</c> → <c>api.tidal.com:v1</c></description></item>
-        /// <item><description><c>sp-ap-eu.audio.tidal.com/.../seg.mp4</c> → <c>sp-ap-eu.audio.tidal.com:</c></description></item>
-        /// </list>
-        /// </summary>
-        private static string BuildEndpointKey(HttpRequestMessage request)
-        {
-            Uri? uri = request.RequestUri;
-            if (uri is null) return "unknown";
-            string host = uri.Host;
-            string firstSeg = uri.Segments.Length > 1 ? uri.Segments[1].TrimEnd('/') : string.Empty;
-            return $"{host}:{firstSeg}";
-        }
-
-        /// <summary>
-        /// Resolves the effective delay from a <c>Retry-After</c> header value.
-        /// Precedence: Delta → Date → Zero.
-        /// </summary>
-        private static TimeSpan ResolveRetryAfter(System.Net.Http.Headers.RetryConditionHeaderValue retryAfter)
-        {
-            if (retryAfter.Delta is { } delta) return delta;
-            if (retryAfter.Date is { } date)
-            {
-                TimeSpan untilDate = date - DateTimeOffset.UtcNow;
-                return untilDate > TimeSpan.Zero ? untilDate : TimeSpan.Zero;
-            }
-            return TimeSpan.Zero;
         }
     }
 }

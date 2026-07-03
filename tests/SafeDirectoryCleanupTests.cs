@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using Lidarr.Plugin.Common.Services.Download;
 using Xunit;
@@ -149,6 +150,85 @@ namespace Lidarr.Plugin.Common.Tests
             {
                 try { Directory.Delete(root, true); } catch { }
                 try { Directory.Delete(outside, true); } catch { }
+            }
+        }
+
+        // LOOP-006: a reparse point NESTED inside an in-bounds tree must not be traversed by the recursive
+        // delete. .NET's Directory.Delete(recursive: true) removes a reparse point as a link and does NOT recurse
+        // into its target. This verifies that runtime guarantee — the basis for R2-05 scoping the explicit check
+        // to the top-level target — and gates it: if a platform ever followed the nested link, the outside file
+        // would vanish and this test would fail.
+        [Fact]
+        public void DeleteTreeUnderRoot_NestedReparsePoint_IsNotTraversed_TargetSurvives()
+        {
+            var container = NewTempRoot();   // the configured root
+            var outside = NewTempRoot();     // an unrelated tree the nested link points at
+            try
+            {
+                var outsideFile = Path.Combine(outside, "precious.flac");
+                File.WriteAllText(outsideFile, "do not delete");
+
+                var tree = Path.Combine(container, "artist", "album");   // strict descendant of container
+                Directory.CreateDirectory(tree);
+                File.WriteAllText(Path.Combine(tree, "01.flac"), "x");
+
+                var nestedLink = Path.Combine(tree, "linkToOutside");
+                if (!TryCreateDirReparsePoint(nestedLink, outside))
+                {
+                    // Couldn't create a reparse point in this environment — nothing to verify.
+                    return;
+                }
+
+                // Must NOT throw a raw filesystem exception (a nested junction makes .NET's recursive delete throw
+                // on Windows; DeleteTreeUnderRoot now reports a partial cleanup instead).
+                var result = SafeDirectoryCleanup.DeleteTreeUnderRoot(tree, container);
+
+                // The security invariant on every platform: the reparse point is never followed into its target.
+                Assert.True(File.Exists(outsideFile),
+                    "the NESTED reparse point must NOT be followed into its target — the outside file must survive");
+                Assert.True(Directory.Exists(outside), "the outside directory must survive");
+                _ = result; // Deleted (Linux: link removed, tree gone) or Refused (Windows: junction blocked) — both safe.
+            }
+            finally
+            {
+                try { Directory.Delete(container, true); } catch { }
+                try { Directory.Delete(outside, true); } catch { }
+            }
+        }
+
+        /// <summary>Creates a directory reparse point at <paramref name="link"/> pointing at <paramref name="target"/>.
+        /// Uses a junction on Windows (<c>mklink /J</c> — no elevation required) and a symbolic link elsewhere.
+        /// Returns false if neither could be created (privilege / platform).</summary>
+        private static bool TryCreateDirReparsePoint(string link, string target)
+        {
+            if (OperatingSystem.IsWindows())
+            {
+                try
+                {
+                    var psi = new System.Diagnostics.ProcessStartInfo("cmd.exe", $"/c mklink /J \"{link}\" \"{target}\"")
+                    {
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true,
+                    };
+                    using var p = System.Diagnostics.Process.Start(psi);
+                    p?.WaitForExit(5000);
+                }
+                catch { return false; }
+
+                return Directory.Exists(link)
+                       && (new DirectoryInfo(link).Attributes & FileAttributes.ReparsePoint) != 0;
+            }
+
+            try
+            {
+                Directory.CreateSymbolicLink(link, target);
+                return true;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+            {
+                return false;
             }
         }
     }

@@ -116,7 +116,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
                     JsonSerializer.Serialize(fs, entry, _json);
                 }
                 File.Move(tmp, path, overwrite: true);
-                EnforceLimits();
+                EnforceLimits(path);
             }
             catch (IOException ex)
             {
@@ -192,7 +192,7 @@ namespace Lidarr.Plugin.Common.Services.Caching
             catch { }
         }
 
-        private void EnforceLimits()
+        private void EnforceLimits(string? protectedPath = null)
         {
             try
             {
@@ -209,10 +209,31 @@ namespace Lidarr.Plugin.Common.Services.Caching
                 // conjunct permanently false whenever entries were the active constraint — deleting
                 // EVERY entry (wiping the whole cache) instead of trimming to the cap.
                 var remaining = files.Count;
-                foreach (var fi in files.OrderBy(f => f.LastWriteTimeUtc))
+                var protectedFullPath = protectedPath is null ? null : Path.GetFullPath(protectedPath);
+                FileInfo? protectedFile = null;
+                bool WithinLimits() => (remaining <= _maxEntries || _maxEntries <= 0) && (total <= _maxBytes || _maxBytes <= 0);
+                bool IsProtected(FileInfo fi) => protectedFullPath is not null
+                    && string.Equals(Path.GetFullPath(fi.FullName), protectedFullPath, StringComparison.OrdinalIgnoreCase);
+                void Delete(FileInfo fi)
                 {
                     try { File.Delete(fi.FullName); total -= fi.Length; remaining--; } catch { }
-                    if ((remaining <= _maxEntries || _maxEntries <= 0) && (total <= _maxBytes || _maxBytes <= 0)) break;
+                }
+
+                foreach (var fi in files.OrderBy(f => f.LastWriteTimeUtc))
+                {
+                    if (IsProtected(fi))
+                    {
+                        protectedFile = fi;
+                        continue;
+                    }
+
+                    Delete(fi);
+                    if (WithinLimits()) break;
+                }
+
+                if (protectedFile is not null && !WithinLimits())
+                {
+                    Delete(protectedFile);
                 }
             }
             catch { }
@@ -236,4 +257,3 @@ namespace Lidarr.Plugin.Common.Services.Caching
         }
     }
 }
-

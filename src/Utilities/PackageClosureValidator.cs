@@ -9,39 +9,45 @@ using System.Linq;
 namespace Lidarr.Plugin.Common.Utilities
 {
     /// <summary>
-    /// Validates plugin package contents to ensure they don't include host assemblies.
-    /// This prevents accidental bundling of Lidarr framework assemblies that should be
-    /// provided by the host runtime.
+    /// Validates plugin package contents to ensure they don't include host assemblies or
+    /// dependencies that should be merged/internalized into the main plugin DLL.
     /// </summary>
     /// <remarks>
     /// This pattern is extracted from Tidalarr's packaging-closure workflow and generalized
-    /// for use across all plugins. Including host assemblies in plugins can cause version
-    /// conflicts and runtime failures.
+    /// for use across all plugins. Including host assemblies or merged sidecars in plugins
+    /// can cause version conflicts and runtime failures.
     /// </remarks>
     public static class PackageClosureValidator
     {
         /// <summary>
-        /// Default list of Lidarr host assemblies that should never be included in plugins.
+        /// Default list of package sidecars that should never be included in merged plugin packages.
         /// </summary>
         public static readonly IReadOnlyList<string> DefaultDisallowedAssemblies = new[]
         {
+            "FluentValidation.dll",
+            "NLog.dll",
+            "System.Text.Json.dll",
+            "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+            "Microsoft.Extensions.Logging.Abstractions.dll",
+            "Microsoft.Extensions.Logging.dll",
+            "Microsoft.Extensions.Configuration.dll",
+            "Microsoft.Extensions.Caching.Memory.dll",
+            "Microsoft.Extensions.Http.dll",
+            "Lidarr.Plugin.Abstractions.dll",
+            "Lidarr.Plugin.Common.dll",
             "Lidarr.Core.dll",
             "Lidarr.Common.dll",
-            "Lidarr.Host.dll",
             "Lidarr.Http.dll",
             "Lidarr.Api.V1.dll",
+            "Lidarr.Host.dll",
             "NzbDrone.Core.dll",
             "NzbDrone.Common.dll"
         };
 
         /// <summary>
-        /// Default list of assemblies that are allowed even if they match the Lidarr.* pattern.
+        /// Default list of assemblies that are allowed even if they match a disallowed pattern.
         /// </summary>
-        public static readonly IReadOnlyList<string> DefaultAllowedAssemblies = new[]
-        {
-            "Lidarr.Plugin.Common.dll",
-            "Lidarr.Plugin.Abstractions.dll"
-        };
+        public static readonly IReadOnlyList<string> DefaultAllowedAssemblies = Array.Empty<string>();
 
         /// <summary>
         /// Validates a plugin package ZIP file to ensure it doesn't contain host assemblies.
@@ -98,7 +104,12 @@ namespace Lidarr.Plugin.Common.Utilities
                         continue;
                     }
 
-                    // Check for Lidarr.* pattern (except allowed ones)
+                    if (IsMainPluginAssembly(assemblyName))
+                    {
+                        continue;
+                    }
+
+                    // Check for Lidarr.* host pattern after exempting the main plugin assembly.
                     if (assemblyName.StartsWith("Lidarr.", StringComparison.OrdinalIgnoreCase) &&
                         !allowed.Contains(assemblyName))
                     {
@@ -162,7 +173,12 @@ namespace Lidarr.Plugin.Common.Utilities
                     continue;
                 }
 
-                // Check for Lidarr.* pattern (except allowed ones)
+                if (IsMainPluginAssembly(assemblyName))
+                {
+                    continue;
+                }
+
+                // Check for Lidarr.* host pattern after exempting the main plugin assembly.
                 if (assemblyName.StartsWith("Lidarr.", StringComparison.OrdinalIgnoreCase) &&
                     !allowed.Contains(assemblyName))
                 {
@@ -175,6 +191,13 @@ namespace Lidarr.Plugin.Common.Utilities
                 assembliesFound: assembliesInDirectory,
                 violations: violations,
                 packagePath: directoryPath);
+        }
+
+        private static bool IsMainPluginAssembly(string assemblyName)
+        {
+            return assemblyName.StartsWith("Lidarr.Plugin.", StringComparison.OrdinalIgnoreCase) &&
+                !assemblyName.Equals("Lidarr.Plugin.Common.dll", StringComparison.OrdinalIgnoreCase) &&
+                !assemblyName.Equals("Lidarr.Plugin.Abstractions.dll", StringComparison.OrdinalIgnoreCase);
         }
     }
 

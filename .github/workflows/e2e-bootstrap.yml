@@ -10,7 +10,7 @@ on:
       lidarr_tag:
         description: Lidarr Docker tag (plugins branch)
         required: true
-        default: pr-plugins-3.1.1.4884
+        default: nightly-3.1.3.4970
       plugins:
         description: Comma-separated plugins to test
         required: true
@@ -437,7 +437,7 @@ jobs:
 
           # Verify checksum integrity for cached builds
           CACHE_HIT="${{ steps['cache-host-override'].outputs.cache-hit }}"
-          if [ "$CACHE_HIT" = "true" ] && [ -f "$CHECKSUM_PATH" ]; then    
+          if [ "$CACHE_HIT" = "true" ] && [ -f "$CHECKSUM_PATH" ]; then
             EXPECTED_SHA256=$(cat "$CHECKSUM_PATH" | tr -d '[:space:]')
             if [ "$DLL_SHA256" != "$EXPECTED_SHA256" ]; then
               echo "::error::Cache integrity check FAILED!"
@@ -922,7 +922,7 @@ jobs:
               echo ""
               echo "REMEDIATION:"
               echo "  1. Enable host override (use_host_override=always) to mount patched Lidarr.Common.dll"
-              echo "  2. Pin to a known-working Lidarr tag (e.g., pr-plugins-3.1.1.4884)"
+              echo "  2. Pin to a known-working Lidarr tag (e.g., nightly-3.1.3.4970)"
               echo "  3. Check if this Lidarr version requires plugin manager API installation"
               echo ""
             fi
@@ -1456,7 +1456,7 @@ jobs:
                 [void]$sb.AppendLine("")
                 [void]$sb.AppendLine("**Remediation:**")
                 [void]$sb.AppendLine("1. Enable host override: ``use_host_override=always``")
-                [void]$sb.AppendLine("2. Pin to known-working tag: ``pr-plugins-3.1.1.4884``")
+                [void]$sb.AppendLine("2. Pin to known-working tag: ``nightly-3.1.3.4970``")
                 [void]$sb.AppendLine("3. Check if plugins need API-based installation")
               }
 
@@ -1894,7 +1894,7 @@ jobs:
             ContainerName = $env:CONTAINER_NAME
             DiagnosticsPath = "./.e2e-canary/diagnostics"
           }
-          
+
           # Canary semantics: if the canary is running credentialed gates, missing creds should FAIL (not SKIP).
           # This is non-blocking for the workflow overall (continue-on-error), but prevents “green-by-skip” canary runs.
           if ($gate -ne "configure") {

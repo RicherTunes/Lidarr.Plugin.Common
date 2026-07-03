@@ -15,6 +15,46 @@ public class MetadataFieldSanitizerTests
         Assert.Equal(expected, MetadataFieldSanitizer.SanitizeVersion(input));
     }
 
+    private static bool HasUnpairedSurrogate(string s)
+    {
+        for (var i = 0; i < s.Length; i++)
+        {
+            if (char.IsHighSurrogate(s[i]))
+            {
+                if (i + 1 >= s.Length || !char.IsLowSurrogate(s[i + 1])) return true;
+                i++;
+            }
+            else if (char.IsLowSurrogate(s[i]))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    [Fact]
+    public void SanitizeMetadataField_DoesNotSplitSurrogatePair_AtMaxLengthBoundary()
+    {
+        // "ab😀cd" = a,b (2) + 😀 surrogate pair (2) + c,d (2) = 6 UTF-16 units.
+        // A naive Substring(0, 3) cuts INSIDE the emoji's surrogate pair, leaving a lone
+        // high surrogate — an invalid string that mojibakes on the wire / in the DB.
+        var result = MetadataFieldSanitizer.SanitizeMetadataField("ab😀cd", maxLength: 3);
+
+        Assert.False(HasUnpairedSurrogate(result), $"truncation left an unpaired surrogate: '{result}'");
+        Assert.Equal("ab", result); // grapheme-safe truncation drops the boundary-spanning emoji
+    }
+
+    [Fact]
+    public void SanitizeMetadataField_KeepsWholeAstralChar_WhenItFitsTheBudget()
+    {
+        // 😀 fits within maxLength=4 (a,b + the 2-unit pair), so it must be retained intact.
+        var result = MetadataFieldSanitizer.SanitizeMetadataField("ab😀cd", maxLength: 4);
+
+        Assert.False(HasUnpairedSurrogate(result));
+        Assert.Equal("ab😀", result);
+    }
+
     [Theory]
     [InlineData("Deluxe Edition", "Deluxe Edition")]
     [InlineData("Remastered 2009", "Remastered 2009")]

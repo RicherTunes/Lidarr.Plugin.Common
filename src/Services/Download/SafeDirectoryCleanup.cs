@@ -92,8 +92,20 @@ namespace Lidarr.Plugin.Common.Services.Download
                 return DirectoryCleanupResult.Refused("path attributes could not be read.");
             }
 
-            Directory.Delete(canonicalPath, recursive: true);
-            return DirectoryCleanupResult.Removed;
+            // LOOP-006: a reparse point NESTED inside the tree makes .NET's recursive delete throw
+            // (UnauthorizedAccessException on Windows) — but it does NOT follow the link into its target, so no
+            // out-of-tree data is lost (verified on .NET 8 for junctions/symlinks). Report a partial cleanup
+            // rather than throwing, so failed-download cleanup degrades gracefully instead of surfacing a raw
+            // filesystem exception. A locked/permission-denied entry takes the same path.
+            try
+            {
+                Directory.Delete(canonicalPath, recursive: true);
+                return DirectoryCleanupResult.Removed;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return DirectoryCleanupResult.Refused($"tree could not be fully deleted (nested reparse point or locked entry): {ex.Message}");
+            }
         }
 
         private static StringComparison PathComparison =>

@@ -3,10 +3,17 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <LidarrPluginCommonVersion>1.18.0-dev</LidarrPluginCommonVersion>
   </PropertyGroup>
+  <ItemGroup Condition="'$(LidarrPluginCommonRepoRoot)' != ''">
+    <ProjectReference Include="$(LidarrPluginCommonRepoRoot)/src/Lidarr.Plugin.Common.csproj" />
+    <ProjectReference Include="$(LidarrPluginCommonRepoRoot)/src/Abstractions/Lidarr.Plugin.Abstractions.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(LidarrPluginCommonRepoRoot)' == ''">
+    <PackageReference Include="Lidarr.Plugin.Common" Version="$(LidarrPluginCommonVersion)" />
+    <PackageReference Include="Lidarr.Plugin.Abstractions" Version="$(LidarrPluginCommonVersion)" />
+  </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="../../../src/Lidarr.Plugin.Common.csproj" />
-    <ProjectReference Include="../../../src/Abstractions/Lidarr.Plugin.Abstractions.csproj" />
+    <None Include="../../plugin.json" Link="plugin.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>
-

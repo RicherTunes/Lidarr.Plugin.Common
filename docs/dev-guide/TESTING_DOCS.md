@@ -56,7 +56,7 @@ pwsh ./tools/DocTools/lint-docs.ps1
 Requires Node.js (for `npx`) and, if you want local link checking, the `lychee` CLI on your PATH.
 
 ## Public API baselines
-When CI reports RS0016/RS0026 warnings, update the relevant baseline files as described in [Public API baselines](../reference/PUBLIC_API_BASELINES.md).
+The `PublicApiAnalyzers` baseline gate (RS0016/RS0026) was removed 2026-06; public-surface changes are now tracked through review and `CHANGELOG.md`. See [Public API baselines](../reference/PUBLIC_API_BASELINES.md) for the rationale.
 
 ## CI workflow
 See [`../dev-guide/CI.md`](CI.md) for the GitHub Actions workflow that orchestrates these checks. A docs-only change must pass the same gates as code changes.

@@ -49,6 +49,7 @@ namespace Lidarr.Plugin.Common.Utilities
 
         private static readonly ConcurrentDictionary<string, GateState> Gates = new();
         private static readonly ConcurrentDictionary<string, GateState> AggregateGates = new();
+        private static readonly object LifecycleLock = new();
         private static readonly TimeSpan IdleTtl = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(5);
         // Nullable so Shutdown() can null it via Interlocked.Exchange (readonly would prevent that).
@@ -60,36 +61,66 @@ namespace Lidarr.Plugin.Common.Utilities
             _sweeper = new Timer(_ => Sweep(), null, SweepInterval, SweepInterval);
         }
 
+        // Test/diagnostic observability: whether the idle-gate sweeper timer is currently armed.
+        internal static bool IsSweeperActive => Volatile.Read(ref _sweeper) is not null;
+
+        // Re-arm the sweeper lazily after a prior Shutdown() nulled it. Lidarr keeps the host
+        // process alive across plugin reloads, so without this the first unload's Shutdown()
+        // would kill idle-gate eviction permanently and every subsequently-added gate (each
+        // owning a SemaphoreSlim) would accumulate forever.
+        private static void EnsureSweeper()
+        {
+            if (Volatile.Read(ref _sweeper) is not null)
+            {
+                return;
+            }
+
+            var timer = new Timer(_ => Sweep(), null, SweepInterval, SweepInterval);
+            // Only install if still null; if another thread won the race, dispose ours.
+            if (Interlocked.CompareExchange(ref _sweeper, timer, null) is not null)
+            {
+                timer.Dispose();
+            }
+        }
+
         public static SemaphoreSlim Get(string? host, int requestedLimit)
         {
             host ??= "__unknown__";
-            var gate = Gates.AddOrUpdate(
-                host,
-                _ => new GateState(requestedLimit),
-                (_, existing) =>
-                {
-                    existing.EnsureLimit(requestedLimit);
-                    return existing;
-                });
+            lock (LifecycleLock)
+            {
+                EnsureSweeper();
+                var gate = Gates.AddOrUpdate(
+                    host,
+                    _ => new GateState(requestedLimit),
+                    (_, existing) =>
+                    {
+                        existing.EnsureLimit(requestedLimit);
+                        return existing;
+                    });
 
-            gate.Touch();
-            return gate.Semaphore;
+                gate.Touch();
+                return gate.Semaphore;
+            }
         }
 
         public static SemaphoreSlim GetAggregate(string? host, int requestedLimit)
         {
             host ??= "__unknown__";
-            var gate = AggregateGates.AddOrUpdate(
-                host,
-                _ => new GateState(requestedLimit),
-                (_, existing) =>
-                {
-                    existing.EnsureLimit(requestedLimit);
-                    return existing;
-                });
+            lock (LifecycleLock)
+            {
+                EnsureSweeper();
+                var gate = AggregateGates.AddOrUpdate(
+                    host,
+                    _ => new GateState(requestedLimit),
+                    (_, existing) =>
+                    {
+                        existing.EnsureLimit(requestedLimit);
+                        return existing;
+                    });
 
-            gate.Touch();
-            return gate.Semaphore;
+                gate.Touch();
+                return gate.Semaphore;
+            }
         }
 
         public static bool TryGetState(string? host, out (SemaphoreSlim Semaphore, int Limit) state)
@@ -132,25 +163,28 @@ namespace Lidarr.Plugin.Common.Utilities
         /// </summary>
         public static void Shutdown()
         {
-            // Swap the sweeper with a sentinel null so concurrent Sweep() calls are no-ops.
-            var sweeper = Interlocked.Exchange(ref _sweeper, null);
-            sweeper?.Dispose();
-
-            // Drain Gates
-            foreach (var kv in Gates)
+            lock (LifecycleLock)
             {
-                if (Gates.TryRemove(kv.Key, out var removed))
+                // Swap the sweeper with a sentinel null so concurrent Sweep() calls are no-ops.
+                var sweeper = Interlocked.Exchange(ref _sweeper, null);
+                sweeper?.Dispose();
+
+                // Drain Gates
+                foreach (var kv in Gates)
                 {
-                    try { removed.Semaphore.Dispose(); } catch { /* best-effort */ }
+                    if (Gates.TryRemove(kv.Key, out var removed))
+                    {
+                        try { removed.Semaphore.Dispose(); } catch { /* best-effort */ }
+                    }
                 }
-            }
 
-            // Drain AggregateGates
-            foreach (var kv in AggregateGates)
-            {
-                if (AggregateGates.TryRemove(kv.Key, out var removed))
+                // Drain AggregateGates
+                foreach (var kv in AggregateGates)
                 {
-                    try { removed.Semaphore.Dispose(); } catch { /* best-effort */ }
+                    if (AggregateGates.TryRemove(kv.Key, out var removed))
+                    {
+                        try { removed.Semaphore.Dispose(); } catch { /* best-effort */ }
+                    }
                 }
             }
         }
