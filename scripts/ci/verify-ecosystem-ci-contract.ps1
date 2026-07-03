@@ -125,6 +125,25 @@ function Get-WorkflowNonCommentContent {
     }) -join "`n")
 }
 
+function Get-WorkflowJobMap {
+    param(
+        [string]$Content
+    )
+
+    $jobs = @{}
+    $jobsMatch = [regex]::Match($Content, '(?ms)^jobs:\s*\r?\n(?<body>.*)$')
+    if (-not $jobsMatch.Success) {
+        return $jobs
+    }
+
+    $jobMatches = [regex]::Matches($jobsMatch.Groups['body'].Value, '(?ms)^  (?<name>[A-Za-z0-9_-]+):\s*\r?\n(?<body>.*?)(?=^  [A-Za-z0-9_-]+:\s*$|\z)')
+    foreach ($job in $jobMatches) {
+        $jobs[$job.Groups['name'].Value] = $job.Groups['body'].Value
+    }
+
+    return $jobs
+}
+
 $SharedPluginLintRunnerOwnedScriptPattern = '(ecosystem-parity-lint|lint-date-parsing|lint-sync-over-async|lint-test-traits|lint-doc-script-refs|lint-gitea-secret-scan)\.ps1'
 $SharedPluginLintRunnerSkipSwitchPattern = '-(SkipDateParsing|SkipSyncOverAsync|SkipTestTraits|SkipEcosystemParity|SkipVersionContract|SkipPluginContractTests|SkipDocRefs|SkipGiteaSecretScan)\b'
 
@@ -464,25 +483,53 @@ function Test-GitHubCiMirrorContract {
         }
     }
 
-    $jobsMatch = [regex]::Match($content, '(?ms)^jobs:\s*\r?\n(?<body>.*)$')
-    if (-not $jobsMatch.Success) {
+    $jobs = Get-WorkflowJobMap -Content $content
+    if ($jobs.Count -eq 0 -and $content -notmatch '(?m)^jobs:\s*$') {
         return [PSCustomObject]@{
             Ok     = $false
             Reason = ".github/workflows/ci.yml is missing a jobs block"
         }
     }
 
-    $jobMatches = [regex]::Matches($jobsMatch.Groups['body'].Value, '(?ms)^  (?<name>[A-Za-z0-9_-]+):\s*\r?\n(?<body>.*?)(?=^  [A-Za-z0-9_-]+:\s*$|\z)')
-    if ($jobMatches.Count -eq 0) {
+    if ($jobs.Count -eq 0) {
         return [PSCustomObject]@{
             Ok     = $false
             Reason = ".github/workflows/ci.yml has no parseable jobs"
         }
     }
 
-    $jobs = @{}
-    foreach ($job in $jobMatches) {
-        $jobs[$job.Groups['name'].Value] = $job.Groups['body'].Value
+    $giteaCi = Join-Path $PluginDir '.gitea/workflows/ci.yml'
+    if (-not (Test-Path -LiteralPath $giteaCi)) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = '.gitea/workflows/ci.yml not found; cannot compare GitHub mirror job shape'
+        }
+    }
+
+    $giteaJobs = Get-WorkflowJobMap -Content (Get-WorkflowNonCommentContent -Path $giteaCi)
+    if ($giteaJobs.Count -eq 0) {
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = '.gitea/workflows/ci.yml has no parseable jobs; cannot compare GitHub mirror job shape'
+        }
+    }
+
+    $githubJobNames = @($jobs.Keys | Sort-Object)
+    $giteaJobNames = @($giteaJobs.Keys | Sort-Object)
+    $missingMirrorJobs = @($giteaJobNames | Where-Object { $_ -notin $githubJobNames })
+    $extraMirrorJobs = @($githubJobNames | Where-Object { $_ -notin $giteaJobNames })
+    if ($missingMirrorJobs.Count -gt 0 -or $extraMirrorJobs.Count -gt 0) {
+        $details = [System.Collections.Generic.List[string]]::new()
+        if ($missingMirrorJobs.Count -gt 0) {
+            $details.Add("missing GitHub job(s) present in Gitea: $($missingMirrorJobs -join ', ')") | Out-Null
+        }
+        if ($extraMirrorJobs.Count -gt 0) {
+            $details.Add("extra GitHub job(s) absent from Gitea: $($extraMirrorJobs -join ', ')") | Out-Null
+        }
+        return [PSCustomObject]@{
+            Ok     = $false
+            Reason = ".github/workflows/ci.yml job shape does not match .gitea/workflows/ci.yml ($($details -join '; '))"
+        }
     }
 
     $requiredJobs = @('secret-scan', 'lint', 'verify')
@@ -496,9 +543,9 @@ function Test-GitHubCiMirrorContract {
 
     $unguardedJobs = [System.Collections.Generic.List[string]]::new()
     $githubOnlyGuardPattern = "(?m)^\s{4}if:\s*\$\{\{\s*github\.server_url\s*==\s*'https://github\.com'\s*\}\}\s*$"
-    foreach ($job in $jobMatches) {
-        if ($job.Groups['body'].Value -notmatch $githubOnlyGuardPattern) {
-            $unguardedJobs.Add($job.Groups['name'].Value) | Out-Null
+    foreach ($jobName in $jobs.Keys) {
+        if ($jobs[$jobName] -notmatch $githubOnlyGuardPattern) {
+            $unguardedJobs.Add($jobName) | Out-Null
         }
     }
 
