@@ -199,5 +199,73 @@ namespace Lidarr.Plugin.Common.Tests.Services.Streaming.Manifests
             Assert.Null(manifest.Pssh);
             Assert.Null(manifest.KeyId);
         }
+
+        // --- Bandwidth-ceiling overload (additive; the 2-arg entry point is unchanged) ---
+
+        // Three renditions at 128 / 900 / 3000 kbps sharing one AdaptationSet SegmentTemplate whose media +
+        // init tokens carry $RepresentationID$ — so the chosen representation is unambiguous from the URL.
+        private const string ThreeRepMpd =
+            "<MPD xmlns=\"urn:mpeg:dash:schema:mpd:2011\" mediaPresentationDuration=\"PT4S\"><Period><AdaptationSet contentType=\"audio\">" +
+            "<BaseURL>https://cdn.example.com/x/</BaseURL>" +
+            "<SegmentTemplate media=\"seg_$RepresentationID$_$Number$.m4s\" initialization=\"init_$RepresentationID$.mp4\" duration=\"1\" timescale=\"1\" startNumber=\"1\"/>" +
+            "<Representation id=\"lo\" bandwidth=\"128000\" codecs=\"mp4a.40.2\"/>" +
+            "<Representation id=\"mid\" bandwidth=\"900000\" codecs=\"flac\"/>" +
+            "<Representation id=\"hi\" bandwidth=\"3000000\" codecs=\"flac\"/>" +
+            "</AdaptationSet></Period></MPD>";
+
+        private const string ThreeRepBase = "https://cdn.example.com/x/m.mpd";
+
+        [Fact]
+        public void Parse_WithBandwidthCeiling_SelectsSegmentsFromRepresentationAtOrBelowCeiling()
+        {
+            // Ceiling 900_000 => the "mid" (900 kbps) rendition drives the segment list, not the 3000 kbps "hi".
+            StreamManifest manifest = _parser.Parse(ThreeRepMpd, ThreeRepBase, bandwidthCeilingBps: 900_000);
+
+            // PT4S / 1s = 4 media segments + 1 init = 5.
+            Assert.Equal(5, manifest.Segments.Count);
+            Assert.Equal("https://cdn.example.com/x/init_mid.mp4", manifest.Segments[0].Url);
+            Assert.All(manifest.Segments.Skip(1), s => Assert.Contains("seg_mid_", s.Url));
+            Assert.DoesNotContain(manifest.Segments, s => s.Url.Contains("_hi_") || s.Url.Contains("init_hi"));
+            Assert.Equal("flac", manifest.Codec);
+
+            // The full rendition set is still surfaced regardless of the ceiling.
+            Assert.Equal(new[] { 128000, 900000, 3000000 }, manifest.Variants.Select(v => v.BandwidthBps).ToArray());
+        }
+
+        [Fact]
+        public void Parse_NoCeiling_SelectsHighestBandwidth_AndMatchesTwoArgOverload()
+        {
+            // 2-arg entry point (interface contract) — unchanged: segments come from the highest ("hi") rendition.
+            StreamManifest twoArg = _parser.Parse(ThreeRepMpd, ThreeRepBase);
+            // 3-arg with a null ceiling must be byte-for-byte equivalent to the 2-arg call (full back-compat).
+            StreamManifest nullCeiling = _parser.Parse(ThreeRepMpd, ThreeRepBase, bandwidthCeilingBps: null);
+
+            Assert.Equal("https://cdn.example.com/x/init_hi.mp4", twoArg.Segments[0].Url);
+            Assert.All(twoArg.Segments.Skip(1), s => Assert.Contains("seg_hi_", s.Url));
+            Assert.Equal(
+                twoArg.Segments.Select(s => s.Url).ToArray(),
+                nullCeiling.Segments.Select(s => s.Url).ToArray());
+        }
+
+        [Fact]
+        public void Parse_WithCeilingBelowEveryRendition_FallsBackToLowest_NeverNothing()
+        {
+            // Every rendition exceeds a 50 kbps ceiling: QualitySelector's "always pick something playable"
+            // contract means the lowest ("lo", 128 kbps) is used — the ceiling must never drop ALL renditions.
+            StreamManifest manifest = _parser.Parse(ThreeRepMpd, ThreeRepBase, bandwidthCeilingBps: 50_000);
+
+            Assert.Equal(5, manifest.Segments.Count);
+            Assert.Equal("https://cdn.example.com/x/init_lo.mp4", manifest.Segments[0].Url);
+            Assert.All(manifest.Segments.Skip(1), s => Assert.Contains("seg_lo_", s.Url));
+            Assert.Equal("mp4a.40.2", manifest.Codec);
+        }
+
+        [Fact]
+        public void Parse_WithCeilingExactlyOnARendition_IncludesIt()
+        {
+            // The ceiling is INCLUSIVE: a rendition exactly at the ceiling qualifies (picks "mid", not "lo").
+            StreamManifest manifest = _parser.Parse(ThreeRepMpd, ThreeRepBase, bandwidthCeilingBps: 900_000);
+            Assert.Contains("init_mid.mp4", manifest.Segments[0].Url);
+        }
     }
 }
