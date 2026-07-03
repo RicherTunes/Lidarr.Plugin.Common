@@ -15,6 +15,8 @@
 .PARAMETER DiffBase
     Git ref to diff against for PR mode. When set, only new occurrences in the diff are flagged.
     Unset = strict mode (all non-allowlisted matches fail).
+.PARAMETER SourceDir
+    Optional source directory relative to Path or absolute. Defaults to src/, then *.Plugin/.
 .PARAMETER SelfTest
     Run built-in fixture tests to validate detection and allowlist logic.
 #>
@@ -25,6 +27,7 @@ param(
     [string]$Mode = 'interactive',
     [string]$AllowlistPath,
     [string]$DiffBase,
+    [string]$SourceDir,
     [switch]$SelfTest
 )
 
@@ -77,7 +80,7 @@ function Get-DiffAddedLines {
     param([string]$Base, [string]$RepoRoot)
     $added = @{}
     try {
-        $diff = git -C $RepoRoot diff "$Base...HEAD" --unified=0 --diff-filter=ACMR -- 'src/**/*.cs' 2>$null
+        $diff = git -C $RepoRoot diff "$Base...HEAD" --unified=0 --diff-filter=ACMR -- '*.cs' 2>$null
         $currentFile = $null
         foreach ($line in $diff) {
             if ($line -match '^\+\+\+ b/(.+)$') {
@@ -97,19 +100,53 @@ function Get-DiffAddedLines {
 
 # ─── Core Scan ───────────────────────────────────────────────────────────────
 
+function Resolve-SourceDir {
+    param(
+        [string]$RepoRoot,
+        [string]$Explicit
+    )
+
+    if ($Explicit) {
+        $candidate = if ([System.IO.Path]::IsPathRooted($Explicit)) {
+            $Explicit
+        } else {
+            Join-Path $RepoRoot $Explicit
+        }
+
+        if (Test-Path -LiteralPath $candidate) {
+            return (Resolve-Path -LiteralPath $candidate).Path
+        }
+
+        throw "SourceDir not found: $candidate"
+    }
+
+    $src = Join-Path $RepoRoot 'src'
+    if (Test-Path -LiteralPath $src) {
+        return $src
+    }
+
+    $pluginDir = Get-ChildItem -Path $RepoRoot -Directory -Filter '*.Plugin' -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($pluginDir) {
+        return $pluginDir.FullName
+    }
+
+    return $null
+}
+
 function Invoke-Scan {
     param(
         [string]$RepoRoot,
         [array]$Allowlist,
-        [hashtable]$DiffLines
+        [hashtable]$DiffLines,
+        [string]$SourceDir
     )
 
     $violations = @()
     $suppressed = @()
-    $srcPath = Join-Path $RepoRoot 'src'
+    $srcPath = Resolve-SourceDir -RepoRoot $RepoRoot -Explicit $SourceDir
 
-    if (-not (Test-Path $srcPath)) {
-        Write-Warning "No src/ directory found at $RepoRoot"
+    if (-not $srcPath -or -not (Test-Path -LiteralPath $srcPath)) {
+        Write-Warning "No source directory found at $RepoRoot (tried 'src' and '*.Plugin')"
         return @{ Violations = $violations; Suppressed = $suppressed }
     }
 
@@ -143,6 +180,37 @@ function Invoke-Scan {
                             $isNew = $true
                             break
                         }
+                    }
+                    if (-not $isNew) { continue }
+                }
+
+                $violations += $match
+            }
+        }
+
+        # Multiline-split form: `.GetAwaiter()` and `.GetResult()` separated by a newline. The per-line
+        # scan above misses these, yet they are exactly as deadlock-prone (an auto-formatter can split a
+        # long line, or an author can split it to evade the gate). Scan the raw file content; the mandatory
+        # `\r?\n` makes this match ONLY the split form, so it never double-counts the single-line matches.
+        $raw = Get-Content -LiteralPath $file.FullName -Raw
+        if ($raw) {
+            foreach ($m in ([regex]'\.GetAwaiter\(\)\s*\r?\n\s*\.GetResult\(\)').Matches($raw)) {
+                $lineNum = ([regex]::Matches($raw.Substring(0, $m.Index), "`n")).Count + 1
+                $match = @{
+                    File = $relativePath
+                    Line = $lineNum
+                    Content = '.GetAwaiter() / .GetResult() split across lines'
+                }
+
+                $allowEntry = Test-Allowlisted $relativePath $Allowlist
+                if ($allowEntry) { $suppressed += $match; continue }
+
+                if ($DiffLines -and $DiffLines.Count -gt 0) {
+                    $diffFile = $relativePath -replace '\\', '/'
+                    if (-not $DiffLines.ContainsKey($diffFile)) { continue }
+                    $isNew = $false
+                    foreach ($addedLine in $DiffLines[$diffFile]) {
+                        if ($addedLine -match '\.GetAwaiter\(\)' -or $addedLine -match '\.GetResult\(\)') { $isNew = $true; break }
                     }
                     if (-not $isNew) { continue }
                 }
@@ -216,17 +284,42 @@ function Invoke-SelfTest {
             $failed++
         }
 
-        # Test 5: Multiline .GetAwaiter()\n.GetResult() (less common but valid)
+        # Test 5: Multiline .GetAwaiter()\n.GetResult() MUST be flagged — an auto-formatter (or an
+        # author evading the gate) can split the call across lines, and it is exactly as deadlock-prone
+        # as the single-line form. The gate now scans full file content, not just per-line.
         Remove-Item $testFile2 -Force
         $multiFile = Join-Path $srcDir 'Multi.cs'
         Set-Content $multiFile "var x = task.GetAwaiter()`n    .GetResult();"
         $result = Invoke-Scan -RepoRoot $tempDir -Allowlist @() -DiffLines @{}
-        # This is a single-line regex so multiline won't match — that's OK, it catches the common pattern
-        if ($result.Violations.Count -eq 0) {
-            Write-Host '  [PASS] Test 5: Multiline split not flagged (by design — single-line scan)' -ForegroundColor Green
+        if ($result.Violations.Count -ge 1) {
+            Write-Host '  [PASS] Test 5: Multiline split .GetAwaiter()/.GetResult() is flagged' -ForegroundColor Green
             $passed++
         } else {
-            Write-Host "  [FAIL] Test 5: Expected 0 violations for multiline split" -ForegroundColor Red
+            Write-Host "  [FAIL] Test 5: Expected the multiline split to be flagged, got 0 violations" -ForegroundColor Red
+            $failed++
+        }
+
+        # Test 5b: an allowlisted file must still suppress the multiline split form.
+        $result5b = Invoke-Scan -RepoRoot $tempDir -Allowlist @(@{ file = 'src/Multi.cs'; reason = 'test'; category = 'A' }) -DiffLines @{}
+        if ($result5b.Violations.Count -eq 0 -and $result5b.Suppressed.Count -ge 1) {
+            Write-Host '  [PASS] Test 5b: Multiline split respects the allowlist' -ForegroundColor Green
+            $passed++
+        } else {
+            Write-Host "  [FAIL] Test 5b: allowlisted multiline split should be suppressed, not flagged" -ForegroundColor Red
+            $failed++
+        }
+
+        # Test 6: Brainarr-style source layout (*.Plugin/) is scanned when src/ is absent.
+        Remove-Item $srcDir -Recurse -Force
+        $pluginDir = Join-Path $tempDir 'Brainarr.Plugin'
+        New-Item -ItemType Directory -Path $pluginDir -Force | Out-Null
+        Set-Content (Join-Path $pluginDir 'Bad.cs') 'var x = task.GetAwaiter().GetResult();'
+        $result = Invoke-Scan -RepoRoot $tempDir -Allowlist @() -DiffLines @{}
+        if ($result.Violations.Count -eq 1) {
+            Write-Host '  [PASS] Test 6: *.Plugin source layout is scanned' -ForegroundColor Green
+            $passed++
+        } else {
+            Write-Host "  [FAIL] Test 6: Expected 1 violation in *.Plugin layout, got $($result.Violations.Count)" -ForegroundColor Red
             $failed++
         }
 
@@ -258,7 +351,7 @@ if ($DiffBase) {
     $diffLines = Get-DiffAddedLines -Base $DiffBase -RepoRoot $resolvedPath
 }
 
-$result = Invoke-Scan -RepoRoot $resolvedPath -Allowlist $allowlist -DiffLines $diffLines
+$result = Invoke-Scan -RepoRoot $resolvedPath -Allowlist $allowlist -DiffLines $diffLines -SourceDir $SourceDir
 
 # ─── Output ──────────────────────────────────────────────────────────────────
 

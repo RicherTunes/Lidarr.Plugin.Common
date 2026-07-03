@@ -21,5 +21,14 @@ internal static class Diagnostics
         defaultSeverity: DiagnosticSeverity.Info,
         isEnabledByDefault: true,
         description: "Prefer the overload that accepts ResiliencePolicy or the builder path.");
+
+    public static readonly DiagnosticDescriptor AvoidHtmlEncodeOnSearchTerm = new(
+        id: "LPC0003",
+        title: "Do not HTML-encode a search term",
+        messageFormat: "Do not call '{0}' on a search term; pass the RAW sanitized query (SearchQuerySanitizer) and let the request builder percent-encode it",
+        category: "Usage",
+        defaultSeverity: DiagnosticSeverity.Warning,
+        isEnabledByDefault: true,
+        description: "HTML-encoding a search term ships the literal entity to the API (\"Beyoncé\" -> \"Beyonc&#233;\") and loses matches. Search terms must reach the wire as raw text; only the request builder percent-encodes them. Use SearchQuerySanitizer + ToQueryParameterValue, never WebUtility/HttpUtility.HtmlEncode or Sanitize.DisplayText.");
 }
 

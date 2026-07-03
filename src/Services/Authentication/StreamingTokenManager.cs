@@ -81,14 +81,22 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 throw new InvalidOperationException("No valid session is available and no fallback credentials were provided.");
             }
 
-            await RefreshSessionAsync(fallbackCredentials).ConfigureAwait(false);
+            // onlyIfStillInvalid: concurrent callers that queued on the refresh gate while the
+            // first one authenticated must reuse its session, not re-authenticate serially
+            // (token stampede against the upstream provider).
+            await RefreshSessionCoreAsync(fallbackCredentials, onlyIfStillInvalid: true).ConfigureAwait(false);
             return _currentSession!;
         }
 
         /// <summary>
-        /// Forces a session refresh using the supplied credentials.
+        /// Forces a session refresh using the supplied credentials. Always re-authenticates,
+        /// even when the current session is still clock-valid — callers use this after the
+        /// provider rejects a token server-side.
         /// </summary>
-        public async Task RefreshSessionAsync(TCredentials credentials)
+        public Task RefreshSessionAsync(TCredentials credentials)
+            => RefreshSessionCoreAsync(credentials, onlyIfStillInvalid: false);
+
+        private async Task RefreshSessionCoreAsync(TCredentials credentials, bool onlyIfStillInvalid)
         {
             if (credentials == null)
             {
@@ -100,6 +108,17 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             await _refreshSemaphore.WaitAsync().ConfigureAwait(false);
             try
             {
+                if (onlyIfStillInvalid)
+                {
+                    lock (_tokenLock)
+                    {
+                        if (IsSessionValidUnsafe())
+                        {
+                            return;
+                        }
+                    }
+                }
+
                 _isRefreshing = true;
                 _refreshAttempts++;
 
@@ -172,12 +191,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// </summary>
         public void ClearSession()
         {
-            lock (_tokenLock)
-            {
-                _currentSession = null;
-                _sessionExpiryTime = DateTime.MinValue;
-                _refreshAttempts = 0;
-            }
+            ClearInMemorySession();
 
             // Fire-and-forget: best-effort clear of persisted state.
             // Callers needing to await persistence should use ClearSessionAsync().
@@ -194,12 +208,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// </summary>
         public async Task ClearSessionAsync(CancellationToken cancellationToken = default)
         {
-            lock (_tokenLock)
-            {
-                _currentSession = null;
-                _sessionExpiryTime = DateTime.MinValue;
-                _refreshAttempts = 0;
-            }
+            ClearInMemorySession();
 
             // Always clear any persisted session when a store is configured, even if no
             // in-memory session has been loaded yet. This ensures an explicit clear truly
@@ -329,7 +338,7 @@ namespace Lidarr.Plugin.Common.Services.Authentication
 
                 try
                 {
-                    await RefreshSessionAsync(credentials).ConfigureAwait(false);
+                    await RefreshSessionCoreAsync(credentials, onlyIfStillInvalid: true).ConfigureAwait(false);
                     _logger.LogDebug("Proactive token refresh completed successfully");
                 }
                 catch (Exception refreshEx)
@@ -418,13 +427,23 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             }
         }
 
+        private void ClearInMemorySession()
+        {
+            lock (_tokenLock)
+            {
+                _currentSession = null;
+                _sessionExpiryTime = DateTime.MinValue;
+                _refreshAttempts = 0;
+            }
+        }
+
         public void Dispose()
         {
             try
             {
                 _refreshTimer.Dispose();
                 _refreshSemaphore.Dispose();
-                ClearSession();
+                ClearInMemorySession();
             }
             catch (Exception ex)
             {

@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 ---
 name: release-automation
 description: Automate library releases, NuGet package publishing, and API versioning. Use when working with NuGet releases, package versioning, API compatibility checks, library releases, or semantic versioning for shared libraries. Handles package publishing, version management, and breaking change detection.
@@ -18,10 +19,9 @@ Automate and streamline releases for the Lidarr.Plugin.Common shared library, en
 - Handle pre-release packages (alpha, beta, rc)
 
 ### 2. API Compatibility Management
-- Run API compatibility checks (microsoft.dotnet.apicompat.tool)
-- Detect breaking changes in public API
-- Generate public API surface files
-- Validate API changes against previous versions
+- Detect breaking changes in the public API during code review (no automated gate)
+- Record public-surface changes in CHANGELOG.md
+- Verify consumer plugins compile against the re-pinned Common submodule (the de-facto compatibility check)
 - Document breaking changes
 
 ### 3. Semantic Versioning for Libraries
@@ -53,7 +53,7 @@ Automate and streamline releases for the Lidarr.Plugin.Common shared library, en
   - Lidarr.Plugin.Abstractions (host-owned ABI)
   - Lidarr.Plugin.Common (main library)
 - **Publishing**: NuGet.org + GitHub Packages
-- **API Validation**: microsoft.dotnet.apicompat.tool
+- **API Validation**: review + CHANGELOG.md; consumer plugins compile Common from a pinned source submodule, so breaking changes fail at plugin compile on re-pin (no analyzer/apicompat gate — removed 2026-06, see docs/reference/PUBLIC_API_BASELINES.md)
 - **Existing Workflows**: release.yml, publish-packages.yml
 
 ### Key Files to Maintain
@@ -63,7 +63,6 @@ Automate and streamline releases for the Lidarr.Plugin.Common shared library, en
 - `src/Abstractions/Lidarr.Plugin.Abstractions.csproj` - Abstractions version
 - `CHANGELOG.md` - Version history with breaking changes
 - `Directory.Build.props` - Shared build properties
-- `.config/PublicAPI/*/*.txt` - Public API surface files
 
 ## Best Practices
 
@@ -88,8 +87,7 @@ Automate and streamline releases for the Lidarr.Plugin.Common shared library, en
 ### Release Process
 1. **Pre-release Validation**:
    - All tests pass on all TFMs
-   - API compatibility check passes
-   - Public API files updated
+   - Public-surface changes reviewed and recorded in CHANGELOG.md
    - CHANGELOG updated with breaking changes
    - Documentation current
    - Examples updated
@@ -99,7 +97,6 @@ Automate and streamline releases for the Lidarr.Plugin.Common shared library, en
    - Trigger release workflow
    - Build for all TFMs
    - Pack NuGet packages
-   - Run API compatibility check
    - Publish to NuGet.org
    - Publish to GitHub Packages
    - Create GitHub release
@@ -135,13 +132,6 @@ See [MIGRATION.md](docs/migration/v1.1-to-v1.2.md) for detailed upgrade instruct
 # Enhancement opportunity: Create version bump script
 ```
 
-### API Surface Update
-```bash
-# Generate public API files
-dotnet tool restore
-dotnet public-api-generator src/Lidarr.Plugin.Common.csproj -o .config/PublicAPI/net8.0/PublicAPI.Shipped.txt
-```
-
 ### Package Build
 ```bash
 # Pack packages locally
@@ -156,31 +146,26 @@ dotnet nuget push dist/*.nupkg --source https://api.nuget.org/v3/index.json --ap
 ```
 
 ### API Compatibility Check
-```bash
-# Check against previous version
-dotnet tool restore
-dotnet apicompat --package Lidarr.Plugin.Common --package-version 1.1.5 --assembly dist/Lidarr.Plugin.Common.dll
-```
+There is no automated tool. To check compatibility, re-pin the Common submodule in a consumer
+plugin (e.g. Qobuzarr or Tidalarr) and build it — removals and signature changes fail the
+plugin compile. Record every public-surface change in CHANGELOG.md.
 
 ## Workflow Integration
 
 ### GitHub Actions Release Flow
 1. **Trigger**: Tag push `v*.*.*` or manual dispatch
 2. **Build**: Restore and build for net8.0
-3. **Validate**: Public API drift checks for net8.0
-4. **Test**: Run test suite (with timing flake filters on tags)
-5. **Pack**: Create NuGet packages with ContinuousIntegrationBuild=true
-6. **API Check**: Validate compatibility with previous release
-7. **Publish**: Push to NuGet.org (if NUGET_API_KEY present)
-8. **Release**: Create GitHub release
+3. **Test**: Run test suite (with timing flake filters on tags)
+4. **Pack**: Create NuGet packages with ContinuousIntegrationBuild=true
+5. **Publish**: Push to NuGet.org (if NUGET_API_KEY present)
+6. **Release**: Create GitHub release
 
 ### Release Checklist
 - [ ] Update version in both csproj files
-- [ ] Update PublicAPI.Shipped.txt for breaking changes
-- [ ] Update CHANGELOG.md with categorized changes
+- [ ] Update CHANGELOG.md with categorized changes (including all public-surface changes)
 - [ ] Update documentation for new features
 - [ ] Run tests locally: `dotnet test`
-- [ ] Check API compatibility: `dotnet apicompat`
+- [ ] Check API compatibility: re-pin the Common submodule in a consumer plugin and build it
 - [ ] Commit changes: `git commit -m "chore: release v1.2.0"`
 - [ ] Create tag: `git tag -a v1.2.0 -m "Release 1.2.0"`
 - [ ] Push tag: `git push origin v1.2.0`
@@ -191,13 +176,12 @@ dotnet apicompat --package Lidarr.Plugin.Common --package-version 1.1.5 --assemb
 
 ## Troubleshooting
 
-### API Compatibility Check Fails
-**Problem**: New version breaks API contract
+### Consumer Plugin Fails to Compile After Re-pin
+**Problem**: New version breaks the API contract (plugin build errors on submodule re-pin)
 **Solution**:
-1. Review PublicAPI.Unshipped.txt changes
+1. Identify the removed/changed public types or members from the compile errors
 2. If breaking: Bump MAJOR version
-3. If new APIs: Move to PublicAPI.Shipped.txt
-4. Document breaking changes in CHANGELOG
+3. Document breaking changes in CHANGELOG and docs/migration/BREAKING_CHANGES.md
 
 ### NuGet Publish Fails
 **Problem**: Package already exists or API key invalid
@@ -241,26 +225,24 @@ dotnet apicompat --package Lidarr.Plugin.Common --package-version 1.1.5 --assemb
 ### Example 1: Release New Version with Breaking Changes
 **User**: "Release version 1.3.0 with the new authentication API"
 **Action**:
-1. Verify breaking changes documented in CHANGELOG.md
-2. Update PublicAPI.Shipped.txt
-3. Update both csproj versions to 1.3.0
-4. Create migration guide in docs/migration/
+1. Verify breaking changes documented in CHANGELOG.md and docs/migration/BREAKING_CHANGES.md
+2. Update both csproj versions to 1.3.0
+3. Create migration guide in docs/migration/
+4. Re-pin the Common submodule in a consumer plugin and build to confirm the expected breakage surface
 5. Commit and create tag v1.3.0
 6. Monitor release workflow
-7. Verify API compatibility check runs (may fail if breaking, but documented)
-8. Publish to NuGet.org
-9. Create GitHub release with migration notes
-10. Update consuming projects
+7. Publish to NuGet.org
+8. Create GitHub release with migration notes
+9. Update consuming projects
 
 ### Example 2: Fix API Compatibility Error
-**User**: "The API compatibility check is failing"
+**User**: "A consumer plugin no longer compiles after re-pinning Common"
 **Action**:
-1. Review PublicAPI.Unshipped.txt for changes
+1. Review the plugin compile errors to identify the changed public surface
 2. Identify breaking vs. non-breaking changes
 3. If breaking: Ensure MAJOR version bump
-4. Move new APIs from Unshipped to Shipped
-5. Update CHANGELOG.md with breaking change details
-6. Re-run release workflow
+4. Update CHANGELOG.md with breaking change details and add a row to docs/migration/BREAKING_CHANGES.md
+5. Re-run release workflow
 
 ### Example 3: Publish Pre-release Package
 **User**: "Publish a beta package for testing"

@@ -3,7 +3,7 @@
   Validates that Lidarr Docker image tags are consistent across a repository.
 
 .DESCRIPTION
-  Scans workflow files, scripts, and docs for pr-plugins-* Docker tags and
+  Scans workflow files, scripts, and docs for Lidarr Docker tags and
   verifies they all reference the same version. Optionally checks against
   a pinned digest file (.github/lidarr_digest.txt).
 
@@ -19,7 +19,7 @@
   'ci' for ::error:: annotations and exit 1; 'report' for human output.
 
 .EXAMPLE
-  ./lint-docker-tag-source.ps1 -RepoPath . -ExpectedTag "pr-plugins-3.1.2.4913" -Mode ci
+  ./lint-docker-tag-source.ps1 -RepoPath . -ExpectedTag "nightly-3.1.3.4970" -Mode ci
 #>
 [CmdletBinding()]
 param(
@@ -37,8 +37,8 @@ $root = Resolve-Path -LiteralPath $RepoPath
 # Extensions to scan
 $extensions = @("*.yml", "*.yaml", "*.ps1", "*.sh", "*.cs", "*.csproj", "*.md")
 
-# Regex for pr-plugins-N.N.N.N tags
-$tagPattern = 'pr-plugins-(\d+\.\d+\.\d+\.\d+)'
+# Regex for pinned hotio/lidarr versioned tags.
+$tagPattern = '(?:pr-plugins|nightly|testing|release)-(\d+\.\d+\.\d+\.\d+)'
 
 $hits = @()
 
@@ -46,10 +46,12 @@ foreach ($ext in $extensions) {
     $files = Get-ChildItem -Path $root -Recurse -Filter $ext -File -ErrorAction SilentlyContinue |
         Where-Object {
             $rel = $_.FullName.Substring($root.Path.Length).TrimStart('\', '/')
-            # Exclude ext/ submodules, .worktrees/ (separate checkouts), CHANGELOG.md (historical)
+            # Exclude ext/ submodules, .worktrees/ (separate checkouts), and historical docs.
             -not ($rel -match '^ext[/\\]') -and
             -not ($rel -match '^\.worktrees[/\\]') -and
-            -not ($rel -match '(?:^|[/\\])CHANGELOG\.md$')
+            -not ($rel -match '(?:^|[/\\])CHANGELOG\.md$') -and
+            -not ($rel -match '^docs[/\\](archive|archived|superpowers)[/\\]') -and
+            -not ($rel -match '^docs[/\\]INVESTIGATION-')
         }
 
     foreach ($file in $files) {
@@ -82,7 +84,7 @@ foreach ($ext in $extensions) {
 }
 
 if ($hits.Count -eq 0) {
-    Write-Host "[OK] No pr-plugins-* tags found in repo-owned files."
+    Write-Host "[OK] No pinned Lidarr Docker tags found in repo-owned files."
     exit 0
 }
 

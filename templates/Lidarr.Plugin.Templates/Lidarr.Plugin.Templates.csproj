@@ -10,10 +10,14 @@
     <RepositoryUrl>https://github.com/RicherTunes/Lidarr.Plugin.Common</RepositoryUrl>
     <RepositoryType>git</RepositoryType>
     <NoBuild>true</NoBuild>
+    <IncludeBuildOutput>false</IncludeBuildOutput>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
   </PropertyGroup>
   <ItemGroup>
-    <None Include="../lidarr-plugin/**" Pack="true" PackagePath="content/" />
+    <None Include="../lidarr-plugin/**"
+          Exclude="../lidarr-plugin/**/bin/**;../lidarr-plugin/**/obj/**"
+          Pack="true"
+          PackagePath="content/" />
     <None Include="README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>
-

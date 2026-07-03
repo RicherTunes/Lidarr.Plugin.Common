@@ -3,8 +3,8 @@
 .SYNOPSIS
     Ecosystem parity lint — detects structural gaps in plugin repos against the canonical spec.
 .DESCRIPTION
-    Reads parity-spec.json and scans a plugin repo for missing files, incorrect global.json,
-    missing workflows, and other structural violations. Mirrors parity-lint.ps1 pattern.
+    Reads parity-spec.json and scans a plugin repo for missing files, missing Gitea CI,
+    incorrect global.json, and other structural violations. Mirrors parity-lint.ps1 pattern.
 .PARAMETER RepoPath
     Path to a single plugin repo to scan.
 .PARAMETER AllRepos
@@ -21,7 +21,8 @@ param(
     [string]$Mode = 'interactive',
     [ValidateSet('all', 'Structural', 'VersionContract')]
     [string]$Check = 'all',
-    [string]$CommonRoot
+    [string]$CommonRoot,
+    [string]$EmitMatrix
 )
 
 $ErrorActionPreference = 'Stop'
@@ -46,13 +47,14 @@ function Get-PluginRepos {
     param([string]$CommonRoot)
     $parent = Split-Path $CommonRoot -Parent
     $repos = @()
-    foreach ($name in @('qobuzarr', 'tidalarr', 'applemusicarr')) {
+    foreach ($name in @('amazonmusicarr', 'qobuzarr', 'tidalarr', 'applemusicarr', 'brainarr')) {
         $path = Join-Path $parent $name
         $capPath = Join-Path $parent ($name.Substring(0,1).ToUpper() + $name.Substring(1))
         if (Test-Path $path) { $repos += @{ Name = $name; Path = $path } }
         elseif (Test-Path $capPath) { $repos += @{ Name = $name; Path = $capPath } }
     }
-    return $repos
+    # Always return an array so callers can use .Count even with 0/1 matches.
+    return ,@($repos)
 }
 
 function Test-RequiredFiles {
@@ -105,17 +107,16 @@ function Test-RequiredDirectories {
 function Test-RequiredWorkflows {
     param([string]$RepoPath, [string]$RepoName)
     $violations = @()
-    $workflowDir = Join-Path $RepoPath '.github/workflows'
-    foreach ($req in $spec.requiredWorkflows) {
-        $wfPath = Join-Path $workflowDir $req.file
-        if (-not (Test-Path $wfPath)) {
-            $violations += [PSCustomObject]@{
-                Repo = $RepoName
-                Category = 'MissingWorkflow'
-                Path = ".github/workflows/$($req.file)"
-                Message = "Missing required workflow: $($req.file) ($($req.description))"
-                Severity = 'error'
-            }
+
+    $required = $spec.requiredCiWorkflow
+    $workflowPath = Join-Path $RepoPath $required.path
+    if (-not (Test-Path $workflowPath)) {
+        $violations += [PSCustomObject]@{
+            Repo = $RepoName
+            Category = 'MissingWorkflow'
+            Path = $required.path
+            Message = "Missing required CI workflow: $($required.path) ($($required.description))"
+            Severity = 'error'
         }
     }
     return $violations
@@ -251,19 +252,18 @@ function Test-DirectoryPackagesProps {
 
 function Get-CanonicalCommonVersion {
     param([string]$CommonRootPath)
-    $csprojRel = $script:Spec.versionContract.commonVersionSource
-    $csprojAbs = Join-Path $CommonRootPath $csprojRel
-    if (-not (Test-Path $csprojAbs)) {
-        throw "Common csproj not found at $csprojAbs (versionContract.commonVersionSource)"
+    $sourceRel = $script:Spec.versionContract.commonVersionSource
+    $sourceAbs = Join-Path $CommonRootPath $sourceRel
+    if (-not (Test-Path $sourceAbs)) {
+        throw "Common version source not found at $sourceAbs (versionContract.commonVersionSource)"
     }
-    $content = Get-Content $csprojAbs -Raw
+    $content = Get-Content $sourceAbs -Raw
     if ($content -match '<Version>([^<]+)</Version>') {
         return $matches[1]
     }
-    # Wave 6D: <Version> moved to Directory.Build.props as the single source of truth
-    # for both Lidarr.Plugin.Common and Lidarr.Plugin.Abstractions. Fall back to reading
-    # the props file from the canonical Common root. Probing this way keeps the script
-    # forward-compatible for both layouts.
+
+    # Compatibility for older Common submodule pins whose parity spec still points
+    # at the csproj after the version moved to Directory.Build.props.
     $propsPath = Join-Path $CommonRootPath 'Directory.Build.props'
     if (Test-Path $propsPath) {
         $propsContent = Get-Content $propsPath -Raw
@@ -271,7 +271,8 @@ function Get-CanonicalCommonVersion {
             return $matches[1]
         }
     }
-    throw "Could not parse <Version> from $csprojAbs or fallback $propsPath"
+
+    throw "Could not parse <Version> from $sourceAbs or fallback $propsPath"
 }
 
 function Test-VersionContract {
@@ -316,7 +317,7 @@ function Test-VersionContract {
         if (-not $pluginCommonVer -or $pluginCommonVer -ne $CanonicalCommonVersion) {
             $violations += [PSCustomObject]@{
                 Repo = $RepoName; Category = 'VersionContract'; Path = $pjRel
-                Message = "plugin.json commonVersion is '$pluginCommonVer', expected canonical '$CanonicalCommonVersion' from Common csproj"
+                Message = "plugin.json commonVersion is '$pluginCommonVer', expected canonical '$CanonicalCommonVersion' from Common version source"
                 Severity = 'error'
             }
         }
@@ -475,14 +476,27 @@ if ($RepoPath) {
     }
 } else {
     Write-Host "Usage: ecosystem-parity-lint.ps1 [-RepoPath <path>] [-AllRepos] [-Mode ci|interactive]"
+    # In CI mode a missing scan target is a misconfigured invocation, not a pass —
+    # exiting 0 here would let a broken workflow step silently green-light merges.
+    if ($Mode -eq 'ci') { exit 2 }
     exit 0
 }
 
 $totalViolations = @()
+$matrixRepos = [ordered]@{}
 
 foreach ($repo in $reposToScan) {
     Write-Host "Scanning: $($repo.Name)" -ForegroundColor Cyan
     $violations = @(Find-AllViolations -RepoPath $repo.Path -RepoName $repo.Name -CheckScope $Check -CanonicalCommonVersion $script:CanonicalCommonVersion)
+
+    # Machine-readable matrix row for this repo (-EmitMatrix).
+    $repoErrors = @($violations | Where-Object { $_.Severity -eq 'error' })
+    $matrixRepos[$repo.Name] = [ordered]@{
+        status        = if ($repoErrors.Count -eq 0) { 'pass' } else { 'fail' }
+        errorCount    = $repoErrors.Count
+        warningCount  = @($violations | Where-Object { $_.Severity -ne 'error' }).Count
+        violations    = @($violations | ForEach-Object { [ordered]@{ category = $_.Category; path = $_.Path; message = $_.Message; severity = $_.Severity } })
+    }
 
     if ($violations.Count -eq 0) {
         Write-Host "  [OK] No violations" -ForegroundColor Green
@@ -508,6 +522,23 @@ foreach ($repo in $reposToScan) {
 }
 
 $totalErrors = @($totalViolations | Where-Object { $_.Severity -eq 'error' })
+
+# Machine-readable matrix artifact (-EmitMatrix <path>): one greppable JSON of every repo's parity
+# status + violations against the canonical spec. CI can diff/gate this; humans get a single source
+# of truth that never drifts from reality (it is generated, not hand-maintained).
+if ($EmitMatrix) {
+    $matrix = [ordered]@{
+        schema                 = 'ecosystem-parity-matrix/v1'
+        canonicalCommonVersion = $script:CanonicalCommonVersion
+        checkScope             = $Check
+        repoCount              = $reposToScan.Count
+        errorCount             = $totalErrors.Count
+        allPass                = ($totalErrors.Count -eq 0)
+        repos                  = $matrixRepos
+    }
+    $matrix | ConvertTo-Json -Depth 8 | Set-Content -Path $EmitMatrix -Encoding utf8
+    Write-Host "Matrix written: $EmitMatrix" -ForegroundColor Cyan
+}
 
 Write-Host "=================================================" -ForegroundColor Cyan
 Write-Host "Summary: Repos=$($reposToScan.Count), Errors=$($totalErrors.Count), Total=$($totalViolations.Count)" -ForegroundColor Cyan

@@ -1,7 +1,7 @@
 # Host Version Upgrade Playbook
 
 ## When to use
-When upgrading the Lidarr host target (e.g., pr-plugins-3.1.2.4913 → next version).
+When upgrading the Lidarr host target (e.g., nightly-3.1.3.4970 -> next version).
 
 ## Steps
 

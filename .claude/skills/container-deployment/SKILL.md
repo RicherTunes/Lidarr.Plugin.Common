@@ -1,3 +1,4 @@
+﻿<!-- docval:ignore-workflow-refs -->
 ---
 name: container-deployment
 description: Container strategies for .NET libraries and test environments. Use when working with Docker test environments, container-based integration testing, or NuGet package container builds. Not typically for production deployment of libraries.
@@ -75,7 +76,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       lidarr:
-        image: ghcr.io/hotio/lidarr:pr-plugins-2.14.2.4786
+        image: ghcr.io/hotio/lidarr:nightly-3.1.3.4970
         ports:
           - 8686:8686
         env:

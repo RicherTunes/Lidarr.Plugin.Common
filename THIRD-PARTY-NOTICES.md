@@ -27,7 +27,6 @@ Note: Versions reflect the current repository state and may change over time. So
 - Build/Tooling (PrivateAssets or development only)
   - FluentValidation 9.5.4
   - Microsoft.SourceLink.GitHub 1.1.1 (PrivateAssets)
-  - Microsoft.CodeAnalysis.PublicApiAnalyzers 3.3.4 (PrivateAssets)
   - Microsoft.DotNet.PackageValidation 1.0.0-preview.7.21379.12 (PrivateAssets)
   - System.CommandLine 2.0.0-beta4.22272.1 (optional CLI dev/testing)
   - Newtonsoft.Json 13.0.4 (optional CLI dev/testing)

@@ -1,5 +1,7 @@
 # KPI Definitions
 
+<!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
+
 Canonical definitions for all Key Performance Indicators tracked across the plugin ecosystem. Each KPI includes its formula, measurement method, acceptable range, and escalation criteria.
 
 This document is the **single source of truth** for KPI methodology. Phase-specific targets may tighten these ranges (e.g., Phase 18 requires flake rate < 0.5% vs the baseline < 1%).

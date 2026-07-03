@@ -78,7 +78,7 @@ docker run -d `
     -e PUID=1000 `
     -e PGID=1000 `
     -e TZ=UTC `
-    "ghcr.io/hotio/lidarr:pr-plugins-3.1.1.4884"
+    "ghcr.io/hotio/lidarr:nightly-3.1.3.4970"
 
 # Wait for startup
 Write-Host "Waiting for Lidarr to start..." -ForegroundColor Yellow

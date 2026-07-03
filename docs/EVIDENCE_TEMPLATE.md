@@ -1,5 +1,7 @@
 # Phase Gate Evidence Template
 
+<!-- docval:ignore-script-refs: references plugin-side / proposed scripts, not Common tooling -->
+
 Every phase completion must produce structured evidence artifacts. This template defines the required format so that any AI agent or human reviewer can verify phase gates without ambiguity.
 
 See also: [KPI_DEFINITIONS.md](KPI_DEFINITIONS.md) for measurement formulas and targets.

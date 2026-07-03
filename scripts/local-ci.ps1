@@ -16,13 +16,13 @@
       CommonPath, LidarrDockerVersion, ExpectedContentsFile
     Optional keys:
       SolutionFile, BuildFlags, TestProjects, PackageParams,
-      WarningBudget, WarningBudgetEnforce
+      WarningBudget, WarningBudgetEnforce, RequireHermeticTests, RequireDeterministicTests
 
 .PARAMETER SkipExtract
     Reuse previously extracted host assemblies (fast rerun).
 
 .PARAMETER SkipTests
-    Skip hermetic E2E tests (build + package + closure only).
+    Skip deterministic test sweep (build + package + closure only).
 
 .PARAMETER NoRestore
     Skip dotnet restore (fast iteration after first run).
@@ -54,6 +54,11 @@ $script:TotalStopwatch = [System.Diagnostics.Stopwatch]::StartNew()
 $script:BuildWarningCount = 0
 $script:TestBuildWarningCount = 0
 $script:TestRunWarningCount = 0
+$script:DotnetNoServerArgs = @('--disable-build-servers')
+$script:SerializedMsbuildArgs = @('-m:1', '-p:BuildInParallel=false', '-p:UseSharedCompilation=false')
+
+$env:DOTNET_CLI_DISABLE_BUILD_SERVERS = '1'
+$env:MSBUILDDISABLENODEREUSE = '1'
 
 function Write-Stage {
     param([string]$Name, [string]$Status, [string]$Detail = '', [int]$Seconds = 0)
@@ -161,6 +166,7 @@ $testProjects   = $Config['TestProjects']
 $packageParams  = $Config['PackageParams']
 $warningBudget  = if ($Config.ContainsKey('WarningBudget') -and $Config.WarningBudget -ne $null -and "$($Config.WarningBudget)".Trim()) { [int]$Config.WarningBudget } else { $null }
 $warningBudgetEnforce = [bool]$Config['WarningBudgetEnforce']
+$requireDeterministicTests = [bool]($Config['RequireDeterministicTests'] -or $Config['RequireHermeticTests'])
 
 # Validate Common submodule
 if (-not (Test-Path -LiteralPath $commonPath)) {
@@ -172,6 +178,7 @@ if (-not (Test-Path -LiteralPath $commonPath)) {
 # Validate tools exist and resolve to absolute paths (Import-Module requires absolute)
 $pluginPackModule = Join-Path $commonPath 'tools/PluginPack.psm1'
 $genExpectedScript = Join-Path $commonPath 'scripts/generate-expected-contents.ps1'
+$testTraitPolicyModule = Join-Path $commonPath 'scripts/lib/test-trait-policy.psm1'
 if (-not (Test-Path -LiteralPath $pluginPackModule)) {
     Write-Host "PREFLIGHT FAIL: PluginPack.psm1 not found at: $pluginPackModule" -ForegroundColor Red
     exit 1
@@ -180,8 +187,16 @@ if (-not (Test-Path -LiteralPath $genExpectedScript)) {
     Write-Host "PREFLIGHT FAIL: generate-expected-contents.ps1 not found at: $genExpectedScript" -ForegroundColor Red
     exit 1
 }
+if (-not (Test-Path -LiteralPath $testTraitPolicyModule)) {
+    Write-Host "PREFLIGHT FAIL: test-trait-policy.psm1 not found at: $testTraitPolicyModule" -ForegroundColor Red
+    exit 1
+}
 $pluginPackModule = (Resolve-Path -LiteralPath $pluginPackModule).Path
 $genExpectedScript = (Resolve-Path -LiteralPath $genExpectedScript).Path
+$testTraitPolicyModule = (Resolve-Path -LiteralPath $testTraitPolicyModule).Path
+
+Import-Module $testTraitPolicyModule -Force
+$deterministicTestFilter = Get-LocalCiDeterministicFilter
 
 # Check .NET SDK
 Write-Host "Checking .NET SDK..."
@@ -340,7 +355,7 @@ $buildOk = Invoke-Stage -Name 'BUILD' -Number "$currentStage/5" -Required -Actio
     # PackageReferences (e.g., FluentValidation with SkipHostBridge) resolve correctly.
     if (-not $NoRestore) {
         $restoreTarget = $pluginCsproj
-        $restoreArgs = @($restoreTarget)
+        $restoreArgs = @($restoreTarget) + $script:DotnetNoServerArgs + $script:SerializedMsbuildArgs
         if ($buildFlags) {
             $resolvedFlags = $buildFlags | ForEach-Object {
                 $_ -replace '\{HOST_PATH\}', $hostPathAbsolute
@@ -355,7 +370,7 @@ $buildOk = Invoke-Stage -Name 'BUILD' -Number "$currentStage/5" -Required -Actio
     }
 
     # Build with repo-specific flags
-    $buildArgs = @($pluginCsproj, '-c', $Configuration, '--no-restore')
+    $buildArgs = @($pluginCsproj, '-c', $Configuration, '--no-restore') + $script:DotnetNoServerArgs + $script:SerializedMsbuildArgs
 
     if ($buildFlags) {
         $resolvedFlags = $buildFlags | ForEach-Object {
@@ -407,7 +422,7 @@ if (-not $buildOk) {
             Manifest       = $manifestPath
             Framework      = 'net8.0'
             Configuration  = $Configuration
-            ExtraBuildArgs = $resolvedBuildFlags
+            ExtraBuildArgs = $script:DotnetNoServerArgs + $script:SerializedMsbuildArgs + $resolvedBuildFlags
         }
 
         # Merge extra packaging params from config
@@ -467,18 +482,21 @@ if (-not $zipPath) {
     } | Out-Null
 }
 
-# ── Stage 5: HERMETIC E2E ──────────────────────────────────────────────
+# ── Stage 5: DETERMINISTIC TESTS ───────────────────────────────────────
 
 $currentStage++
 
 if ($SkipTests) {
-    $script:StageResults["[$currentStage/5] HERMETIC E2E"] = @{
+    $script:StageResults["[$currentStage/5] DETERMINISTIC TESTS"] = @{
         Status = 'SKIP'; Seconds = 0; Detail = 'Skipped (--SkipTests or upstream failure)'
     }
-    Write-Host "`n--- [$currentStage/5] HERMETIC E2E (skipped) ---" -ForegroundColor DarkGray
+    Write-Host "`n--- [$currentStage/5] DETERMINISTIC TESTS (skipped) ---" -ForegroundColor DarkGray
 } else {
-    $e2eOk = Invoke-Stage -Name 'HERMETIC E2E' -Number "$currentStage/5" -Action {
+    $e2eOk = Invoke-Stage -Name 'DETERMINISTIC TESTS' -Number "$currentStage/5" -Action {
         if (-not $testProjects -or $testProjects.Count -eq 0) {
+            if ($requireDeterministicTests) {
+                throw "No test projects configured while RequireDeterministicTests is enabled"
+            }
             return "No test projects configured"
         }
 
@@ -489,11 +507,20 @@ if ($SkipTests) {
         $totalFailed = 0
         $totalSkipped = 0
 
+        # Expose the package zip built in the PACKAGE stage so Category=Packaging
+        # tests (PluginPackagingPolicyTests) validate the freshly-built zip instead of
+        # throwing "package not found". The shared TestKit's PackagingTestPaths reads
+        # PLUGIN_PACKAGE_PATH first (testkit/Packaging/PackagingTestPaths.cs).
+        if ($script:zipPath -and (Test-Path -LiteralPath $script:zipPath)) {
+            $env:PLUGIN_PACKAGE_PATH = (Resolve-Path -LiteralPath $script:zipPath).Path
+            Write-Host "  PLUGIN_PACKAGE_PATH = $env:PLUGIN_PACKAGE_PATH (Category=Packaging tests validate the built zip)"
+        }
+
         foreach ($testProj in $testProjects) {
             Write-Host "  Running tests in $testProj ..."
 
             # Restore test project with build flags (separate from plugin csproj restore)
-            $testRestoreArgs = @($testProj)
+            $testRestoreArgs = @($testProj) + $script:DotnetNoServerArgs + $script:SerializedMsbuildArgs
             $resolvedFlags = @()
             if ($buildFlags) {
                 $resolvedFlags = $buildFlags | ForEach-Object {
@@ -507,7 +534,7 @@ if ($SkipTests) {
             $trOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
 
             # Build test project (disable plugin packaging, exclude host bridge tests)
-            $testBuildArgs = @($testProj, '-c', $Configuration, '--no-restore')
+            $testBuildArgs = @($testProj, '-c', $Configuration, '--no-restore') + $script:DotnetNoServerArgs + $script:SerializedMsbuildArgs
             if ($resolvedFlags) { $testBuildArgs += $resolvedFlags }
             $testBuildArgs += '-p:PluginPackagingDisable=true'
             $testBuildArgs += '-p:ExcludeHostBridge=true'
@@ -518,13 +545,12 @@ if ($SkipTests) {
             if ($tbExit -ne 0) { throw "Test project build failed: $testProj" }
             $script:TestBuildWarningCount += Get-WarningCountFromOutput -OutputLines $tbOutput
 
-            # Run tests with hermetic E2E filter
+            # Run tests with the Common-owned deterministic CI filter.
             $resultsDir = Join-Path ([System.IO.Path]::GetTempPath()) "local-ci-trx-$([guid]::NewGuid().ToString('N').Substring(0,8))"
             New-Item -ItemType Directory -Path $resultsDir -Force | Out-Null
 
-            $testArgs = @(
-                $testProj, '--no-build', '-c', $Configuration,
-                '--filter', 'Area=E2E/Hermetic',
+            $testArgs = @($testProj, '--no-build', '-c', $Configuration) + $script:DotnetNoServerArgs + @(
+                '--filter', $deterministicTestFilter,
                 '--logger', 'trx',
                 '--results-directory', $resultsDir
             )
@@ -557,6 +583,11 @@ if ($SkipTests) {
 
         if ($totalFailed -gt 0) {
             throw "$totalFailed test(s) failed"
+        }
+
+        $totalMatched = $totalPassed + $totalFailed + $totalSkipped
+        if ($requireDeterministicTests -and $totalMatched -eq 0) {
+            throw "No tests matched deterministic CI filter $deterministicTestFilter"
         }
 
         $stageWarningTotal = $script:TestBuildWarningCount + $script:TestRunWarningCount

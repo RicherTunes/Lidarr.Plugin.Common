@@ -789,25 +789,73 @@ namespace Lidarr.Plugin.Common.Tests
             var customFolder = Path.Combine(Path.GetTempPath(), "cache-limits-test-" + Guid.NewGuid().ToString("N"));
             Environment.SetEnvironmentVariable("ARR_RESP_CACHE_MAX_ENTRIES", "5");
             var cache = new FileStreamingResponseCache(customFolder, TimeSpan.FromHours(1));
+            var baseWriteTime = DateTime.UtcNow.AddMinutes(-10);
 
             try
             {
-                // Act - Add more entries than max
+                // Act - Add more entries than max. Force monotonic file timestamps after each
+                // write so eviction order is deterministic across filesystems/CI hosts with coarse
+                // timestamp resolution.
                 for (int i = 0; i < 10; i++)
                 {
-                    cache.Set($"/api/item-{i}", new Dictionary<string, string>(),
+                    var endpoint = $"/api/item-{i}";
+                    var parameters = new Dictionary<string, string>();
+
+                    cache.Set(endpoint, parameters,
                         new CachedHttpResponse { Body = Encoding.UTF8.GetBytes($"data-{i}") });
+
+                    var key = cache.GenerateCacheKey(endpoint, parameters);
+                    var path = Path.Combine(customFolder, key[..2], key + ".json");
+                    File.SetLastWriteTimeUtc(path, baseWriteTime.AddSeconds(i));
                 }
 
-                // Assert - Should still work without throwing
-                var result = cache.Get<CachedHttpResponse>("/api/item-9", new Dictionary<string, string>());
-                Assert.NotNull(result);
+                // Assert - oldest entries were trimmed and the newest five remain.
+                for (int i = 0; i < 5; i++)
+                {
+                    Assert.Null(cache.Get<CachedHttpResponse>($"/api/item-{i}", new Dictionary<string, string>()));
+                }
+
+                for (int i = 5; i < 10; i++)
+                {
+                    var result = cache.Get<CachedHttpResponse>($"/api/item-{i}", new Dictionary<string, string>());
+                    Assert.NotNull(result);
+                    Assert.Equal($"data-{i}", Encoding.UTF8.GetString(result.Body));
+                }
             }
             finally
             {
                 Environment.SetEnvironmentVariable("ARR_RESP_CACHE_MAX_ENTRIES", null);
                 try { Directory.Delete(customFolder, recursive: true); }
                 catch { }
+            }
+        }
+
+        [Fact]
+        public void Set_WhenExistingEntryHasFutureTimestamp_DoesNotEvictNewlyWrittenEntry()
+        {
+            var folder = Path.Combine(Path.GetTempPath(), "cache-limit-current-write-" + Guid.NewGuid().ToString("N"));
+            Environment.SetEnvironmentVariable("ARR_RESP_CACHE_MAX_ENTRIES", "1");
+            try
+            {
+                var cache = new FileStreamingResponseCache(folder, TimeSpan.FromHours(1));
+                var parameters = new Dictionary<string, string>();
+
+                cache.Set("/api/old", parameters,
+                    new CachedHttpResponse { Body = Encoding.UTF8.GetBytes("old") });
+                var oldPath = CachePathFor(cache, folder, "/api/old", parameters);
+                File.SetLastWriteTimeUtc(oldPath, DateTime.UtcNow.AddMinutes(5));
+
+                cache.Set("/api/new", parameters,
+                    new CachedHttpResponse { Body = Encoding.UTF8.GetBytes("new") });
+
+                var result = cache.Get<CachedHttpResponse>("/api/new", parameters);
+                Assert.NotNull(result);
+                Assert.Equal("new", Encoding.UTF8.GetString(result.Body));
+            }
+            finally
+            {
+                Environment.SetEnvironmentVariable("ARR_RESP_CACHE_MAX_ENTRIES", null);
+                try { Directory.Delete(folder, recursive: true); } catch { }
             }
         }
 
@@ -933,6 +981,16 @@ namespace Lidarr.Plugin.Common.Tests
                     catch { }
                 }
             }
+        }
+
+        private static string CachePathFor(
+            FileStreamingResponseCache cache,
+            string root,
+            string endpoint,
+            Dictionary<string, string> parameters)
+        {
+            var key = cache.GenerateCacheKey(endpoint, parameters);
+            return Path.Combine(root, key[..2], key + ".json");
         }
 
         #endregion
