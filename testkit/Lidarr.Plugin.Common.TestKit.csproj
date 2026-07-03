@@ -59,7 +59,7 @@
          Bumping to 6.x would embed AssemblyRef=6.0.0.0 in merged plugin DLLs,
          causing FileNotFoundException when the host tries to resolve NLog at runtime.
          See docs/dev-guide/ALC_MULTIPLUGIN_FIX.md host-version table. -->
-    <PackageReference Include="NLog" Version="5.4.0" />
+    <PackageReference Include="NLog" Version="5.5.1" />
   </ItemGroup>
 
   <ItemGroup>
