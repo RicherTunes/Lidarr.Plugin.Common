@@ -5,7 +5,7 @@ This package provides a `dotnet new` template to bootstrap a Lidarr streaming pl
 Usage (once published):
 
   dotnet new install RicherTunes.Lidarr.Plugin.Templates
-  dotnet new lidarr-plugin -n MyServiceArr
+  dotnet new lidarr-plugin -n MyStreamingServiceArr
 
 Local install (from repo):
 

@@ -2,7 +2,7 @@
 # Billing-blocked as of 2026-07; validated to build once Actions billing is restored.
 # Keep in sync with the .gitea copy -- patch both in the same PR.
 #
-# Jobs mirrored : build-test, lint, secret-scan
+# Jobs mirrored : build-test, template, lint, secret-scan
 # Jobs omitted  : ecosystem-contract -- that job clones all 5 plugin repos from
 #                 192.168.2.59:3001/RicherTunes/* which is unreachable from GitHub runners.
 #                 It remains Gitea-only and continues to run there on push/dispatch/schedule.
@@ -47,6 +47,29 @@ jobs:
       # Matches the Build step's -m:1. --blame-hang-timeout catches post-test process-exit hangs.
       - name: Test (full unit suite, excl. quarantined)
         run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 10m
+
+  template:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      # Guards the templates/lidarr-plugin/ scaffold shipped in the
+      # RicherTunes.Lidarr.Plugin.Templates nupkg: build-test above only builds
+      # src/Lidarr.Plugin.Common.csproj, so a breaking Common API change can silently leave
+      # the scaffold non-compiling for a long time (a fabricated SettingAttribute shipped
+      # for ~a year before PR #100 caught it by hand). This is a direct-csproj build, not a
+      # full `dotnet new install && dotnet new lidarr-plugin` materialize+build: MyPlugin.csproj
+      # uses monorepo-relative ProjectReferences (../../../../src/...) that only resolve inside
+      # this repo, so a real standalone materialization currently fails to build regardless of
+      # scaffold correctness (separate, pre-existing issue -- not introduced or fixed here).
+      - name: Build template scaffold (src)
+        run: dotnet build templates/lidarr-plugin/src/MyPlugin/MyPlugin.csproj -c Release -m:1
+      - name: Build template scaffold (tests)
+        run: dotnet build templates/lidarr-plugin/tests/MyPlugin.Tests/MyPlugin.Tests.csproj -c Release -m:1
 
   lint:
     if: ${{ github.server_url == 'https://github.com' }}
