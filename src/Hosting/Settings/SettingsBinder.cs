@@ -217,7 +217,7 @@ internal static class SettingsBinder
                 var str = element.GetString();
                 if (destinationType == typeof(Guid))
                 {
-                    return Guid.TryParse(str, out var guid) ? guid : Guid.Empty;
+                    return Guid.Parse(str!);
                 }
 
                 if (destinationType == typeof(DateTime))
@@ -287,4 +287,3 @@ internal static class SettingsBinder
         return Enum.ToObject(enumType, numeric);
     }
 }
-
