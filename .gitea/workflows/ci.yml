@@ -103,19 +103,18 @@ jobs:
           echo "$HOME/.dotnet" >> "$GITHUB_PATH"
           echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
           echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
-      # Guards the templates/lidarr-plugin/ scaffold shipped in the
-      # RicherTunes.Lidarr.Plugin.Templates nupkg: build-test above only builds
-      # src/Lidarr.Plugin.Common.csproj, so a breaking Common API change can silently leave
-      # the scaffold non-compiling for a long time (a fabricated SettingAttribute shipped
-      # for ~a year before PR #100 caught it by hand). This is a direct-csproj build, not a
-      # full `dotnet new install && dotnet new lidarr-plugin` materialize+build: MyPlugin.csproj
-      # uses monorepo-relative ProjectReferences (../../../../src/...) that only resolve inside
-      # this repo, so a real standalone materialization currently fails to build regardless of
-      # scaffold correctness (separate, pre-existing issue -- not introduced or fixed here).
-      - name: Build template scaffold (src)
-        run: dotnet build templates/lidarr-plugin/src/MyPlugin/MyPlugin.csproj -c Release -p:EnableSourceLink=false -m:1
-      - name: Build template scaffold (tests)
-        run: dotnet build templates/lidarr-plugin/tests/MyPlugin.Tests/MyPlugin.Tests.csproj -c Release -p:EnableSourceLink=false -m:1
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /opt/pwsh
+          tar -xzf /tmp/pwsh.tgz -C /opt/pwsh
+          chmod +x /opt/pwsh/pwsh
+          echo "/opt/pwsh" >> "$GITHUB_PATH"
+      - name: Materialize and test template package
+        shell: pwsh
+        run: ./scripts/ci/smoke-lidarr-plugin-template.ps1 -Configuration Release
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15

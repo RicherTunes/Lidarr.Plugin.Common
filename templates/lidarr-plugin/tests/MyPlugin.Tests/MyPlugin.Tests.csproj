@@ -3,6 +3,8 @@
     <TargetFramework>net8.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
+    <LidarrPluginCommonVersion>1.18.0-dev</LidarrPluginCommonVersion>
+    <LidarrPluginCommonTestKitVersion>1.1.8</LidarrPluginCommonTestKitVersion>
   </PropertyGroup>
   <ItemGroup>
     <!-- Must match Lidarr.Plugin.Common.TestKit's xunit.extensibility.core pin (2.9.3) or NuGet
@@ -11,9 +13,12 @@
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" PrivateAssets="all" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
   </ItemGroup>
-  <ItemGroup>
-    <ProjectReference Include="../../../../testkit/Lidarr.Plugin.Common.TestKit.csproj" />
+  <ItemGroup Condition="'$(LidarrPluginCommonRepoRoot)' != ''">
+    <ProjectReference Include="$(LidarrPluginCommonRepoRoot)/testkit/Lidarr.Plugin.Common.TestKit.csproj" />
+    <ProjectReference Include="../../src/MyPlugin/MyPlugin.csproj" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(LidarrPluginCommonRepoRoot)' == ''">
+    <PackageReference Include="Lidarr.Plugin.Common.TestKit" Version="$(LidarrPluginCommonTestKitVersion)" />
     <ProjectReference Include="../../src/MyPlugin/MyPlugin.csproj" />
   </ItemGroup>
 </Project>
-

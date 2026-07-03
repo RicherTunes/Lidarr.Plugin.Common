@@ -1,0 +1,16 @@
+{
+  "id": "MyPlugin",
+  "name": "MyPlugin",
+  "version": "0.1.0",
+  "apiVersion": "1.x",
+  "commonVersion": "1.18.0-dev",
+  "minHostVersion": "3.0.0",
+  "description": "Lidarr streaming plugin scaffold.",
+  "author": "RicherTunes",
+  "capabilities": [],
+  "requiredSettings": [
+    "BaseUrl"
+  ],
+  "main": "MyPlugin.dll",
+  "entryAssembly": "MyPlugin.dll"
+}
