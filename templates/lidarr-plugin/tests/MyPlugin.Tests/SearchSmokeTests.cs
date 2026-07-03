@@ -3,6 +3,7 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Http;
+using Lidarr.Plugin.Common.Utilities;
 using Xunit;
 
 namespace MyPlugin.Tests;
