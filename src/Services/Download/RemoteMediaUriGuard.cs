@@ -71,6 +71,15 @@ namespace Lidarr.Plugin.Common.Services.Download
     /// address between this check and the actual connect (DNS rebinding). For full protection, also disable
     /// automatic redirects and re-validate the resolved address at connection time. This guard removes the
     /// large, easy SSRF surface (literal-IP and naive-DNS targets) and is the shared policy plugins build on.</para>
+    ///
+    /// <para><b>Transient vs. unsafe:</b> a DNS-resolution FAILURE (the resolver throws, or returns no addresses)
+    /// is reported as a <see cref="UriGuardResult.Transient(string)"/> result — <see cref="UriGuardResult.IsAllowed"/>
+    /// stays false (we still refuse to fetch on a host we could not confirm), but <see cref="UriGuardResult.IsTransient"/>
+    /// is true so download callers surface it as a RETRYABLE network error instead of a permanent refusal.
+    /// This is safe because it relaxes <b>only</b> the case where resolution failed: a host that successfully
+    /// resolves to a private/loopback/link-local/reserved address is a confirmed-unsafe target and remains a hard
+    /// <see cref="UriGuardResult.Blocked(string)"/> (never transient). Treating a resolution blip as permanent
+    /// otherwise fails downloads whenever a CDN host intermittently fails to resolve.</para>
     /// </summary>
     public static class RemoteMediaUriGuard
     {
