@@ -71,6 +71,27 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
 
         /// <inheritdoc />
         public StreamManifest Parse(string manifestContent, string baseUrl)
+            => Parse(manifestContent, baseUrl, bandwidthCeilingBps: null);
+
+        /// <summary>
+        /// Additive overload of <see cref="Parse(string, string)"/> that caps which representation the
+        /// segment list is generated from. When <paramref name="bandwidthCeilingBps"/> is supplied, segments
+        /// (and the reported codec / file extension) come from the highest representation whose declared
+        /// bandwidth is at or below the ceiling — falling back to the single lowest representation when every
+        /// rendition exceeds it (per <see cref="QualitySelector.SelectByBandwidthCeiling"/>), so a playable
+        /// stream is always chosen rather than none. When it is <c>null</c> (the default, and the behavior of
+        /// the 2-arg <see cref="IStreamManifestParser"/> entry point) the highest-bandwidth representation is
+        /// used exactly as before — full back-compat for callers (e.g. Tidal) that do not select a quality here.
+        /// The <see cref="StreamManifest.Variants"/> list is always the complete rendition set regardless of
+        /// the ceiling; only which representation drives <see cref="StreamManifest.Segments"/> changes.
+        /// </summary>
+        /// <param name="manifestContent">The raw MPD document (already decoded text, not base64).</param>
+        /// <param name="baseUrl">Absolute URL the manifest was fetched from; resolves relative URLs.</param>
+        /// <param name="bandwidthCeilingBps">
+        /// Inclusive upper bound (bits per second) on the representation the segments are generated from, or
+        /// <c>null</c> for no cap (highest representation).
+        /// </param>
+        public StreamManifest Parse(string manifestContent, string baseUrl, int? bandwidthCeilingBps)
         {
             if (string.IsNullOrWhiteSpace(manifestContent))
             {
@@ -123,10 +144,12 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
                 variants.Add(new StreamVariant(bandwidth, variantUrl, string.IsNullOrEmpty(repCodec) ? null : repCodec));
             }
 
-            // Generate segments from the highest-bandwidth representation (the canonical rendition to fetch).
-            XElement? chosen = representations
-                .OrderByDescending(r => ParseInt(r.Attribute("bandwidth")?.Value, 0))
-                .FirstOrDefault();
+            // Generate segments from the selected representation. With no ceiling this is the highest-bandwidth
+            // representation (the canonical rendition to fetch, unchanged from the 2-arg entry point). With a
+            // ceiling it is the highest representation at or below it (else the lowest — never nothing), chosen
+            // via the shared QualitySelector so callers get identical ranking to variant selection elsewhere.
+            int chosenIndex = SelectRepresentationIndex(variants, bandwidthCeilingBps);
+            XElement? chosen = chosenIndex >= 0 ? representations[chosenIndex] : null;
 
             string codec = chosen?.Attribute("codecs")?.Value
                            ?? adaptationSet.Attribute("codecs")?.Value
@@ -161,6 +184,53 @@ namespace Lidarr.Plugin.Common.Services.Streaming.Manifests
             using var reader = new StringReader(manifestContent);
             using var xmlReader = XmlReader.Create(reader, settings);
             return XDocument.Load(xmlReader);
+        }
+
+        /// <summary>
+        /// Picks the index into <paramref name="variants"/> (1:1 with the representation list, same order) of
+        /// the representation the segments should be generated from. With no <paramref name="bandwidthCeilingBps"/>
+        /// this is the first highest-bandwidth variant (matching the prior <c>OrderByDescending().First()</c>).
+        /// With a ceiling it delegates to <see cref="QualitySelector.SelectByBandwidthCeiling"/> (highest at or
+        /// below the ceiling, else the lowest) and maps the chosen variant back to its position by reference, so
+        /// the selection can never drop every rendition — it returns <c>-1</c> only for an empty list.
+        /// </summary>
+        private static int SelectRepresentationIndex(IReadOnlyList<StreamVariant> variants, int? bandwidthCeilingBps)
+        {
+            if (variants.Count == 0)
+            {
+                return -1;
+            }
+
+            if (bandwidthCeilingBps is int ceiling)
+            {
+                StreamVariant? selected = QualitySelector.SelectByBandwidthCeiling(variants, ceiling);
+                // QualitySelector returns one of the passed-in instances (never null for a non-empty list),
+                // so a reference match always finds it — robust even if two variants are structurally equal.
+                if (selected != null)
+                {
+                    for (int i = 0; i < variants.Count; i++)
+                    {
+                        if (ReferenceEquals(variants[i], selected))
+                        {
+                            return i;
+                        }
+                    }
+                }
+
+                // Defensive: a non-empty list always yields a selection above. Fall through to highest so we
+                // never accidentally return "nothing" for a manifest that has renditions.
+            }
+
+            int best = 0;
+            for (int i = 1; i < variants.Count; i++)
+            {
+                if (variants[i].BandwidthBps > variants[best].BandwidthBps)
+                {
+                    best = i;
+                }
+            }
+
+            return best;
         }
 
         private static bool IsAudio(XElement adaptationSet)
