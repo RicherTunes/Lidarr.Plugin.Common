@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Text.Json;
 using Lidarr.Plugin.Common.Services.Http;
+using Lidarr.Plugin.Common.Utilities;
 
 namespace MyPlugin;
 
