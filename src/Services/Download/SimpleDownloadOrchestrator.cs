@@ -330,24 +330,65 @@ namespace Lidarr.Plugin.Common.Services.Download
                 // If a chunk-based stream provider is supplied, use it
                 if (_streamProvider != null)
                 {
+                    Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
+                    var tempPath = outputPath + ".partial";
+                    var maxAttempts = Math.Max(1, MaxStreamProviderAttempts);
                     try
                     {
-                        Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
-                        var tempPath = outputPath + ".partial";
-                        var streamResult = await _streamProvider.GetStreamAsync(trackId, quality, cancellationToken).ConfigureAwait(false);
-                        var totalExpected = streamResult.TotalBytes ?? 0;
-                        if (!string.IsNullOrWhiteSpace(streamResult.SuggestedExtension))
+                        // Retry-with-re-acquire. IAudioStreamProvider.GetStreamAsync hands back a FULLY-ASSEMBLED
+                        // stream with no byte-range support, so a transient blip DURING the body copy (a truncated
+                        // provider stream, a connection reset, a per-request timeout) cannot be resumed — a retry
+                        // must re-invoke the whole provider (for Widevine that re-acquires a DRM license per
+                        // attempt). Without any retry, one blip fails the track, AlbumCompletionPolicy fails the
+                        // whole album, and the host re-grabs into a loop. The attempt cap is deliberately small
+                        // (see MaxStreamProviderAttempts) so we recover a one-off blip without hammering license
+                        // acquisition; a NON-transient error (auth/DRM/argument) is never retried.
+                        for (var attempt = 1; ; attempt++)
                         {
-                            outputPath = Path.ChangeExtension(outputPath, streamResult.SuggestedExtension.TrimStart('.'));
+                            try
+                            {
+                                var streamResult = await _streamProvider.GetStreamAsync(trackId, quality, cancellationToken).ConfigureAwait(false);
+                                var totalExpected = streamResult.TotalBytes ?? 0;
+                                if (!string.IsNullOrWhiteSpace(streamResult.SuggestedExtension))
+                                {
+                                    outputPath = Path.ChangeExtension(outputPath, streamResult.SuggestedExtension.TrimStart('.'));
+                                }
+
+                                using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, useAsync: true))
+                                {
+                                    await CopyWithProgressAsync(streamResult.Stream, fs, totalExpected, cancellationToken, (fraction, bps, eta) =>
+                                    {
+                                        ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
+                                    }).ConfigureAwait(false);
+                                }
+
+                                break; // a full copy completed — proceed to move + validate below
+                            }
+                            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                            {
+                                // Genuine caller cancellation: rethrow so the outer catch cleans up and the outer
+                                // method emits cancellation telemetry. A NON-caller OCE (a per-request provider
+                                // timeout → TaskCanceledException with the caller token NOT cancelled) does not
+                                // match this filter — it is classified as transient below and retried.
+                                throw;
+                            }
+                            catch (Exception ex) when (attempt < maxAttempts && IsTransientDownloadException(ex, cancellationToken))
+                            {
+                                // Transient and attempts remain: the assembled stream has no Range-resume, so
+                                // discard the partial and re-acquire from scratch after a backoff.
+                                DownloadTelemetryContext.RecordRetry(System.Net.HttpStatusCode.ServiceUnavailable);
+                                _logger.LogWarning(ex,
+                                    "[{ServiceName}] Transient stream-provider failure for track {TrackId} (attempt {Attempt}/{MaxAttempts}); re-acquiring after backoff",
+                                    ServiceName, trackId, attempt, maxAttempts);
+                                TryDelete(tempPath);
+                                var delay = GetRetryDelay(attempt);
+                                if (delay > TimeSpan.Zero)
+                                {
+                                    await Task.Delay(delay, cancellationToken).ConfigureAwait(false);
+                                }
+                            }
                         }
 
-                        using (var fs = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None, 8192, useAsync: true))
-                        {
-                            await CopyWithProgressAsync(streamResult.Stream, fs, totalExpected, cancellationToken, (fraction, bps, eta) =>
-                            {
-                                ReportProgress(progress, completedBefore, totalTracks, track?.Title, fraction, bps, eta);
-                            }).ConfigureAwait(false);
-                        }
                         try { FileSystemUtilities.MoveFile(tempPath, outputPath, true); }
                         catch { if (File.Exists(outputPath)) File.Delete(outputPath); File.Move(tempPath, outputPath); }
 
@@ -370,15 +411,17 @@ namespace Lidarr.Plugin.Common.Services.Download
                     }
                     catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                     {
-                        // Genuine caller cancellation: let the outer catch emit cancellation telemetry
-                        // and rethrow. A NON-caller OCE (a per-request provider/HttpClient timeout →
-                        // TaskCanceledException with the caller token NOT cancelled) falls through to the
-                        // generic catch below and becomes a single-track failure — it must NOT escape and
-                        // cancel the whole album.
+                        // Genuine caller cancellation: drop the half-written partial, then let the outer catch
+                        // emit cancellation telemetry and rethrow.
+                        TryDelete(tempPath);
                         throw;
                     }
                     catch (Exception ex)
                     {
+                        // Final failure (retries exhausted, or a non-transient error): clean the partial so a
+                        // half-written temp never lingers, and record a single-track failure — it must NOT escape
+                        // and cancel the whole album.
+                        TryDelete(tempPath);
                         result = new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
                     }
                 }
@@ -598,6 +641,15 @@ namespace Lidarr.Plugin.Common.Services.Download
 
         /// <summary>Max attempts for a single track's URL download before giving up. Overridable for tests.</summary>
         internal virtual int MaxDownloadAttempts => 4;
+
+        /// <summary>
+        /// Max attempts for a single track's stream-PROVIDER download (<see cref="IAudioStreamProvider"/>)
+        /// before giving up. Deliberately smaller than <see cref="MaxDownloadAttempts"/>: the provider hands
+        /// back a fully-assembled stream with no byte-range resume, so each retry re-invokes the whole provider
+        /// (for Widevine that re-acquires a DRM license). Conservative (one retry) so a one-off transient blip
+        /// is recovered without hammering license acquisition. Overridable for tests.
+        /// </summary>
+        internal virtual int MaxStreamProviderAttempts => 2;
 
         /// <summary>Backoff between resume-retries (1s, 2s, 4s, capped at 8s). Overridable to zero in tests.</summary>
         internal virtual TimeSpan GetRetryDelay(int attempt) =>
