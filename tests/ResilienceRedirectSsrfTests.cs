@@ -1,6 +1,7 @@
 using System;
 using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Services.Download;
@@ -10,7 +11,7 @@ using Xunit;
 namespace Lidarr.Plugin.Common.Tests
 {
     /// <summary>
-    /// LOOP-004: ExecuteWithResilienceAsync follows 301/302/307/308 redirects itself. When a caller supplies a
+    /// LOOP-004: ExecuteWithResilienceAsync follows 301/302/303/307/308 redirects itself. When a caller supplies a
     /// redirect-target validator (media callers pass the SSRF guard), a 3xx that points at an internal/unsafe
     /// host must be refused before the next hop — a hostile CDN can't bounce the resilience layer to localhost.
     /// </summary>
@@ -19,14 +20,20 @@ namespace Lidarr.Plugin.Common.Tests
         private sealed class RedirectHandler : DelegatingHandler
         {
             private readonly string _location;
+            private readonly HttpStatusCode _statusCode;
             public int Calls;
-            public RedirectHandler(string location) => _location = location;
+            public RedirectHandler(string location, HttpStatusCode statusCode = HttpStatusCode.Redirect)
+            {
+                _location = location;
+                _statusCode = statusCode;
+            }
+
             protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
             {
                 Interlocked.Increment(ref Calls);
                 if (Calls == 1)
                 {
-                    var r = new HttpResponseMessage(HttpStatusCode.Redirect); // 302
+                    var r = new HttpResponseMessage(_statusCode);
                     r.Headers.Location = new Uri(_location);
                     return Task.FromResult(r);
                 }
@@ -35,6 +42,15 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         private static bool GuardAllows(Uri u) => RemoteMediaUriGuard.Validate(u, RemoteMediaUriPolicy.Strict).IsAllowed;
+        private static RemoteMediaUriPolicy TransientDnsPolicy() => new()
+        {
+            DnsResolver = _ => throw new SocketException(11001)
+        };
+
+        private static RemoteMediaUriPolicy ResolvesPrivatePolicy() => new()
+        {
+            DnsResolver = _ => new[] { IPAddress.Parse("10.0.0.1") }
+        };
 
         [Fact]
         public async Task RedirectToPrivateHost_IsRefused_BeforeFetchingIt()
@@ -52,6 +68,40 @@ namespace Lidarr.Plugin.Common.Tests
         }
 
         [Fact]
+        public async Task RedirectTargetTransientDns_IsRetryable_BeforeFetchingTarget()
+        {
+            var handler = new RedirectHandler("https://cdn.example.com/seg"); // 302 -> hostname DNS blip
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("https://8.8.8.8/") };
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/seg");
+
+            await Assert.ThrowsAsync<HttpRequestException>(() =>
+                client.ExecuteWithResilienceAsync(
+                    request,
+                    ResiliencePolicy.Streaming,
+                    CancellationToken.None,
+                    validateRedirectTarget: u => RemoteMediaUriGuard.IsAllowedForRedirectTargetOrThrowTransient(u, TransientDnsPolicy())));
+
+            Assert.Equal(1, handler.Calls);
+        }
+
+        [Fact]
+        public async Task RedirectTargetResolvesPrivate_IsPermanent_BeforeFetchingTarget()
+        {
+            var handler = new RedirectHandler("https://cdn.example.com/seg"); // 302 -> confirmed private DNS
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("https://8.8.8.8/") };
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/seg");
+
+            await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                client.ExecuteWithResilienceAsync(
+                    request,
+                    ResiliencePolicy.Streaming,
+                    CancellationToken.None,
+                    validateRedirectTarget: u => RemoteMediaUriGuard.IsAllowedForRedirectTargetOrThrowTransient(u, ResolvesPrivatePolicy())));
+
+            Assert.Equal(1, handler.Calls);
+        }
+
+        [Fact]
         public async Task RedirectToPublicHost_IsFollowed_WithValidator()
         {
             var handler = new RedirectHandler("https://1.1.1.1/cdn/seg"); // 302 → public
@@ -64,6 +114,23 @@ namespace Lidarr.Plugin.Common.Tests
 
             Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
             Assert.Equal(2, handler.Calls); // followed the public redirect
+        }
+
+        [Fact]
+        public async Task SeeOtherRedirectToPublicHost_IsFollowed_ForSafeGet()
+        {
+            var handler = new RedirectHandler("https://1.1.1.1/cdn/seg", HttpStatusCode.SeeOther); // 303
+            using var client = new HttpClient(handler) { BaseAddress = new Uri("https://8.8.8.8/") };
+            using var request = new HttpRequestMessage(HttpMethod.Get, "/seg");
+
+            using var resp = await client.ExecuteWithResilienceAsync(
+                request,
+                ResiliencePolicy.Streaming,
+                CancellationToken.None,
+                validateRedirectTarget: GuardAllows);
+
+            Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+            Assert.Equal(2, handler.Calls);
         }
 
         [Fact]

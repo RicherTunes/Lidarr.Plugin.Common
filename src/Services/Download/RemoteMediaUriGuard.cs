@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Net;
+using System.Net.Http;
 using System.Net.Sockets;
 
 namespace Lidarr.Plugin.Common.Services.Download
@@ -198,6 +199,27 @@ namespace Lidarr.Plugin.Common.Services.Download
             return UriGuardResult.Allowed;
         }
 
+        /// <summary>
+        /// Adapter for redirect validators that still use <c>Func&lt;Uri, bool&gt;</c>. A transient DNS failure
+        /// throws a retryable <see cref="HttpRequestException"/> while confirmed unsafe targets return
+        /// <c>false</c> so the caller can preserve its hard-block message.
+        /// </summary>
+        internal static bool IsAllowedForRedirectTargetOrThrowTransient(Uri uri, RemoteMediaUriPolicy? policy = null)
+        {
+            var result = Validate(uri, policy);
+            if (result.IsAllowed)
+            {
+                return true;
+            }
+
+            if (result.IsTransient)
+            {
+                throw new HttpRequestException($"Transient resolution failure for redirect URL {Redact(uri)}: {result.Reason}");
+            }
+
+            return false;
+        }
+
         /// <summary>R2-09: host matches an allowed suffix only on a label (dot) boundary — exact host, or a
         /// real subdomain ending in ".&lt;suffix&gt;". A bare suffix "cdn.com" must not admit "evilcdn.com".
         /// Accepts the suffix written with or without a leading dot.</summary>
@@ -219,6 +241,8 @@ namespace Lidarr.Plugin.Common.Services.Download
                     host[host.Length - bare.Length - 1] == '.' &&
                     host.EndsWith(bare, StringComparison.OrdinalIgnoreCase));
         }
+
+        private static string Redact(Uri uri) => $"{uri.Scheme}://{uri.Host}";
 
         /// <summary>True if the address is loopback, link-local, private, ULA, multicast, unspecified, or
         /// otherwise not a public unicast destination.</summary>
