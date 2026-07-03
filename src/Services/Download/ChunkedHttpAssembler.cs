@@ -156,7 +156,14 @@ namespace Lidarr.Plugin.Common.Services.Download
             {
                 var guard = RemoteMediaUriGuard.Validate(chunk.Url, _mediaUriPolicy);
                 if (!guard.IsAllowed)
+                {
+                    // Transient (DNS resolution failed) → throw a RETRYABLE HttpRequestException so the caller's
+                    // download-retry path re-attempts instead of permanently failing the track on a DNS blip.
+                    // A hard security block (private IP, non-https, metadata host) stays a permanent refusal.
+                    if (guard.IsTransient)
+                        throw new HttpRequestException($"Transient resolution failure for chunk {chunk.Index} URL: {guard.Reason}");
                     throw new InvalidOperationException($"Refusing to download chunk {chunk.Index} from an unsafe URL: {guard.Reason}");
+                }
             }
 
             var maxConcurrency = Math.Max(1, options.MaxConcurrency);

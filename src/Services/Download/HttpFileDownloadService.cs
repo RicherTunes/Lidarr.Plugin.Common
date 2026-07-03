@@ -66,7 +66,13 @@ namespace Lidarr.Plugin.Common.Services.Download
             // SSRF guard: validate the destination before any fetch (provider URLs are hostile-controllable).
             var guard = RemoteMediaUriGuard.Validate(url, _mediaUriPolicy);
             if (!guard.IsAllowed)
+            {
+                // Transient (DNS resolution failed) → RETRYABLE HttpRequestException; a hard security block
+                // (private IP, non-https, metadata host) stays a permanent refusal.
+                if (guard.IsTransient)
+                    throw new HttpRequestException($"Transient resolution failure for download URL: {guard.Reason}");
                 throw new InvalidOperationException($"Refusing to download from an unsafe URL: {guard.Reason}");
+            }
 
             // Stream to a temporary .partial file, then atomic move to final
             var partialPath = filePath + ".partial";
