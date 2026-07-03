@@ -628,9 +628,13 @@ public abstract partial class EcosystemParityTestBase
     /// wrong container? — is consolidated in Common's canonical <c>DownloadPayloadValidator</c>, a strict
     /// superset of the legacy <c>AudioMagicBytesValidator</c> (it adds MP4/M4A ftyp recognition,
     /// text/HTML/JSON/XML rejection, and file + span overloads). A plugin that ships a download client
-    /// must not (a) use the legacy <c>AudioMagicBytesValidator</c>, nor (b) declare its own
-    /// <c>*PayloadValidator</c> fork — the historical tidalarr <c>TidalDownloadPayloadValidator</c> +
-    /// qobuz m4a-workaround divergence this guard exists to prevent regressing. Applicable only to
+    /// must show positive evidence of using that Common seam, and must not (a) use the legacy
+    /// <c>AudioMagicBytesValidator</c>, nor (b) declare its own <c>*PayloadValidator</c> fork — the
+    /// historical tidalarr <c>TidalDownloadPayloadValidator</c> + qobuz m4a-workaround divergence
+    /// this guard exists to prevent regressing. Adoption can be direct (<c>DownloadPayloadValidator</c>)
+    /// or through Common's higher-level download services that own validation
+    /// (<c>HttpFileDownloadService</c>, <c>IHttpFileDownloadService</c>, or
+    /// <c>SimpleDownloadOrchestrator</c>). Applicable only to
     /// download-client plugins (import-list plugins such as brainarr → N/A); source-scan based and
     /// conservative (no source root → skip). Note: inline MP4-box integrity checks on decrypted DASH
     /// segments (moov/mdat) are a DISTINCT concern (segment integrity, not file-level audio validation)
@@ -643,43 +647,45 @@ public abstract partial class EcosystemParityTestBase
         if (!PluginDeclaresHostDownloadClient(assembly)) return ComplianceResult.Success; // N/A (no download client)
         if (!Directory.Exists(PluginSourceRoot)) return Skipped();
 
-        var excluded = new[]
-        {
-            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}tests{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}Tests{Path.DirectorySeparatorChar}",
-            ".Tests" + Path.DirectorySeparatorChar,
-            $"{Path.DirectorySeparatorChar}examples{Path.DirectorySeparatorChar}",
-        };
-        // (a) legacy weak validator usage; (b) a plugin-local *PayloadValidator fork declaration.
+        // Positive Common adoption evidence, then (a) legacy weak validator usage; (b) local fork declaration.
+        var commonValidationUse = new System.Text.RegularExpressions.Regex(
+            @"\bDownloadPayloadValidator\s*\.\s*(?:ValidateOrThrow|ValidateFileOrThrow|LooksLikeAudioPayload|LooksLikeTextPayload|LooksLikeHtmlPayload|LooksLikeJsonPayload|LooksLikeXmlPayload|ClassifyPayload)\b|\b(?:new\s+)?HttpFileDownloadService\b|\bIHttpFileDownloadService\b|\bnew\s+SimpleDownloadOrchestrator\b|:\s*(?:Lidarr\.Plugin\.Common\.Services\.Download\.)?SimpleDownloadOrchestrator\b",
+            System.Text.RegularExpressions.RegexOptions.Compiled);
         var legacyUse = new System.Text.RegularExpressions.Regex(
             @"\bAudioMagicBytesValidator\b", System.Text.RegularExpressions.RegexOptions.Compiled);
         var forkClass = new System.Text.RegularExpressions.Regex(
             @"\bclass\s+[A-Za-z0-9_]*PayloadValidator\b", System.Text.RegularExpressions.RegexOptions.Compiled);
 
         var offenders = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        var commonValidationEvidence = new List<string>();
+        foreach (var file in EnumerateCSharpFiles(PluginSourceRoot, includeTests: false))
         {
-            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
             string text;
             try { text = File.ReadAllText(file); }
             catch { continue; }
+            text = RemoveCommentOnlyLines(text);
             var rel = Path.GetRelativePath(RepoRootPath, file);
+            if (commonValidationUse.IsMatch(text))
+                commonValidationEvidence.Add(rel);
             if (legacyUse.IsMatch(text))
                 offenders.Add($"{rel}: uses the legacy AudioMagicBytesValidator");
             if (forkClass.IsMatch(text))
                 offenders.Add($"{rel}: declares a plugin-local *PayloadValidator fork");
         }
 
+        if (commonValidationEvidence.Count == 0)
+        {
+            offenders.Add(
+                "no positive Common payload-validation evidence found in plugin source " +
+                "(expected DownloadPayloadValidator or a Common download service that owns validation)");
+        }
+
         return offenders.Count == 0
             ? ComplianceResult.Success
             : ComplianceResult.Failure(
                 "Audio-payload validation must use Lidarr.Plugin.Common.Utilities.DownloadPayloadValidator " +
-                $"(the canonical superset), not the legacy AudioMagicBytesValidator or a plugin-local fork: {string.Join("; ", offenders)}");
+                "directly or through a Common download service that owns validation; do not use the legacy " +
+                $"AudioMagicBytesValidator or a plugin-local fork: {string.Join("; ", offenders)}");
     }
 
     #endregion
@@ -769,6 +775,21 @@ public abstract partial class EcosystemParityTestBase
         }
     }
 
+    private static string RemoveCommentOnlyLines(string text)
+    {
+        var lines = text.Split(new[] { "\r\n", "\n" }, StringSplitOptions.None);
+        var builder = new System.Text.StringBuilder(text.Length);
+        foreach (var line in lines)
+        {
+            if (System.Text.RegularExpressions.Regex.IsMatch(line, @"^\s*(?://|/\*|\*|\*/)", System.Text.RegularExpressions.RegexOptions.CultureInvariant))
+                continue;
+
+            builder.AppendLine(line);
+        }
+
+        return builder.ToString();
+    }
+
     #endregion
 
     #region Check_FileClassNameParity
@@ -787,14 +808,6 @@ public abstract partial class EcosystemParityTestBase
     {
         if (!Directory.Exists(PluginSourceRoot)) return Skipped();
 
-        var excluded = new[]
-        {
-            $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}ext{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}.worktrees{Path.DirectorySeparatorChar}",
-            $"{Path.DirectorySeparatorChar}.git{Path.DirectorySeparatorChar}",
-        };
         // Public top-level (or nested — counted, which makes multi-type files exceed 1 and skip) type.
         var typeDecl = new System.Text.RegularExpressions.Regex(
             @"(?m)^\s*(?:\[[^\]]*\]\s*)*public\s+(?:sealed\s+|abstract\s+|static\s+|partial\s+|readonly\s+|unsafe\s+)*(?:class|interface|record|struct|enum)\s+([A-Za-z_][A-Za-z0-9_]*)",
@@ -804,9 +817,8 @@ public abstract partial class EcosystemParityTestBase
             System.Text.RegularExpressions.RegexOptions.Compiled);
 
         var offenders = new List<string>();
-        foreach (var file in Directory.EnumerateFiles(PluginSourceRoot, "*.cs", SearchOption.AllDirectories))
+        foreach (var file in EnumerateCSharpFiles(PluginSourceRoot, includeTests: false))
         {
-            if (excluded.Any(x => file.Contains(x, StringComparison.Ordinal))) continue;
             var fileName = Path.GetFileNameWithoutExtension(file);
             if (fileName.Contains('.')) continue; // dotted (partial splits / *.Designer / *.g) — skip
             string text;
@@ -822,10 +834,11 @@ public abstract partial class EcosystemParityTestBase
             // type (any accessibility) is itself named after the file, the file IS correctly named and
             // the public type is a nested helper (e.g. an `internal *HealthDiagnostics` whose only
             // public member is a nested `Capabilities`). Only flag when no top-level type matches the
-            // file name. (^-anchored = top-level in the file-scoped-namespace style these repos use.)
+            // file name. Accept file-scoped namespace style (column 0) and normal block-namespace
+            // indentation (up to one 4-space indent), but avoid deeply nested helper types.
             var declaresFileNameTopLevelType = System.Text.RegularExpressions.Regex.IsMatch(
                 text,
-                $@"(?m)^(?:\[[^\]]*\]\s*)*(?:(?:public|internal|private|protected|file|sealed|abstract|static|partial|readonly|unsafe)\s+)*(?:class|interface|record|struct|enum)\s+{System.Text.RegularExpressions.Regex.Escape(fileName)}\b");
+                $@"(?m)^[ \t]{{0,4}}(?:\[[^\]]*\]\s*)*(?:(?:public|internal|private|protected|file|sealed|abstract|static|partial|readonly|unsafe)\s+)*(?:class|interface|record|struct|enum)\s+{System.Text.RegularExpressions.Regex.Escape(fileName)}\b");
             if (declaresFileNameTopLevelType) continue;
 
             offenders.Add($"{Path.GetRelativePath(RepoRootPath, file)} (file '{fileName}' != type '{typeName}')");

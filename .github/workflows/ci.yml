@@ -2,7 +2,7 @@
 # Billing-blocked as of 2026-07; validated to build once Actions billing is restored.
 # Keep in sync with the .gitea copy -- patch both in the same PR.
 #
-# Jobs mirrored : build-test, lint, secret-scan
+# Jobs mirrored : build-test, template, lint, secret-scan
 # Jobs omitted  : ecosystem-contract -- that job clones all 5 plugin repos from
 #                 192.168.2.59:3001/RicherTunes/* which is unreachable from GitHub runners.
 #                 It remains Gitea-only and continues to run there on push/dispatch/schedule.
@@ -48,6 +48,19 @@ jobs:
       - name: Test (full unit suite, excl. quarantined)
         run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 10m
 
+  template:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Materialize and test template package
+        shell: pwsh
+        run: ./scripts/ci/smoke-lidarr-plugin-template.ps1 -Configuration Release
+
   lint:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-latest
@@ -76,6 +89,9 @@ jobs:
       - name: Doc workflow-ref gate self-test
         shell: pwsh
         run: ./scripts/tests/Test-LintDocWorkflowRefs.ps1
+      - name: Merge conflict marker guard
+        shell: pwsh
+        run: ./scripts/tests/Test-NoMergeConflictMarkers.ps1
       - name: Plugin CI truth docs self-test
         shell: pwsh
         run: ./scripts/tests/Test-PluginCiTruthDocs.ps1

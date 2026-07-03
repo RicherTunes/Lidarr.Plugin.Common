@@ -5,18 +5,10 @@
   "identity": "RicherTunes.Lidarr.Plugin.Template.CSharp",
   "name": "Lidarr Streaming Plugin",
   "shortName": "lidarr-plugin",
-  "sourceName": "MyServiceArr",
+  "sourceName": "MyPlugin",
   "preferNameDirectory": true,
-  "symbols": {
-    "ServiceId": {
-      "type": "parameter",
-      "datatype": "text",
-      "defaultValue": "MyService",
-      "description": "Short service identifier (e.g., Qobuz, TIDAL)"
-    }
-  },
   "primaryOutputs": [
-    { "path": "src/MyServiceArr/MyServiceArr.csproj" }
+    { "path": "src/MyPlugin/MyPlugin.csproj" }
   ]
 }
 

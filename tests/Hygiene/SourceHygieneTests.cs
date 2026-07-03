@@ -56,6 +56,19 @@ namespace Lidarr.Plugin.Common.Tests.Hygiene
                 string.Join("\n  ", offenders));
         }
 
+        [Fact]
+        public void Adaptive_rate_limiting_handler_uses_shared_rate_limit_header_utilities()
+        {
+            var repoRoot = FindRepoRoot();
+            var path = Path.Combine(repoRoot, "src", "Services", "Http", "AdaptiveRateLimitingHandler.cs");
+            var source = File.ReadAllText(path);
+
+            Assert.Contains("RateLimitHeaderUtilities.BuildHostFirstSegmentKey", source);
+            Assert.Contains("RateLimitHeaderUtilities.ResolveRetryAfter", source);
+            Assert.DoesNotContain("private static string BuildEndpointKey", source);
+            Assert.DoesNotContain("private static TimeSpan ResolveRetryAfter", source);
+        }
+
         private static IEnumerable<string> EnumerateTextSources(string repoRoot)
         {
             foreach (var file in Directory.EnumerateFiles(repoRoot, "*", SearchOption.AllDirectories))

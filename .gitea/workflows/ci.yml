@@ -79,6 +79,42 @@ jobs:
       # disabling the shared compiler server removes that race (matches the Build step's -m:1).
       - name: Test (full unit suite, excl. quarantined)
         run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -p:EnableSourceLink=false -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 10m
+  template:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # See build-test job comment: replace actions/checkout@v4 with a native git clone
+      # that only touches the Gitea instance (no external DNS required).
+      - name: Checkout
+        shell: bash
+        run: |
+          set -e
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
+          AUTH_HEADER="$(printf 'x-access-token:%s' '${{ secrets.GITHUB_TOKEN }}' | base64 | tr -d '\n')"
+          git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            clone --depth=50 --branch "$BRANCH" \
+            "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
+      - name: Install .NET SDK
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /opt/pwsh
+          tar -xzf /tmp/pwsh.tgz -C /opt/pwsh
+          chmod +x /opt/pwsh/pwsh
+          echo "/opt/pwsh" >> "$GITHUB_PATH"
+      - name: Materialize and test template package
+        shell: pwsh
+        run: ./scripts/ci/smoke-lidarr-plugin-template.ps1 -Configuration Release
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -127,6 +163,9 @@ jobs:
       - name: Doc workflow-ref gate self-test
         shell: pwsh
         run: ./scripts/tests/Test-LintDocWorkflowRefs.ps1
+      - name: Merge conflict marker guard
+        shell: pwsh
+        run: ./scripts/tests/Test-NoMergeConflictMarkers.ps1
       - name: Plugin CI truth docs self-test
         shell: pwsh
         run: ./scripts/tests/Test-PluginCiTruthDocs.ps1

@@ -50,6 +50,13 @@ public class AudioMagicBytesValidatorTests
         Assert.True(AudioMagicBytesValidator.IsValidAudioMagicBytes(bytes));
     }
 
+    [Fact]
+    public void IsValid_M4aFtypSignature_True()
+    {
+        ReadOnlySpan<byte> bytes = stackalloc byte[] { 0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70 };
+        Assert.True(AudioMagicBytesValidator.IsValidAudioMagicBytes(bytes));
+    }
+
     [Theory]
     [InlineData(0xFF, 0xE0)]   // exactly the boundary
     [InlineData(0xFF, 0xF0)]
@@ -104,6 +111,20 @@ public class AudioMagicBytesValidatorTests
     public void Validate_ValidFlacFile_DoesNotThrow()
     {
         var path = WriteTempFile(new byte[] { 0x66, 0x4C, 0x61, 0x43, 0x00, 0x00 });
+        try
+        {
+            AudioMagicBytesValidator.ValidateAudioMagicBytes(path);
+        }
+        finally
+        {
+            File.Delete(path);
+        }
+    }
+
+    [Fact]
+    public void Validate_ValidM4aFile_DoesNotThrow()
+    {
+        var path = WriteTempFile(new byte[] { 0x00, 0x00, 0x00, 0x18, 0x66, 0x74, 0x79, 0x70, 0x6D, 0x70, 0x34, 0x32 });
         try
         {
             AudioMagicBytesValidator.ValidateAudioMagicBytes(path);
