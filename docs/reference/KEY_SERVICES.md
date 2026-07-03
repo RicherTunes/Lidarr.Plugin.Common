@@ -35,7 +35,7 @@ response.EnsureSuccessStatusCode();
 Notes
 
 - Builder stamps standardized options (`EndpointKey`, `ParametersKey`, `ProfileKey`, `AuthScopeKey`) used for cache keys and dedup keys.
-- 301/302 auto-follow only for safe methods; 307/308 preserve method/body. Non-idempotent calls are surfaced to the caller for control.
+- 301/302/303 auto-follow only for safe methods; 307/308 preserve method/body. Non-idempotent calls are surfaced to the caller for control.
 
 ## Resilience
 

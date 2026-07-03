@@ -551,10 +551,11 @@ namespace Lidarr.Plugin.Common.Utilities
                                 continue;
                             }
                             catch (InvalidOperationException) { throw; } // LOOP-004: an SSRF redirect refusal must propagate, not be swallowed
+                            catch (HttpRequestException) { throw; } // Transient redirect-target DNS failures must stay retryable for callers
                             catch (Exception swallowEx) { SwallowToTrace(swallowEx); /* fall through to return */ }
                         }
-                        // Handle 301/302 redirects only when safe (GET/HEAD). Do not auto-follow for unsafe methods (e.g., POST)
-                        else if ((status == 301 || status == 302) && response.Headers.Location != null &&
+                        // Handle 301/302/303 redirects only when safe (GET/HEAD). Do not auto-follow for unsafe methods (e.g., POST)
+                        else if ((status == 301 || status == 302 || status == 303) && response.Headers.Location != null &&
                                  (HttpMethod.Get.Equals(attemptRequest.Method) || HttpMethod.Head.Equals(attemptRequest.Method)))
                         {
                             try
@@ -626,6 +627,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                 continue;
                             }
                             catch (InvalidOperationException) { throw; } // LOOP-004: an SSRF redirect refusal must propagate, not be swallowed
+                            catch (HttpRequestException) { throw; } // Transient redirect-target DNS failures must stay retryable for callers
                             catch (Exception swallowEx) { SwallowToTrace(swallowEx); /* fall through to return */ }
                         }
                         return response;
@@ -1350,7 +1352,6 @@ namespace Lidarr.Plugin.Common.Utilities
         }
     }
 }
-
 
 
 

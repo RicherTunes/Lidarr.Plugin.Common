@@ -469,7 +469,7 @@ Template to copy when drafting a release:
 - Builder → Options → Executor integration: stamp endpoint/profile/params/scope
 - GET singleflight dedup when cache misses with race-guarded recheck
 - Query canonicalization for multivalue params
-- 307/308 auto-follow preserving method/body; 301/302 auto-follow for safe methods only
+- 307/308 auto-follow preserving method/body; 301/302/303 auto-follow for safe methods only
 - Cache sliding TTL coalesced with absolute expiration and stale-grace
 - Conditional GET: ETag/Last-Modified persisted and revalidation path tested
 - OTel quickstart (feature flag LPC_OTEL_ENABLE=1) + sample Grafana dashboard

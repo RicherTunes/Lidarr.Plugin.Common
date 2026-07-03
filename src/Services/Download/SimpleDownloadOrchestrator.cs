@@ -564,7 +564,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                             req,
                             ResiliencePolicy.Streaming,
                             cancellationToken,
-                            validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
+                            validateRedirectTarget: u => RemoteMediaUriGuard.IsAllowedForRedirectTargetOrThrowTransient(u, _mediaUriPolicy)).ConfigureAwait(false);
                         resp.EnsureSuccessStatusCode();
 
                         var totalHeader = resp.Content.Headers.ContentLength;
@@ -778,7 +778,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                     request,
                     ResiliencePolicy.Metadata,
                     cancellationToken,
-                    validateRedirectTarget: u => RemoteMediaUriGuard.Validate(u, _mediaUriPolicy).IsAllowed).ConfigureAwait(false);
+                    validateRedirectTarget: u => RemoteMediaUriGuard.IsAllowedForRedirectTargetOrThrowTransient(u, _mediaUriPolicy)).ConfigureAwait(false);
 
                 response.EnsureSuccessStatusCode();
 
