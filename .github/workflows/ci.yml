@@ -8,7 +8,7 @@
 #                 It remains Gitea-only and continues to run there on push/dispatch/schedule.
 #
 # Translation vs .gitea/workflows/ci.yml:
-#   - Checkout     : actions/checkout@v4 (replaces the Gitea-only hand-rolled git-clone that
+#   - Checkout     : actions/checkout@v7 (replaces the Gitea-only hand-rolled git-clone that
 #                    targeted 192.168.2.59:3001; Common has no submodules)
 #   - .NET SDK     : actions/setup-dotnet@v4 replaces the curl dotnet-install.sh block
 #   - PowerShell   : ubuntu-latest ships pwsh -- "Install PowerShell" tarball step removed
@@ -32,7 +32,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: '8.0.x'
@@ -66,7 +66,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       # All lint steps are pure PowerShell; ubuntu-latest ships pwsh so no install needed.
       - name: Date-parsing gate (culture-safety + epoch guard)
         shell: pwsh
@@ -117,7 +117,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: gitleaks (secret scan)
         shell: bash
         run: |
