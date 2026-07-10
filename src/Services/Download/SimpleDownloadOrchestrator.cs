@@ -658,7 +658,7 @@ namespace Lidarr.Plugin.Common.Services.Download
 
         /// <summary>
         /// Builds the output path for a track inside the shared album loop. The default mirrors the
-        /// historical behavior (sanitized "NN - Title" via <see cref="FileSystemUtilities.CreateTrackFileName"/>).
+        /// historical behavior (sanitized "NN - Title" via <see cref="FileSystemUtilities.CreateTrackFileName(string, int, string, int)"/>).
         /// Plugins override this to apply service-specific naming (multi-disc numbering, user naming formats)
         /// while still reusing the base album loop. Always return a name WITH a provisional extension — when
         /// the service resolves a stream format, the engine swaps the extension via <c>Path.ChangeExtension</c>
