@@ -119,6 +119,95 @@ public sealed class LrclibClientSearchFallbackTests
     }
 
     [Fact]
+    public async Task GetMiss_SearchSameTitleDifferentArtist_ReturnsNull()
+    {
+        // /api/search is fuzzy across the whole catalog: a same-title row from ANOTHER artist
+        // (covers, common titles like "Home") can rank first with a plausible duration. Embedding
+        // that LRC would be wrong-artist lyrics — worse than none. The candidate's artist must
+        // match the requested artist.
+        var handler = new RoutingStubHandler
+        {
+            Get = (HttpStatusCode.NotFound, null),
+            Search = (HttpStatusCode.OK, "[{\"artistName\":\"Someone Else\",\"trackName\":\"Right Song\",\"syncedLyrics\":\"[00:00.00] wrong artist\",\"duration\":188.0}]"),
+        };
+        using var client = new LrclibClient(new HttpClient(handler));
+
+        var lrc = await client.TryFetchSyncedLyricsAsync("Right Artist", "Right Song", "C", 188);
+
+        Assert.Null(lrc);
+    }
+
+    [Fact]
+    public async Task GetMiss_UnknownDuration_SameTitleDifferentArtist_ReturnsNull()
+    {
+        // duration <= 0 must not shortcut past the artist check: without a duration to compare,
+        // the title-only take-first previously accepted the FIRST same-title row unconditionally.
+        var handler = new RoutingStubHandler
+        {
+            Get = (HttpStatusCode.NotFound, null),
+            Search = (HttpStatusCode.OK, "[{\"artistName\":\"Someone Else\",\"trackName\":\"B\",\"syncedLyrics\":\"[00:00.00] wrong artist\",\"duration\":260.0}]"),
+        };
+        using var client = new LrclibClient(new HttpClient(handler));
+
+        var lrc = await client.TryFetchSyncedLyricsAsync("A", "B", "C", 0);
+
+        Assert.Null(lrc);
+    }
+
+    [Fact]
+    public async Task GetMiss_UnknownDuration_SkipsWrongArtistRow_TakesLaterMatchingArtistRow()
+    {
+        // Take-first applies among ARTIST-MATCHING candidates: a wrong-artist row ranked first
+        // must be skipped, not end the scan.
+        var handler = new RoutingStubHandler
+        {
+            Get = (HttpStatusCode.NotFound, null),
+            Search = (HttpStatusCode.OK, "[{\"artistName\":\"Someone Else\",\"trackName\":\"B\",\"syncedLyrics\":\"[00:00.00] wrong artist\",\"duration\":260.0},{\"artistName\":\"A\",\"trackName\":\"B\",\"syncedLyrics\":\"[00:00.00] right artist\",\"duration\":261.0}]"),
+        };
+        using var client = new LrclibClient(new HttpClient(handler));
+
+        var lrc = await client.TryFetchSyncedLyricsAsync("A", "B", "C", 0);
+
+        Assert.Equal("[00:00.00] right artist", lrc);
+    }
+
+    [Fact]
+    public async Task GetMiss_ArtistMatchUsesSameLooseNormalizationAsTitle_NotOverBlocking()
+    {
+        // Artist equality uses the same alnum-lowercase normalization as the title compare, so
+        // punctuation/case variants ("AC/DC" vs "ACDC") still match — verification must not
+        // regress legitimate matches.
+        var handler = new RoutingStubHandler
+        {
+            Get = (HttpStatusCode.NotFound, null),
+            Search = (HttpStatusCode.OK, "[{\"artistName\":\"ACDC\",\"trackName\":\"T.N.T.\",\"syncedLyrics\":\"[00:00.00] oi\",\"duration\":215.0}]"),
+        };
+        using var client = new LrclibClient(new HttpClient(handler));
+
+        var lrc = await client.TryFetchSyncedLyricsAsync("AC/DC", "TNT", "High Voltage", 214);
+
+        Assert.Equal("[00:00.00] oi", lrc);
+    }
+
+    [Fact]
+    public async Task GetMiss_CandidateMissingArtistName_ReturnsNull()
+    {
+        // A row whose artistName is absent/empty cannot be verified — reject it rather than
+        // risk wrong-artist lyrics. (The real LRCLIB API always returns artistName; this guards
+        // the degenerate/malformed case.)
+        var handler = new RoutingStubHandler
+        {
+            Get = (HttpStatusCode.NotFound, null),
+            Search = (HttpStatusCode.OK, "[{\"trackName\":\"B\",\"syncedLyrics\":\"[00:00.00] unverifiable\",\"duration\":188.0}]"),
+        };
+        using var client = new LrclibClient(new HttpClient(handler));
+
+        var lrc = await client.TryFetchSyncedLyricsAsync("A", "B", "C", 188);
+
+        Assert.Null(lrc);
+    }
+
+    [Fact]
     public async Task GetMiss_SearchNetworkError_ReturnsNull()
     {
         var handler = new RoutingStubHandler
