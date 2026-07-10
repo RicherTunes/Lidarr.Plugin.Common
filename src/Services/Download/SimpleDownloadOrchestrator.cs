@@ -187,7 +187,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                     cancellationToken.ThrowIfCancellationRequested();
 
                     var track = await _getTrackAsync(trackId).ConfigureAwait(false);
-                    var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
+                    var trackPath = BuildTrackOutputPath(outputDirectory, track);
 
                     var tr = await DownloadTrackInternalAsync(albumId, trackId, track, trackPath, quality, progress, done, total, cancellationToken).ConfigureAwait(false);
                     result.TrackResults.Add(new TrackDownloadResult
@@ -220,7 +220,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                         cancellationToken.ThrowIfCancellationRequested();
 
                         var track = await _getTrackAsync(trackId).ConfigureAwait(false);
-                        var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
+                        var trackPath = BuildTrackOutputPath(outputDirectory, track);
 
                         var currentCompleted = Interlocked.CompareExchange(ref completed, 0, 0);
                         var tr = await DownloadTrackInternalAsync(albumId, trackId, track, trackPath, quality, progress, currentCompleted, total, cancellationToken).ConfigureAwait(false);
@@ -328,6 +328,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                 TrackDownloadResult result;
 
                 // If a chunk-based stream provider is supplied, use it
+                // (payload validation runs after either branch — see ApplyPayloadValidation below)
                 if (_streamProvider != null)
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
@@ -430,6 +431,8 @@ namespace Lidarr.Plugin.Common.Services.Download
                     // Fallback to URL-based path with resume tracking
                     result = await DownloadViaUrlAsync(trackId, track, outputPath, quality, progress, completedBefore, totalTracks, cancellationToken).ConfigureAwait(false);
                 }
+
+                result = ApplyPayloadValidation(result, track, cancellationToken);
 
                 stopwatch.Stop();
                 EmitTrackTelemetry(albumId, track, quality, trackId, result, stopwatch.Elapsed, counters);
@@ -650,6 +653,66 @@ namespace Lidarr.Plugin.Common.Services.Download
                 // Includes a non-caller OCE that exhausted the resume-retries (e.g. repeated request
                 // timeouts) — recorded as a track failure rather than escaping as a whole-album cancel.
                 return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
+            }
+        }
+
+        /// <summary>
+        /// Builds the output path for a track inside the shared album loop. The default mirrors the
+        /// historical behavior (sanitized "NN - Title" via <see cref="FileSystemUtilities.CreateTrackFileName"/>).
+        /// Plugins override this to apply service-specific naming (multi-disc numbering, user naming formats)
+        /// while still reusing the base album loop. The returned extension is provisional — the download
+        /// engine replaces it with the resolved stream format's extension via <c>Path.ChangeExtension</c>.
+        /// </summary>
+        protected virtual string BuildTrackOutputPath(string outputDirectory, StreamingTrack? track)
+        {
+            return Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
+        }
+
+        /// <summary>
+        /// Validates a successfully downloaded — and already post-processed/tagged — payload. Runs for every
+        /// track download (album loop and direct track downloads, both the URL and stream-provider engines)
+        /// with the FINAL file path. Throw to reject the payload: the orchestrator deletes the file and
+        /// records the track as failed, feeding the AlbumCompletionPolicy incomplete⇒Failed contract exactly
+        /// like any other track failure. The default performs no validation beyond the engine's own
+        /// empty-file check.
+        /// </summary>
+        protected virtual void ValidateDownloadedPayload(string filePath, StreamingTrack? track)
+        {
+        }
+
+        /// <summary>
+        /// Applies <see cref="ValidateDownloadedPayload"/> to a successful track result. A validation throw
+        /// deletes the rejected file and converts the result to a failure (sanitized message); a genuine
+        /// caller cancellation propagates so the outer handler emits cancellation telemetry.
+        /// </summary>
+        private TrackDownloadResult ApplyPayloadValidation(TrackDownloadResult result, StreamingTrack? track, CancellationToken cancellationToken)
+        {
+            if (!result.Success || string.IsNullOrWhiteSpace(result.FilePath))
+            {
+                return result;
+            }
+
+            try
+            {
+                ValidateDownloadedPayload(result.FilePath, track);
+                return result;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                TryDelete(result.FilePath);
+                _logger.LogWarning(ex,
+                    "[{ServiceName}] Downloaded payload rejected by validation for track {TrackId}: {FileName}",
+                    ServiceName, result.TrackId, Path.GetFileName(result.FilePath));
+                return new TrackDownloadResult
+                {
+                    TrackId = result.TrackId,
+                    Success = false,
+                    ErrorMessage = $"Track {result.TrackId}: {Sanitize.SafeErrorMessage(ex.Message)}"
+                };
             }
         }
 
