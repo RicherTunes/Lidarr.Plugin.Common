@@ -187,7 +187,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                     cancellationToken.ThrowIfCancellationRequested();
 
                     var track = await _getTrackAsync(trackId).ConfigureAwait(false);
-                    var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
+                    var trackPath = BuildTrackOutputPath(outputDirectory, track);
 
                     var tr = await DownloadTrackInternalAsync(albumId, trackId, track, trackPath, quality, progress, done, total, cancellationToken).ConfigureAwait(false);
                     result.TrackResults.Add(new TrackDownloadResult
@@ -220,7 +220,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                         cancellationToken.ThrowIfCancellationRequested();
 
                         var track = await _getTrackAsync(trackId).ConfigureAwait(false);
-                        var trackPath = Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
+                        var trackPath = BuildTrackOutputPath(outputDirectory, track);
 
                         var currentCompleted = Interlocked.CompareExchange(ref completed, 0, 0);
                         var tr = await DownloadTrackInternalAsync(albumId, trackId, track, trackPath, quality, progress, currentCompleted, total, cancellationToken).ConfigureAwait(false);
@@ -328,6 +328,7 @@ namespace Lidarr.Plugin.Common.Services.Download
                 TrackDownloadResult result;
 
                 // If a chunk-based stream provider is supplied, use it
+                // (payload validation runs after either branch — see ApplyPayloadValidation below)
                 if (_streamProvider != null)
                 {
                     Directory.CreateDirectory(Path.GetDirectoryName(outputPath) ?? ".");
@@ -430,6 +431,8 @@ namespace Lidarr.Plugin.Common.Services.Download
                     // Fallback to URL-based path with resume tracking
                     result = await DownloadViaUrlAsync(trackId, track, outputPath, quality, progress, completedBefore, totalTracks, cancellationToken).ConfigureAwait(false);
                 }
+
+                result = ApplyPayloadValidation(result, track, cancellationToken);
 
                 stopwatch.Stop();
                 EmitTrackTelemetry(albumId, track, quality, trackId, result, stopwatch.Elapsed, counters);
@@ -650,6 +653,75 @@ namespace Lidarr.Plugin.Common.Services.Download
                 // Includes a non-caller OCE that exhausted the resume-retries (e.g. repeated request
                 // timeouts) — recorded as a track failure rather than escaping as a whole-album cancel.
                 return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
+            }
+        }
+
+        /// <summary>
+        /// Builds the output path for a track inside the shared album loop. The default mirrors the
+        /// historical behavior (sanitized "NN - Title" via <see cref="FileSystemUtilities.CreateTrackFileName(string, int, string, int)"/>).
+        /// Plugins override this to apply service-specific naming (multi-disc numbering, user naming formats)
+        /// while still reusing the base album loop. Always return a name WITH a provisional extension — when
+        /// the service resolves a stream format, the engine swaps the extension via <c>Path.ChangeExtension</c>
+        /// (an extensionless name containing a dot would be mangled); when the service returns no extension,
+        /// the provisional one is kept. Overrides MUST be thread-safe: the album loop invokes this
+        /// concurrently when <c>maxConcurrentTracks &gt; 1</c>.
+        /// </summary>
+        protected virtual string BuildTrackOutputPath(string outputDirectory, StreamingTrack? track)
+        {
+            return Path.Combine(outputDirectory, FileSystemUtilities.CreateTrackFileName(track?.Title ?? "Unknown", track?.TrackNumber ?? 0));
+        }
+
+        /// <summary>
+        /// Validates a successfully downloaded — and already post-processed/tagged — payload. Runs for every
+        /// track download (album loop and direct track downloads, both the URL and stream-provider engines)
+        /// with the FINAL file path; never invoked for a failed download. Throw to reject the payload: the
+        /// orchestrator deletes the file and records the track as failed, feeding the AlbumCompletionPolicy
+        /// incomplete⇒Failed contract exactly like any other track failure. (Exception: a genuine
+        /// caller-cancellation <see cref="OperationCanceledException"/> propagates as a cancel without
+        /// deleting the file, matching the engine's cancellation semantics.) The default performs NO
+        /// validation — the engine's own empty-file check is separate and always on. Overriders wanting
+        /// audio magic-byte validation should build on Common's canonical
+        /// <see cref="DownloadPayloadValidator.ValidateFileOrThrow"/> rather than forking the logic.
+        /// Overrides MUST be thread-safe: the album loop invokes this concurrently when
+        /// <c>maxConcurrentTracks &gt; 1</c>.
+        /// </summary>
+        protected virtual void ValidateDownloadedPayload(string filePath, StreamingTrack? track)
+        {
+        }
+
+        /// <summary>
+        /// Applies <see cref="ValidateDownloadedPayload"/> to a successful track result. A validation throw
+        /// deletes the rejected file and converts the result to a failure (sanitized message); a genuine
+        /// caller cancellation propagates so the outer handler emits cancellation telemetry.
+        /// </summary>
+        private TrackDownloadResult ApplyPayloadValidation(TrackDownloadResult result, StreamingTrack? track, CancellationToken cancellationToken)
+        {
+            if (!result.Success || string.IsNullOrWhiteSpace(result.FilePath))
+            {
+                return result;
+            }
+
+            try
+            {
+                ValidateDownloadedPayload(result.FilePath, track);
+                return result;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                TryDelete(result.FilePath);
+                _logger.LogWarning(ex,
+                    "[{ServiceName}] Downloaded payload rejected by validation for track {TrackId}: {FileName}",
+                    ServiceName, result.TrackId, Path.GetFileName(result.FilePath));
+                return new TrackDownloadResult
+                {
+                    TrackId = result.TrackId,
+                    Success = false,
+                    ErrorMessage = $"Track {result.TrackId}: {Sanitize.SafeErrorMessage(ex.Message)}"
+                };
             }
         }
 
