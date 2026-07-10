@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Interfaces;
 using Lidarr.Plugin.Abstractions.Models;
+using Lidarr.Plugin.Common.HostBridge;
 using Lidarr.Plugin.Common.Utilities;
 using Lidarr.Plugin.Common.Services.Metadata;
 using Lidarr.Plugin.Common.Security;
@@ -187,9 +188,8 @@ namespace Lidarr.Plugin.Common.Services.Download
                     cancellationToken.ThrowIfCancellationRequested();
 
                     var track = await _getTrackAsync(trackId).ConfigureAwait(false);
-                    var trackPath = BuildTrackOutputPath(outputDirectory, track);
 
-                    var tr = await DownloadTrackInternalAsync(albumId, trackId, track, trackPath, quality, progress, done, total, cancellationToken).ConfigureAwait(false);
+                    var tr = await DownloadAlbumTrackAsync(albumId, trackId, track, outputDirectory, quality, progress, done, total, cancellationToken).ConfigureAwait(false);
                     result.TrackResults.Add(new TrackDownloadResult
                     {
                         TrackId = trackId,
@@ -220,10 +220,9 @@ namespace Lidarr.Plugin.Common.Services.Download
                         cancellationToken.ThrowIfCancellationRequested();
 
                         var track = await _getTrackAsync(trackId).ConfigureAwait(false);
-                        var trackPath = BuildTrackOutputPath(outputDirectory, track);
 
                         var currentCompleted = Interlocked.CompareExchange(ref completed, 0, 0);
-                        var tr = await DownloadTrackInternalAsync(albumId, trackId, track, trackPath, quality, progress, currentCompleted, total, cancellationToken).ConfigureAwait(false);
+                        var tr = await DownloadAlbumTrackAsync(albumId, trackId, track, outputDirectory, quality, progress, currentCompleted, total, cancellationToken).ConfigureAwait(false);
 
                         lock (trackResultsLock)
                         {
@@ -315,6 +314,51 @@ namespace Lidarr.Plugin.Common.Services.Download
             var track = await _getTrackAsync(trackId).ConfigureAwait(false);
             if (track == null) throw new InvalidOperationException($"Track not found: {trackId}");
             return await DownloadTrackInternalAsync(albumId: null, trackId, track, outputPath, quality, null, 0, 1, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Album-loop wrapper around <see cref="DownloadTrackInternalAsync"/>: resolves the track's output
+        /// path through the <see cref="BuildTrackOutputPath"/> seam with album-root containment enforced.
+        /// A containment violation (or any other throw from a naming override) fails ONLY this track — the
+        /// album loop records the failure and continues with the remaining tracks, so the incomplete album
+        /// flows through the normal AlbumCompletionPolicy incomplete⇒Failed contract instead of aborting.
+        /// </summary>
+        private async Task<TrackDownloadResult> DownloadAlbumTrackAsync(string albumId, string trackId, StreamingTrack track, string outputDirectory, StreamingQuality? quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks, CancellationToken cancellationToken)
+        {
+            string trackPath;
+            try
+            {
+                trackPath = ResolveTrackOutputPathOrThrow(outputDirectory, track);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex,
+                    "[{ServiceName}] Refusing to download track {TrackId}: output path rejected",
+                    ServiceName, trackId);
+                return new TrackDownloadResult { TrackId = trackId, Success = false, ErrorMessage = $"Track {trackId}: {Sanitize.SafeErrorMessage(ex.Message)}" };
+            }
+
+            return await DownloadTrackInternalAsync(albumId, trackId, track, trackPath, quality, progress, completedBefore, totalTracks, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <summary>
+        /// Resolves a track's output path through the <see cref="BuildTrackOutputPath"/> seam and enforces
+        /// album-root containment: the returned path must resolve within <paramref name="outputDirectory"/>
+        /// (nested descendants such as <c>Disc 01/01 - Title.flac</c> are allowed). Throws
+        /// <see cref="InvalidOperationException"/> when an override returns a path that escapes the album
+        /// root. The check is lexical per <see cref="PathTraversalGuard.IsPathWithinRoot"/>'s threat model
+        /// (canonicalizes <c>.</c>/<c>..</c>/separators but does not resolve symlinks/junctions).
+        /// </summary>
+        private string ResolveTrackOutputPathOrThrow(string outputDirectory, StreamingTrack? track)
+        {
+            var path = BuildTrackOutputPath(outputDirectory, track);
+            if (!PathTraversalGuard.IsPathWithinRoot(path, outputDirectory))
+            {
+                throw new InvalidOperationException(
+                    $"Track output path escapes the album root: '{path}' does not resolve within '{outputDirectory}'.");
+            }
+
+            return path;
         }
 
         private async Task<TrackDownloadResult> DownloadTrackInternalAsync(string? albumId, string trackId, StreamingTrack track, string outputPath, StreamingQuality? quality, IProgress<DownloadProgress>? progress, int completedBefore, int totalTracks, CancellationToken cancellationToken)
@@ -568,6 +612,31 @@ namespace Lidarr.Plugin.Common.Services.Download
                             ResiliencePolicy.Streaming,
                             cancellationToken,
                             validateRedirectTarget: u => RemoteMediaUriGuard.IsAllowedForRedirectTargetOrThrowTransient(u, _mediaUriPolicy)).ConfigureAwait(false);
+
+                        // A 416 on a RESUME attempt means the server can no longer satisfy the Range built
+                        // from the preserved ".partial" (stale/oversized partial, changed representation).
+                        // Retrying with the same partial can only 416 again until the attempt budget is
+                        // exhausted — failing the track, the album, and re-entering the host re-grab loop
+                        // that retry-with-resume exists to prevent. Discard the stale partial + resume state
+                        // and restart: the next attempt sees no partial, so it issues a clean full GET with
+                        // NO Range header. The restart still consumes an attempt, keeping a pathological
+                        // always-416 server bounded by MaxDownloadAttempts. A 416 with no partial (no Range
+                        // was sent) is an ordinary HTTP failure handled by EnsureSuccessStatusCode below.
+                        if (resp.StatusCode == System.Net.HttpStatusCode.RequestedRangeNotSatisfiable && existingBytes > 0)
+                        {
+                            DownloadTelemetryContext.RecordRetry(resp.StatusCode);
+                            _logger.LogWarning(
+                                "[{ServiceName}] Resume rejected with 416 for track {TrackId} (attempt {Attempt}/{MaxAttempts}); discarding stale partial and restarting with a clean full GET",
+                                ServiceName, trackId, attempt, maxAttempts);
+                            TryDelete(tempPath);
+                            TryDelete(resumePath);
+                            if (attempt >= maxAttempts)
+                            {
+                                resp.EnsureSuccessStatusCode(); // out of attempts — surface the 416 as the final failure
+                            }
+                            continue;
+                        }
+
                         resp.EnsureSuccessStatusCode();
 
                         var totalHeader = resp.Content.Headers.ContentLength;
@@ -665,6 +734,12 @@ namespace Lidarr.Plugin.Common.Services.Download
         /// (an extensionless name containing a dot would be mangled); when the service returns no extension,
         /// the provisional one is kept. Overrides MUST be thread-safe: the album loop invokes this
         /// concurrently when <c>maxConcurrentTracks &gt; 1</c>.
+        /// <para>Containment is enforced by the album loops: the returned path must resolve WITHIN
+        /// <paramref name="outputDirectory"/> (nested subpaths like <c>Disc 01/01 - Title.flac</c> are
+        /// fine). A path that escapes the album root fails that track (never written, album continues),
+        /// so overrides are safe-by-default against traversal in the segments they compose. The guard is
+        /// lexical (<see cref="PathTraversalGuard.IsPathWithinRoot"/>'s threat model: resolves
+        /// <c>.</c>/<c>..</c>, not symlinks/junctions).</para>
         /// </summary>
         protected virtual string BuildTrackOutputPath(string outputDirectory, StreamingTrack? track)
         {
