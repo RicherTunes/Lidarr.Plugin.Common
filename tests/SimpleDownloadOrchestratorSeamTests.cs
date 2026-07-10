@@ -38,7 +38,8 @@ namespace Lidarr.Plugin.Common.Tests
                 Func<string, StreamingQuality?, Task<(string Url, string Extension)>> getStreamAsync,
                 int maxConcurrentTracks = 1,
                 IAudioStreamProvider? streamProvider = null,
-                IAudioPostProcessor? postProcessor = null)
+                IAudioPostProcessor? postProcessor = null,
+                IDownloadTelemetrySink? telemetrySink = null)
                 : base(
                     "SeamTest",
                     httpClient,
@@ -50,7 +51,8 @@ namespace Lidarr.Plugin.Common.Tests
                     streamProvider,
                     metadataApplier: new NoopMetadataApplier(),
                     logger: null,
-                    postProcessor: postProcessor)
+                    postProcessor: postProcessor,
+                    telemetrySink: telemetrySink)
             {
             }
 
@@ -290,6 +292,136 @@ namespace Lidarr.Plugin.Common.Tests
                 TryDelete(temp);
                 TryDelete(expectedFlac);
                 TryDelete(Path.ChangeExtension(temp, "bin"));
+            }
+        }
+
+        [Fact]
+        public async Task DownloadAlbumAsync_FailedDownload_DoesNotInvokePayloadValidation()
+        {
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 4, supportRange: false));
+            var orch = new SeamOrchestrator(
+                http,
+                getAlbumAsync: id => Task.FromResult(Album(id, 1)),
+                getTrackAsync: id => Task.FromResult(Track(id, 1)),
+                getAlbumTrackIdsAsync: _ => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1" }),
+                getStreamAsync: (id, q) => Task.FromResult((string.Empty, string.Empty)));
+
+            var dir = Path.Combine(Path.GetTempPath(), $"orch_seam_validate_skipfail_{Guid.NewGuid():N}");
+            try
+            {
+                var result = await orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 });
+
+                Assert.False(result.Success);
+                Assert.Empty(orch.ValidationCalls);
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task DownloadAlbumAsync_ParallelLoop_ValidationFailureOnOneTrack_FailsAlbumKeepsGoodTrack()
+        {
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 4, supportRange: false));
+            var sink = new RecordingTelemetrySink();
+            var orch = new SeamOrchestrator(
+                http,
+                getAlbumAsync: id => Task.FromResult(Album(id, 2)),
+                getTrackAsync: id => Task.FromResult(Track(id, int.Parse(id.TrimStart('t')))),
+                getAlbumTrackIdsAsync: _ => Task.FromResult((IReadOnlyList<string>)new List<string> { "t1", "t2" }),
+                getStreamAsync: (id, q) => Task.FromResult(("https://93.184.216.34/file", "bin")),
+                maxConcurrentTracks: 2,
+                telemetrySink: sink);
+            orch.Validator = (path, track) =>
+            {
+                if (track?.Id == "t2") throw new InvalidOperationException("payload validation failed: not audio");
+            };
+
+            var dir = Path.Combine(Path.GetTempPath(), $"orch_seam_validate_par_{Guid.NewGuid():N}");
+            try
+            {
+                var result = await orch.DownloadAlbumAsync("a1", dir, new StreamingQuality { Bitrate = 320 });
+
+                Assert.False(result.Success);
+                Assert.Equal(2, result.TrackResults.Count);
+                Assert.Single(result.TrackResults, tr => tr.Success);
+                var failed = Assert.Single(result.TrackResults, tr => !tr.Success);
+                Assert.Equal("t2", failed.TrackId);
+                var goodFile = Assert.Single(result.FilePaths);
+                Assert.True(File.Exists(goodFile));
+                // Telemetry must reflect the FINAL (post-validation) result per track.
+                Assert.False(sink.ByTrackId["t2"].Success);
+                Assert.True(sink.ByTrackId["t1"].Success);
+            }
+            finally
+            {
+                TryDeleteDir(dir);
+            }
+        }
+
+        [Fact]
+        public async Task DownloadTrackAsync_ValidatorThrowsNonCallerOce_ConvertsToTrackFailureAndDeletesFile()
+        {
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 4, supportRange: false));
+            var orch = CreateUrlOrchestrator(http, new List<string> { "t1" });
+            // A validator-internal timeout (OCE while the caller token is NOT cancelled) must be a track
+            // failure — never escape as a whole-album cancel.
+            orch.Validator = (path, track) => throw new OperationCanceledException("validator-internal timeout");
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_seam_validate_oce_int_{Guid.NewGuid():N}.tmp");
+            try
+            {
+                var result = await orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 });
+
+                Assert.False(result.Success);
+                var call = Assert.Single(orch.ValidationCalls);
+                Assert.False(File.Exists(call.FilePath));
+            }
+            finally
+            {
+                TryDelete(temp);
+                TryDelete(Path.ChangeExtension(temp, "bin"));
+            }
+        }
+
+        [Fact]
+        public async Task DownloadTrackAsync_ValidatorThrowsCallerCancellation_PropagatesAsCancel()
+        {
+            using var http = new HttpClient(new FakeRangeHandler(totalBytes: 4, supportRange: false));
+            using var cts = new CancellationTokenSource();
+            var orch = CreateUrlOrchestrator(http, new List<string> { "t1" });
+            orch.Validator = (path, track) =>
+            {
+                cts.Cancel();
+                throw new OperationCanceledException(cts.Token);
+            };
+
+            var temp = Path.Combine(Path.GetTempPath(), $"orch_seam_validate_oce_caller_{Guid.NewGuid():N}.tmp");
+            try
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                    () => orch.DownloadTrackAsync("t1", temp, new StreamingQuality { Bitrate = 320 }, cts.Token));
+            }
+            finally
+            {
+                TryDelete(temp);
+                TryDelete(Path.ChangeExtension(temp, "bin"));
+            }
+        }
+
+        private sealed class RecordingTelemetrySink : IDownloadTelemetrySink
+        {
+            private readonly ConcurrentDictionary<string, DownloadTelemetry> _byTrackId = new();
+
+            public IReadOnlyDictionary<string, DownloadTelemetry> ByTrackId => _byTrackId;
+
+            public void OnTrackCompleted(DownloadTelemetry telemetry)
+            {
+                if (telemetry.TrackId != null)
+                {
+                    _byTrackId[telemetry.TrackId] = telemetry;
+                }
             }
         }
 

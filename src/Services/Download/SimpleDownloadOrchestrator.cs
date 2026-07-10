@@ -660,8 +660,11 @@ namespace Lidarr.Plugin.Common.Services.Download
         /// Builds the output path for a track inside the shared album loop. The default mirrors the
         /// historical behavior (sanitized "NN - Title" via <see cref="FileSystemUtilities.CreateTrackFileName"/>).
         /// Plugins override this to apply service-specific naming (multi-disc numbering, user naming formats)
-        /// while still reusing the base album loop. The returned extension is provisional — the download
-        /// engine replaces it with the resolved stream format's extension via <c>Path.ChangeExtension</c>.
+        /// while still reusing the base album loop. Always return a name WITH a provisional extension — when
+        /// the service resolves a stream format, the engine swaps the extension via <c>Path.ChangeExtension</c>
+        /// (an extensionless name containing a dot would be mangled); when the service returns no extension,
+        /// the provisional one is kept. Overrides MUST be thread-safe: the album loop invokes this
+        /// concurrently when <c>maxConcurrentTracks &gt; 1</c>.
         /// </summary>
         protected virtual string BuildTrackOutputPath(string outputDirectory, StreamingTrack? track)
         {
@@ -671,10 +674,16 @@ namespace Lidarr.Plugin.Common.Services.Download
         /// <summary>
         /// Validates a successfully downloaded — and already post-processed/tagged — payload. Runs for every
         /// track download (album loop and direct track downloads, both the URL and stream-provider engines)
-        /// with the FINAL file path. Throw to reject the payload: the orchestrator deletes the file and
-        /// records the track as failed, feeding the AlbumCompletionPolicy incomplete⇒Failed contract exactly
-        /// like any other track failure. The default performs no validation beyond the engine's own
-        /// empty-file check.
+        /// with the FINAL file path; never invoked for a failed download. Throw to reject the payload: the
+        /// orchestrator deletes the file and records the track as failed, feeding the AlbumCompletionPolicy
+        /// incomplete⇒Failed contract exactly like any other track failure. (Exception: a genuine
+        /// caller-cancellation <see cref="OperationCanceledException"/> propagates as a cancel without
+        /// deleting the file, matching the engine's cancellation semantics.) The default performs NO
+        /// validation — the engine's own empty-file check is separate and always on. Overriders wanting
+        /// audio magic-byte validation should build on Common's canonical
+        /// <see cref="DownloadPayloadValidator.ValidateFileOrThrow"/> rather than forking the logic.
+        /// Overrides MUST be thread-safe: the album loop invokes this concurrently when
+        /// <c>maxConcurrentTracks &gt; 1</c>.
         /// </summary>
         protected virtual void ValidateDownloadedPayload(string filePath, StreamingTrack? track)
         {
