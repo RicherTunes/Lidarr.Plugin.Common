@@ -12,6 +12,10 @@ namespace Lidarr.Plugin.Common.HostBridge;
 /// Durable, bounded, TTL-based suppression store for provider releases known to be terminally unavailable.
 /// Plugins use this to stop re-offering a provider release that can never complete while keeping the host
 /// download result truthful.
+/// Suppression checks read an in-memory snapshot refreshed at most once per <c>refreshInterval</c>
+/// (default 1 hour), so a TTL expiry becomes observable only on the next refresh — an entry may stay
+/// suppressed for up to one refresh interval after its TTL lapses (over-suppression window ≤
+/// <c>refreshInterval</c>).
 /// </summary>
 public sealed class TerminalReleaseSuppressionStore : ITerminalReleaseSuppressionStore
 {

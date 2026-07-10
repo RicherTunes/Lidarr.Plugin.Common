@@ -95,7 +95,8 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
 
             // 2) Fallback: /api/get 404s whenever the album-edition name or duration differs even
             //    slightly from LRCLIB's crowd-sourced record (common), so fuzzy-search by
-            //    artist+track and take the closest-duration synced match within tolerance.
+            //    artist+track and take the closest-duration synced match within tolerance among
+            //    candidates whose normalized TITLE AND ARTIST both match the request.
             return await TrySearchSyncedLyricsAsync(artistName, trackName, durationSeconds, cancellationToken).ConfigureAwait(false);
         }
 
@@ -166,10 +167,16 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
                 {
                     if (string.IsNullOrWhiteSpace(r?.SyncedLyrics)) continue;
                     if (!IsSameTrack(trackName, r.TrackName)) continue;
+                    // /api/search is fuzzy across the whole catalog: a same-title row from a DIFFERENT
+                    // artist (covers, common titles) can rank first with a plausible duration, and
+                    // embedding its LRC would be wrong-artist lyrics. Require the candidate's artist to
+                    // match under the same alnum-lowercase normalization as the title compare; a row
+                    // without a verifiable artistName is rejected rather than risked.
+                    if (!IsSameArtist(artistName, r.ArtistName)) continue;
 
                     if (durationSeconds <= 0)
                     {
-                        // Unknown duration — take the top-ranked synced result LRCLIB returned.
+                        // Unknown duration — take the top-ranked ARTIST-MATCHING synced result.
                         best = r;
                         break;
                     }
@@ -227,6 +234,12 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
         }
 
         private static bool IsSameTrack(string requested, string? candidate)
+            => NormalizedNamesEqual(requested, candidate);
+
+        private static bool IsSameArtist(string requested, string? candidate)
+            => NormalizedNamesEqual(requested, candidate);
+
+        private static bool NormalizedNamesEqual(string requested, string? candidate)
         {
             var normalizedRequested = NormalizeTrackName(requested);
             var normalizedCandidate = NormalizeTrackName(candidate);
@@ -282,6 +295,9 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
 
         private sealed class LrclibSearchResult
         {
+            [JsonPropertyName("artistName")]
+            public string? ArtistName { get; init; }
+
             [JsonPropertyName("trackName")]
             public string? TrackName { get; init; }
 
@@ -291,7 +307,7 @@ namespace Lidarr.Plugin.Common.Services.Lyrics
             [JsonPropertyName("duration")]
             public double Duration { get; init; }
 
-            // The API also returns id/artistName/trackName/albumName/plainLyrics — not needed here.
+            // The API also returns id/albumName/plainLyrics — not needed here.
         }
     }
 }
