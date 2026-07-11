@@ -215,6 +215,56 @@ public sealed class HostBridgeDownloadOrchestrator
             cancellationToken);
     }
 
+    /// <summary>
+    /// Snapshot settings and perform asynchronous pre-admission before committing an AttemptV2
+    /// queue item, registering cancellation, or scheduling background work.
+    /// </summary>
+    public async Task<string> StartTrackedDownloadV2Async<TItem, TSettings>(
+        TSettings settings,
+        HostBridgeDownloadTrackerStore<TItem> tracker,
+        Func<TSettings, TSettings> snapshotter,
+        Func<TSettings, string, TItem> itemFactory,
+        Func<TSettings, string, TItem, ValueTask<HostBridgePreAdmissionResult>> preAdmission,
+        Func<TSettings, string, TItem, CancellationToken, Task> doWork,
+        HostBridgeDownloadStartOptions<TItem> options,
+        CancellationToken cancellationToken = default)
+        where TItem : HostBridgeDownloadItem
+    {
+        if (tracker is null) throw new ArgumentNullException(nameof(tracker));
+        if (snapshotter is null) throw new ArgumentNullException(nameof(snapshotter));
+        if (itemFactory is null) throw new ArgumentNullException(nameof(itemFactory));
+        if (preAdmission is null) throw new ArgumentNullException(nameof(preAdmission));
+        if (doWork is null) throw new ArgumentNullException(nameof(doWork));
+        if (options is null) throw new ArgumentNullException(nameof(options));
+
+        TSettings snapshot = snapshotter(settings);
+        string downloadId = Guid.NewGuid().ToString("N");
+        TItem item = itemFactory(snapshot, downloadId);
+
+        HostBridgePreAdmissionResult admission =
+            await preAdmission(snapshot, downloadId, item).ConfigureAwait(false);
+        cancellationToken.ThrowIfCancellationRequested();
+        if (!admission.Accepted)
+        {
+            throw new HostBridgePreAdmissionException(admission.Code, admission.Message);
+        }
+
+        if (!tracker.TryAddAttempt(item).Applied)
+        {
+            throw new InvalidOperationException(HostBridgeQueueResultCodes.Conflict);
+        }
+
+        return await ScheduleTrackedWorkAsync(
+                snapshot,
+                downloadId,
+                item,
+                tracker,
+                doWork,
+                options,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
     private Task<string> StartTrackedDownloadAsyncCore<TItem, TSettings>(
         TSettings settings,
         HostBridgeDownloadTrackerStore<TItem> tracker,
@@ -249,6 +299,26 @@ public sealed class HostBridgeDownloadOrchestrator
             "HostBridgeDownloadOrchestrator: enqueuing download {DownloadId} (tracker count after add: item inserted)",
             downloadId);
 
+        return ScheduleTrackedWorkAsync(
+            snapshot,
+            downloadId,
+            item,
+            tracker,
+            doWork,
+            options,
+            cancellationToken);
+    }
+
+    private Task<string> ScheduleTrackedWorkAsync<TItem, TSettings>(
+        TSettings snapshot,
+        string downloadId,
+        TItem item,
+        HostBridgeDownloadTrackerStore<TItem> tracker,
+        Func<TSettings, string, TItem, CancellationToken, Task> doWork,
+        HostBridgeDownloadStartOptions<TItem>? options,
+        CancellationToken cancellationToken)
+        where TItem : HostBridgeDownloadItem
+    {
         HostBridgeDownloadCancellationRegistration? cancellationRegistration = null;
         try
         {

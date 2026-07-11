@@ -28,6 +28,13 @@ public readonly record struct HostBridgePreAdmissionResult(bool Accepted, string
     public static HostBridgePreAdmissionResult Reject(string code, string message) => new(false, code, message);
 }
 
+public sealed class HostBridgePreAdmissionException : InvalidOperationException
+{
+    public HostBridgePreAdmissionException(string code, string message) : base(message) => Code = code;
+
+    public string Code { get; }
+}
+
 public readonly record struct HostBridgeRestartEvidence(
     bool AttemptTemporaryStateContained,
     bool VerifiedSegmentsAvailable,
