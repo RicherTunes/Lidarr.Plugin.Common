@@ -45,6 +45,13 @@ public sealed class HostBridgeDownloadStartOptions<TItem>
     /// disposed by Common when the background work exits.
     /// </summary>
     public Func<string, TItem, HostBridgeDownloadCancellationRegistration>? RegisterCancellation { get; init; }
+
+    /// <summary>
+    /// Observes cleanup, observer, and wrapper-infrastructure failures contained by the
+    /// fire-and-forget path. Work-delegate exceptions retain their existing logger-only
+    /// handling. The callback is invoked outside tracker locks, and callback failures are ignored.
+    /// </summary>
+    public Action<string, Exception>? OnBackgroundFault { get; init; }
 }
 
 /// <summary>
@@ -249,7 +256,8 @@ public sealed class HostBridgeDownloadOrchestrator
             throw new HostBridgePreAdmissionException(admission.Code, admission.Message);
         }
 
-        if (!tracker.TryAddAttempt(item).Applied)
+        var commit = tracker.TryAddAttempt(item);
+        if (!commit.Applied)
         {
             throw new InvalidOperationException(HostBridgeQueueResultCodes.Conflict);
         }
@@ -261,7 +269,8 @@ public sealed class HostBridgeDownloadOrchestrator
                 tracker,
                 doWork,
                 options,
-                cancellationToken)
+                cancellationToken,
+                commit.Current)
             .ConfigureAwait(false);
     }
 
@@ -316,7 +325,8 @@ public sealed class HostBridgeDownloadOrchestrator
         HostBridgeDownloadTrackerStore<TItem> tracker,
         Func<TSettings, string, TItem, CancellationToken, Task> doWork,
         HostBridgeDownloadStartOptions<TItem>? options,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        HostBridgeQueueMutationKey? committedAttempt = null)
         where TItem : HostBridgeDownloadItem
     {
         HostBridgeDownloadCancellationRegistration? cancellationRegistration = null;
@@ -326,22 +336,34 @@ public sealed class HostBridgeDownloadOrchestrator
         }
         catch
         {
-            tracker.Remove(downloadId, deleteData: false, out _);
+            if (committedAttempt.HasValue)
+            {
+                try
+                {
+                    tracker.TryRollbackAttempt(committedAttempt.Value, item);
+                }
+                catch (Exception ex)
+                {
+                    ReportBackgroundFault(options, downloadId, ex);
+                }
+            }
+            else
+                tracker.Remove(downloadId, deleteData: false, out _);
             throw;
         }
 
         CancellationToken effectiveCancellationToken =
             CreateEffectiveCancellationToken(cancellationToken, cancellationRegistration, out var linkedCancellationSource);
 
-        // Preserve old-overload scheduling semantics when no per-download cancellation
-        // registration exists. New options-based callers always run the delegate so Common
-        // can dispose the registration even when the caller token was already cancelled.
-        var taskRunCancellationToken = cancellationRegistration is null
-            ? cancellationToken
-            : CancellationToken.None;
+        // AttemptV2 commits must always enter the wrapper so terminal mutation and final
+        // persistence cannot be skipped by cancellation after commit. Legacy callers retain
+        // their prior behavior: only a non-null registration forces wrapper entry.
+        var taskRunCancellationToken = committedAttempt.HasValue || cancellationRegistration is not null
+            ? CancellationToken.None
+            : cancellationToken;
 
         // Step 5: fire-and-forget. Captures snapshot (not live settings), downloadId, and item.
-        _ = Task.Run(async () =>
+        var backgroundTask = Task.Run(async () =>
         {
             try
             {
@@ -361,22 +383,37 @@ public sealed class HostBridgeDownloadOrchestrator
             }
             finally
             {
-                tracker.PersistSnapshot();
+                try
+                {
+                    tracker.PersistSnapshot();
+                }
+                catch (Exception ex)
+                {
+                    ReportBackgroundFault(options, downloadId, ex);
+                }
                 try
                 {
                     FinalPersistenceCompleted?.Invoke(downloadId);
                 }
-                catch
+                catch (Exception ex)
                 {
-                    // Internal observation must never affect download cleanup.
+                    ReportBackgroundFault(options, downloadId, ex);
                 }
-                linkedCancellationSource?.Dispose();
+                try
+                {
+                    linkedCancellationSource?.Dispose();
+                }
+                catch (Exception ex)
+                {
+                    ReportBackgroundFault(options, downloadId, ex);
+                }
                 try
                 {
                     cancellationRegistration?.Dispose();
                 }
                 catch (Exception ex)
                 {
+                    ReportBackgroundFault(options, downloadId, ex);
                     _logger?.LogWarning(ex,
                         "HostBridgeDownloadOrchestrator: cancellation cleanup failed for download {DownloadId}.",
                         downloadId);
@@ -384,8 +421,38 @@ public sealed class HostBridgeDownloadOrchestrator
             }
         }, taskRunCancellationToken);
 
+        _ = backgroundTask.ContinueWith(
+            faultedTask =>
+            {
+                var aggregate = faultedTask.Exception;
+                if (aggregate is null)
+                    return;
+
+                foreach (var exception in aggregate.Flatten().InnerExceptions)
+                    ReportBackgroundFault(options, downloadId, exception);
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+
         // Step 6: return immediately — doWork is still running in the background.
         return Task.FromResult(downloadId);
+    }
+
+    private static void ReportBackgroundFault<TItem>(
+        HostBridgeDownloadStartOptions<TItem>? options,
+        string downloadId,
+        Exception exception)
+        where TItem : HostBridgeDownloadItem
+    {
+        try
+        {
+            options?.OnBackgroundFault?.Invoke(downloadId, exception);
+        }
+        catch
+        {
+            // A diagnostic observer must never fault the fire-and-forget wrapper.
+        }
     }
 
     private static CancellationToken CreateEffectiveCancellationToken(

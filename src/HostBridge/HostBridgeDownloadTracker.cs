@@ -629,6 +629,31 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         return result;
     }
 
+    internal bool TryRollbackAttempt(HostBridgeQueueMutationKey committed, TItem committedItem)
+    {
+        if (_options.ContractVersion != HostBridgeQueueContractVersion.AttemptV2)
+            throw new InvalidOperationException("TryRollbackAttempt requires AttemptV2 store options.");
+        if (committedItem is null) throw new ArgumentNullException(nameof(committedItem));
+
+        var normalized = NormalizeDownloadId(committed.DownloadId);
+        string? warning = null;
+        var removed = false;
+        lock (_membershipLock)
+        {
+            if (_items.TryGetValue(normalized, out var current) &&
+                ReferenceEquals(current, committedItem) &&
+                current.MutationKey() == committed)
+            {
+                removed = _items.TryRemove(normalized, out _);
+                if (removed)
+                    warning = PersistToDisk();
+            }
+        }
+
+        NotifyWarning(warning);
+        return removed;
+    }
+
     public HostBridgeQueueMutationResult<TItem> TryTransition(
         HostBridgeQueueMutationKey expected,
         HostBridgeDownloadAttemptState target)
