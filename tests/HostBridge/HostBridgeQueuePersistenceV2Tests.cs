@@ -588,6 +588,151 @@ public sealed class HostBridgeQueuePersistenceV2Tests : IDisposable
         Assert.Equal(520, V2(path).GetSnapshot().Count());
     }
 
+    [Theory]
+    [InlineData("TryAdd", "status")]
+    [InlineData("TryAddAttempt", "status")]
+    [InlineData("AddOrReplace", "status")]
+    [InlineData("TryAdd", "nan")]
+    [InlineData("TryAddAttempt", "nan")]
+    [InlineData("AddOrReplace", "nan")]
+    [InlineData("TryAdd", "positive-infinity")]
+    [InlineData("TryAddAttempt", "positive-infinity")]
+    [InlineData("AddOrReplace", "positive-infinity")]
+    [InlineData("TryAdd", "negative-infinity")]
+    [InlineData("TryAddAttempt", "negative-infinity")]
+    [InlineData("AddOrReplace", "negative-infinity")]
+    public void InvalidWriterState_AllInsertionWrappersRejectWithoutMutation(
+        string insertion,
+        string invalidKind)
+    {
+        var path = TempFile();
+        var store = V2(path);
+        var item = new HostBridgeDownloadItem { DownloadId = "invalid-writer" };
+        SetInvalidWriterState(item, invalidKind);
+
+        switch (insertion)
+        {
+            case "TryAdd":
+                Assert.False(store.TryAdd(item));
+                break;
+            case "TryAddAttempt":
+                var result = store.TryAddAttempt(item);
+                Assert.False(result.Applied);
+                Assert.Equal(HostBridgeQueueResultCodes.PersistenceInvalidState, result.Code);
+                break;
+            case "AddOrReplace":
+                var error = Assert.Throws<InvalidOperationException>(() => store.AddOrReplace(item));
+                Assert.Contains(HostBridgeQueueResultCodes.PersistenceInvalidState, error.Message, StringComparison.Ordinal);
+                break;
+        }
+
+        Assert.Empty(store.GetSnapshot());
+        Assert.False(File.Exists(path));
+        Assert.Equal(Guid.Empty, item.AttemptId);
+        Assert.Equal(0, item.Revision);
+    }
+
+    [Fact]
+    public void InvalidAttemptState_InsertionRejectsWithoutMutation()
+    {
+        var path = TempFile();
+        var item = new HostBridgeDownloadItemDto
+        {
+            DownloadId = "invalid-attempt-state",
+            AttemptId = Guid.NewGuid(),
+            Revision = 1,
+            AttemptState = (HostBridgeDownloadAttemptState)999,
+            StateChangedAtUtc = DateTime.UtcNow,
+        }.ToItem();
+
+        var result = V2(path).TryAddAttempt(item);
+
+        Assert.False(result.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.PersistenceInvalidState, result.Code);
+        Assert.False(File.Exists(path));
+    }
+
+    [Fact]
+    public void InvalidAttemptState_TransitionReturnsPersistenceInvalidState()
+    {
+        var path = TempFile();
+        var store = V2(path);
+        var added = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "invalid-transition-state" });
+        var item = added.Item!;
+        var persisted = File.ReadAllBytes(path);
+        item.RestoreAttempt(
+            item.AttemptId,
+            item.Revision,
+            (HostBridgeDownloadAttemptState)999,
+            item.StateChangedAtUtc);
+        var metadata = (item.Revision, item.AttemptState, item.StateChangedAtUtc);
+
+        var result = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Preparing);
+
+        Assert.False(result.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.PersistenceInvalidState, result.Code);
+        Assert.Equal(metadata, (item.Revision, item.AttemptState, item.StateChangedAtUtc));
+        Assert.Equal(persisted, File.ReadAllBytes(path));
+    }
+
+    [Theory]
+    [InlineData("status")]
+    [InlineData("nan")]
+    [InlineData("positive-infinity")]
+    [InlineData("negative-infinity")]
+    public void InvalidWriterState_TransitionRejectsThenValidStateWritesAndReopens(string invalidKind)
+    {
+        var path = TempFile();
+        var warnings = new List<string>();
+        var store = V2(path, warnings.Add);
+        var added = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "transition-invalid" });
+        var item = added.Item!;
+        var persisted = File.ReadAllBytes(path);
+        var metadata = (item.Revision, item.AttemptState, item.StateChangedAtUtc);
+        SetInvalidWriterState(item, invalidKind);
+
+        store.PersistSnapshot();
+
+        var rejected = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Preparing);
+
+        Assert.False(rejected.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.PersistenceInvalidState, rejected.Code);
+        Assert.Equal(metadata, (item.Revision, item.AttemptState, item.StateChangedAtUtc));
+        Assert.Equal(persisted, File.ReadAllBytes(path));
+        Assert.Contains(warnings, warning => warning.Contains(
+            HostBridgeQueueResultCodes.PersistenceInvalidState,
+            StringComparison.Ordinal));
+
+        item.SetStatus(HostBridgeDownloadItemStatus.Queued);
+        item.SetProgress(1);
+        var accepted = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Preparing);
+        Assert.True(accepted.Applied);
+        Assert.Equal(HostBridgeDownloadAttemptState.Queued, V2(
+            path,
+            evidence: _ => new(true, false, false)).GetSnapshot().Single().AttemptState);
+    }
+
+    private static void SetInvalidWriterState(HostBridgeDownloadItem item, string invalidKind)
+    {
+        switch (invalidKind)
+        {
+            case "status":
+                item.SetStatus((HostBridgeDownloadItemStatus)999);
+                break;
+            case "nan":
+                item.SetProgress(double.NaN);
+                break;
+            case "positive-infinity":
+                item.SetProgress(double.PositiveInfinity);
+                break;
+            case "negative-infinity":
+                item.SetProgress(double.NegativeInfinity);
+                break;
+            default:
+                throw new ArgumentOutOfRangeException(nameof(invalidKind));
+        }
+    }
+
     [Fact]
     public void AttemptV2_TransientReplaceFailureLeavesOriginalEnvelopeAndCleansTempFile()
     {

@@ -65,6 +65,7 @@ public static class HostBridgeQueueResultCodes
     public const string IllegalTransition = "QUEUE_ILLEGAL_TRANSITION";
     public const string MetadataExhausted = "QUEUE_METADATA_EXHAUSTED";
     public const string PersistenceLimitExceeded = "QUEUE_PERSISTENCE_LIMIT_EXCEEDED";
+    public const string PersistenceInvalidState = "QUEUE_PERSISTENCE_INVALID_STATE";
     public const string NotFound = "QUEUE_NOT_FOUND";
     public const string WorkerShutdownTimeout = "QUEUE_WORKER_SHUTDOWN_TIMEOUT";
     public const string Removed = "QUEUE_REMOVED";

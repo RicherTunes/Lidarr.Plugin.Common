@@ -388,6 +388,13 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     {
     }
 
+    private enum V2SnapshotValidationFailure
+    {
+        None,
+        LimitExceeded,
+        InvalidState,
+    }
+
     /// <summary>
     /// Default retention: 30 minutes. Long enough that the Lidarr UI shows the result
     /// after a download completes; short enough that old failures don't accumulate.
@@ -596,8 +603,14 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 candidate.StateChangedAtUtc = EnsureUtc(_options.UtcNow());
             }
 
-            if (!TryValidateProjectedV2Snapshot(candidate, replacedDownloadId: null, out _))
-                return new(false, HostBridgeQueueResultCodes.PersistenceLimitExceeded, default, null);
+            if (!TryValidateProjectedV2Snapshot(
+                    candidate,
+                    replacedDownloadId: null,
+                    out var validationFailure,
+                    out _))
+            {
+                return new(false, ValidationResultCode(validationFailure), default, null);
+            }
 
             if (!initialized)
             {
@@ -645,6 +658,14 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 var current = item.MutationKey();
                 if (current.AttemptId != expected.AttemptId || current.Revision != expected.Revision)
                     return new(false, HostBridgeQueueResultCodes.Conflict, current, item);
+                if (!IsPersistenceValidV2Dto(HostBridgeDownloadItemDto.FromItem(item)))
+                {
+                    return new(
+                        false,
+                        HostBridgeQueueResultCodes.PersistenceInvalidState,
+                        current,
+                        item);
+                }
                 if (!HostBridgeQueueStateMachine.CanTransition(item.AttemptState, target))
                     return new(false, HostBridgeQueueResultCodes.IllegalTransition, current, item);
                 if (item.Revision == long.MaxValue || item.StateChangedAtUtc.Ticks == DateTime.MaxValue.Ticks)
@@ -657,11 +678,15 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 projected.StateChangedAtUtc = new DateTime(
                     Math.Max(changedAtUtc.Ticks, item.StateChangedAtUtc.Ticks + 1),
                     DateTimeKind.Utc);
-                if (!TryValidateProjectedV2Snapshot(projected, normalized, out _))
+                if (!TryValidateProjectedV2Snapshot(
+                        projected,
+                        normalized,
+                        out var validationFailure,
+                        out _))
                 {
                     return new(
                         false,
-                        HostBridgeQueueResultCodes.PersistenceLimitExceeded,
+                        ValidationResultCode(validationFailure),
                         current,
                         item);
                 }
@@ -1265,6 +1290,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     private bool TryValidateProjectedV2Snapshot(
         HostBridgeDownloadItemDto projected,
         string? replacedDownloadId,
+        out V2SnapshotValidationFailure failure,
         out string reason)
     {
         var dtos = new List<HostBridgeDownloadItemDto>(_items.Count + 1);
@@ -1278,25 +1304,35 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             dtos.Add(HostBridgeDownloadItemDto.FromItem(pair.Value));
         }
         dtos.Add(projected);
-        return TrySerializeV2Snapshot(dtos, out _, out reason);
+        return TrySerializeV2Snapshot(dtos, out _, out failure, out reason);
     }
 
     private static bool TrySerializeV2Snapshot(
         List<HostBridgeDownloadItemDto> dtos,
         out byte[] json,
+        out V2SnapshotValidationFailure failure,
         out string reason)
     {
         json = Array.Empty<byte>();
         if (dtos.Count > MaxPersistedItems)
         {
+            failure = V2SnapshotValidationFailure.LimitExceeded;
             reason = $"maximum item count of {MaxPersistedItems} exceeded";
             return false;
         }
 
         foreach (var dto in dtos)
         {
+            if (!IsPersistenceValidV2Dto(dto))
+            {
+                failure = V2SnapshotValidationFailure.InvalidState;
+                reason = "snapshot contains persistence-invalid item state";
+                return false;
+            }
+
             if (PersistedStrings(dto).Any(value => value is not null && value.Length > MaxPersistedStringLength))
             {
+                failure = V2SnapshotValidationFailure.LimitExceeded;
                 reason = $"maximum string length of {MaxPersistedStringLength} characters exceeded";
                 return false;
             }
@@ -1313,13 +1349,38 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         catch (PersistenceLimitException)
         {
             json = Array.Empty<byte>();
+            failure = V2SnapshotValidationFailure.LimitExceeded;
             reason = $"maximum persistence size of {MaxPersistenceBytes} bytes exceeded";
             return false;
         }
+        catch (Exception ex) when (ex is ArgumentException or JsonException or NotSupportedException)
+        {
+            json = Array.Empty<byte>();
+            failure = V2SnapshotValidationFailure.InvalidState;
+            reason = "snapshot contains a value unsupported by the persistence serializer";
+            return false;
+        }
 
+        failure = V2SnapshotValidationFailure.None;
         reason = string.Empty;
         return true;
     }
+
+    private static bool IsPersistenceValidV2Dto(HostBridgeDownloadItemDto dto) =>
+        !string.IsNullOrWhiteSpace(dto.DownloadId) &&
+        dto.AttemptId != Guid.Empty &&
+        dto.Revision >= 1 &&
+        Enum.IsDefined(typeof(HostBridgeDownloadItemStatus), dto.Status) &&
+        Enum.IsDefined(typeof(HostBridgeDownloadAttemptState), dto.AttemptState) &&
+        dto.StateChangedAtUtc != default &&
+        double.IsFinite(dto.Progress);
+
+    private static string ValidationResultCode(V2SnapshotValidationFailure failure) => failure switch
+    {
+        V2SnapshotValidationFailure.LimitExceeded => HostBridgeQueueResultCodes.PersistenceLimitExceeded,
+        V2SnapshotValidationFailure.InvalidState => HostBridgeQueueResultCodes.PersistenceInvalidState,
+        _ => throw new ArgumentOutOfRangeException(nameof(failure)),
+    };
 
     private static IEnumerable<string?> PersistedStrings(HostBridgeDownloadItemDto dto)
     {
@@ -1441,9 +1502,13 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
                 byte[]? v2Json = null;
                 if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2 &&
-                    !TrySerializeV2Snapshot(dtos, out v2Json, out var limitReason))
+                    !TrySerializeV2Snapshot(
+                        dtos,
+                        out v2Json,
+                        out var validationFailure,
+                        out var validationReason))
                 {
-                    return $"HostBridgeDownloadTrackerStore: {HostBridgeQueueResultCodes.PersistenceLimitExceeded} — {limitReason}.";
+                    return $"HostBridgeDownloadTrackerStore: {ValidationResultCode(validationFailure)} — {validationReason}.";
                 }
 
                 var dir = Path.GetDirectoryName(_persistencePath);
