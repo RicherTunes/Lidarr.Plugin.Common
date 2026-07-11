@@ -1,5 +1,7 @@
 using System;
+using System.Collections.Concurrent;
 using System.Linq;
+using System.Threading.Tasks;
 using Lidarr.Plugin.Common.HostBridge;
 using Xunit;
 
@@ -65,5 +67,110 @@ public sealed class HostBridgeQueueIdentityAndCasTests
         Assert.Equal(HostBridgeQueueResultCodes.Conflict, second.Code);
         Assert.Equal(first.Current, second.Current);
         Assert.Single(store.GetSnapshot().ToArray());
+    }
+
+    [Theory]
+    [InlineData("TryAdd")]
+    [InlineData("AddOrReplace")]
+    [InlineData("TryAddAttempt")]
+    public void AttemptV2_AllSuccessfulInsertionPathsInitializeAttemptMetadata(string insertionPath)
+    {
+        var instant = new DateTime(2026, 7, 11, 15, 0, 0, DateTimeKind.Utc);
+        var store = Store(() => instant);
+        var item = new HostBridgeDownloadItem { DownloadId = $"  {insertionPath}  " };
+
+        switch (insertionPath)
+        {
+            case "TryAdd":
+                Assert.True(store.TryAdd(item));
+                break;
+            case "AddOrReplace":
+                store.AddOrReplace(item);
+                break;
+            case "TryAddAttempt":
+                Assert.True(store.TryAddAttempt(item).Applied);
+                break;
+        }
+
+        Assert.NotEqual(Guid.Empty, item.AttemptId);
+        Assert.Equal(1, item.Revision);
+        Assert.Equal(HostBridgeDownloadAttemptState.Queued, item.AttemptState);
+        Assert.Equal(instant, item.StateChangedAtUtc);
+        Assert.Equal(DateTimeKind.Utc, item.StateChangedAtUtc.Kind);
+        Assert.Equal(insertionPath, item.DownloadId);
+    }
+
+    [Theory]
+    [InlineData(DateTimeKind.Local)]
+    [InlineData(DateTimeKind.Unspecified)]
+    public void TryAddAttempt_NormalizesClockToUtc(DateTimeKind kind)
+    {
+        var clockValue = new DateTime(2026, 7, 11, 15, 30, 0, kind);
+        var expected = kind == DateTimeKind.Local
+            ? clockValue.ToUniversalTime()
+            : DateTime.SpecifyKind(clockValue, DateTimeKind.Utc);
+
+        var item = Store(() => clockValue)
+            .TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "clock" })
+            .Item!;
+
+        Assert.Equal(expected, item.StateChangedAtUtc);
+        Assert.Equal(DateTimeKind.Utc, item.StateChangedAtUtc.Kind);
+    }
+
+    [Fact]
+    public void DownloadItemDto_RoundTripsAttemptMetadata()
+    {
+        var instant = new DateTime(2026, 7, 11, 16, 0, 0, DateTimeKind.Utc);
+        var original = Store(() => instant)
+            .TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "round-trip" })
+            .Item!;
+
+        var restored = HostBridgeDownloadItemDto.FromItem(original).ToItem();
+
+        Assert.Equal(original.AttemptId, restored.AttemptId);
+        Assert.Equal(original.Revision, restored.Revision);
+        Assert.Equal(original.AttemptState, restored.AttemptState);
+        Assert.Equal(original.StateChangedAtUtc, restored.StateChangedAtUtc);
+    }
+
+    [Fact]
+    public async Task TryAddAttempt_ConcurrentRemovalNeverThrowsDuringConflictLookup()
+    {
+        var store = Store();
+        var exceptions = new ConcurrentQueue<Exception>();
+
+        var adders = Enumerable.Range(0, 4).Select(worker => Task.Run(() =>
+        {
+            for (var i = 0; i < 20_000; i++)
+            {
+                try
+                {
+                    store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "contended" });
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Enqueue(ex);
+                }
+            }
+        }));
+        var removers = Enumerable.Range(0, 4).Select(worker => Task.Run(() =>
+        {
+            for (var i = 0; i < 20_000; i++)
+            {
+                try
+                {
+                    store.Remove("contended", deleteData: false, out _);
+                }
+                catch (Exception ex)
+                {
+                    exceptions.Enqueue(ex);
+                }
+            }
+        }));
+
+        await Task.WhenAll(adders.Concat(removers));
+
+        Assert.Empty(exceptions);
     }
 }

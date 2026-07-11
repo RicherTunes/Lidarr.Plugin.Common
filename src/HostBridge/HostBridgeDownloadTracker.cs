@@ -274,8 +274,7 @@ public sealed class HostBridgeDownloadItemDto
 public sealed class HostBridgeDownloadTrackerStore<TItem>
     where TItem : HostBridgeDownloadItem
 {
-    private readonly ConcurrentDictionary<string, TItem> _items =
-        new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, TItem> _items;
     private readonly TimeSpan _completedRetention;
     private readonly string? _persistencePath;
     private readonly Func<HostBridgeDownloadItemDto, TItem> _itemFactory;
@@ -329,6 +328,10 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         _onWarn             = onWarn;
         _itemFactory        = itemFactory ?? DefaultItemFactory;
         _options            = options ?? new HostBridgeQueueStoreOptions();
+        _items              = new ConcurrentDictionary<string, TItem>(
+            _options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2
+                ? StringComparer.OrdinalIgnoreCase
+                : StringComparer.Ordinal);
 
         if (_persistencePath != null)
             LoadFromDisk();
@@ -409,8 +412,10 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             return;
         }
 
-        var normalized = NormalizeDownloadId(item.DownloadId);
-        _items[normalized] = item;
+        if (string.IsNullOrWhiteSpace(item.DownloadId))
+            throw new ArgumentException("DownloadId must be non-empty.", nameof(item));
+
+        _items[item.DownloadId] = item;
         PersistToDisk();
     }
 
@@ -430,9 +435,12 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     public bool TryAdd(TItem item)
     {
         if (item is null) throw new ArgumentNullException(nameof(item));
+        if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2)
+            return TryAddAttempt(item).Applied;
+        if (string.IsNullOrWhiteSpace(item.DownloadId))
+            throw new ArgumentException("DownloadId must be non-empty.", nameof(item));
 
-        var normalized = NormalizeDownloadId(item.DownloadId);
-        var added = _items.TryAdd(normalized, item);
+        var added = _items.TryAdd(item.DownloadId, item);
         if (added)
             PersistToDisk();
         return added;
@@ -444,6 +452,17 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     /// </summary>
     public bool TryGet(string downloadId, [NotNullWhen(true)] out TItem? item)
     {
+        if (_options.ContractVersion == HostBridgeQueueContractVersion.LegacyV1)
+        {
+            if (string.IsNullOrWhiteSpace(downloadId))
+            {
+                item = null;
+                return false;
+            }
+
+            return _items.TryGetValue(downloadId, out item);
+        }
+
         var normalized = NormalizeDownloadId(downloadId);
         return _items.TryGetValue(normalized, out item);
     }
@@ -456,14 +475,17 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
         var normalized = NormalizeDownloadId(item.DownloadId);
         item.InitializeAttempt(normalized, Guid.NewGuid(), EnsureUtc(_options.UtcNow()));
-        if (!_items.TryAdd(normalized, item))
+        while (true)
         {
-            var current = _items[normalized];
-            return new(false, HostBridgeQueueResultCodes.Conflict, current.MutationKey(), current);
-        }
+            if (_items.TryAdd(normalized, item))
+            {
+                PersistToDisk();
+                return new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
+            }
 
-        PersistToDisk();
-        return new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
+            if (_items.TryGetValue(normalized, out var current))
+                return new(false, HostBridgeQueueResultCodes.Conflict, current.MutationKey(), current);
+        }
     }
 
     /// <summary>
@@ -515,8 +537,10 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     /// </summary>
     public bool Remove(string downloadId, bool deleteData, out TItem? removed, Action<Exception>? onDeleteError = null)
     {
-        var normalized = NormalizeDownloadId(downloadId);
-        if (!_items.TryRemove(normalized, out removed))
+        var key = _options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2
+            ? NormalizeDownloadId(downloadId)
+            : downloadId;
+        if (!_items.TryRemove(key, out removed))
         {
             return false;
         }
