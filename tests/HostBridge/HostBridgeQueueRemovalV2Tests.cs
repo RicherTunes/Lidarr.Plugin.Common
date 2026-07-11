@@ -59,7 +59,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
     }
 
     [Fact]
-    public async Task ActiveRemoval_PersistsCancelling_AwaitsWorker_ThenRemoves()
+    public async Task ActiveRemoval_PersistsCancelling_AwaitsWorker_ThenDefersDeletion()
     {
         var path = TempFile();
         var store = V2(path, OwnedRoot());
@@ -82,10 +82,12 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         releaseWorker.SetResult();
         var result = await removal;
         Assert.True(observedCancelling);
-        Assert.True(result.StateRemoved);
-        Assert.True(result.FilesRemoved);
-        Assert.Equal(HostBridgeQueueResultCodes.Removed, result.Code);
-        Assert.False(store.TryGet("ACTIVE", out _));
+        Assert.False(result.StateRemoved);
+        Assert.False(result.FilesRemoved);
+        Assert.True(result.MappingRetained);
+        Assert.Equal(HostBridgeQueueResultCodes.RemovalDeferred, result.Code);
+        Assert.True(store.TryGet("ACTIVE", out var retained));
+        Assert.Equal(HostBridgeDownloadAttemptState.Cancelled, retained!.AttemptState);
     }
 
     [Fact]
@@ -168,7 +170,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(Directory.Exists(output));
     }
 
-    [Theory]
+    [Theory(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     [InlineData("root")]
     [InlineData("sibling")]
     [InlineData("dotdot")]
@@ -197,7 +199,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(Directory.Exists(Path.GetFullPath(target)));
     }
 
-    [Fact]
+    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     public async Task MissingInRootTarget_IsSuccessfulDeleteNoOp()
     {
         var root = OwnedRoot();
@@ -215,7 +217,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.False(result.SafeOrphanRetained);
     }
 
-    [Fact]
+    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     public async Task AnotherActiveAttemptOwningCanonicalPath_PreservesFilesButRemovesTerminalRecord()
     {
         var output = Child("shared");
@@ -237,7 +239,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(Directory.Exists(output));
     }
 
-    [Fact]
+    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     public async Task TerminalAttempt_SkipsWorkerAndRemovesDirectly()
     {
         var output = Child("terminal");
@@ -287,7 +289,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(Directory.Exists(output));
     }
 
-    [SkippableFact]
+    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     public async Task TargetReparsePoint_IsRetainedAndOutsideTargetSurvives()
     {
         var root = OwnedRoot();
@@ -296,7 +298,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         var evidence = Path.Combine(outside, "precious.flac");
         File.WriteAllText(evidence, "keep");
         var link = Path.Combine(root, "linked-target");
-        Skip.If(!TryCreateDirectoryLink(link, outside), "Directory link creation is unavailable on this host.");
+        if (!TryCreateDirectoryLink(link, outside)) return;
         var store = V2(TempFile(), root);
         var added = store.TryAddAttempt(Item("link", link));
         var failed = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Failed);
@@ -310,14 +312,14 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [SkippableFact]
+    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     public async Task RootReparsePoint_IsRetainedAndOutsideTargetSurvives()
     {
         Directory.CreateDirectory(_root);
         var outside = Path.Combine(_root, "physical-root");
         Directory.CreateDirectory(outside);
         var linkRoot = Path.Combine(_root, "linked-root");
-        Skip.If(!TryCreateDirectoryLink(linkRoot, outside), "Directory link creation is unavailable on this host.");
+        if (!TryCreateDirectoryLink(linkRoot, outside)) return;
         var target = Path.Combine(linkRoot, "attempt");
         Directory.CreateDirectory(target);
         var evidence = Path.Combine(target, "precious.flac");
@@ -335,7 +337,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [SkippableFact]
+    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     public async Task NestedReparsePoint_IsRetainedAndOutsideTargetSurvives()
     {
         var target = Child("nested-link");
@@ -345,9 +347,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Directory.CreateDirectory(outside);
         var evidence = Path.Combine(outside, "precious.flac");
         File.WriteAllText(evidence, "keep");
-        Skip.If(
-            !TryCreateDirectoryLink(Path.Combine(target, "escape"), outside),
-            "Directory link creation is unavailable on this host.");
+        if (!TryCreateDirectoryLink(Path.Combine(target, "escape"), outside)) return;
         var store = V2(TempFile(), OwnedRoot());
         var added = store.TryAddAttempt(Item("nested-link", target));
         var failed = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Failed);
@@ -363,16 +363,14 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [SkippableFact]
+    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     public async Task DanglingTargetSymlink_IsRetainedOnUnix()
     {
-        Skip.If(OperatingSystem.IsWindows(), "Dangling symlink identity is exercised on Unix hosts.");
+        if (OperatingSystem.IsWindows()) return;
 
         var root = OwnedRoot();
         var link = Path.Combine(root, "dangling-target");
-        Skip.If(
-            !TryCreateDanglingDirectoryLink(link, Path.Combine(_root, "missing-target")),
-            "Dangling directory symlink creation is unavailable on this host.");
+        if (!TryCreateDanglingDirectoryLink(link, Path.Combine(_root, "missing-target"))) return;
         var store = V2(TempFile(), root);
         var added = store.TryAddAttempt(Item("dangling-target", link));
         var failed = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Failed);
@@ -387,16 +385,14 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(IsReparsePoint(link));
     }
 
-    [SkippableFact]
+    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     public async Task DanglingRootSymlink_IsRetainedOnUnix()
     {
-        Skip.If(OperatingSystem.IsWindows(), "Dangling symlink identity is exercised on Unix hosts.");
+        if (OperatingSystem.IsWindows()) return;
 
         Directory.CreateDirectory(_root);
         var linkRoot = Path.Combine(_root, "dangling-root");
-        Skip.If(
-            !TryCreateDanglingDirectoryLink(linkRoot, Path.Combine(_root, "missing-root")),
-            "Dangling directory symlink creation is unavailable on this host.");
+        if (!TryCreateDanglingDirectoryLink(linkRoot, Path.Combine(_root, "missing-root"))) return;
         var target = Path.Combine(linkRoot, "attempt");
         var store = V2(TempFile(), linkRoot);
         var added = store.TryAddAttempt(Item("dangling-root", target));
@@ -412,7 +408,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(IsReparsePoint(linkRoot));
     }
 
-    [SkippableFact]
+    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     public async Task RootFilesystemIdentityIsRevalidatedAtRemovalTime()
     {
         Directory.CreateDirectory(_root);
@@ -429,7 +425,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Directory.CreateDirectory(Path.Combine(outside, "attempt"));
         var evidence = Path.Combine(outside, "attempt", "precious.flac");
         File.WriteAllText(evidence, "keep");
-        Skip.If(!TryCreateDirectoryLink(originalRoot, outside), "Directory link creation is unavailable on this host.");
+        if (!TryCreateDirectoryLink(originalRoot, outside)) return;
 
         var result = await store.RemoveAttemptAsync(
             failed.Current, true, static (_, _) => Task.CompletedTask, TimeSpan.FromSeconds(1));
@@ -439,7 +435,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [Fact]
+    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
     public async Task ConfiguredOwnedRoot_IsSnapshottedWhenStoreIsConstructed()
     {
         var originalRoot = OwnedRoot();

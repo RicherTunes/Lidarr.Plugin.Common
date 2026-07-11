@@ -53,8 +53,16 @@ public readonly record struct HostBridgeQueueRemovalResult<TItem>(
     bool FilesRemoved,
     bool SafeOrphanRetained,
     string Code,
+    RemovalOperationId? RemovalOperationId,
     TItem? Item)
-    where TItem : HostBridgeDownloadItem;
+    where TItem : HostBridgeDownloadItem
+{
+    public bool MappingRetained => SafeOrphanRetained;
+    public RemovalJournalState? RemovalState { get; init; }
+    public QueueRemovalDurability Durability { get; init; }
+}
+
+public enum QueueRemovalDurability { None = 0, Volatile = 1, Durable = 2 }
 
 public sealed class HostBridgeQueueStoreOptions
 {
@@ -63,7 +71,6 @@ public sealed class HostBridgeQueueStoreOptions
     public Func<DateTime> UtcNow { get; init; } = static () => DateTime.UtcNow;
     public Func<HostBridgeDownloadItemDto, HostBridgeRestartEvidence> RestartEvidence { get; init; } =
         static _ => new(false, false, false);
-    internal HostBridgeOwnedStagingHooks? OwnedStagingHooks { get; init; }
 }
 
 public static class HostBridgeQueueResultCodes
@@ -77,6 +84,20 @@ public static class HostBridgeQueueResultCodes
     public const string NotFound = "QUEUE_NOT_FOUND";
     public const string WorkerShutdownTimeout = "QUEUE_WORKER_SHUTDOWN_TIMEOUT";
     public const string Removed = "QUEUE_REMOVED";
+    public const string RemovedVolatile = "QUEUE_REMOVED_VOLATILE";
+    public const string RemovalDeferred = "QUEUE_REMOVAL_DEFERRED";
+    public const string RemovalRecoveryRequired = "QUEUE_REMOVAL_RECOVERY_REQUIRED";
+    public const string RemovalSecondWriter = "QUEUE_REMOVAL_SECOND_WRITER";
+    public const string RemovalPrepared = "QUEUE_REMOVAL_PREPARED";
+    public const string RemovalQuarantined = "QUEUE_REMOVAL_QUARANTINED";
+    public const string RemovalQuarantineOnly = "QUEUE_REMOVAL_QUARANTINE_ONLY";
+    public const string RemovalDeleting = "QUEUE_REMOVAL_DELETING";
+    public const string RemovalDeleted = "QUEUE_REMOVAL_DELETED";
+    public const string RemovalSourceMissing = "QUEUE_REMOVAL_SOURCE_MISSING";
+    public const string RemovalManualAcknowledged = "QUEUE_REMOVAL_MANUAL_ACKNOWLEDGED";
+    public const string RemovalTamper = "QUEUE_REMOVAL_TAMPER";
+    public const string RemovalJournalFailure = "QUEUE_REMOVAL_JOURNAL_FAILURE";
+    public const string DurabilityFailure = "QUEUE_DURABILITY_FAILURE";
     public const string SafeOrphanOutsideRoot = "QUEUE_SAFE_ORPHAN_OUTSIDE_ROOT";
     public const string SafeOrphanLinkTraversal = "QUEUE_SAFE_ORPHAN_LINK_TRAVERSAL";
     public const string SafeOrphanDeleteFailed = "QUEUE_SAFE_ORPHAN_DELETE_FAILED";

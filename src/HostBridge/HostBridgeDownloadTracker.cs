@@ -44,7 +44,6 @@ public enum HostBridgeDownloadItemStatus
 public class HostBridgeDownloadItem
 {
     private string _downloadId = string.Empty;
-    private string _outputPath = string.Empty;
     private Guid _attemptId;
     private long _revision;
     private int _attemptState = (int)HostBridgeDownloadAttemptState.Queued;
@@ -144,13 +143,7 @@ public class HostBridgeDownloadItem
     public string AlbumId { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;
     public string Artist { get; init; } = string.Empty;
-    public string OutputPath
-    {
-        get => _outputPath;
-        init => _outputPath = value;
-    }
-
-    internal void RetargetOutputPath(string outputPath) => _outputPath = outputPath;
+    public string OutputPath { get; init; } = string.Empty;
 
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
 
@@ -867,11 +860,11 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         lock (_membershipLock)
         {
             if (!_items.TryGetValue(normalized, out item!))
-                return new(false, false, false, false, HostBridgeQueueResultCodes.NotFound, null);
+                return new(false, false, false, false, HostBridgeQueueResultCodes.NotFound, null, null);
 
             var current = item.MutationKey();
             if (current.AttemptId != expected.AttemptId || current.Revision != expected.Revision)
-                return new(true, false, false, false, HostBridgeQueueResultCodes.Conflict, item);
+                return new(true, false, false, false, HostBridgeQueueResultCodes.Conflict, null, item);
         }
 
         if (!HostBridgeQueueStateMachine.IsTerminal(item.AttemptState))
@@ -885,6 +878,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                     false,
                     false,
                     cancelling.Code,
+                    null,
                     cancelling.Item);
             }
 
@@ -909,6 +903,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                     false,
                     false,
                     HostBridgeQueueResultCodes.WorkerShutdownTimeout,
+                    null,
                     item);
             }
 
@@ -921,6 +916,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                     false,
                     false,
                     cancelled.Code,
+                    null,
                     cancelled.Item);
             }
 
@@ -936,7 +932,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         lock (_membershipLock)
         {
             if (!_items.TryGetValue(normalized, out var attached))
-                return new(false, false, false, false, HostBridgeQueueResultCodes.NotFound, null);
+                return new(false, false, false, false, HostBridgeQueueResultCodes.NotFound, null, null);
 
             lock (attached.MutationSync)
             {
@@ -944,66 +940,41 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                     !ReferenceEquals(currentItem, attached))
                 {
                     return currentItem is null
-                        ? new(false, false, false, false, HostBridgeQueueResultCodes.NotFound, null)
-                        : new(true, false, false, false, HostBridgeQueueResultCodes.Conflict, currentItem);
+                        ? new(false, false, false, false, HostBridgeQueueResultCodes.NotFound, null, null)
+                        : new(true, false, false, false, HostBridgeQueueResultCodes.Conflict, null, currentItem);
                 }
 
                 var current = attached.MutationKey();
                 if (current.AttemptId != removalKey.AttemptId || current.Revision != removalKey.Revision)
-                    return new(true, false, false, false, HostBridgeQueueResultCodes.Conflict, attached);
+                    return new(true, false, false, false, HostBridgeQueueResultCodes.Conflict, null, attached);
 
-                var filesRemoved = false;
                 if (deleteData)
                 {
-                    var anotherAttemptOwnsPath = _items.Any(pair =>
-                        !ReferenceEquals(pair.Value, attached) &&
-                        !HostBridgeQueueStateMachine.IsTerminal(pair.Value.AttemptState) &&
-                        SameDirectory(pair.Value.OutputPath, attached.OutputPath));
-
-                    if (!anotherAttemptOwnsPath)
-                    {
-                        var deletion = OwnedStagingTree.QuarantineAndDelete(
-                            _ownedStagingRoot,
-                            attached.OutputPath,
-                            attached.AttemptId,
-                            attached.Revision,
-                            _options.OwnedStagingHooks);
-                        if (deletion.QuarantinePath is not null)
-                        {
-                            attached.RetargetOutputPath(deletion.QuarantinePath);
-                            warning = PersistToDisk();
-                        }
-
-                        if (!deletion.CanRemoveRecord)
-                        {
-                            result = new(
-                                true,
-                                false,
-                                false,
-                                true,
-                                deletion.Code,
-                                attached);
-                            goto RemovalComplete;
-                        }
-                        filesRemoved = deletion.FilesRemoved;
-                    }
+                    return new(
+                        true,
+                        false,
+                        false,
+                        true,
+                        HostBridgeQueueResultCodes.RemovalDeferred,
+                        null,
+                        attached);
                 }
 
                 if (!_items.TryRemove(new KeyValuePair<string, TItem>(normalized, attached)))
-                    return new(true, false, filesRemoved, false, HostBridgeQueueResultCodes.Conflict, attached);
+                    return new(true, false, false, false, HostBridgeQueueResultCodes.Conflict, null, attached);
 
                 warning = PersistToDisk();
                 result = new(
                     true,
                     true,
-                    filesRemoved,
+                    false,
                     false,
                     HostBridgeQueueResultCodes.Removed,
+                    null,
                     attached);
             }
         }
 
-    RemovalComplete:
         try { NotifyWarning(warning); }
         catch { /* removal is committed; diagnostics observers cannot roll it back */ }
         return result;
