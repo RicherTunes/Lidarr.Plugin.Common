@@ -3,6 +3,9 @@ using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
+using System.Linq;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
@@ -328,6 +331,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     private readonly Func<HostBridgeDownloadItemDto, TItem> _itemFactory;
     private readonly Action<string>? _onWarn;
     private readonly HostBridgeQueueStoreOptions _options;
+    private bool _persistenceWriteDisabled;
 
     // AttemptV2 lock order is membership -> item.MutationSync -> persistence.
     // Persistence warnings are captured under these locks and dispatched only after every
@@ -340,6 +344,15 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         WriteIndented = false,
         Converters = { new JsonStringEnumConverter() },
     };
+
+    private sealed class QueueEnvelope
+    {
+        [JsonPropertyName("schemaVersion")]
+        public int SchemaVersion { get; set; } = 2;
+
+        [JsonPropertyName("items")]
+        public List<HostBridgeDownloadItemDto> Items { get; set; } = new();
+    }
 
     /// <summary>
     /// Default retention: 30 minutes. Long enough that the Lidarr UI shows the result
@@ -756,7 +769,8 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         {
             var item = kv.Value;
             var status = item.GetStatus();
-            if (IsTerminalStatus(status) &&
+            if (_options.ContractVersion == HostBridgeQueueContractVersion.LegacyV1 &&
+                IsTerminalStatus(status) &&
                 item.CompletedAt.HasValue &&
                 now - item.CompletedAt.Value > _completedRetention)
             {
@@ -826,92 +840,350 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 return;
 
             using var document = JsonDocument.Parse(json);
-            if (document.RootElement.ValueKind != JsonValueKind.Array)
+            if (_options.ContractVersion == HostBridgeQueueContractVersion.LegacyV1)
             {
-                _onWarn?.Invoke(
-                    $"HostBridgeDownloadTrackerStore: could not load persistence file '{_persistencePath}' — " +
-                    "starting with empty store. Reason: root JSON value is not an array.");
+                LoadLegacySnapshot(document.RootElement);
                 return;
             }
 
-            var now = DateTime.UtcNow;
-            var shouldPersistCleanedSnapshot = false;
-            foreach (var element in document.RootElement.EnumerateArray())
+            if (document.RootElement.ValueKind == JsonValueKind.Array)
             {
-                HostBridgeDownloadItemDto? dto;
-                try
-                {
-                    dto = element.Deserialize<HostBridgeDownloadItemDto>(_jsonOptions);
-                }
-                catch (Exception ex)
-                {
-                    _onWarn?.Invoke(
-                        $"HostBridgeDownloadTrackerStore: skipping persistence entry — could not deserialize: {ex.Message}");
-                    continue;
-                }
-
-                if (dto == null)
-                    continue;
-                if (string.IsNullOrWhiteSpace(dto.DownloadId))
-                    continue;
-                if (!Enum.IsDefined(typeof(HostBridgeDownloadItemStatus), dto.Status))
-                {
-                    _onWarn?.Invoke(
-                        $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — invalid status '{dto.Status}'.");
-                    continue;
-                }
-
-                if (!IsTerminalStatus(dto.Status))
-                {
-                    shouldPersistCleanedSnapshot = true;
-                    _onWarn?.Invoke(
-                        $"HostBridgeDownloadTrackerStore: dropping non-terminal entry '{dto.DownloadId}' with status '{dto.Status}' — no resumable worker survives process restart.");
-                    continue;
-                }
-
-                // Skip entries already past retention window — no need to resurrect stale data.
-                if (dto.CompletedAt.HasValue &&
-                    now - dto.CompletedAt.Value > _completedRetention)
-                {
-                    shouldPersistCleanedSnapshot = true;
-                    continue;
-                }
-
-                try
-                {
-                    var item = _itemFactory(dto);
-                    if (item is null || string.IsNullOrWhiteSpace(item.DownloadId))
-                    {
-                        _onWarn?.Invoke(
-                            $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — itemFactory returned an item with no DownloadId.");
-                        continue;
-                    }
-                    if (!string.Equals(item.DownloadId, dto.DownloadId, StringComparison.Ordinal))
-                    {
-                        _onWarn?.Invoke(
-                            $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — itemFactory changed DownloadId to '{item.DownloadId}'.");
-                        continue;
-                    }
-
-                    _items[item.DownloadId] = item;
-                }
-                catch (Exception ex)
-                {
-                    _onWarn?.Invoke(
-                        $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — itemFactory threw: {ex.Message}");
-                }
+                MigrateV1Snapshot(document.RootElement);
+                return;
             }
 
-            if (shouldPersistCleanedSnapshot)
-                NotifyWarning(PersistToDisk());
+            if (document.RootElement.ValueKind != JsonValueKind.Object ||
+                !document.RootElement.TryGetProperty("schemaVersion", out var versionElement) ||
+                versionElement.ValueKind != JsonValueKind.Number ||
+                !versionElement.TryGetInt32(out var schemaVersion))
+            {
+                DisablePersistenceWrites("missing or non-numeric schemaVersion");
+                return;
+            }
+
+            if (schemaVersion > (int)HostBridgeQueueContractVersion.AttemptV2)
+            {
+                DisablePersistenceWrites($"newer schemaVersion {schemaVersion}");
+                return;
+            }
+
+            if (schemaVersion != (int)HostBridgeQueueContractVersion.AttemptV2 ||
+                !document.RootElement.TryGetProperty("items", out var itemsElement) ||
+                itemsElement.ValueKind != JsonValueKind.Array)
+            {
+                DisablePersistenceWrites($"unsupported or malformed schemaVersion {schemaVersion}");
+                return;
+            }
+
+            LoadV2Snapshot(itemsElement);
         }
         catch (Exception ex)
         {
             // Corrupt / unreadable file — start empty, never throw on load.
+            if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2)
+                _persistenceWriteDisabled = true;
             _onWarn?.Invoke(
                 $"HostBridgeDownloadTrackerStore: could not load persistence file '{_persistencePath}' — " +
                 $"starting with empty store. Reason: {ex.GetType().Name}: {ex.Message}");
         }
+    }
+
+    private void LoadLegacySnapshot(JsonElement root)
+    {
+        if (root.ValueKind != JsonValueKind.Array)
+        {
+            _onWarn?.Invoke(
+                $"HostBridgeDownloadTrackerStore: could not load persistence file '{_persistencePath}' — " +
+                "starting with empty store. Reason: root JSON value is not an array.");
+            return;
+        }
+
+        var now = DateTime.UtcNow;
+        var shouldPersistCleanedSnapshot = false;
+        foreach (var element in root.EnumerateArray())
+        {
+            HostBridgeDownloadItemDto? dto;
+            try
+            {
+                dto = element.Deserialize<HostBridgeDownloadItemDto>(_jsonOptions);
+            }
+            catch (Exception ex)
+            {
+                _onWarn?.Invoke(
+                    $"HostBridgeDownloadTrackerStore: skipping persistence entry — could not deserialize: {ex.Message}");
+                continue;
+            }
+
+            if (dto == null || string.IsNullOrWhiteSpace(dto.DownloadId))
+                continue;
+            if (!Enum.IsDefined(typeof(HostBridgeDownloadItemStatus), dto.Status))
+            {
+                _onWarn?.Invoke(
+                    $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — invalid status '{dto.Status}'.");
+                continue;
+            }
+
+            if (!IsTerminalStatus(dto.Status))
+            {
+                shouldPersistCleanedSnapshot = true;
+                _onWarn?.Invoke(
+                    $"HostBridgeDownloadTrackerStore: dropping non-terminal entry '{dto.DownloadId}' with status '{dto.Status}' — no resumable worker survives process restart.");
+                continue;
+            }
+
+            if (dto.CompletedAt.HasValue && now - dto.CompletedAt.Value > _completedRetention)
+            {
+                shouldPersistCleanedSnapshot = true;
+                continue;
+            }
+
+            TryRestoreLegacyItem(dto);
+        }
+
+        if (shouldPersistCleanedSnapshot)
+            NotifyWarning(PersistToDisk());
+    }
+
+    private void TryRestoreLegacyItem(HostBridgeDownloadItemDto dto)
+    {
+        try
+        {
+            var item = _itemFactory(dto);
+            if (item is null || string.IsNullOrWhiteSpace(item.DownloadId))
+            {
+                _onWarn?.Invoke(
+                    $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — itemFactory returned an item with no DownloadId.");
+                return;
+            }
+            if (!string.Equals(item.DownloadId, dto.DownloadId, StringComparison.Ordinal))
+            {
+                _onWarn?.Invoke(
+                    $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — itemFactory changed DownloadId to '{item.DownloadId}'.");
+                return;
+            }
+
+            _items[item.DownloadId] = item;
+        }
+        catch (Exception ex)
+        {
+            _onWarn?.Invoke(
+                $"HostBridgeDownloadTrackerStore: skipping entry '{dto.DownloadId}' — itemFactory threw: {ex.Message}");
+        }
+    }
+
+    private void MigrateV1Snapshot(JsonElement root)
+    {
+        var candidates = new List<(HostBridgeDownloadItemDto Dto, string NormalizedId, string CanonicalJson, string Hash)>();
+        foreach (var element in root.EnumerateArray())
+        {
+            HostBridgeDownloadItemDto? dto;
+            try
+            {
+                dto = element.Deserialize<HostBridgeDownloadItemDto>(_jsonOptions);
+            }
+            catch (Exception ex)
+            {
+                DisablePersistenceWrites($"malformed V1 entry: {ex.Message}");
+                return;
+            }
+
+            if (dto == null || string.IsNullOrWhiteSpace(dto.DownloadId) ||
+                !Enum.IsDefined(typeof(HostBridgeDownloadItemStatus), dto.Status))
+            {
+                DisablePersistenceWrites("malformed V1 entry");
+                return;
+            }
+
+            var normalizedId = NormalizeDownloadId(dto.DownloadId);
+            var canonicalJson = JsonSerializer.Serialize(dto, _jsonOptions);
+            var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalJson)));
+            candidates.Add((dto, normalizedId, canonicalJson, hash));
+        }
+
+        var migrated = new List<TItem>();
+        foreach (var group in candidates.GroupBy(candidate => candidate.NormalizedId, StringComparer.OrdinalIgnoreCase))
+        {
+            var canonicalId = group.Select(candidate => candidate.NormalizedId)
+                .OrderBy(id => id, StringComparer.Ordinal)
+                .First();
+            var selected = group
+                .OrderBy(candidate => V1StatusPrecedence(candidate.Dto.Status))
+                .ThenBy(candidate => candidate.Hash, StringComparer.Ordinal)
+                .First();
+            var dto = selected.Dto;
+            dto.DownloadId = canonicalId;
+            dto.AttemptId = CreateMigrationAttemptId(canonicalId, selected.CanonicalJson);
+            dto.Revision = 1;
+            dto.AttemptState = RecoverState(MapV1AttemptState(dto.Status), _options.RestartEvidence(dto));
+            dto.StateChangedAtUtc = MigrationStateChangedAtUtc(dto);
+
+            if (!TryCreateV2Item(dto, out var item, out var reason))
+            {
+                DisablePersistenceWrites($"invalid migrated V1 snapshot: {reason}");
+                return;
+            }
+            migrated.Add(item!);
+        }
+
+        foreach (var item in migrated)
+            _items[item.DownloadId] = item;
+        NotifyWarning(PersistToDisk());
+    }
+
+    private void LoadV2Snapshot(JsonElement itemsElement)
+    {
+        var restored = new List<TItem>();
+        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var recoveredAny = false;
+        foreach (var element in itemsElement.EnumerateArray())
+        {
+            HostBridgeDownloadItemDto? dto;
+            try
+            {
+                dto = element.Deserialize<HostBridgeDownloadItemDto>(_jsonOptions);
+            }
+            catch (Exception ex)
+            {
+                DisablePersistenceWrites($"malformed V2 entry: {ex.Message}");
+                return;
+            }
+
+            if (dto == null || string.IsNullOrWhiteSpace(dto.DownloadId) ||
+                dto.AttemptId == Guid.Empty || dto.Revision < 1 ||
+                !Enum.IsDefined(typeof(HostBridgeDownloadAttemptState), dto.AttemptState) ||
+                dto.StateChangedAtUtc == default)
+            {
+                DisablePersistenceWrites("malformed V2 entry metadata");
+                return;
+            }
+
+            dto.DownloadId = NormalizeDownloadId(dto.DownloadId);
+            dto.StateChangedAtUtc = EnsureUtc(dto.StateChangedAtUtc);
+            if (!ids.Add(dto.DownloadId))
+            {
+                DisablePersistenceWrites($"duplicate V2 downloadId '{dto.DownloadId}'");
+                return;
+            }
+
+            HostBridgeRestartEvidence evidence;
+            try
+            {
+                evidence = _options.RestartEvidence(dto);
+            }
+            catch (Exception ex)
+            {
+                DisablePersistenceWrites($"restart evidence failed for '{dto.DownloadId}': {ex.Message}");
+                return;
+            }
+
+            var recovered = RecoverState(dto.AttemptState, evidence);
+            if (recovered != dto.AttemptState)
+            {
+                if (dto.Revision == long.MaxValue || dto.StateChangedAtUtc.Ticks == DateTime.MaxValue.Ticks)
+                {
+                    DisablePersistenceWrites($"restart metadata exhausted for '{dto.DownloadId}'");
+                    return;
+                }
+                dto.Revision++;
+                dto.AttemptState = recovered;
+                var clockTicks = EnsureUtc(_options.UtcNow()).Ticks;
+                dto.StateChangedAtUtc = new DateTime(
+                    Math.Max(clockTicks, dto.StateChangedAtUtc.Ticks + 1),
+                    DateTimeKind.Utc);
+                recoveredAny = true;
+            }
+
+            if (!TryCreateV2Item(dto, out var item, out var reason))
+            {
+                DisablePersistenceWrites($"invalid V2 entry: {reason}");
+                return;
+            }
+            restored.Add(item!);
+        }
+
+        foreach (var item in restored)
+            _items[item.DownloadId] = item;
+        if (recoveredAny)
+            NotifyWarning(PersistToDisk());
+    }
+
+    private bool TryCreateV2Item(HostBridgeDownloadItemDto dto, out TItem? item, out string reason)
+    {
+        try
+        {
+            item = _itemFactory(dto);
+            if (item is null || !string.Equals(item.DownloadId, dto.DownloadId, StringComparison.Ordinal))
+            {
+                reason = "itemFactory changed or removed DownloadId";
+                return false;
+            }
+            item.RestoreAttempt(dto.AttemptId, dto.Revision, dto.AttemptState, dto.StateChangedAtUtc);
+            reason = string.Empty;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            item = null;
+            reason = $"itemFactory threw: {ex.Message}";
+            return false;
+        }
+    }
+
+    private void DisablePersistenceWrites(string reason)
+    {
+        _persistenceWriteDisabled = true;
+        _onWarn?.Invoke(
+            $"HostBridgeDownloadTrackerStore: could not load persistence file '{_persistencePath}' — " +
+            $"starting with empty store. Reason: {reason}.");
+    }
+
+    private static int V1StatusPrecedence(HostBridgeDownloadItemStatus status) => status switch
+    {
+        HostBridgeDownloadItemStatus.Completed => 0,
+        HostBridgeDownloadItemStatus.Failed => 1,
+        HostBridgeDownloadItemStatus.Cancelled => 2,
+        _ => 3,
+    };
+
+    private static HostBridgeDownloadAttemptState MapV1AttemptState(HostBridgeDownloadItemStatus status) => status switch
+    {
+        HostBridgeDownloadItemStatus.Completed => HostBridgeDownloadAttemptState.CompletedImportable,
+        HostBridgeDownloadItemStatus.Failed => HostBridgeDownloadAttemptState.Failed,
+        HostBridgeDownloadItemStatus.Cancelled => HostBridgeDownloadAttemptState.Cancelled,
+        HostBridgeDownloadItemStatus.Downloading => HostBridgeDownloadAttemptState.Downloading,
+        _ => HostBridgeDownloadAttemptState.Queued,
+    };
+
+    private static HostBridgeDownloadAttemptState RecoverState(
+        HostBridgeDownloadAttemptState state,
+        HostBridgeRestartEvidence evidence) => state switch
+    {
+        HostBridgeDownloadAttemptState.Queued => state,
+        HostBridgeDownloadAttemptState.Paused => state,
+        HostBridgeDownloadAttemptState.Preparing when evidence.AttemptTemporaryStateContained => HostBridgeDownloadAttemptState.Queued,
+        HostBridgeDownloadAttemptState.Preparing => HostBridgeDownloadAttemptState.Failed,
+        HostBridgeDownloadAttemptState.Downloading when evidence.VerifiedSegmentsAvailable => HostBridgeDownloadAttemptState.Downloading,
+        HostBridgeDownloadAttemptState.Downloading => HostBridgeDownloadAttemptState.Queued,
+        HostBridgeDownloadAttemptState.Finalizing when evidence.FinalizedOutputValid => HostBridgeDownloadAttemptState.CompletedImportable,
+        HostBridgeDownloadAttemptState.Finalizing => HostBridgeDownloadAttemptState.Queued,
+        HostBridgeDownloadAttemptState.Cancelling => HostBridgeDownloadAttemptState.Cancelled,
+        HostBridgeDownloadAttemptState.CompletedImportable => state,
+        HostBridgeDownloadAttemptState.Failed => state,
+        HostBridgeDownloadAttemptState.Cancelled => state,
+        _ => HostBridgeDownloadAttemptState.Failed,
+    };
+
+    private static Guid CreateMigrationAttemptId(string normalizedId, string canonicalDtoJson)
+    {
+        var payload = Encoding.UTF8.GetBytes("lpc-queue-v1\0" + normalizedId + "\0" + canonicalDtoJson);
+        var hash = SHA256.HashData(payload);
+        return new Guid(hash.AsSpan(0, 16));
+    }
+
+    private static DateTime MigrationStateChangedAtUtc(HostBridgeDownloadItemDto dto)
+    {
+        var value = dto.CompletedAt ?? (dto.StartedAt == default ? DateTime.UnixEpoch : dto.StartedAt);
+        return EnsureUtc(value);
     }
 
     private void PersistAndNotify() => NotifyWarning(PersistToDisk());
@@ -924,7 +1196,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
     private string? PersistToDisk()
     {
-        if (_persistencePath == null)
+        if (_persistencePath == null || _persistenceWriteDisabled)
             return null;
 
         lock (_persistLock)
@@ -943,7 +1215,9 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                     Directory.CreateDirectory(dir);
 
                 tmpPath = _persistencePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                var json    = JsonSerializer.Serialize(dtos, _jsonOptions);
+                var json = _options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2
+                    ? JsonSerializer.Serialize(new QueueEnvelope { Items = dtos }, _jsonOptions)
+                    : JsonSerializer.Serialize(dtos, _jsonOptions);
                 File.WriteAllText(tmpPath, json);
 
                 for (var attempt = 1; attempt <= MaxReplaceAttempts; attempt++)
