@@ -4,7 +4,6 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
-using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -45,6 +44,7 @@ public enum HostBridgeDownloadItemStatus
 public class HostBridgeDownloadItem
 {
     private string _downloadId = string.Empty;
+    private string _outputPath = string.Empty;
     private Guid _attemptId;
     private long _revision;
     private int _attemptState = (int)HostBridgeDownloadAttemptState.Queued;
@@ -144,7 +144,13 @@ public class HostBridgeDownloadItem
     public string AlbumId { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;
     public string Artist { get; init; } = string.Empty;
-    public string OutputPath { get; init; } = string.Empty;
+    public string OutputPath
+    {
+        get => _outputPath;
+        init => _outputPath = value;
+    }
+
+    internal void RetargetOutputPath(string outputPath) => _outputPath = outputPath;
 
     public DateTime StartedAt { get; set; } = DateTime.UtcNow;
 
@@ -329,6 +335,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     private const long MaxPersistenceBytes = 16L * 1024 * 1024;
     private const int MaxPersistedItems = 10_000;
     private const int MaxPersistedStringLength = 32 * 1024;
+    private static readonly TimeSpan MaxWorkerShutdownTimeout = TimeSpan.FromMinutes(5);
 
     private readonly ConcurrentDictionary<string, TItem> _items;
     private readonly TimeSpan _completedRetention;
@@ -850,7 +857,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         if (_options.ContractVersion != HostBridgeQueueContractVersion.AttemptV2)
             throw new InvalidOperationException("RemoveAttemptAsync requires AttemptV2 store options.");
         if (stopWorker is null) throw new ArgumentNullException(nameof(stopWorker));
-        if (shutdownTimeout < TimeSpan.Zero && shutdownTimeout != Timeout.InfiniteTimeSpan)
+        if (shutdownTimeout <= TimeSpan.Zero || shutdownTimeout > MaxWorkerShutdownTimeout)
             throw new ArgumentOutOfRangeException(nameof(shutdownTimeout));
 
         var normalized = NormalizeDownloadId(expected.DownloadId);
@@ -883,9 +890,15 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
             using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             shutdown.CancelAfter(shutdownTimeout);
+            var workerTask = Task.Run(() => stopWorker(item, shutdown.Token), CancellationToken.None);
+            _ = workerTask.ContinueWith(
+                static completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.ExecuteSynchronously | TaskContinuationOptions.OnlyOnFaulted,
+                TaskScheduler.Default);
             try
             {
-                await stopWorker(item, shutdown.Token).WaitAsync(shutdown.Token).ConfigureAwait(false);
+                await workerTask.WaitAsync(shutdown.Token).ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (
                 shutdown.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
@@ -949,40 +962,29 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
                     if (!anotherAttemptOwnsPath)
                     {
-                        OwnedStagingTreeDeleteResult deletion;
-                        try
+                        var deletion = OwnedStagingTree.QuarantineAndDelete(
+                            _ownedStagingRoot,
+                            attached.OutputPath,
+                            attached.AttemptId,
+                            attached.Revision,
+                            _options.OwnedStagingHooks);
+                        if (deletion.QuarantinePath is not null)
                         {
-                            deletion = OwnedStagingTree.DeleteValidatedTree(
-                                _ownedStagingRoot,
-                                attached.OutputPath);
-                        }
-                        catch (Exception ex) when (ex is
-                            IOException or
-                            UnauthorizedAccessException or
-                            SecurityException or
-                            ArgumentException or
-                            NotSupportedException)
-                        {
-                            return new(
-                                true,
-                                false,
-                                false,
-                                true,
-                                HostBridgeQueueResultCodes.SafeOrphanDeleteFailed,
-                                attached);
+                            attached.RetargetOutputPath(deletion.QuarantinePath);
+                            warning = PersistToDisk();
                         }
 
-                        if (!deletion.Allowed)
+                        if (!deletion.CanRemoveRecord)
                         {
-                            return new(
+                            result = new(
                                 true,
                                 false,
                                 false,
                                 true,
                                 deletion.Code,
                                 attached);
+                            goto RemovalComplete;
                         }
-
                         filesRemoved = deletion.FilesRemoved;
                     }
                 }
@@ -1001,6 +1003,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             }
         }
 
+    RemovalComplete:
         try { NotifyWarning(warning); }
         catch { /* removal is committed; diagnostics observers cannot roll it back */ }
         return result;

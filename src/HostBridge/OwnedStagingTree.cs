@@ -1,148 +1,269 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 
 namespace Lidarr.Plugin.Common.HostBridge;
 
-internal readonly record struct OwnedStagingTreeDeleteResult(
-    bool Allowed,
+internal sealed class HostBridgeOwnedStagingHooks
+{
+    internal Action<string>? BeforeInspectPath { get; set; }
+    internal Action<string, string>? BeforeQuarantineMove { get; set; }
+    internal Action<string, string>? MoveDirectory { get; set; }
+    internal Action<string>? BeforeDeleteEntry { get; set; }
+}
+
+internal readonly record struct OwnedStagingQuarantineResult(
+    bool CanRemoveRecord,
     bool FilesRemoved,
-    string Code);
+    string Code,
+    string? QuarantinePath);
 
 internal static class OwnedStagingTree
 {
-    internal static string? ValidateStrictDescendant(string? ownedRoot, string? target)
-    {
-        if (string.IsNullOrWhiteSpace(ownedRoot) || string.IsNullOrWhiteSpace(target))
-            return HostBridgeQueueResultCodes.SafeOrphanOutsideRoot;
+    private const string TrashDirectoryName = ".lpc-trash";
 
-        string canonicalRoot;
-        string canonicalTarget;
+    internal static string? ValidateStrictDescendant(string? ownedRoot, string? target) =>
+        InspectStrictDescendant(ownedRoot, target, hooks: null).Code;
+
+    internal static OwnedStagingQuarantineResult QuarantineAndDelete(
+        string? ownedRoot,
+        string? target,
+        Guid attemptId,
+        long revision,
+        HostBridgeOwnedStagingHooks? hooks)
+    {
+        string root;
+        string source;
         try
         {
-            canonicalRoot = Normalize(ownedRoot);
-            canonicalTarget = Normalize(target);
+            root = NormalizeRequired(ownedRoot);
+            source = NormalizeRequired(target);
         }
         catch (Exception ex) when (IsPathException(ex))
         {
-            return HostBridgeQueueResultCodes.SafeOrphanOutsideRoot;
+            return Refused(HostBridgeQueueResultCodes.SafeOrphanOutsideRoot);
         }
 
-        if (SamePath(canonicalRoot, canonicalTarget) ||
-            !canonicalTarget.StartsWith(canonicalRoot + Path.DirectorySeparatorChar, PathComparison))
+        Inspection sourceInspection;
+        try
         {
-            return HostBridgeQueueResultCodes.SafeOrphanOutsideRoot;
+            sourceInspection = InspectStrictDescendant(root, source, hooks);
+        }
+        catch (Exception ex) when (IsInspectionException(ex))
+        {
+            return Refused(HostBridgeQueueResultCodes.SafeOrphanDeleteFailed);
         }
 
-        foreach (var component in ExistingComponents(canonicalRoot, canonicalTarget))
-        {
-            if (IsReparsePoint(component))
-                return HostBridgeQueueResultCodes.SafeOrphanLinkTraversal;
-        }
+        if (sourceInspection.Code is not null)
+            return Refused(sourceInspection.Code);
+        if (!sourceInspection.Exists)
+            return Success();
 
-        if (!Directory.Exists(canonicalTarget))
-            return null;
+        var trash = Path.Combine(root, TrashDirectoryName);
+        if (IsStrictDescendant(source, trash))
+            return DeleteQuarantine(source, hooks);
 
-        var pending = new Stack<string>();
-        pending.Push(canonicalTarget);
-        while (pending.Count > 0)
+        var quarantine = Path.Combine(trash, $"{attemptId:N}-{revision}");
+        var createdTrash = false;
+        try
         {
-            var directory = pending.Pop();
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            var trashInspection = InspectStrictDescendant(root, trash, hooks);
+            if (trashInspection.Code is not null)
+                return Refused(trashInspection.Code);
+            if (!trashInspection.Exists)
             {
-                var attributes = File.GetAttributes(entry);
-                if ((attributes & FileAttributes.ReparsePoint) != 0)
-                    return HostBridgeQueueResultCodes.SafeOrphanLinkTraversal;
-                if ((attributes & FileAttributes.Directory) != 0)
-                    pending.Push(entry);
+                Directory.CreateDirectory(trash);
+                createdTrash = true;
             }
+
+            trashInspection = InspectStrictDescendant(root, trash, hooks);
+            if (trashInspection.Code is not null || !trashInspection.Exists)
+                return Refused(trashInspection.Code ?? HostBridgeQueueResultCodes.SafeOrphanDeleteFailed);
+
+            var destinationInspection = InspectStrictDescendant(root, quarantine, hooks);
+            if (destinationInspection.Code is not null || destinationInspection.Exists)
+                return Refused(destinationInspection.Code ?? HostBridgeQueueResultCodes.SafeOrphanDeleteFailed);
+
+            hooks?.BeforeQuarantineMove?.Invoke(source, quarantine);
+            if (hooks?.MoveDirectory is { } move)
+                move(source, quarantine);
+            else
+                Directory.Move(source, quarantine);
+        }
+        catch (Exception ex) when (IsInspectionException(ex))
+        {
+            if (createdTrash)
+                TryRemoveEmptyTrash(trash);
+            return Refused(HostBridgeQueueResultCodes.SafeOrphanDeleteFailed);
         }
 
-        return null;
+        Inspection movedInspection;
+        try
+        {
+            movedInspection = InspectStrictDescendant(root, quarantine, hooks);
+        }
+        catch (Exception ex) when (IsInspectionException(ex))
+        {
+            return Retained(HostBridgeQueueResultCodes.SafeOrphanDeleteFailed, quarantine);
+        }
+
+        if (movedInspection.Code is not null)
+            return Retained(movedInspection.Code, quarantine);
+        if (!movedInspection.Exists)
+            return Retained(HostBridgeQueueResultCodes.SafeOrphanDeleteFailed, quarantine);
+
+        return DeleteQuarantine(quarantine, hooks);
     }
 
-    internal static OwnedStagingTreeDeleteResult DeleteValidatedTree(
+    private static OwnedStagingQuarantineResult DeleteQuarantine(
+        string quarantine,
+        HostBridgeOwnedStagingHooks? hooks)
+    {
+        try
+        {
+            DeleteTreeDepthFirst(quarantine, hooks);
+            return Success();
+        }
+        catch (Exception ex) when (IsInspectionException(ex))
+        {
+            return Retained(HostBridgeQueueResultCodes.SafeOrphanDeleteFailed, quarantine);
+        }
+    }
+
+    private static Inspection InspectStrictDescendant(
         string? ownedRoot,
-        string? target)
+        string? target,
+        HostBridgeOwnedStagingHooks? hooks)
     {
-        var refusalCode = ValidateStrictDescendant(ownedRoot, target);
-        if (refusalCode is not null)
-            return new(false, false, refusalCode);
+        if (string.IsNullOrWhiteSpace(ownedRoot) || string.IsNullOrWhiteSpace(target))
+            return new(false, HostBridgeQueueResultCodes.SafeOrphanOutsideRoot);
 
-        var canonicalTarget = Normalize(target!);
-        if (!Directory.Exists(canonicalTarget))
-            return new(true, true, HostBridgeQueueResultCodes.Removed);
-
-        var directories = new List<string>();
-        var pending = new Stack<string>();
-        pending.Push(canonicalTarget);
-        while (pending.Count > 0)
+        string root;
+        string candidate;
+        try
         {
-            var directory = pending.Pop();
-            directories.Add(directory);
-            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
-            {
-                var attributes = File.GetAttributes(entry);
-                if ((attributes & FileAttributes.ReparsePoint) != 0)
-                    return new(false, false, HostBridgeQueueResultCodes.SafeOrphanLinkTraversal);
-                if ((attributes & FileAttributes.Directory) != 0)
-                    pending.Push(entry);
-                else
-                    File.Delete(entry);
-            }
+            root = NormalizeRequired(ownedRoot);
+            candidate = NormalizeRequired(target);
+        }
+        catch (Exception ex) when (IsPathException(ex))
+        {
+            return new(false, HostBridgeQueueResultCodes.SafeOrphanOutsideRoot);
         }
 
-        for (var index = directories.Count - 1; index >= 0; index--)
-            Directory.Delete(directories[index], recursive: false);
+        if (!IsStrictDescendant(candidate, root))
+            return new(false, HostBridgeQueueResultCodes.SafeOrphanOutsideRoot);
 
-        return new(true, true, HostBridgeQueueResultCodes.Removed);
-    }
+        var rootKind = InspectEntry(root, hooks);
+        if (rootKind == EntryKind.Missing)
+            throw new DirectoryNotFoundException();
+        if (rootKind == EntryKind.Link)
+            return new(true, HostBridgeQueueResultCodes.SafeOrphanLinkTraversal);
 
-    private static IEnumerable<string> ExistingComponents(string canonicalRoot, string canonicalTarget)
-    {
-        if (ExistsOrIsLink(canonicalRoot))
-            yield return canonicalRoot;
-
-        var relative = Path.GetRelativePath(canonicalRoot, canonicalTarget);
-        var current = canonicalRoot;
+        var relative = Path.GetRelativePath(root, candidate);
+        var current = root;
         foreach (var segment in relative.Split(
                      new[] { Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar },
                      StringSplitOptions.RemoveEmptyEntries))
         {
             current = Path.Combine(current, segment);
-            if (ExistsOrIsLink(current))
-                yield return current;
-            else
-                yield break;
+            var kind = InspectEntry(current, hooks);
+            if (kind == EntryKind.Missing)
+                return new(false, null);
+            if (kind == EntryKind.Link)
+                return new(true, HostBridgeQueueResultCodes.SafeOrphanLinkTraversal);
+        }
+
+        var pending = new Stack<string>();
+        pending.Push(candidate);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory))
+            {
+                var kind = InspectEntry(entry, hooks);
+                if (kind == EntryKind.Link)
+                    return new(true, HostBridgeQueueResultCodes.SafeOrphanLinkTraversal);
+                if (kind == EntryKind.Directory)
+                    pending.Push(entry);
+            }
+        }
+
+        return new(true, null);
+    }
+
+    private static void DeleteTreeDepthFirst(string target, HostBridgeOwnedStagingHooks? hooks)
+    {
+        var directories = new List<string>();
+        var files = new List<string>();
+        var pending = new Stack<string>();
+        pending.Push(target);
+        while (pending.Count > 0)
+        {
+            var directory = pending.Pop();
+            directories.Add(directory);
+            foreach (var entry in Directory.EnumerateFileSystemEntries(directory).OrderBy(static path => path, StringComparer.Ordinal))
+            {
+                var kind = InspectEntry(entry, hooks);
+                if (kind == EntryKind.Link)
+                    throw new IOException("Link appeared in quarantined tree.");
+                if (kind == EntryKind.Directory)
+                    pending.Push(entry);
+                else if (kind == EntryKind.File)
+                    files.Add(entry);
+                else
+                    throw new IOException("Quarantined entry disappeared during inspection.");
+            }
+        }
+
+        foreach (var file in files.OrderBy(static path => path, StringComparer.Ordinal))
+        {
+            hooks?.BeforeDeleteEntry?.Invoke(file);
+            File.Delete(file);
+        }
+
+        for (var index = directories.Count - 1; index >= 0; index--)
+        {
+            hooks?.BeforeDeleteEntry?.Invoke(directories[index]);
+            Directory.Delete(directories[index], recursive: false);
         }
     }
 
-    private static bool ExistsOrIsLink(string path) =>
-        Directory.Exists(path) || File.Exists(path) || IsReparsePoint(path);
-
-    private static bool IsReparsePoint(string path)
+    private static EntryKind InspectEntry(string path, HostBridgeOwnedStagingHooks? hooks)
     {
+        hooks?.BeforeInspectPath?.Invoke(path);
+        FileAttributes attributes;
         try
         {
-            if ((File.GetAttributes(path) & FileAttributes.ReparsePoint) != 0)
-                return true;
+            attributes = File.GetAttributes(path);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (FileNotFoundException)
         {
+            return LinkTargetExists(path) ? EntryKind.Link : EntryKind.Missing;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return LinkTargetExists(path) ? EntryKind.Link : EntryKind.Missing;
         }
 
-        try { return new DirectoryInfo(path).LinkTarget is not null; }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-            return false;
-        }
+        if ((attributes & FileAttributes.ReparsePoint) != 0)
+            return EntryKind.Link;
+        return (attributes & FileAttributes.Directory) != 0 ? EntryKind.Directory : EntryKind.File;
     }
 
-    private static string Normalize(string path) =>
-        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+    private static bool LinkTargetExists(string path)
+    {
+        try { return new DirectoryInfo(path).LinkTarget is not null; }
+        catch (FileNotFoundException) { return false; }
+        catch (DirectoryNotFoundException) { return false; }
+    }
 
-    private static bool SamePath(string left, string right) =>
-        string.Equals(left, right, PathComparison);
+    private static bool IsStrictDescendant(string candidate, string root) =>
+        !string.Equals(candidate, root, PathComparison) &&
+        candidate.StartsWith(root + Path.DirectorySeparatorChar, PathComparison);
+
+    private static string NormalizeRequired(string? path) =>
+        Path.TrimEndingDirectorySeparator(Path.GetFullPath(path!));
 
     private static StringComparison PathComparison =>
         OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
@@ -150,7 +271,30 @@ internal static class OwnedStagingTree
     private static bool IsPathException(Exception exception) => exception is
         ArgumentException or
         NotSupportedException or
-        PathTooLongException or
+        PathTooLongException;
+
+    private static bool IsInspectionException(Exception exception) => exception is
         IOException or
-        UnauthorizedAccessException;
+        UnauthorizedAccessException or
+        ArgumentException or
+        NotSupportedException;
+
+    private static void TryRemoveEmptyTrash(string trash)
+    {
+        try { Directory.Delete(trash, recursive: false); }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+    }
+
+    private static OwnedStagingQuarantineResult Success() =>
+        new(true, true, HostBridgeQueueResultCodes.Removed, null);
+
+    private static OwnedStagingQuarantineResult Refused(string code) =>
+        new(false, false, code, null);
+
+    private static OwnedStagingQuarantineResult Retained(string code, string quarantine) =>
+        new(false, false, code, quarantine);
+
+    private readonly record struct Inspection(bool Exists, string? Code);
+
+    private enum EntryKind { Missing, File, Directory, Link }
 }

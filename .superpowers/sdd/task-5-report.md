@@ -109,3 +109,61 @@ canonical fast lane.
 ## Commit
 
 Implementation, tests, and this report: `HEAD feat(queue): make removal a bounded two-phase transaction`
+
+## Quarantine hardening follow-up
+
+### Feasibility and safety decision
+
+Cross-platform quarantine is feasible without an unsafe fallback. The destination is always
+`<immutable canonical owned root>/.lpc-trash/<attemptId>-<revision>`, so source and destination
+are on the same filesystem. Production uses `Directory.Move` only; it never falls back to a
+copy/delete sequence. The moved tree is re-inspected for link identity and containment before
+any deletion, and only the quarantine path is deleted.
+
+### Follow-up TDD evidence
+
+The quarantine suite was written first and failed to compile with `CS0246` because
+`HostBridgeOwnedStagingHooks` and the quarantine contract did not exist. The implemented suite
+then passed **10/10** and covers:
+
+- rename into `.lpc-trash` before deletion;
+- pre-move failure preserving the exact record key, original path, state, and evidence;
+- a deterministic source-to-link swap before move, post-move link refusal, and untouched
+  outside data;
+- deterministic partial deletion, persisted quarantine retarget, store reload, and exact-key
+  retry to completion;
+- inaccessible target inspection classified as `QUEUE_SAFE_ORPHAN_DELETE_FAILED`, never as a
+  missing-target success;
+- rejection of negative, infinite, zero, and greater-than-five-minute shutdown timeouts before
+  any queue mutation;
+- a synchronously blocking worker delegate bounded by a `Task.Run` scheduler boundary and
+  `WaitAsync`, with eventual faults observed by a fault-only continuation.
+
+Link-capability tests now use repository-standard `[SkippableFact]` and `Skip.If(...)`; no link
+test silently returns. On the Windows verification host the focused set reported the two
+Unix-only dangling-link cases as honest skips.
+
+Focused command:
+
+```powershell
+dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --no-restore -m:1 --filter "FullyQualifiedName~HostBridgeQueueRemovalV2Tests|FullyQualifiedName~HostBridgeQueueRemovalQuarantineTests|FullyQualifiedName~HostBridgeDownloadTrackerCleanupRaceTests|FullyQualifiedName~SimpleDownloadOrchestratorPathContainmentTests|FullyQualifiedName~HostBridgeQueuePreAdmissionTests"
+```
+
+Result: **Passed: 52, Failed: 0, Skipped: 2, Total: 54**.
+
+The quarantine and legacy cleanup race subset was repeated ten times without rebuilding:
+**150/150 passed**.
+
+Canonical command:
+
+```powershell
+pwsh scripts/test.ps1
+```
+
+Result: build succeeded with **0 warnings, 0 errors**; tests **7,183 passed, 0 failed,
+3 skipped, 7,186 total** in 2.81 minutes.
+
+### Follow-up commit
+
+Quarantine hardening and this evidence are committed separately after the original Task 5
+implementation commit.

@@ -63,6 +63,7 @@ public sealed class HostBridgeQueueStoreOptions
     public Func<DateTime> UtcNow { get; init; } = static () => DateTime.UtcNow;
     public Func<HostBridgeDownloadItemDto, HostBridgeRestartEvidence> RestartEvidence { get; init; } =
         static _ => new(false, false, false);
+    internal HostBridgeOwnedStagingHooks? OwnedStagingHooks { get; init; }
 }
 
 public static class HostBridgeQueueResultCodes

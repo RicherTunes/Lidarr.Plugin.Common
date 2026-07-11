@@ -287,7 +287,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(Directory.Exists(output));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task TargetReparsePoint_IsRetainedAndOutsideTargetSurvives()
     {
         var root = OwnedRoot();
@@ -296,7 +296,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         var evidence = Path.Combine(outside, "precious.flac");
         File.WriteAllText(evidence, "keep");
         var link = Path.Combine(root, "linked-target");
-        if (!TryCreateDirectoryLink(link, outside)) return;
+        Skip.If(!TryCreateDirectoryLink(link, outside), "Directory link creation is unavailable on this host.");
         var store = V2(TempFile(), root);
         var added = store.TryAddAttempt(Item("link", link));
         var failed = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Failed);
@@ -310,14 +310,14 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task RootReparsePoint_IsRetainedAndOutsideTargetSurvives()
     {
         Directory.CreateDirectory(_root);
         var outside = Path.Combine(_root, "physical-root");
         Directory.CreateDirectory(outside);
         var linkRoot = Path.Combine(_root, "linked-root");
-        if (!TryCreateDirectoryLink(linkRoot, outside)) return;
+        Skip.If(!TryCreateDirectoryLink(linkRoot, outside), "Directory link creation is unavailable on this host.");
         var target = Path.Combine(linkRoot, "attempt");
         Directory.CreateDirectory(target);
         var evidence = Path.Combine(target, "precious.flac");
@@ -335,7 +335,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task NestedReparsePoint_IsRetainedAndOutsideTargetSurvives()
     {
         var target = Child("nested-link");
@@ -345,7 +345,9 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Directory.CreateDirectory(outside);
         var evidence = Path.Combine(outside, "precious.flac");
         File.WriteAllText(evidence, "keep");
-        if (!TryCreateDirectoryLink(Path.Combine(target, "escape"), outside)) return;
+        Skip.If(
+            !TryCreateDirectoryLink(Path.Combine(target, "escape"), outside),
+            "Directory link creation is unavailable on this host.");
         var store = V2(TempFile(), OwnedRoot());
         var added = store.TryAddAttempt(Item("nested-link", target));
         var failed = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Failed);
@@ -361,14 +363,16 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task DanglingTargetSymlink_IsRetainedOnUnix()
     {
-        if (OperatingSystem.IsWindows()) return;
+        Skip.If(OperatingSystem.IsWindows(), "Dangling symlink identity is exercised on Unix hosts.");
 
         var root = OwnedRoot();
         var link = Path.Combine(root, "dangling-target");
-        if (!TryCreateDanglingDirectoryLink(link, Path.Combine(_root, "missing-target"))) return;
+        Skip.If(
+            !TryCreateDanglingDirectoryLink(link, Path.Combine(_root, "missing-target")),
+            "Dangling directory symlink creation is unavailable on this host.");
         var store = V2(TempFile(), root);
         var added = store.TryAddAttempt(Item("dangling-target", link));
         var failed = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Failed);
@@ -383,14 +387,16 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(IsReparsePoint(link));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task DanglingRootSymlink_IsRetainedOnUnix()
     {
-        if (OperatingSystem.IsWindows()) return;
+        Skip.If(OperatingSystem.IsWindows(), "Dangling symlink identity is exercised on Unix hosts.");
 
         Directory.CreateDirectory(_root);
         var linkRoot = Path.Combine(_root, "dangling-root");
-        if (!TryCreateDanglingDirectoryLink(linkRoot, Path.Combine(_root, "missing-root"))) return;
+        Skip.If(
+            !TryCreateDanglingDirectoryLink(linkRoot, Path.Combine(_root, "missing-root")),
+            "Dangling directory symlink creation is unavailable on this host.");
         var target = Path.Combine(linkRoot, "attempt");
         var store = V2(TempFile(), linkRoot);
         var added = store.TryAddAttempt(Item("dangling-root", target));
@@ -406,7 +412,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(IsReparsePoint(linkRoot));
     }
 
-    [Fact]
+    [SkippableFact]
     public async Task RootFilesystemIdentityIsRevalidatedAtRemovalTime()
     {
         Directory.CreateDirectory(_root);
@@ -423,7 +429,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Directory.CreateDirectory(Path.Combine(outside, "attempt"));
         var evidence = Path.Combine(outside, "attempt", "precious.flac");
         File.WriteAllText(evidence, "keep");
-        if (!TryCreateDirectoryLink(originalRoot, outside)) return;
+        Skip.If(!TryCreateDirectoryLink(originalRoot, outside), "Directory link creation is unavailable on this host.");
 
         var result = await store.RemoveAttemptAsync(
             failed.Current, true, static (_, _) => Task.CompletedTask, TimeSpan.FromSeconds(1));
