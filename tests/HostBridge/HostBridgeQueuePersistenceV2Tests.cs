@@ -63,6 +63,21 @@ public sealed class HostBridgeQueuePersistenceV2Tests : IDisposable
         return path;
     }
 
+    private static HostBridgeDownloadItemDto PersistedDto(string id) => new()
+    {
+        DownloadId = id,
+        AttemptId = Guid.Parse("b7ef2460-f5e7-4c91-9266-5ce763ad0065"),
+        Revision = 1,
+        AttemptState = HostBridgeDownloadAttemptState.Queued,
+        StateChangedAtUtc = new DateTime(2026, 7, 11, 12, 0, 0, DateTimeKind.Utc),
+    };
+
+    private static byte[] SerializeEnvelope(IReadOnlyCollection<HostBridgeDownloadItemDto> dtos)
+    {
+        var options = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
+        return JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 2, items = dtos }, options);
+    }
+
     [Fact]
     public void AttemptV2_PersistsSchemaEnvelope()
     {
@@ -280,7 +295,19 @@ public sealed class HostBridgeQueuePersistenceV2Tests : IDisposable
 
         var migrated = V2(path).GetSnapshot().Single();
 
-        Assert.Equal(Guid.Parse("f2b18429-b1b6-e042-4d8e-bd75aec825db"), migrated.AttemptId);
+        Assert.Equal(Guid.Parse("a4c7a5d1-209b-e063-22ec-a4e106c71689"), migrated.AttemptId);
+    }
+
+    [Fact]
+    public void V1Migration_OffsetDatesHaveUtcInvariantPinnedAttemptId()
+    {
+        var path = TempFile();
+        File.WriteAllText(path, "[{\"downloadId\":\"offset\",\"status\":\"Completed\",\"startedAt\":\"2026-07-11T08:30:00-04:00\",\"completedAt\":\"2026-07-11T09:45:00-04:00\"}]");
+
+        var migrated = V2(path).GetSnapshot().Single();
+
+        Assert.Equal(Guid.Parse("0a21e1cc-14f8-dc2b-0225-c4407ede4908"), migrated.AttemptId);
+        Assert.Equal(new DateTime(2026, 7, 11, 13, 45, 0, DateTimeKind.Utc), migrated.StateChangedAtUtc);
     }
 
     [Fact]
@@ -445,6 +472,120 @@ public sealed class HostBridgeQueuePersistenceV2Tests : IDisposable
         Assert.Equal(malformed, File.ReadAllText(path));
         Assert.Contains(warnings, warning => warning.Contains("maximum string length", StringComparison.Ordinal));
         Assert.DoesNotContain(warnings, warning => warning.Contains("SECRET", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void ExactMaximumString_WritesAndReopens()
+    {
+        var path = TempFile();
+        var title = new string('x', 32 * 1024);
+
+        var added = V2(path).TryAddAttempt(new HostBridgeDownloadItem
+        {
+            DownloadId = "max-string",
+            Title = title,
+        });
+        var reopened = V2(path).GetSnapshot().Single();
+
+        Assert.True(added.Applied);
+        Assert.Equal(title, reopened.Title);
+    }
+
+    [Theory]
+    [InlineData("TryAdd")]
+    [InlineData("TryAddAttempt")]
+    [InlineData("AddOrReplace")]
+    public void OverMaximumString_AllInsertionWrappersRejectWithoutStateOrFile(string insertion)
+    {
+        var path = TempFile();
+        var store = V2(path);
+        var item = new HostBridgeDownloadItem
+        {
+            DownloadId = "too-long",
+            Title = new string('x', (32 * 1024) + 1),
+        };
+
+        switch (insertion)
+        {
+            case "TryAdd":
+                Assert.False(store.TryAdd(item));
+                break;
+            case "TryAddAttempt":
+                var result = store.TryAddAttempt(item);
+                Assert.False(result.Applied);
+                Assert.Equal(HostBridgeQueueResultCodes.PersistenceLimitExceeded, result.Code);
+                break;
+            case "AddOrReplace":
+                var error = Assert.Throws<InvalidOperationException>(() => store.AddOrReplace(item));
+                Assert.Contains(HostBridgeQueueResultCodes.PersistenceLimitExceeded, error.Message, StringComparison.Ordinal);
+                break;
+        }
+
+        Assert.Empty(store.GetSnapshot());
+        Assert.False(File.Exists(path));
+        Assert.Equal(0, item.Revision);
+        Assert.Equal(Guid.Empty, item.AttemptId);
+    }
+
+    [Fact]
+    public void ExactMaximumItemCount_WritesReopensAndRejectsNextItem()
+    {
+        var path = TempFile();
+        var dtos = Enumerable.Range(0, 10_000)
+            .Select(index => PersistedDto($"item-{index:D5}"))
+            .ToArray();
+        File.WriteAllBytes(path, SerializeEnvelope(dtos));
+        var store = V2(path);
+        store.PersistSnapshot();
+        var acceptedBytes = File.ReadAllBytes(path);
+
+        var rejected = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "item-over-limit" });
+
+        Assert.Equal(10_000, store.GetSnapshot().Count());
+        Assert.False(rejected.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.PersistenceLimitExceeded, rejected.Code);
+        Assert.Equal(acceptedBytes, File.ReadAllBytes(path));
+        Assert.Equal(10_000, V2(path).GetSnapshot().Count());
+    }
+
+    [Fact]
+    public void ExactMaximumEnvelope_ReopensButMutableGrowthBlocksPersistAndTransition()
+    {
+        const int maxBytes = 16 * 1024 * 1024;
+        var path = TempFile();
+        var dtos = Enumerable.Range(0, 520)
+            .Select(index => PersistedDto($"envelope-{index:D4}"))
+            .ToArray();
+        var remaining = maxBytes - SerializeEnvelope(dtos).Length;
+        foreach (var dto in dtos)
+        {
+            var length = Math.Min(remaining, 32 * 1024);
+            dto.Title = new string('x', length);
+            remaining -= length;
+        }
+        Assert.Equal(0, remaining);
+        var exact = SerializeEnvelope(dtos);
+        Assert.Equal(maxBytes, exact.Length);
+        File.WriteAllBytes(path, exact);
+        var warnings = new List<string>();
+        var store = V2(path, warnings.Add);
+        store.PersistSnapshot();
+        var accepted = File.ReadAllBytes(path);
+        var item = store.GetSnapshot().First();
+        var before = (item.Revision, item.AttemptState, item.StateChangedAtUtc);
+
+        item.TotalSize = long.MinValue;
+        store.PersistSnapshot();
+        var transitioned = store.TryTransition(item.MutationKey(), HostBridgeDownloadAttemptState.Preparing);
+
+        Assert.Equal(maxBytes, accepted.Length);
+        Assert.Equal(accepted, File.ReadAllBytes(path));
+        Assert.False(transitioned.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.PersistenceLimitExceeded, transitioned.Code);
+        Assert.Equal(before, (item.Revision, item.AttemptState, item.StateChangedAtUtc));
+        Assert.Contains(warnings, warning => warning.Contains(HostBridgeQueueResultCodes.PersistenceLimitExceeded, StringComparison.Ordinal));
+        item.TotalSize = 0;
+        Assert.Equal(520, V2(path).GetSnapshot().Count());
     }
 
     [Fact]

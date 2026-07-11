@@ -357,6 +357,37 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         public List<HostBridgeDownloadItemDto> Items { get; set; } = new();
     }
 
+    private sealed class BoundedPersistenceStream : MemoryStream
+    {
+        public override void Write(byte[] buffer, int offset, int count)
+        {
+            EnsureCapacityFor(count);
+            base.Write(buffer, offset, count);
+        }
+
+        public override void Write(ReadOnlySpan<byte> buffer)
+        {
+            EnsureCapacityFor(buffer.Length);
+            base.Write(buffer);
+        }
+
+        public override void WriteByte(byte value)
+        {
+            EnsureCapacityFor(1);
+            base.WriteByte(value);
+        }
+
+        private void EnsureCapacityFor(int count)
+        {
+            if (Position > MaxPersistenceBytes - count)
+                throw new PersistenceLimitException();
+        }
+    }
+
+    private sealed class PersistenceLimitException : Exception
+    {
+    }
+
     /// <summary>
     /// Default retention: 30 minutes. Long enough that the Lidarr UI shows the result
     /// after a download completes; short enough that old failures don't accumulate.
@@ -477,7 +508,8 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         {
             var result = TryAddAttempt(item);
             if (!result.Applied)
-                throw new InvalidOperationException($"An attempt with DownloadId '{item.DownloadId}' already exists.");
+                throw new InvalidOperationException(
+                    $"Attempt '{item.DownloadId}' was rejected with code {result.Code}.");
             return;
         }
 
@@ -543,22 +575,41 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             throw new InvalidOperationException("TryAddAttempt requires AttemptV2 store options.");
 
         var normalized = NormalizeDownloadId(item.DownloadId);
-        item.InitializeAttempt(normalized, Guid.NewGuid, () => EnsureUtc(_options.UtcNow()));
         HostBridgeQueueMutationResult<TItem> result;
         string? warning = null;
 
         lock (_membershipLock)
         {
-            if (_items.TryAdd(normalized, item))
+            if (_items.TryGetValue(normalized, out var existing))
             {
-                warning = PersistToDisk();
-                result = new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
+                return new(false, HostBridgeQueueResultCodes.Conflict, existing.MutationKey(), existing);
             }
-            else
+
+            var candidate = HostBridgeDownloadItemDto.FromItem(item);
+            var initialized = candidate.AttemptId != Guid.Empty || candidate.Revision != 0;
+            if (!initialized)
             {
-                var current = _items[normalized];
-                result = new(false, HostBridgeQueueResultCodes.Conflict, current.MutationKey(), current);
+                candidate.DownloadId = normalized;
+                candidate.AttemptId = Guid.NewGuid();
+                candidate.Revision = 1;
+                candidate.AttemptState = HostBridgeDownloadAttemptState.Queued;
+                candidate.StateChangedAtUtc = EnsureUtc(_options.UtcNow());
             }
+
+            if (!TryValidateProjectedV2Snapshot(candidate, replacedDownloadId: null, out _))
+                return new(false, HostBridgeQueueResultCodes.PersistenceLimitExceeded, default, null);
+
+            if (!initialized)
+            {
+                item.InitializeAttempt(
+                    normalized,
+                    candidate.AttemptId,
+                    candidate.StateChangedAtUtc);
+            }
+
+            _items[normalized] = item;
+            warning = PersistToDisk();
+            result = new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
         }
 
         NotifyWarning(warning);
@@ -599,7 +650,23 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 if (item.Revision == long.MaxValue || item.StateChangedAtUtc.Ticks == DateTime.MaxValue.Ticks)
                     return new(false, HostBridgeQueueResultCodes.MetadataExhausted, current, item);
 
-                item.ApplyTransition(target, EnsureUtc(_options.UtcNow()));
+                var changedAtUtc = EnsureUtc(_options.UtcNow());
+                var projected = HostBridgeDownloadItemDto.FromItem(item);
+                projected.Revision++;
+                projected.AttemptState = target;
+                projected.StateChangedAtUtc = new DateTime(
+                    Math.Max(changedAtUtc.Ticks, item.StateChangedAtUtc.Ticks + 1),
+                    DateTimeKind.Utc);
+                if (!TryValidateProjectedV2Snapshot(projected, normalized, out _))
+                {
+                    return new(
+                        false,
+                        HostBridgeQueueResultCodes.PersistenceLimitExceeded,
+                        current,
+                        item);
+                }
+
+                item.ApplyTransition(target, changedAtUtc);
                 warning = PersistToDisk();
                 result = new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
             }
@@ -1195,6 +1262,74 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         }
     }
 
+    private bool TryValidateProjectedV2Snapshot(
+        HostBridgeDownloadItemDto projected,
+        string? replacedDownloadId,
+        out string reason)
+    {
+        var dtos = new List<HostBridgeDownloadItemDto>(_items.Count + 1);
+        foreach (var pair in _items)
+        {
+            if (replacedDownloadId is not null &&
+                string.Equals(pair.Key, replacedDownloadId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+            dtos.Add(HostBridgeDownloadItemDto.FromItem(pair.Value));
+        }
+        dtos.Add(projected);
+        return TrySerializeV2Snapshot(dtos, out _, out reason);
+    }
+
+    private static bool TrySerializeV2Snapshot(
+        List<HostBridgeDownloadItemDto> dtos,
+        out byte[] json,
+        out string reason)
+    {
+        json = Array.Empty<byte>();
+        if (dtos.Count > MaxPersistedItems)
+        {
+            reason = $"maximum item count of {MaxPersistedItems} exceeded";
+            return false;
+        }
+
+        foreach (var dto in dtos)
+        {
+            if (PersistedStrings(dto).Any(value => value is not null && value.Length > MaxPersistedStringLength))
+            {
+                reason = $"maximum string length of {MaxPersistedStringLength} characters exceeded";
+                return false;
+            }
+        }
+
+        dtos.Sort(static (left, right) =>
+            StringComparer.Ordinal.Compare(left.DownloadId, right.DownloadId));
+        try
+        {
+            using var stream = new BoundedPersistenceStream();
+            JsonSerializer.Serialize(stream, new QueueEnvelope { Items = dtos }, _jsonOptions);
+            json = stream.ToArray();
+        }
+        catch (PersistenceLimitException)
+        {
+            json = Array.Empty<byte>();
+            reason = $"maximum persistence size of {MaxPersistenceBytes} bytes exceeded";
+            return false;
+        }
+
+        reason = string.Empty;
+        return true;
+    }
+
+    private static IEnumerable<string?> PersistedStrings(HostBridgeDownloadItemDto dto)
+    {
+        yield return dto.DownloadId;
+        yield return dto.AlbumId;
+        yield return dto.Title;
+        yield return dto.Artist;
+        yield return dto.OutputPath;
+    }
+
     private void DisablePersistenceWrites(string reason)
     {
         _persistenceWriteDisabled = true;
@@ -1257,9 +1392,9 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             writer.WriteString("title", dto.Title);
             writer.WriteString("artist", dto.Artist);
             writer.WriteString("outputPath", dto.OutputPath);
-            writer.WriteString("startedAt", dto.StartedAt);
+            writer.WriteString("startedAt", EnsureUtc(dto.StartedAt));
             if (dto.CompletedAt.HasValue)
-                writer.WriteString("completedAt", dto.CompletedAt.Value);
+                writer.WriteString("completedAt", EnsureUtc(dto.CompletedAt.Value));
             else
                 writer.WriteNull("completedAt");
             writer.WriteNumber("totalSize", dto.TotalSize);
@@ -1268,7 +1403,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             writer.WriteString("attemptId", dto.AttemptId);
             writer.WriteNumber("revision", dto.Revision);
             writer.WriteString("attemptState", dto.AttemptState.ToString());
-            writer.WriteString("stateChangedAtUtc", dto.StateChangedAtUtc);
+            writer.WriteString("stateChangedAtUtc", EnsureUtc(dto.StateChangedAtUtc));
             writer.WriteEndObject();
         }
         return Encoding.UTF8.GetString(stream.ToArray());
@@ -1303,10 +1438,12 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 var dtos = new List<HostBridgeDownloadItemDto>(_items.Count);
                 foreach (var kv in _items)
                     dtos.Add(HostBridgeDownloadItemDto.FromItem(kv.Value));
-                if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2)
+
+                byte[]? v2Json = null;
+                if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2 &&
+                    !TrySerializeV2Snapshot(dtos, out v2Json, out var limitReason))
                 {
-                    dtos.Sort(static (left, right) =>
-                        StringComparer.Ordinal.Compare(left.DownloadId, right.DownloadId));
+                    return $"HostBridgeDownloadTrackerStore: {HostBridgeQueueResultCodes.PersistenceLimitExceeded} — {limitReason}.";
                 }
 
                 var dir = Path.GetDirectoryName(_persistencePath);
@@ -1314,10 +1451,10 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                     Directory.CreateDirectory(dir);
 
                 tmpPath = _persistencePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
-                var json = _options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2
-                    ? JsonSerializer.Serialize(new QueueEnvelope { Items = dtos }, _jsonOptions)
-                    : JsonSerializer.Serialize(dtos, _jsonOptions);
-                File.WriteAllText(tmpPath, json);
+                if (v2Json is not null)
+                    File.WriteAllBytes(tmpPath, v2Json);
+                else
+                    File.WriteAllText(tmpPath, JsonSerializer.Serialize(dtos, _jsonOptions));
 
                 for (var attempt = 1; attempt <= MaxReplaceAttempts; attempt++)
                 {
