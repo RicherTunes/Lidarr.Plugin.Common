@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
+using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.HostBridge;
@@ -136,6 +138,253 @@ public sealed class HostBridgeQueueIdentityAndCasTests
         Assert.Equal(31, results.Count(result => result.Code == HostBridgeQueueResultCodes.Conflict));
         Assert.Equal(2, added.Item!.Revision);
         Assert.Equal(HostBridgeDownloadAttemptState.Preparing, added.Item.AttemptState);
+    }
+
+    [Fact]
+    public async Task TryTransition_RemoveWaitsForAtomicMembershipAndMutation()
+    {
+        var store = Store();
+        var added = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "remove-race" });
+        var membershipSync = MembershipSync(store);
+        Task<HostBridgeQueueMutationResult<HostBridgeDownloadItem>> transition;
+        Task<bool> removal;
+        using var removalStarted = new ManualResetEventSlim();
+
+        lock (added.Item!.MutationSync)
+        {
+            transition = Task.Run(() => store.TryTransition(
+                added.Current,
+                HostBridgeDownloadAttemptState.Preparing));
+            Assert.True(SpinWait.SpinUntil(
+                () => IsHeldByAnotherThread(membershipSync),
+                TimeSpan.FromSeconds(5)));
+
+            removal = Task.Run(() =>
+            {
+                removalStarted.Set();
+                return store.Remove("remove-race", false, out _);
+            });
+            Assert.True(removalStarted.Wait(TimeSpan.FromSeconds(5)));
+            Assert.False(removal.IsCompleted);
+        }
+
+        Assert.True((await transition).Applied);
+        Assert.True(await removal);
+        Assert.False(store.TryGet("remove-race", out _));
+    }
+
+    [Fact]
+    public async Task TryTransition_ReplacementWaitsForAtomicMembershipAndMutation()
+    {
+        var store = Store();
+        var old = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "replace-race" });
+        var membershipSync = MembershipSync(store);
+        Task<HostBridgeQueueMutationResult<HostBridgeDownloadItem>> transition;
+        Task<HostBridgeQueueMutationResult<HostBridgeDownloadItem>> replacement;
+        using var replacementStarted = new ManualResetEventSlim();
+
+        lock (old.Item!.MutationSync)
+        {
+            transition = Task.Run(() => store.TryTransition(
+                old.Current,
+                HostBridgeDownloadAttemptState.Preparing));
+            Assert.True(SpinWait.SpinUntil(
+                () => IsHeldByAnotherThread(membershipSync),
+                TimeSpan.FromSeconds(5)));
+
+            replacement = Task.Run(() =>
+            {
+                replacementStarted.Set();
+                Assert.True(store.Remove("replace-race", false, out _));
+                return store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "REPLACE-RACE" });
+            });
+            Assert.True(replacementStarted.Wait(TimeSpan.FromSeconds(5)));
+            Assert.False(replacement.IsCompleted);
+        }
+
+        Assert.True((await transition).Applied);
+        var current = await replacement;
+        Assert.True(current.Applied);
+        Assert.NotEqual(old.Current.AttemptId, current.Current.AttemptId);
+        Assert.Equal(HostBridgeDownloadAttemptState.Queued, current.Item!.AttemptState);
+        Assert.Equal(1, current.Item.Revision);
+    }
+
+    [Fact]
+    public void TryTransition_DetachedStaleAttemptNeverAppliesOrMutatesLiveState()
+    {
+        var store = Store();
+        var old = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "detached" });
+        Assert.True(store.Remove("detached", false, out _));
+        var current = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "DETACHED" });
+        var liveBefore = Metadata(current.Item!);
+        var detachedBefore = Metadata(old.Item!);
+
+        var result = store.TryTransition(old.Current, HostBridgeDownloadAttemptState.Preparing);
+
+        Assert.False(result.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.Conflict, result.Code);
+        Assert.Same(current.Item, result.Item);
+        Assert.Equal(liveBefore, Metadata(current.Item!));
+        Assert.Equal(detachedBefore, Metadata(old.Item!));
+    }
+
+    [Fact]
+    public void TryTransition_LegacyStoreRejectsWithoutMutationOrPersistence()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hostbridge-legacy-transition-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "tracker.json");
+        var warnings = new List<string>();
+        try
+        {
+            var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+                persistencePath: path,
+                onWarn: warnings.Add);
+            var item = new HostBridgeDownloadItem { DownloadId = "legacy" };
+            store.AddOrReplace(item);
+            File.Delete(path);
+            Directory.CreateDirectory(path);
+            var before = Metadata(item);
+
+            var result = store.TryTransition(
+                new HostBridgeQueueMutationKey("legacy", Guid.Empty, 0),
+                HostBridgeDownloadAttemptState.Preparing);
+
+            Assert.False(result.Applied);
+            Assert.Equal(HostBridgeQueueResultCodes.IllegalTransition, result.Code);
+            Assert.Equal(before, Metadata(item));
+            Assert.Empty(warnings);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void TryTransition_MaxRevisionReturnsMetadataExhaustedWithoutMutation()
+    {
+        var store = Store();
+        var item = RestoredItem(
+            "max-revision",
+            long.MaxValue,
+            new DateTime(2026, 7, 11, 20, 0, 0, DateTimeKind.Utc));
+        var added = store.TryAddAttempt(item);
+        var before = Metadata(item);
+
+        var result = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Preparing);
+
+        Assert.False(result.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.MetadataExhausted, result.Code);
+        Assert.Equal(before, Metadata(item));
+    }
+
+    [Fact]
+    public void TryTransition_MaxTimestampReturnsMetadataExhaustedWithoutClockOrMutation()
+    {
+        var clockCalls = 0;
+        var store = Store(() =>
+        {
+            Interlocked.Increment(ref clockCalls);
+            return DateTime.MinValue;
+        });
+        var item = RestoredItem("max-time", 1, DateTime.MaxValue);
+        var added = store.TryAddAttempt(item);
+        var before = Metadata(item);
+
+        var result = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Preparing);
+
+        Assert.False(result.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.MetadataExhausted, result.Code);
+        Assert.Equal(before, Metadata(item));
+        Assert.Equal(0, clockCalls);
+    }
+
+    [Fact]
+    public void TryTransition_ClockCanReachMaxValueThenFurtherMutationIsExhausted()
+    {
+        var times = new Queue<DateTime>(new[]
+        {
+            new DateTime(2026, 7, 11, 20, 0, 0, DateTimeKind.Utc),
+            DateTime.MaxValue,
+        });
+        var store = Store(() => times.Dequeue());
+        var added = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "max-clock" });
+
+        var preparing = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Preparing);
+        var exhausted = store.TryTransition(preparing.Current, HostBridgeDownloadAttemptState.Downloading);
+
+        Assert.True(preparing.Applied);
+        Assert.Equal(DateTime.MaxValue.Ticks, preparing.Item!.StateChangedAtUtc.Ticks);
+        Assert.False(exhausted.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.MetadataExhausted, exhausted.Code);
+        Assert.Equal(2, exhausted.Item!.Revision);
+        Assert.Equal(HostBridgeDownloadAttemptState.Preparing, exhausted.Item.AttemptState);
+    }
+
+    [Fact]
+    public async Task PersistenceWarningCallback_CanReenterStoreWithoutLockDeadlock()
+    {
+        var root = Path.Combine(Path.GetTempPath(), "hostbridge-warning-reentry-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var path = Path.Combine(root, "tracker.json");
+        HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>? store = null;
+        var callbackReentered = false;
+        var callbackCalls = 0;
+        using var reentryDone = new ManualResetEventSlim();
+        try
+        {
+            store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+                persistencePath: path,
+                onWarn: warning =>
+                {
+                    if (Interlocked.Increment(ref callbackCalls) != 1) return;
+                    _ = Task.Run(() =>
+                    {
+                        store!.PersistSnapshot();
+                        reentryDone.Set();
+                    });
+                    callbackReentered = reentryDone.Wait(TimeSpan.FromSeconds(2));
+                },
+                options: new HostBridgeQueueStoreOptions
+                {
+                    ContractVersion = HostBridgeQueueContractVersion.AttemptV2,
+                });
+            var added = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "reenter" });
+            File.Delete(path);
+            Directory.CreateDirectory(path);
+
+            var transition = await Task.Run(() => store.TryTransition(
+                added.Current,
+                HostBridgeDownloadAttemptState.Preparing));
+
+            Assert.True(transition.Applied);
+            Assert.True(callbackReentered);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void StateMachine_ExhaustiveDefinedAndUndefinedPairMatrix()
+    {
+        var defined = Enum.GetValues<HostBridgeDownloadAttemptState>();
+        var undefined = new[]
+        {
+            (HostBridgeDownloadAttemptState)(-1),
+            (HostBridgeDownloadAttemptState)9,
+            (HostBridgeDownloadAttemptState)int.MaxValue,
+        };
+        var all = defined.Concat(undefined).ToArray();
+
+        foreach (var from in all)
+        foreach (var to in all)
+        {
+            Assert.Equal(ExpectedTransition(from, to), HostBridgeQueueStateMachine.CanTransition(from, to));
+        }
     }
 
     [Fact]
@@ -383,4 +632,49 @@ public sealed class HostBridgeQueueIdentityAndCasTests
     private static (Guid, long, HostBridgeDownloadAttemptState, DateTime) Metadata(
         HostBridgeDownloadItem item) =>
         (item.AttemptId, item.Revision, item.AttemptState, item.StateChangedAtUtc);
+
+    private static object MembershipSync(HostBridgeDownloadTrackerStore<HostBridgeDownloadItem> store) =>
+        typeof(HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>)
+            .GetField("_membershipLock", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .GetValue(store)!;
+
+    private static bool IsHeldByAnotherThread(object sync)
+    {
+        if (!Monitor.TryEnter(sync)) return true;
+        Monitor.Exit(sync);
+        return false;
+    }
+
+    private static HostBridgeDownloadItem RestoredItem(string id, long revision, DateTime changedAtUtc) =>
+        new HostBridgeDownloadItemDto
+        {
+            DownloadId = id,
+            AttemptId = Guid.NewGuid(),
+            Revision = revision,
+            AttemptState = HostBridgeDownloadAttemptState.Queued,
+            StateChangedAtUtc = changedAtUtc,
+        }.ToItem();
+
+    private static bool ExpectedTransition(
+        HostBridgeDownloadAttemptState from,
+        HostBridgeDownloadAttemptState to)
+    {
+        if (!Enum.IsDefined(from) || !Enum.IsDefined(to)) return false;
+        if (from is HostBridgeDownloadAttemptState.CompletedImportable or
+            HostBridgeDownloadAttemptState.Failed or
+            HostBridgeDownloadAttemptState.Cancelled) return false;
+        if (to == HostBridgeDownloadAttemptState.Failed)
+            return from != HostBridgeDownloadAttemptState.Cancelling;
+        if (to == HostBridgeDownloadAttemptState.Cancelling)
+            return from != HostBridgeDownloadAttemptState.Cancelling;
+
+        return (from, to) is
+            (HostBridgeDownloadAttemptState.Queued, HostBridgeDownloadAttemptState.Preparing) or
+            (HostBridgeDownloadAttemptState.Preparing, HostBridgeDownloadAttemptState.Downloading) or
+            (HostBridgeDownloadAttemptState.Downloading, HostBridgeDownloadAttemptState.Paused) or
+            (HostBridgeDownloadAttemptState.Paused, HostBridgeDownloadAttemptState.Downloading) or
+            (HostBridgeDownloadAttemptState.Downloading, HostBridgeDownloadAttemptState.Finalizing) or
+            (HostBridgeDownloadAttemptState.Finalizing, HostBridgeDownloadAttemptState.CompletedImportable) or
+            (HostBridgeDownloadAttemptState.Cancelling, HostBridgeDownloadAttemptState.Cancelled);
+    }
 }

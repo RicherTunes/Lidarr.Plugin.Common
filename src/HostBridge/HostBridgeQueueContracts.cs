@@ -63,6 +63,7 @@ public static class HostBridgeQueueResultCodes
     public const string Applied = "QUEUE_APPLIED";
     public const string Conflict = "QUEUE_CONFLICT";
     public const string IllegalTransition = "QUEUE_ILLEGAL_TRANSITION";
+    public const string MetadataExhausted = "QUEUE_METADATA_EXHAUSTED";
     public const string NotFound = "QUEUE_NOT_FOUND";
     public const string WorkerShutdownTimeout = "QUEUE_WORKER_SHUTDOWN_TIMEOUT";
     public const string Removed = "QUEUE_REMOVED";

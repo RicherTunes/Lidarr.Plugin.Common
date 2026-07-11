@@ -11,6 +11,7 @@ public static class HostBridgeQueueStateMachine
         HostBridgeDownloadAttemptState from,
         HostBridgeDownloadAttemptState to)
     {
+        if (!System.Enum.IsDefined(from) || !System.Enum.IsDefined(to)) return false;
         if (IsTerminal(from)) return false;
         if (to == HostBridgeDownloadAttemptState.Failed)
             return from != HostBridgeDownloadAttemptState.Cancelling;

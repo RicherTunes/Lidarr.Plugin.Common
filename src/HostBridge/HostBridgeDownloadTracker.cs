@@ -49,6 +49,10 @@ public class HostBridgeDownloadItem
     private int _status = (int)HostBridgeDownloadItemStatus.Queued;
     private long _progressBits;
 
+    // Store-owned CAS synchronization. Internal for deterministic friend-assembly tests,
+    // but never exposed through the public item API and never supplied by callers.
+    internal object MutationSync { get; } = new();
+
     // CompletedAt is stored as ticks (long) for atomic reads/writes. DateTime? on x64 is
     // 16 bytes (1 byte HasValue + 7 padding + 8 ticks), and a plain `get/set` is NOT
     // atomic — the retention sweep can observe HasValue=true paired with the previous
@@ -324,6 +328,11 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     private readonly Func<HostBridgeDownloadItemDto, TItem> _itemFactory;
     private readonly Action<string>? _onWarn;
     private readonly HostBridgeQueueStoreOptions _options;
+
+    // AttemptV2 lock order is membership -> item.MutationSync -> persistence.
+    // Persistence warnings are captured under these locks and dispatched only after every
+    // acquired lock has been released. Never acquire an earlier lock from a later one.
+    private readonly object _membershipLock = new();
     private readonly object _persistLock = new();
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -460,7 +469,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             throw new ArgumentException("DownloadId must be non-empty.", nameof(item));
 
         _items[item.DownloadId] = item;
-        PersistToDisk();
+        PersistAndNotify();
     }
 
     /// <summary>
@@ -486,7 +495,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
         var added = _items.TryAdd(item.DownloadId, item);
         if (added)
-            PersistToDisk();
+            PersistAndNotify();
         return added;
     }
 
@@ -519,39 +528,69 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
         var normalized = NormalizeDownloadId(item.DownloadId);
         item.InitializeAttempt(normalized, Guid.NewGuid, () => EnsureUtc(_options.UtcNow()));
-        while (true)
+        HostBridgeQueueMutationResult<TItem> result;
+        string? warning = null;
+
+        lock (_membershipLock)
         {
             if (_items.TryAdd(normalized, item))
             {
-                PersistToDisk();
-                return new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
+                warning = PersistToDisk();
+                result = new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
             }
-
-            if (_items.TryGetValue(normalized, out var current))
-                return new(false, HostBridgeQueueResultCodes.Conflict, current.MutationKey(), current);
+            else
+            {
+                var current = _items[normalized];
+                result = new(false, HostBridgeQueueResultCodes.Conflict, current.MutationKey(), current);
+            }
         }
+
+        NotifyWarning(warning);
+        return result;
     }
 
     public HostBridgeQueueMutationResult<TItem> TryTransition(
         HostBridgeQueueMutationKey expected,
         HostBridgeDownloadAttemptState target)
     {
+        if (_options.ContractVersion != HostBridgeQueueContractVersion.AttemptV2)
+            return new(false, HostBridgeQueueResultCodes.IllegalTransition, default, null);
+
         var normalized = NormalizeDownloadId(expected.DownloadId);
-        if (!_items.TryGetValue(normalized, out var item))
-            return new(false, HostBridgeQueueResultCodes.NotFound, default, null);
+        HostBridgeQueueMutationResult<TItem> result;
+        string? warning = null;
 
-        lock (item)
+        lock (_membershipLock)
         {
-            var current = item.MutationKey();
-            if (current.AttemptId != expected.AttemptId || current.Revision != expected.Revision)
-                return new(false, HostBridgeQueueResultCodes.Conflict, current, item);
-            if (!HostBridgeQueueStateMachine.CanTransition(item.AttemptState, target))
-                return new(false, HostBridgeQueueResultCodes.IllegalTransition, current, item);
+            if (!_items.TryGetValue(normalized, out var item))
+                return new(false, HostBridgeQueueResultCodes.NotFound, default, null);
 
-            item.ApplyTransition(target, EnsureUtc(_options.UtcNow()));
-            PersistToDisk();
-            return new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
+            lock (item.MutationSync)
+            {
+                if (!_items.TryGetValue(normalized, out var attached) ||
+                    !ReferenceEquals(attached, item))
+                {
+                    return attached is null
+                        ? new(false, HostBridgeQueueResultCodes.NotFound, default, null)
+                        : new(false, HostBridgeQueueResultCodes.Conflict, attached.MutationKey(), attached);
+                }
+
+                var current = item.MutationKey();
+                if (current.AttemptId != expected.AttemptId || current.Revision != expected.Revision)
+                    return new(false, HostBridgeQueueResultCodes.Conflict, current, item);
+                if (!HostBridgeQueueStateMachine.CanTransition(item.AttemptState, target))
+                    return new(false, HostBridgeQueueResultCodes.IllegalTransition, current, item);
+                if (item.Revision == long.MaxValue || item.StateChangedAtUtc.Ticks == DateTime.MaxValue.Ticks)
+                    return new(false, HostBridgeQueueResultCodes.MetadataExhausted, current, item);
+
+                item.ApplyTransition(target, EnsureUtc(_options.UtcNow()));
+                warning = PersistToDisk();
+                result = new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
+            }
         }
+
+        NotifyWarning(warning);
+        return result;
     }
 
     /// <summary>
@@ -561,30 +600,22 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     /// </summary>
     public IEnumerable<TItem> GetSnapshot()
     {
-        var now    = DateTime.UtcNow;
-        var result = new List<TItem>(_items.Count);
-        var evicted = false;
-
-        foreach (var kv in _items)
+        if (_options.ContractVersion == HostBridgeQueueContractVersion.LegacyV1)
         {
-            var item   = kv.Value;
-            var status = item.GetStatus();
-
-            if (IsTerminalStatus(status) &&
-                item.CompletedAt.HasValue &&
-                now - item.CompletedAt.Value > _completedRetention)
-            {
-                _items.TryRemove(kv.Key, out _);
-                evicted = true;
-                continue;
-            }
-
-            result.Add(item);
+            var legacy = CollectSnapshot(out var legacyEvicted);
+            if (legacyEvicted) PersistAndNotify();
+            return legacy;
         }
 
-        if (evicted)
-            PersistToDisk();
+        List<TItem> result;
+        string? warning = null;
+        lock (_membershipLock)
+        {
+            result = CollectSnapshot(out var evicted);
+            if (evicted) warning = PersistToDisk();
+        }
 
+        NotifyWarning(warning);
         return result;
     }
 
@@ -606,12 +637,23 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         var key = _options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2
             ? NormalizeDownloadId(downloadId)
             : downloadId;
-        if (!_items.TryRemove(key, out removed))
+        string? warning = null;
+        if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2)
         {
-            return false;
+            lock (_membershipLock)
+            {
+                if (!_items.TryRemove(key, out removed))
+                    return false;
+                warning = PersistToDisk();
+            }
+            NotifyWarning(warning);
         }
-
-        PersistToDisk();
+        else
+        {
+            if (!_items.TryRemove(key, out removed))
+                return false;
+            PersistAndNotify();
+        }
 
         if (deleteData && removed is not null && !string.IsNullOrWhiteSpace(removed.OutputPath))
         {
@@ -665,7 +707,19 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     /// outside Common's <see cref="HostBridgeDownloadOrchestrator"/>. Add/remove/eviction
     /// already flush automatically.</para>
     /// </summary>
-    public void PersistSnapshot() => PersistToDisk();
+    public void PersistSnapshot()
+    {
+        if (_options.ContractVersion == HostBridgeQueueContractVersion.LegacyV1)
+        {
+            PersistAndNotify();
+            return;
+        }
+
+        string? warning;
+        lock (_membershipLock)
+            warning = PersistToDisk();
+        NotifyWarning(warning);
+    }
 
     // ─── Persistence internals ────────────────────────────────────────────────
 
@@ -691,6 +745,31 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     private static bool IsActiveStatus(HostBridgeDownloadItemStatus status)
         => status is HostBridgeDownloadItemStatus.Queued
             or HostBridgeDownloadItemStatus.Downloading;
+
+    private List<TItem> CollectSnapshot(out bool evicted)
+    {
+        var now = DateTime.UtcNow;
+        var result = new List<TItem>(_items.Count);
+        evicted = false;
+
+        foreach (var kv in _items)
+        {
+            var item = kv.Value;
+            var status = item.GetStatus();
+            if (IsTerminalStatus(status) &&
+                item.CompletedAt.HasValue &&
+                now - item.CompletedAt.Value > _completedRetention)
+            {
+                _items.TryRemove(kv.Key, out _);
+                evicted = true;
+                continue;
+            }
+
+            result.Add(item);
+        }
+
+        return result;
+    }
 
     private static string NormalizeDownloadId(string downloadId)
     {
@@ -824,7 +903,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             }
 
             if (shouldPersistCleanedSnapshot)
-                PersistToDisk();
+                NotifyWarning(PersistToDisk());
         }
         catch (Exception ex)
         {
@@ -835,10 +914,18 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         }
     }
 
-    private void PersistToDisk()
+    private void PersistAndNotify() => NotifyWarning(PersistToDisk());
+
+    private void NotifyWarning(string? warning)
+    {
+        if (warning is not null)
+            _onWarn?.Invoke(warning);
+    }
+
+    private string? PersistToDisk()
     {
         if (_persistencePath == null)
-            return;
+            return null;
 
         lock (_persistLock)
         {
@@ -871,7 +958,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                             File.Move(tmpPath, _persistencePath);
 
                         tmpPath = null;
-                        return;
+                        return null;
                     }
                     catch (IOException ex) when (IsTransientReplaceFailure(ex) && attempt < MaxReplaceAttempts)
                     {
@@ -879,16 +966,15 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                     }
                     catch (IOException ex) when (IsTransientReplaceFailure(ex))
                     {
-                        _onWarn?.Invoke(
-                            $"HostBridgeDownloadTrackerStore: could not persist tracker snapshot after {MaxReplaceAttempts} replace attempts — transient file sharing failure.");
-                        return;
+                        return $"HostBridgeDownloadTrackerStore: could not persist tracker snapshot after {MaxReplaceAttempts} replace attempts — transient file sharing failure.";
                     }
                 }
+
+                return null;
             }
             catch (Exception ex)
             {
-                _onWarn?.Invoke(
-                    $"HostBridgeDownloadTrackerStore: could not persist tracker snapshot — {ex.GetType().Name}.");
+                return $"HostBridgeDownloadTrackerStore: could not persist tracker snapshot — {ex.GetType().Name}.";
             }
             finally
             {
