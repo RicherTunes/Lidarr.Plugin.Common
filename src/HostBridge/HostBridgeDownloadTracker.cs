@@ -304,6 +304,10 @@ public sealed class HostBridgeDownloadItemDto
 public sealed class HostBridgeDownloadTrackerStore<TItem>
     where TItem : HostBridgeDownloadItem
 {
+    private const int MaxReplaceAttempts = 5;
+    private const int ErrorSharingViolation = 32;
+    private const int ErrorLockViolation = 33;
+
     private readonly ConcurrentDictionary<string, TItem> _items;
     private readonly TimeSpan _completedRetention;
     private readonly string? _persistencePath;
@@ -806,6 +810,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
         lock (_persistLock)
         {
+            string? tmpPath = null;
             try
             {
                 // Snapshot under the persist lock so an older mutation cannot write a stale
@@ -818,19 +823,54 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 if (!string.IsNullOrEmpty(dir))
                     Directory.CreateDirectory(dir);
 
-                var tmpPath = _persistencePath + ".tmp";
+                tmpPath = _persistencePath + "." + Guid.NewGuid().ToString("N") + ".tmp";
                 var json    = JsonSerializer.Serialize(dtos, _jsonOptions);
                 File.WriteAllText(tmpPath, json);
 
-                // Atomic rename — on same filesystem this is a single metadata operation.
-                File.Move(tmpPath, _persistencePath, overwrite: true);
+                for (var attempt = 1; attempt <= MaxReplaceAttempts; attempt++)
+                {
+                    try
+                    {
+                        // Both paths are in the same directory, so replacing an existing
+                        // snapshot remains a single filesystem metadata operation.
+                        if (File.Exists(_persistencePath))
+                            File.Replace(tmpPath, _persistencePath, destinationBackupFileName: null);
+                        else
+                            File.Move(tmpPath, _persistencePath);
+
+                        tmpPath = null;
+                        return;
+                    }
+                    catch (IOException ex) when (IsTransientReplaceFailure(ex) && attempt < MaxReplaceAttempts)
+                    {
+                        Thread.Sleep(TimeSpan.FromMilliseconds(10 * (1 << (attempt - 1))));
+                    }
+                    catch (IOException ex) when (IsTransientReplaceFailure(ex))
+                    {
+                        _onWarn?.Invoke(
+                            $"HostBridgeDownloadTrackerStore: could not persist tracker snapshot after {MaxReplaceAttempts} replace attempts — transient file sharing failure.");
+                        return;
+                    }
+                }
             }
             catch (Exception ex)
             {
                 _onWarn?.Invoke(
-                    $"HostBridgeDownloadTrackerStore: could not persist to '{_persistencePath}' — " +
-                    $"{ex.GetType().Name}: {ex.Message}");
+                    $"HostBridgeDownloadTrackerStore: could not persist tracker snapshot — {ex.GetType().Name}.");
+            }
+            finally
+            {
+                if (tmpPath is not null)
+                {
+                    try { File.Delete(tmpPath); } catch { /* best-effort cleanup */ }
+                }
             }
         }
+    }
+
+    private static bool IsTransientReplaceFailure(IOException exception)
+    {
+        var nativeError = exception.HResult & 0xFFFF;
+        return nativeError is ErrorSharingViolation or ErrorLockViolation;
     }
 }

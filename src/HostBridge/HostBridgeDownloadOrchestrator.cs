@@ -77,6 +77,8 @@ public sealed class HostBridgeDownloadOrchestrator
 {
     private readonly ILogger? _logger;
 
+    internal Action<string>? FinalPersistenceCompleted { get; set; }
+
     /// <summary>
     /// Create an orchestrator instance. <paramref name="logger"/> is optional — pass
     /// <see langword="null"/> to silence orchestrator-level log output (useful in tests or
@@ -290,6 +292,14 @@ public sealed class HostBridgeDownloadOrchestrator
             finally
             {
                 tracker.PersistSnapshot();
+                try
+                {
+                    FinalPersistenceCompleted?.Invoke(downloadId);
+                }
+                catch
+                {
+                    // Internal observation must never affect download cleanup.
+                }
                 linkedCancellationSource?.Dispose();
                 try
                 {

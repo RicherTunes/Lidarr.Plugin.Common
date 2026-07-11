@@ -355,8 +355,44 @@ public sealed class HostBridgeDownloadTrackerPersistenceTests : IDisposable
 
         store.AddOrReplace(new HostBridgeDownloadItem { DownloadId = "x", Title = "T", Artist = "A" });
 
-        Assert.False(File.Exists(path + ".tmp"));
+        Assert.Empty(Directory.GetFiles(
+            Path.GetDirectoryName(path)!,
+            Path.GetFileName(path) + ".*.tmp"));
         Assert.True(File.Exists(path));
+    }
+
+    [Fact]
+    public async Task PersistSnapshot_ExhaustedSharingRetries_WarnsOnceRedactedAndCleansTemp()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var path = TempFile("locked-tracker.json");
+        var warnings = new List<string>();
+        var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+            persistencePath: path,
+            onWarn: warnings.Add);
+        var item = new HostBridgeDownloadItem
+        {
+            DownloadId = "locked",
+            Title = "Test Album",
+            Artist = "Test Artist",
+        };
+        store.AddOrReplace(item);
+        item.SetStatus(HostBridgeDownloadItemStatus.Completed);
+        item.CompletedAt = DateTime.UtcNow;
+
+        using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+        {
+            await Task.Run(store.PersistSnapshot);
+        }
+
+        var warning = Assert.Single(warnings);
+        Assert.DoesNotContain(path, warning, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("sharing failure", warning, StringComparison.Ordinal);
+        Assert.Empty(Directory.GetFiles(
+            Path.GetDirectoryName(path)!,
+            Path.GetFileName(path) + ".*.tmp"));
     }
 
     // ─── Concurrency ─────────────────────────────────────────────────────────
