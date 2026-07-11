@@ -4,11 +4,13 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading;
+using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Hosting;
 
 namespace Lidarr.Plugin.Common.HostBridge;
@@ -334,6 +336,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     private readonly Func<HostBridgeDownloadItemDto, TItem> _itemFactory;
     private readonly Action<string>? _onWarn;
     private readonly HostBridgeQueueStoreOptions _options;
+    private readonly string? _ownedStagingRoot;
     private bool _persistenceWriteDisabled;
 
     // AttemptV2 lock order is membership -> item.MutationSync -> persistence.
@@ -435,6 +438,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         _onWarn             = onWarn;
         _itemFactory        = itemFactory ?? DefaultItemFactory;
         _options            = options ?? new HostBridgeQueueStoreOptions();
+        _ownedStagingRoot   = SnapshotOwnedStagingRoot(_options.OwnedStagingRoot);
         _items              = new ConcurrentDictionary<string, TItem>(
             _options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2
                 ? StringComparer.OrdinalIgnoreCase
@@ -833,6 +837,176 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     }
 
     /// <summary>
+    /// Removes one AttemptV2 entry by exact mutation key. Active attempts first persist a
+    /// cancelling state and wait for their worker to stop before state or owned files are removed.
+    /// </summary>
+    public async Task<HostBridgeQueueRemovalResult<TItem>> RemoveAttemptAsync(
+        HostBridgeQueueMutationKey expected,
+        bool deleteData,
+        Func<TItem, CancellationToken, Task> stopWorker,
+        TimeSpan shutdownTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        if (_options.ContractVersion != HostBridgeQueueContractVersion.AttemptV2)
+            throw new InvalidOperationException("RemoveAttemptAsync requires AttemptV2 store options.");
+        if (stopWorker is null) throw new ArgumentNullException(nameof(stopWorker));
+        if (shutdownTimeout < TimeSpan.Zero && shutdownTimeout != Timeout.InfiniteTimeSpan)
+            throw new ArgumentOutOfRangeException(nameof(shutdownTimeout));
+
+        var normalized = NormalizeDownloadId(expected.DownloadId);
+        TItem item;
+        HostBridgeQueueMutationKey removalKey;
+
+        lock (_membershipLock)
+        {
+            if (!_items.TryGetValue(normalized, out item!))
+                return new(false, false, false, false, HostBridgeQueueResultCodes.NotFound, null);
+
+            var current = item.MutationKey();
+            if (current.AttemptId != expected.AttemptId || current.Revision != expected.Revision)
+                return new(true, false, false, false, HostBridgeQueueResultCodes.Conflict, item);
+        }
+
+        if (!HostBridgeQueueStateMachine.IsTerminal(item.AttemptState))
+        {
+            var cancelling = TryTransition(expected, HostBridgeDownloadAttemptState.Cancelling);
+            if (!cancelling.Applied)
+            {
+                return new(
+                    cancelling.Code != HostBridgeQueueResultCodes.NotFound,
+                    false,
+                    false,
+                    false,
+                    cancelling.Code,
+                    cancelling.Item);
+            }
+
+            using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            shutdown.CancelAfter(shutdownTimeout);
+            try
+            {
+                await stopWorker(item, shutdown.Token).WaitAsync(shutdown.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (
+                shutdown.IsCancellationRequested && !cancellationToken.IsCancellationRequested)
+            {
+                return new(
+                    true,
+                    false,
+                    false,
+                    false,
+                    HostBridgeQueueResultCodes.WorkerShutdownTimeout,
+                    item);
+            }
+
+            var cancelled = TryTransition(cancelling.Current, HostBridgeDownloadAttemptState.Cancelled);
+            if (!cancelled.Applied)
+            {
+                return new(
+                    cancelled.Code != HostBridgeQueueResultCodes.NotFound,
+                    false,
+                    false,
+                    false,
+                    cancelled.Code,
+                    cancelled.Item);
+            }
+
+            removalKey = cancelled.Current;
+        }
+        else
+        {
+            removalKey = expected;
+        }
+
+        string? warning = null;
+        HostBridgeQueueRemovalResult<TItem> result;
+        lock (_membershipLock)
+        {
+            if (!_items.TryGetValue(normalized, out var attached))
+                return new(false, false, false, false, HostBridgeQueueResultCodes.NotFound, null);
+
+            lock (attached.MutationSync)
+            {
+                if (!_items.TryGetValue(normalized, out var currentItem) ||
+                    !ReferenceEquals(currentItem, attached))
+                {
+                    return currentItem is null
+                        ? new(false, false, false, false, HostBridgeQueueResultCodes.NotFound, null)
+                        : new(true, false, false, false, HostBridgeQueueResultCodes.Conflict, currentItem);
+                }
+
+                var current = attached.MutationKey();
+                if (current.AttemptId != removalKey.AttemptId || current.Revision != removalKey.Revision)
+                    return new(true, false, false, false, HostBridgeQueueResultCodes.Conflict, attached);
+
+                var filesRemoved = false;
+                if (deleteData)
+                {
+                    var anotherAttemptOwnsPath = _items.Any(pair =>
+                        !ReferenceEquals(pair.Value, attached) &&
+                        !HostBridgeQueueStateMachine.IsTerminal(pair.Value.AttemptState) &&
+                        SameDirectory(pair.Value.OutputPath, attached.OutputPath));
+
+                    if (!anotherAttemptOwnsPath)
+                    {
+                        OwnedStagingTreeDeleteResult deletion;
+                        try
+                        {
+                            deletion = OwnedStagingTree.DeleteValidatedTree(
+                                _ownedStagingRoot,
+                                attached.OutputPath);
+                        }
+                        catch (Exception ex) when (ex is
+                            IOException or
+                            UnauthorizedAccessException or
+                            SecurityException or
+                            ArgumentException or
+                            NotSupportedException)
+                        {
+                            return new(
+                                true,
+                                false,
+                                false,
+                                true,
+                                HostBridgeQueueResultCodes.SafeOrphanDeleteFailed,
+                                attached);
+                        }
+
+                        if (!deletion.Allowed)
+                        {
+                            return new(
+                                true,
+                                false,
+                                false,
+                                true,
+                                deletion.Code,
+                                attached);
+                        }
+
+                        filesRemoved = deletion.FilesRemoved;
+                    }
+                }
+
+                if (!_items.TryRemove(new KeyValuePair<string, TItem>(normalized, attached)))
+                    return new(true, false, filesRemoved, false, HostBridgeQueueResultCodes.Conflict, attached);
+
+                warning = PersistToDisk();
+                result = new(
+                    true,
+                    true,
+                    filesRemoved,
+                    false,
+                    HostBridgeQueueResultCodes.Removed,
+                    attached);
+            }
+        }
+
+        try { NotifyWarning(warning); }
+        catch { /* removal is committed; diagnostics observers cannot roll it back */ }
+        return result;
+    }
+
+    /// <summary>
     /// Persist the current in-memory tracker state immediately. No-op for stores created
     /// without a <c>persistencePath</c>.
     ///
@@ -941,6 +1115,18 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
     private static string NormalizeDirectoryPath(string path)
         => Path.TrimEndingDirectorySeparator(Path.GetFullPath(path));
+
+    private static string? SnapshotOwnedStagingRoot(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path))
+            return path;
+
+        try { return NormalizeDirectoryPath(path); }
+        catch (Exception ex) when (ex is ArgumentException or NotSupportedException or PathTooLongException or IOException)
+        {
+            return path;
+        }
+    }
 
     private static StringComparison PathComparison =>
         OperatingSystem.IsLinux() ? StringComparison.Ordinal : StringComparison.OrdinalIgnoreCase;
