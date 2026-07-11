@@ -2,6 +2,10 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
+using System.Security.AccessControl;
+using System.Security.Principal;
+using System.Runtime.Versioning;
 using System.Text;
 using System.Text.Json;
 using System.Threading;
@@ -74,6 +78,29 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
         yield return new object[] { "{\"schemaVersion\":1,\"schemaVersion\":1}" };
         yield return new object[] { "{\"schemaVersion\":0}" };
         yield return new object[] { "{\"schemaVersion\":2}" };
+    }
+
+    public static IEnumerable<object[]> InvalidNestedObjects()
+    {
+        yield return new object[] { "queueKey", "empty" };
+        yield return new object[] { "queueKey", "missing" };
+        yield return new object[] { "queueKey", "duplicate" };
+        yield return new object[] { "queueKey", "unknown" };
+        yield return new object[] { "queueKey", "blank-download-id" };
+        yield return new object[] { "queueKey", "empty-attempt-id" };
+        yield return new object[] { "queueKey", "zero-revision" };
+        yield return new object[] { "fileIdentity", "empty" };
+        yield return new object[] { "fileIdentity", "missing" };
+        yield return new object[] { "fileIdentity", "duplicate" };
+        yield return new object[] { "fileIdentity", "unknown" };
+    }
+
+    public static IEnumerable<object[]> NoncanonicalEncodings()
+    {
+        yield return new object[] { "leading-whitespace" };
+        yield return new object[] { "reordered-properties" };
+        yield return new object[] { "uppercase-operation-guid" };
+        yield return new object[] { "uppercase-attempt-guid" };
     }
 
     [Theory]
@@ -274,6 +301,61 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
         Assert.Equal(RemovalJournalError.SecondWriter, wrongRootOpen.Error);
     }
 
+    [Fact]
+    public async Task WriterLease_BindsAtMostOneLiveJournal()
+    {
+        await using var root = await OpenRootAsync(Path.Combine(_fixtureRoot, "single-live-journal"));
+        var acquired = await RemovalWriterLease.AcquireAsync(root);
+        Assert.True(acquired.Acquired, acquired.Code);
+        await using var lease = acquired.Lease!;
+        var first = await FileRemovalJournal.OpenAsync(root, lease);
+        Assert.True(first.Succeeded);
+        await using var firstJournal = first.Value!;
+
+        var second = await FileRemovalJournal.OpenAsync(root, lease);
+
+        Assert.False(second.Succeeded);
+        Assert.Equal(RemovalJournalError.SecondWriter, second.Error);
+        Assert.Null(second.Value);
+    }
+
+    [Fact]
+    public async Task CompareExchange_SameTokenAcrossSequentialJournalInstances_IsDeterministic()
+    {
+        await using var root = await OpenRootAsync(Path.Combine(_fixtureRoot, "cross-instance-cas"));
+        var acquired = await RemovalWriterLease.AcquireAsync(root);
+        Assert.True(acquired.Acquired, acquired.Code);
+        await using var lease = acquired.Lease!;
+        var firstOpen = await FileRemovalJournal.OpenAsync(root, lease);
+        Assert.True(firstOpen.Succeeded);
+        var firstJournal = firstOpen.Value!;
+        var operationId = RemovalOperationId.New();
+        var now = DateTime.UtcNow;
+        var prepared = NewRecord(root, operationId, now);
+        var created = await firstJournal.CreateAsync(prepared);
+        Assert.True(created.Succeeded);
+        var updated = prepared with
+        {
+            State = RemovalJournalState.Quarantined,
+            JournalRevision = 2,
+            StateChangedAtUtc = now.AddSeconds(1),
+        };
+        var committed = await firstJournal.CompareExchangeAsync(created.Value, updated);
+        Assert.True(committed.Succeeded);
+        await firstJournal.DisposeAsync();
+
+        var secondOpen = await FileRemovalJournal.OpenAsync(root, lease);
+        Assert.True(secondOpen.Succeeded);
+        await using var secondJournal = secondOpen.Value!;
+        var replay = await secondJournal.CompareExchangeAsync(created.Value, updated);
+
+        Assert.False(replay.Succeeded);
+        Assert.Equal(RemovalJournalError.Conflict, replay.Error);
+        var durable = await secondJournal.ReadAsync(operationId);
+        Assert.True(durable.Succeeded);
+        Assert.Equal(committed.Value, durable.Value);
+    }
+
     [SkippableFact]
     public async Task WriterLease_RejectsDanglingLockPathLinkWithoutCreatingOutsideTarget()
     {
@@ -297,6 +379,137 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
         Assert.False(acquired.Acquired);
         Assert.Equal(HostBridgeQueueResultCodes.RemovalJournalFailure, acquired.Code);
         Assert.False(File.Exists(outsideTarget));
+    }
+
+    [Fact]
+    public async Task SafeOwnedRoot_PersistsCspngRootMarkerAndPinsItForLifetime()
+    {
+        var rootPath = Path.Combine(_fixtureRoot, "durable-root-id");
+        Directory.CreateDirectory(rootPath);
+        var first = await SafeOwnedRoot.OpenAsync(rootPath, _fixtureRoot);
+        Assert.True(first.Opened, first.Code);
+        await using (var root = first.Root!)
+        {
+            var markerPath = Path.Combine(rootPath, ".lpc-root-id");
+            Assert.True(File.Exists(markerPath));
+            var marker = File.ReadAllText(markerPath);
+            Assert.Equal(64, marker.Length);
+            Assert.All(marker, static character => Assert.True(character is >= '0' and <= '9' or >= 'a' and <= 'f'));
+            Assert.Equal(marker, root.RootId);
+            Assert.Equal(marker, root.RootMarkerIdentity.MarkerHex);
+            if (OperatingSystem.IsWindows())
+            {
+                Assert.Throws<IOException>(() => File.Open(markerPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None));
+                AssertWindowsMarkerAcl(markerPath);
+            }
+            else
+            {
+                Assert.Equal(
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite,
+                    File.GetUnixFileMode(markerPath));
+            }
+        }
+
+        var reopened = await SafeOwnedRoot.OpenAsync(rootPath, _fixtureRoot);
+        Assert.True(reopened.Opened, reopened.Code);
+        await using var reopenedRoot = reopened.Root!;
+        Assert.Equal(File.ReadAllText(Path.Combine(rootPath, ".lpc-root-id")), reopenedRoot.RootId);
+    }
+
+    [SkippableFact]
+    public async Task SafeOwnedRoot_RejectsLinkedAncestor()
+    {
+        var physicalParent = Path.Combine(_fixtureRoot, "physical-parent");
+        var physicalRoot = Path.Combine(physicalParent, "root");
+        Directory.CreateDirectory(physicalRoot);
+        var linkedParent = Path.Combine(_fixtureRoot, "linked-parent");
+        try
+        {
+            Directory.CreateSymbolicLink(linkedParent, physicalParent);
+        }
+        catch (Exception error) when (error is UnauthorizedAccessException or PlatformNotSupportedException or IOException)
+        {
+            Skip.If(true, "Directory symlink creation is unavailable on this host.");
+        }
+
+        var opened = await SafeOwnedRoot.OpenAsync(Path.Combine(linkedParent, "root"), _fixtureRoot);
+
+        Assert.False(opened.Opened);
+        Assert.Null(opened.Root);
+    }
+
+    [Fact]
+    public async Task Journal_FailsClosedAfterRootMarkerPathIsReplaced()
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        var markerPath = Path.Combine(fixture.RootPath, ".lpc-root-id");
+        var replacementSucceeded = false;
+        try
+        {
+            File.Move(markerPath, markerPath + ".old", overwrite: true);
+            File.WriteAllText(markerPath, new string('b', 64));
+            replacementSucceeded = true;
+        }
+        catch (IOException) when (OperatingSystem.IsWindows())
+        {
+            Assert.True(File.Exists(markerPath));
+        }
+
+        if (replacementSucceeded)
+        {
+            var scan = await fixture.Journal.ScanAsync();
+            Assert.False(scan.Succeeded);
+            Assert.Equal(RemovalJournalError.Corrupt, scan.Error);
+        }
+    }
+
+    [Fact]
+    public async Task Journal_FailsClosedAfterRootMarkerPermissionsDrift()
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        var markerPath = Path.Combine(fixture.RootPath, ".lpc-root-id");
+        if (OperatingSystem.IsWindows())
+        {
+            AddWindowsMarkerAclDrift(markerPath);
+        }
+        else
+        {
+            File.SetUnixFileMode(
+                markerPath,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.GroupRead);
+        }
+
+        var scan = await fixture.Journal.ScanAsync();
+
+        Assert.False(scan.Succeeded);
+        Assert.Equal(RemovalJournalError.Corrupt, scan.Error);
+    }
+
+    [Fact]
+    public async Task Journal_FailsClosedAfterOpenedRootPathIsReplaced()
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        var movedRoot = fixture.RootPath + ".moved";
+        var replacementSucceeded = false;
+        try
+        {
+            Directory.Move(fixture.RootPath, movedRoot);
+            Directory.CreateDirectory(fixture.RootPath);
+            replacementSucceeded = true;
+        }
+        catch (IOException) when (OperatingSystem.IsWindows())
+        {
+            Assert.True(Directory.Exists(fixture.RootPath));
+        }
+
+        if (replacementSucceeded)
+        {
+            var scan = await fixture.Journal.ScanAsync();
+            Assert.False(scan.Succeeded);
+            Assert.Equal(RemovalJournalError.Corrupt, scan.Error);
+            Directory.Delete(fixture.RootPath);
+            Directory.Move(movedRoot, fixture.RootPath);
+        }
     }
 
     [Theory]
@@ -342,7 +555,9 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
 
         Assert.False(result.Succeeded);
         Assert.Equal(RemovalJournalError.DurabilityFailure, result.Error);
-        Assert.True(File.Exists(fixture.RecordPath(entry.Record.OperationId)));
+        Assert.True(
+            File.Exists(fixture.RecordPath(entry.Record.OperationId))
+            || File.Exists(fixture.CompactedPath(entry.Record.OperationId)));
         var read = await fixture.Journal.ReadAsync(entry.Record.OperationId);
         Assert.True(read.Succeeded);
         Assert.Equal(entry.Record, read.Value.Record);
@@ -364,6 +579,11 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
         Assert.True(compacted.Succeeded);
         Assert.True(compacted.Value);
         Assert.False(File.Exists(fixture.RecordPath(automatic.Record.OperationId)));
+        Assert.True(File.Exists(fixture.CompactedPath(automatic.Record.OperationId)));
+        Assert.True((await fixture.Journal.ReadAsync(automatic.Record.OperationId)).Succeeded);
+        Assert.Contains(
+            (await fixture.Journal.ScanAsync()).Entries,
+            entry => entry.Record.OperationId == automatic.Record.OperationId);
 
         var second = await fixture.CreatePreparedAsync();
         var manual = await fixture.AdvanceToAsync(
@@ -404,6 +624,86 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
         Assert.False(scan.Succeeded);
         Assert.Equal(RemovalJournalError.Corrupt, scan.Error);
         Assert.Empty(scan.Entries);
+    }
+
+    [Theory]
+    [MemberData(nameof(InvalidNestedObjects))]
+    public async Task Read_FailsClosedForInvalidNestedQueueKeyOrFileIdentityShape(
+        string property,
+        string mutation)
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        var created = await fixture.CreatePreparedAsync();
+        var path = fixture.RecordPath(created.Record.OperationId);
+        var json = File.ReadAllText(path);
+        var replacement = InvalidNestedJson(property, mutation, created.Record);
+        File.WriteAllText(path, ReplaceObjectProperty(json, property, replacement));
+
+        var read = await fixture.Journal.ReadAsync(created.Record.OperationId);
+
+        Assert.False(read.Succeeded);
+        Assert.Equal(RemovalJournalError.Corrupt, read.Error);
+    }
+
+    [Theory]
+    [MemberData(nameof(NoncanonicalEncodings))]
+    public async Task Read_RejectsNoncanonicalWhitespacePropertyOrderOrGuidCasing(string mutation)
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        var created = await fixture.CreatePreparedAsync();
+        var path = fixture.RecordPath(created.Record.OperationId);
+        var json = File.ReadAllText(path);
+        var changed = mutation switch
+        {
+            "leading-whitespace" => " \r\n" + json,
+            "reordered-properties" => json.Replace(
+                "{\"schemaVersion\":1,",
+                "{",
+                StringComparison.Ordinal)[..^1] + ",\"schemaVersion\":1}",
+            "uppercase-operation-guid" => ReplaceFirst(
+                json,
+                created.Record.OperationId.ToString(),
+                created.Record.OperationId.ToString().ToUpperInvariant()),
+            "uppercase-attempt-guid" => json.Replace(
+                created.Record.QueueKey.AttemptId.ToString(),
+                created.Record.QueueKey.AttemptId.ToString().ToUpperInvariant(),
+                StringComparison.Ordinal),
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
+        };
+        Assert.NotEqual(json, changed);
+        File.WriteAllText(path, changed);
+
+        var read = await fixture.Journal.ReadAsync(created.Record.OperationId);
+
+        Assert.False(read.Succeeded);
+        Assert.Equal(RemovalJournalError.Corrupt, read.Error);
+    }
+
+    [Fact]
+    public async Task Create_UsesCanonicalEncodingAndTokenHash()
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        var created = await fixture.CreatePreparedAsync();
+        var bytes = File.ReadAllBytes(fixture.RecordPath(created.Record.OperationId));
+        var json = Encoding.UTF8.GetString(bytes);
+
+        Assert.StartsWith("{\"schemaVersion\":1,\"operationId\":\"", json, StringComparison.Ordinal);
+        Assert.EndsWith("}", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\r", json, StringComparison.Ordinal);
+        Assert.DoesNotContain("\n", json, StringComparison.Ordinal);
+        Assert.Equal(
+            Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant(),
+            created.CasToken.CanonicalSha256);
+    }
+
+    [Fact]
+    public void QueueDurabilityFailure_ResultCodeNameAndValueAreFrozen()
+    {
+        var field = typeof(HostBridgeQueueResultCodes).GetField("QueueDurabilityFailure");
+
+        Assert.NotNull(field);
+        Assert.True(field!.IsLiteral);
+        Assert.Equal("QUEUE_DURABILITY_FAILURE", field.GetRawConstantValue());
     }
 
     [Fact]
@@ -480,6 +780,80 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
     }
 
     [Fact]
+    public async Task Create_CountsCompactedMappingsTowardTenThousandRecordBound()
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        for (var index = 0; index < 10_000; index++)
+        {
+            File.WriteAllText(
+                Path.Combine(fixture.JournalDirectory, index.ToString("x32") + ".compacted"),
+                "{}");
+        }
+
+        var result = await fixture.Journal.CreateAsync(fixture.NewRecord());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(RemovalJournalError.BoundsExceeded, result.Error);
+    }
+
+    [Fact]
+    public async Task Create_FailsClosedWhenUnknownJournalEntryExists()
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        File.WriteAllText(Path.Combine(fixture.JournalDirectory, "unknown.entry"), "{}");
+
+        var result = await fixture.Journal.CreateAsync(fixture.NewRecord());
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(RemovalJournalError.Corrupt, result.Error);
+    }
+
+    [SkippableFact]
+    public async Task Journal_FailsClosedWhenCurrentUserMarkerAclLosesFullControl()
+    {
+        if (!OperatingSystem.IsWindows())
+        {
+            Skip.If(true, "Windows ACL contract only.");
+            return;
+        }
+
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        SetWindowsMarkerAclToReadOnly(Path.Combine(fixture.RootPath, ".lpc-root-id"));
+
+        var scan = await fixture.Journal.ScanAsync();
+
+        Assert.False(scan.Succeeded);
+        Assert.Equal(RemovalJournalError.Corrupt, scan.Error);
+    }
+
+    [SkippableFact]
+    public async Task Journal_FailsClosedWhenControlDirectoryBecomesLinkAfterOpen()
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        var journalDirectory = fixture.JournalDirectory;
+        var moved = journalDirectory + ".moved";
+        var outside = Path.Combine(_fixtureRoot, "outside-control-drift");
+        Directory.CreateDirectory(outside);
+        Directory.Move(journalDirectory, moved);
+        try
+        {
+            Directory.CreateSymbolicLink(journalDirectory, outside);
+        }
+        catch (Exception error) when (error is UnauthorizedAccessException or PlatformNotSupportedException or IOException)
+        {
+            Directory.Move(moved, journalDirectory);
+            Skip.If(true, "Directory symlink creation is unavailable on this host.");
+        }
+
+        var scan = await fixture.Journal.ScanAsync();
+
+        Assert.False(scan.Succeeded);
+        Assert.Equal(RemovalJournalError.Corrupt, scan.Error);
+        Directory.Delete(journalDirectory);
+        Directory.Move(moved, journalDirectory);
+    }
+
+    [Fact]
     public async Task Open_RejectsLinkedJournalControlPath()
     {
         var rootPath = Path.Combine(_fixtureRoot, "linked-control");
@@ -523,6 +897,124 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
         Assert.True(opened.Opened, opened.Code);
         Assert.NotNull(opened.Root);
         return opened.Root!;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void AssertWindowsMarkerAcl(string markerPath)
+    {
+        var currentUser = WindowsIdentity.GetCurrent().User;
+        var security = new FileInfo(markerPath).GetAccessControl(
+            AccessControlSections.Owner | AccessControlSections.Access);
+        Assert.Equal(currentUser, security.GetOwner(typeof(SecurityIdentifier)));
+        Assert.True(security.AreAccessRulesProtected);
+        Assert.All(
+            security.GetAccessRules(true, true, typeof(SecurityIdentifier)).Cast<FileSystemAccessRule>(),
+            rule =>
+            {
+                Assert.False(rule.IsInherited);
+                Assert.Equal(AccessControlType.Allow, rule.AccessControlType);
+                Assert.Equal(currentUser, rule.IdentityReference);
+            });
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void AddWindowsMarkerAclDrift(string markerPath)
+    {
+        var security = new FileInfo(markerPath).GetAccessControl(AccessControlSections.Access);
+        security.AddAccessRule(new FileSystemAccessRule(
+            new SecurityIdentifier(WellKnownSidType.WorldSid, null),
+            FileSystemRights.ReadData,
+            AccessControlType.Allow));
+        new FileInfo(markerPath).SetAccessControl(security);
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static void SetWindowsMarkerAclToReadOnly(string markerPath)
+    {
+        var currentUser = WindowsIdentity.GetCurrent().User!;
+        var security = new FileSecurity();
+        security.SetOwner(currentUser);
+        security.SetAccessRuleProtection(true, false);
+        security.AddAccessRule(new FileSystemAccessRule(
+            currentUser,
+            FileSystemRights.ReadData,
+            AccessControlType.Allow));
+        new FileInfo(markerPath).SetAccessControl(security);
+    }
+
+    private static RemovalJournalRecord NewRecord(
+        SafeOwnedRoot root,
+        RemovalOperationId operationId,
+        DateTime now) =>
+        new(
+            SchemaVersion: 1,
+            OperationId: operationId,
+            QueueKey: new HostBridgeQueueMutationKey("download", Guid.NewGuid(), 7),
+            SourceRelativePath: RelativeStagingPath.Create("attempts/download"),
+            QuarantineRelativePath: RelativeStagingPath.Create(".lpc-trash/" + operationId),
+            Identity: new FileIdentity(1, new string('a', 64), root.RootId, FileIdentityEntryType.Directory),
+            Capability: StagingDeletionCapability.ProtectedRootCleanup,
+            State: RemovalJournalState.Prepared,
+            CompletionKind: null,
+            JournalRevision: 1,
+            CreatedAtUtc: now,
+            StateChangedAtUtc: now);
+
+    private static string InvalidNestedJson(
+        string property,
+        string mutation,
+        RemovalJournalRecord record)
+    {
+        if (property == "queueKey")
+        {
+            var attemptId = record.QueueKey.AttemptId.ToString();
+            return mutation switch
+            {
+                "empty" => "{}",
+                "missing" => $"{{\"attemptId\":\"{attemptId}\",\"revision\":7}}",
+                "duplicate" => $"{{\"downloadId\":\"download\",\"downloadId\":\"download\",\"attemptId\":\"{attemptId}\",\"revision\":7}}",
+                "unknown" => $"{{\"downloadId\":\"download\",\"attemptId\":\"{attemptId}\",\"revision\":7,\"unknown\":true}}",
+                "blank-download-id" => $"{{\"downloadId\":\" \" ,\"attemptId\":\"{attemptId}\",\"revision\":7}}",
+                "empty-attempt-id" => "{\"downloadId\":\"download\",\"attemptId\":\"00000000-0000-0000-0000-000000000000\",\"revision\":7}",
+                "zero-revision" => $"{{\"downloadId\":\"download\",\"attemptId\":\"{attemptId}\",\"revision\":0}}",
+                _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
+            };
+        }
+
+        return mutation switch
+        {
+            "empty" => "{}",
+            "missing" => $"{{\"markerHex\":\"{record.Identity.MarkerHex}\",\"rootId\":\"{record.Identity.RootId}\",\"entryType\":\"Directory\"}}",
+            "duplicate" => $"{{\"version\":1,\"version\":1,\"markerHex\":\"{record.Identity.MarkerHex}\",\"rootId\":\"{record.Identity.RootId}\",\"entryType\":\"Directory\"}}",
+            "unknown" => $"{{\"version\":1,\"markerHex\":\"{record.Identity.MarkerHex}\",\"rootId\":\"{record.Identity.RootId}\",\"entryType\":\"Directory\",\"unknown\":true}}",
+            _ => throw new ArgumentOutOfRangeException(nameof(mutation)),
+        };
+    }
+
+    private static string ReplaceObjectProperty(string json, string property, string replacement)
+    {
+        var marker = "\"" + property + "\":";
+        var valueStart = json.IndexOf(marker, StringComparison.Ordinal) + marker.Length;
+        Assert.True(valueStart >= marker.Length);
+        Assert.Equal('{', json[valueStart]);
+        var depth = 0;
+        for (var index = valueStart; index < json.Length; index++)
+        {
+            depth += json[index] == '{' ? 1 : json[index] == '}' ? -1 : 0;
+            if (depth == 0)
+            {
+                return json[..valueStart] + replacement + json[(index + 1)..];
+            }
+        }
+
+        throw new InvalidOperationException("Nested JSON object was not closed.");
+    }
+
+    private static string ReplaceFirst(string value, string oldValue, string newValue)
+    {
+        var index = value.IndexOf(oldValue, StringComparison.Ordinal);
+        Assert.True(index >= 0);
+        return value[..index] + newValue + value[(index + oldValue.Length)..];
     }
 
     public enum JournalFaultPoint
@@ -715,6 +1207,9 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
 
         public string RecordPath(RemovalOperationId operationId) =>
             Path.Combine(JournalDirectory, FileRemovalJournal.RecordFileName(operationId));
+
+        public string CompactedPath(RemovalOperationId operationId) =>
+            Path.Combine(JournalDirectory, operationId + ".compacted");
 
         public async ValueTask DisposeAsync()
         {

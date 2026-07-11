@@ -771,6 +771,14 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     /// </summary>
     public bool Remove(string downloadId, bool deleteData, out TItem? removed, Action<Exception>? onDeleteError = null)
     {
+        // AttemptV2 data removal is available only through the bounded, exact-CAS removal API.
+        // Keep this legacy entry point fail closed so it cannot bypass the durable coordinator.
+        if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2 && deleteData)
+        {
+            removed = null;
+            return false;
+        }
+
         var key = _options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2
             ? NormalizeDownloadId(downloadId)
             : downloadId;

@@ -10,6 +10,7 @@ public sealed class RemovalWriterLease : IAsyncDisposable
     public const string RelativeLockPath = ".lpc-state/removals.lock";
 
     private readonly FileStream _stream;
+    private object? _journalOwner;
 
     private RemovalWriterLease(SafeOwnedRoot root, FileStream stream)
     {
@@ -21,12 +22,33 @@ public sealed class RemovalWriterLease : IAsyncDisposable
 
     internal bool IsHeld => _stream.SafeFileHandle is { IsClosed: false, IsInvalid: false };
 
+    internal bool TryBindJournal(SafeOwnedRoot root, object owner) =>
+        IsHeld
+        && string.Equals(root.RootId, RootId, StringComparison.Ordinal)
+        && root.RevalidateForJournal() == RemovalJournalError.None
+        && Interlocked.CompareExchange(ref _journalOwner, owner, null) is null;
+
+    internal bool IsHeldBy(object owner) =>
+        IsHeld && ReferenceEquals(Volatile.Read(ref _journalOwner), owner);
+
+    internal void UnbindJournal(object owner) =>
+        _ = Interlocked.CompareExchange(ref _journalOwner, null, owner);
+
     public static ValueTask<RemovalWriterLeaseAcquireResult> AcquireAsync(
         SafeOwnedRoot root,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(root);
         cancellationToken.ThrowIfCancellationRequested();
+        var rootValidation = root.RevalidateForJournal();
+        if (rootValidation != RemovalJournalError.None)
+        {
+            return ValueTask.FromResult(new RemovalWriterLeaseAcquireResult(
+                false,
+                "QUEUE_REMOVAL_JOURNAL_FAILURE",
+                null));
+        }
+
         try
         {
             var stateDirectory = Path.Combine(root.RootPath, ".lpc-state");

@@ -24,10 +24,20 @@ public sealed class FileRemovalJournal : IRemovalJournal
         "schemaVersion", "operationId", "queueKey", "source", "quarantine", "fileIdentity",
         "capability", "state", "completionKind", "journalRevision", "createdAtUtc", "stateChangedAtUtc",
     };
+    private static readonly HashSet<string> RequiredQueueKeyProperties = new(StringComparer.Ordinal)
+    {
+        "downloadId", "attemptId", "revision",
+    };
+    private static readonly HashSet<string> RequiredFileIdentityProperties = new(StringComparer.Ordinal)
+    {
+        "version", "markerHex", "rootId", "entryType",
+    };
 
     private readonly SafeOwnedRoot _root;
     private readonly RemovalWriterLease _lease;
     private readonly IRemovalJournalDurabilityHooks? _hooks;
+    private readonly string _stateDirectory;
+    private readonly string _lockPath;
     private readonly string _directory;
     private readonly object _gate = new();
     private bool _disposed;
@@ -40,11 +50,17 @@ public sealed class FileRemovalJournal : IRemovalJournal
     {
         _root = root;
         _lease = lease;
+        _stateDirectory = Path.Combine(root.RootPath, ".lpc-state");
+        _lockPath = Path.Combine(
+            root.RootPath,
+            RemovalWriterLease.RelativeLockPath.Replace('/', Path.DirectorySeparatorChar));
         _directory = directory;
         _hooks = hooks;
     }
 
     public static string RecordFileName(RemovalOperationId operationId) => $"{operationId}.json";
+
+    internal static string CompactedFileName(RemovalOperationId operationId) => $"{operationId}.compacted";
 
     public static string TempFileName(RemovalOperationId operationId, int processId, string randomHex32) =>
         $"{operationId}.json.tmp.{processId}.{randomHex32}";
@@ -69,6 +85,10 @@ public sealed class FileRemovalJournal : IRemovalJournal
             return ValueTask.FromResult(Failure<FileRemovalJournal>(RemovalJournalError.SecondWriter));
         }
 
+        var rootValidation = root.RevalidateForJournal();
+        if (rootValidation != RemovalJournalError.None)
+            return ValueTask.FromResult(Failure<FileRemovalJournal>(rootValidation));
+
         try
         {
             var stateDirectory = Path.Combine(root.RootPath, ".lpc-state");
@@ -84,7 +104,10 @@ public sealed class FileRemovalJournal : IRemovalJournal
                 return ValueTask.FromResult(Failure<FileRemovalJournal>(RemovalJournalError.Corrupt));
             }
 
-            return ValueTask.FromResult(Success(new FileRemovalJournal(root, lease, directory, hooks)));
+            var journal = new FileRemovalJournal(root, lease, directory, hooks);
+            return ValueTask.FromResult(lease.TryBindJournal(root, journal)
+                ? Success(journal)
+                : Failure<FileRemovalJournal>(RemovalJournalError.SecondWriter));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
@@ -107,8 +130,9 @@ public sealed class FileRemovalJournal : IRemovalJournal
         CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
-        if (!_lease.IsHeld)
-            return ValueTask.FromResult(Failure<RemovalJournalEntry>(RemovalJournalError.SecondWriter));
+        var availability = AvailabilityError();
+        if (availability != RemovalJournalError.None)
+            return ValueTask.FromResult(Failure<RemovalJournalEntry>(availability));
         cancellationToken.ThrowIfCancellationRequested();
         if (!IsValidPrepared(prepared))
         {
@@ -116,15 +140,25 @@ public sealed class FileRemovalJournal : IRemovalJournal
         }
 
         var path = RecordPath(prepared.OperationId);
-        if (File.Exists(path) || SafeOwnedRoot.IsLink(path))
+        if (File.Exists(path)
+            || File.Exists(CompactedPath(prepared.OperationId))
+            || SafeOwnedRoot.IsLink(path)
+            || SafeOwnedRoot.IsLink(CompactedPath(prepared.OperationId)))
         {
             return ValueTask.FromResult(Failure<RemovalJournalEntry>(RemovalJournalError.Conflict));
         }
 
-        if (Directory.EnumerateFiles(_directory, "*.json", SearchOption.TopDirectoryOnly).Take(MaxRecordCount + 1).Count() >= MaxRecordCount)
+        var liveMappings = Directory
+            .EnumerateFileSystemEntries(_directory, "*", SearchOption.TopDirectoryOnly)
+            .Take(MaxRecordCount + 1)
+            .ToArray();
+        if (liveMappings.Length >= MaxRecordCount)
         {
             return ValueTask.FromResult(Failure<RemovalJournalEntry>(RemovalJournalError.BoundsExceeded));
         }
+
+        if (liveMappings.Any(entry => !IsCanonicalRecordFileName(Path.GetFileName(entry))))
+            return ValueTask.FromResult(Failure<RemovalJournalEntry>(RemovalJournalError.Corrupt));
 
         var bytes = Serialize(prepared);
         if (bytes.Length > MaxRecordBytes)
@@ -146,8 +180,9 @@ public sealed class FileRemovalJournal : IRemovalJournal
         {
             ThrowIfDisposed();
             cancellationToken.ThrowIfCancellationRequested();
-            if (!_lease.IsHeld)
-                return ValueTask.FromResult(Failure<RemovalJournalEntry>(RemovalJournalError.SecondWriter));
+            var availability = AvailabilityError();
+            if (availability != RemovalJournalError.None)
+                return ValueTask.FromResult(Failure<RemovalJournalEntry>(availability));
             return ValueTask.FromResult(ReadCore(operationId));
         }
     }
@@ -163,8 +198,9 @@ public sealed class FileRemovalJournal : IRemovalJournal
     private ValueTask<RemovalJournalScanResult> ScanCore(CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
-        if (!_lease.IsHeld)
-            return ValueTask.FromResult(ScanFailure(RemovalJournalError.SecondWriter));
+        var availability = AvailabilityError();
+        if (availability != RemovalJournalError.None)
+            return ValueTask.FromResult(ScanFailure(availability));
         cancellationToken.ThrowIfCancellationRequested();
         try
         {
@@ -230,8 +266,9 @@ public sealed class FileRemovalJournal : IRemovalJournal
         CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
-        if (!_lease.IsHeld)
-            return ValueTask.FromResult(Failure<RemovalJournalEntry>(RemovalJournalError.SecondWriter));
+        var availability = AvailabilityError();
+        if (availability != RemovalJournalError.None)
+            return ValueTask.FromResult(Failure<RemovalJournalEntry>(availability));
         cancellationToken.ThrowIfCancellationRequested();
         var current = ReadCore(expected.Record.OperationId);
         if (!current.Succeeded)
@@ -276,8 +313,9 @@ public sealed class FileRemovalJournal : IRemovalJournal
         CancellationToken cancellationToken)
     {
         ThrowIfDisposed();
-        if (!_lease.IsHeld)
-            return ValueTask.FromResult(Failure<bool>(RemovalJournalError.SecondWriter));
+        var availability = AvailabilityError();
+        if (availability != RemovalJournalError.None)
+            return ValueTask.FromResult(Failure<bool>(availability));
         cancellationToken.ThrowIfCancellationRequested();
         var completionValid =
             expectedCompleted.Record is { State: RemovalJournalState.Deleted, CompletionKind: RemovalCompletionKind.AutomaticDeletion }
@@ -299,28 +337,20 @@ public sealed class FileRemovalJournal : IRemovalJournal
         }
 
         var path = RecordPath(expectedCompleted.Record.OperationId);
-        byte[]? durableBytes = null;
+        var compactedPath = CompactedPath(expectedCompleted.Record.OperationId);
+        if (!File.Exists(path) && File.Exists(compactedPath))
+            return ValueTask.FromResult(Success(true));
+
         try
         {
-            durableBytes = File.ReadAllBytes(path);
             _hooks?.BeforeCompactionUnlink(path);
-            File.Delete(path);
+            File.Move(path, compactedPath, overwrite: false);
             _hooks?.BeforeCompactionParentFlush(_directory);
             FlushDirectoryIfSupported(_directory);
             return ValueTask.FromResult(Success(true));
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
-            if (durableBytes is not null && !File.Exists(path))
-            {
-                _ = WriteAtomically(
-                    expectedCompleted.Record.OperationId,
-                    path,
-                    durableBytes,
-                    createNew: true,
-                    CancellationToken.None);
-            }
-
             return ValueTask.FromResult(Failure<bool>(RemovalJournalError.DurabilityFailure));
         }
     }
@@ -329,7 +359,11 @@ public sealed class FileRemovalJournal : IRemovalJournal
     {
         lock (_gate)
         {
-            _disposed = true;
+            if (!_disposed)
+            {
+                _disposed = true;
+                _lease.UnbindJournal(this);
+            }
         }
 
         return ValueTask.CompletedTask;
@@ -337,7 +371,12 @@ public sealed class FileRemovalJournal : IRemovalJournal
 
     private RemovalJournalResult<RemovalJournalEntry> ReadCore(RemovalOperationId operationId)
     {
-        var path = RecordPath(operationId);
+        var recordPath = RecordPath(operationId);
+        var compactedPath = CompactedPath(operationId);
+        if (File.Exists(recordPath) && File.Exists(compactedPath))
+            return Failure<RemovalJournalEntry>(RemovalJournalError.Corrupt);
+
+        var path = File.Exists(recordPath) ? recordPath : compactedPath;
         if (SafeOwnedRoot.IsLink(path))
         {
             return Failure<RemovalJournalEntry>(RemovalJournalError.Corrupt);
@@ -370,7 +409,11 @@ public sealed class FileRemovalJournal : IRemovalJournal
                 return Failure<RemovalJournalEntry>(RemovalJournalError.Corrupt);
             }
 
-            return Success(ToEntry(record, bytes));
+            var canonicalBytes = Serialize(record);
+            if (!bytes.AsSpan().SequenceEqual(canonicalBytes))
+                return Failure<RemovalJournalEntry>(RemovalJournalError.Corrupt);
+
+            return Success(ToEntry(record, canonicalBytes));
         }
         catch (JsonException)
         {
@@ -461,6 +504,10 @@ public sealed class FileRemovalJournal : IRemovalJournal
         if (record.SchemaVersion != 1
             || record.OperationId.Value == Guid.Empty
             || record.JournalRevision < 1
+            || string.IsNullOrWhiteSpace(record.QueueKey.DownloadId)
+            || !string.Equals(record.QueueKey.DownloadId, record.QueueKey.DownloadId.Trim(), StringComparison.Ordinal)
+            || record.QueueKey.AttemptId == Guid.Empty
+            || record.QueueKey.Revision < 1
             || string.IsNullOrEmpty(record.SourceRelativePath.Value)
             || string.IsNullOrEmpty(record.QuarantineRelativePath.Value)
             || record.QuarantineRelativePath.Value != CanonicalQuarantine(record.OperationId)
@@ -530,10 +577,25 @@ public sealed class FileRemovalJournal : IRemovalJournal
             return false;
         }
 
-        return HasUniqueProperties(document.RootElement)
-            && document.RootElement.EnumerateObject().Select(static property => property.Name).ToHashSet(StringComparer.Ordinal)
-                .SetEquals(RequiredProperties);
+        if (!HasUniqueProperties(document.RootElement)
+            || !HasExactProperties(document.RootElement, RequiredProperties)
+            || !document.RootElement.TryGetProperty("queueKey", out var queueKey)
+            || !HasExactProperties(queueKey, RequiredQueueKeyProperties)
+            || !document.RootElement.TryGetProperty("fileIdentity", out var fileIdentity)
+            || !HasExactProperties(fileIdentity, RequiredFileIdentityProperties))
+        {
+            return false;
+        }
+
+        return true;
     }
+
+    private static bool HasExactProperties(JsonElement element, HashSet<string> expected) =>
+        element.ValueKind == JsonValueKind.Object
+        && element.EnumerateObject()
+            .Select(static property => property.Name)
+            .ToHashSet(StringComparer.Ordinal)
+            .SetEquals(expected);
 
     private static bool HasUniqueProperties(JsonElement element)
     {
@@ -571,12 +633,19 @@ public sealed class FileRemovalJournal : IRemovalJournal
 
     private string RecordPath(RemovalOperationId operationId) => Path.Combine(_directory, RecordFileName(operationId));
 
+    private string CompactedPath(RemovalOperationId operationId) => Path.Combine(_directory, CompactedFileName(operationId));
+
     private static string CanonicalQuarantine(RemovalOperationId operationId) =>
         string.Join(Path.DirectorySeparatorChar, ".lpc-trash", operationId.ToString());
 
     private static bool IsCanonicalRecordFileName(string name)
     {
-        if (name.Length != 37 || !name.EndsWith(".json", StringComparison.Ordinal))
+        var extension = name.EndsWith(".json", StringComparison.Ordinal)
+            ? ".json"
+            : name.EndsWith(".compacted", StringComparison.Ordinal)
+                ? ".compacted"
+                : string.Empty;
+        if (extension.Length == 0 || name.Length != 32 + extension.Length)
         {
             return false;
         }
@@ -626,6 +695,24 @@ public sealed class FileRemovalJournal : IRemovalJournal
         new(false, error, Array.Empty<RemovalJournalEntry>());
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_disposed, this);
+
+    private RemovalJournalError AvailabilityError()
+    {
+        if (!_lease.IsHeldBy(this)) return RemovalJournalError.SecondWriter;
+        var root = _root.RevalidateForJournal();
+        if (root != RemovalJournalError.None) return root;
+        if (!Directory.Exists(_stateDirectory)
+            || !Directory.Exists(_directory)
+            || !File.Exists(_lockPath)
+            || SafeOwnedRoot.IsLink(_stateDirectory)
+            || SafeOwnedRoot.IsLink(_directory)
+            || SafeOwnedRoot.IsLink(_lockPath))
+        {
+            return RemovalJournalError.Corrupt;
+        }
+
+        return RemovalJournalError.None;
+    }
 
     private sealed class RemovalOperationIdConverter : JsonConverter<RemovalOperationId>
     {

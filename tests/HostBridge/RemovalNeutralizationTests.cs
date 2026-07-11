@@ -50,6 +50,62 @@ public sealed class RemovalNeutralizationTests : IDisposable
         Assert.True(File.Exists(Path.Combine(fixture.OutputPath, "completed.flac")));
     }
 
+    [Fact]
+    public void AttemptV2_LegacyRemoveWithDeleteData_DefersWithoutRemovingMappingOrFiles()
+    {
+        var fixture = TerminalFixture();
+
+        var removed = fixture.Store.Remove(
+            fixture.Key.DownloadId,
+            deleteData: true,
+            out var removedItem);
+
+        Assert.False(removed);
+        Assert.Null(removedItem);
+        Assert.True(fixture.Store.TryGet(fixture.Key.DownloadId, out var retained));
+        Assert.NotNull(retained);
+        Assert.True(Directory.Exists(fixture.OutputPath));
+        Assert.True(File.Exists(Path.Combine(fixture.OutputPath, "completed.flac")));
+    }
+
+    [Fact]
+    public void AttemptV2_LegacyRemoveWithoutDeleteData_IsExactQueueOnlyRemoval()
+    {
+        var fixture = TerminalFixture();
+
+        var removed = fixture.Store.Remove(
+            fixture.Key.DownloadId,
+            deleteData: false,
+            out var removedItem);
+
+        Assert.True(removed);
+        Assert.NotNull(removedItem);
+        Assert.Equal(fixture.Key.DownloadId, removedItem!.DownloadId);
+        Assert.False(fixture.Store.TryGet(fixture.Key.DownloadId, out _));
+        Assert.True(Directory.Exists(fixture.OutputPath));
+        Assert.True(File.Exists(Path.Combine(fixture.OutputPath, "completed.flac")));
+    }
+
+    [Fact]
+    public void LegacyV1_PublicRemoveBehaviorIsUnchanged()
+    {
+        var outputPath = Path.Combine(_root, "legacy-output");
+        Directory.CreateDirectory(outputPath);
+        File.WriteAllText(Path.Combine(outputPath, "legacy.flac"), "delete");
+        var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>();
+        store.AddOrReplace(new HostBridgeDownloadItem
+        {
+            DownloadId = " legacy-id ",
+            OutputPath = outputPath,
+        });
+
+        Assert.False(store.Remove("legacy-id", deleteData: true, out _));
+        Assert.True(store.TryGet(" legacy-id ", out _));
+        Assert.True(store.Remove(" legacy-id ", deleteData: true, out var removed));
+        Assert.Equal(" legacy-id ", removed!.DownloadId);
+        Assert.False(Directory.Exists(outputPath));
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_root))

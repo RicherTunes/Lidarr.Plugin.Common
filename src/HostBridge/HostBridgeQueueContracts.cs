@@ -97,7 +97,7 @@ public static class HostBridgeQueueResultCodes
     public const string RemovalManualAcknowledged = "QUEUE_REMOVAL_MANUAL_ACKNOWLEDGED";
     public const string RemovalTamper = "QUEUE_REMOVAL_TAMPER";
     public const string RemovalJournalFailure = "QUEUE_REMOVAL_JOURNAL_FAILURE";
-    public const string DurabilityFailure = "QUEUE_DURABILITY_FAILURE";
+    public const string QueueDurabilityFailure = "QUEUE_DURABILITY_FAILURE";
     public const string SafeOrphanOutsideRoot = "QUEUE_SAFE_ORPHAN_OUTSIDE_ROOT";
     public const string SafeOrphanLinkTraversal = "QUEUE_SAFE_ORPHAN_LINK_TRAVERSAL";
     public const string SafeOrphanDeleteFailed = "QUEUE_SAFE_ORPHAN_DELETE_FAILED";
