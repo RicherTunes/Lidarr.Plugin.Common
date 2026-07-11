@@ -122,6 +122,16 @@ public class HostBridgeDownloadItem
     internal HostBridgeQueueMutationKey MutationKey() =>
         new(_downloadId, _attemptId, Revision);
 
+    internal void ApplyTransition(HostBridgeDownloadAttemptState target, DateTime changedAtUtc)
+    {
+        Volatile.Write(ref _attemptState, (int)target);
+        Interlocked.Increment(ref _revision);
+        var nextTicks = Math.Max(
+            changedAtUtc.Ticks,
+            Interlocked.Read(ref _stateChangedAtUtcTicks) + 1);
+        Interlocked.Exchange(ref _stateChangedAtUtcTicks, nextTicks);
+    }
+
     public string AlbumId { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;
     public string Artist { get; init; } = string.Empty;
@@ -519,6 +529,28 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
             if (_items.TryGetValue(normalized, out var current))
                 return new(false, HostBridgeQueueResultCodes.Conflict, current.MutationKey(), current);
+        }
+    }
+
+    public HostBridgeQueueMutationResult<TItem> TryTransition(
+        HostBridgeQueueMutationKey expected,
+        HostBridgeDownloadAttemptState target)
+    {
+        var normalized = NormalizeDownloadId(expected.DownloadId);
+        if (!_items.TryGetValue(normalized, out var item))
+            return new(false, HostBridgeQueueResultCodes.NotFound, default, null);
+
+        lock (item)
+        {
+            var current = item.MutationKey();
+            if (current.AttemptId != expected.AttemptId || current.Revision != expected.Revision)
+                return new(false, HostBridgeQueueResultCodes.Conflict, current, item);
+            if (!HostBridgeQueueStateMachine.CanTransition(item.AttemptState, target))
+                return new(false, HostBridgeQueueResultCodes.IllegalTransition, current, item);
+
+            item.ApplyTransition(target, EnsureUtc(_options.UtcNow()));
+            PersistToDisk();
+            return new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
         }
     }
 

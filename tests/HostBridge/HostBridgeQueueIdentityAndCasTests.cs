@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -16,6 +17,126 @@ public sealed class HostBridgeQueueIdentityAndCasTests
             ContractVersion = HostBridgeQueueContractVersion.AttemptV2,
             UtcNow = clock ?? (static () => DateTime.UtcNow),
         });
+
+    [Theory]
+    [InlineData(HostBridgeDownloadAttemptState.Queued, HostBridgeDownloadAttemptState.Preparing)]
+    [InlineData(HostBridgeDownloadAttemptState.Preparing, HostBridgeDownloadAttemptState.Downloading)]
+    [InlineData(HostBridgeDownloadAttemptState.Downloading, HostBridgeDownloadAttemptState.Paused)]
+    [InlineData(HostBridgeDownloadAttemptState.Paused, HostBridgeDownloadAttemptState.Downloading)]
+    [InlineData(HostBridgeDownloadAttemptState.Downloading, HostBridgeDownloadAttemptState.Finalizing)]
+    [InlineData(HostBridgeDownloadAttemptState.Finalizing, HostBridgeDownloadAttemptState.CompletedImportable)]
+    [InlineData(HostBridgeDownloadAttemptState.Queued, HostBridgeDownloadAttemptState.Failed)]
+    [InlineData(HostBridgeDownloadAttemptState.Downloading, HostBridgeDownloadAttemptState.Cancelling)]
+    [InlineData(HostBridgeDownloadAttemptState.Cancelling, HostBridgeDownloadAttemptState.Cancelled)]
+    public void StateMachine_AllowsCanonicalEdges(
+        HostBridgeDownloadAttemptState from,
+        HostBridgeDownloadAttemptState to) =>
+        Assert.True(HostBridgeQueueStateMachine.CanTransition(from, to));
+
+    [Theory]
+    [InlineData(HostBridgeDownloadAttemptState.Queued, HostBridgeDownloadAttemptState.CompletedImportable)]
+    [InlineData(HostBridgeDownloadAttemptState.CompletedImportable, HostBridgeDownloadAttemptState.Queued)]
+    [InlineData(HostBridgeDownloadAttemptState.Failed, HostBridgeDownloadAttemptState.Downloading)]
+    [InlineData(HostBridgeDownloadAttemptState.Cancelled, HostBridgeDownloadAttemptState.Queued)]
+    [InlineData(HostBridgeDownloadAttemptState.Cancelling, HostBridgeDownloadAttemptState.Failed)]
+    public void StateMachine_RejectsSkippedAndTerminalRegressionEdges(
+        HostBridgeDownloadAttemptState from,
+        HostBridgeDownloadAttemptState to) =>
+        Assert.False(HostBridgeQueueStateMachine.CanTransition(from, to));
+
+    [Fact]
+    public void TryTransition_UsesFullCasAndMonotonicTimestamp()
+    {
+        var times = new Queue<DateTime>(new[]
+        {
+            new DateTime(2026, 7, 11, 15, 0, 0, DateTimeKind.Utc),
+            new DateTime(2026, 7, 11, 14, 0, 0, DateTimeKind.Utc),
+        });
+        var store = Store(() => times.Dequeue());
+        var added = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "Case-Key" });
+        var initialTimestamp = added.Item!.StateChangedAtUtc;
+
+        var moved = store.TryTransition(
+            new HostBridgeQueueMutationKey("case-key", added.Current.AttemptId, 1),
+            HostBridgeDownloadAttemptState.Preparing);
+        var stale = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Failed);
+
+        Assert.True(moved.Applied);
+        Assert.Equal(2, moved.Current.Revision);
+        Assert.Equal(initialTimestamp.AddTicks(1), moved.Item!.StateChangedAtUtc);
+        Assert.False(stale.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.Conflict, stale.Code);
+        Assert.Equal(HostBridgeDownloadAttemptState.Preparing, stale.Item!.AttemptState);
+        Assert.Equal(moved.Current, stale.Current);
+    }
+
+    [Fact]
+    public void TryTransition_StalledAndBackwardClockRemainStrictlyMonotonic()
+    {
+        var instant = new DateTime(2026, 7, 11, 15, 0, 0, DateTimeKind.Utc);
+        var times = new Queue<DateTime>(new[] { instant, instant, instant.AddHours(-1) });
+        var store = Store(() => times.Dequeue());
+        var added = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "clock" });
+
+        var preparing = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Preparing);
+        var preparingTimestamp = preparing.Item!.StateChangedAtUtc;
+        var downloading = store.TryTransition(preparing.Current, HostBridgeDownloadAttemptState.Downloading);
+
+        Assert.Equal(instant.AddTicks(1), preparingTimestamp);
+        Assert.Equal(instant.AddTicks(2), downloading.Item!.StateChangedAtUtc);
+    }
+
+    [Fact]
+    public void TryTransition_IllegalEdgeDoesNotMutateMetadata()
+    {
+        var store = Store();
+        var added = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "illegal" });
+        var before = Metadata(added.Item!);
+
+        var result = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.CompletedImportable);
+
+        Assert.False(result.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.IllegalTransition, result.Code);
+        Assert.Equal(added.Current, result.Current);
+        Assert.Equal(before, Metadata(result.Item!));
+    }
+
+    [Fact]
+    public void TryTransition_StaleAttemptCannotOverwriteReplacement()
+    {
+        var store = Store();
+        var old = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "same" });
+        Assert.True(store.Remove("same", false, out _));
+        var current = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "SAME" });
+
+        var stale = store.TryTransition(old.Current, HostBridgeDownloadAttemptState.Preparing);
+
+        Assert.False(stale.Applied);
+        Assert.Equal(HostBridgeQueueResultCodes.Conflict, stale.Code);
+        Assert.Equal(current.Current, stale.Current);
+        Assert.Same(current.Item, stale.Item);
+    }
+
+    [Fact]
+    public async Task TryTransition_ConcurrentSameRevision_OnlyOneWins()
+    {
+        var store = Store();
+        var added = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "race" });
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var calls = Enumerable.Range(0, 32).Select(_ => Task.Run(async () =>
+        {
+            await start.Task;
+            return store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Preparing);
+        })).ToArray();
+
+        start.SetResult();
+        var results = await Task.WhenAll(calls);
+
+        Assert.Single(results, result => result.Applied);
+        Assert.Equal(31, results.Count(result => result.Code == HostBridgeQueueResultCodes.Conflict));
+        Assert.Equal(2, added.Item!.Revision);
+        Assert.Equal(HostBridgeDownloadAttemptState.Preparing, added.Item.AttemptState);
+    }
 
     [Fact]
     public void TryAddAttempt_TrimsAndKeysDownloadIdOrdinalIgnoreCase()
