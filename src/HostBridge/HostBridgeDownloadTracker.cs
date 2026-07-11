@@ -39,6 +39,11 @@ public enum HostBridgeDownloadItemStatus
 /// </summary>
 public class HostBridgeDownloadItem
 {
+    private string _downloadId = string.Empty;
+    private Guid _attemptId;
+    private long _revision;
+    private int _attemptState = (int)HostBridgeDownloadAttemptState.Queued;
+    private long _stateChangedAtUtcTicks;
     private int _status = (int)HostBridgeDownloadItemStatus.Queued;
     private long _progressBits;
 
@@ -50,7 +55,43 @@ public class HostBridgeDownloadItem
     // observation consistent. 0 means "not completed" (DateTime.MinValue.Ticks = 0).
     private long _completedAtTicks;
 
-    public string DownloadId { get; init; } = string.Empty;
+    public string DownloadId
+    {
+        get => _downloadId;
+        init => _downloadId = value;
+    }
+
+    public Guid AttemptId => _attemptId;
+    public long Revision => Interlocked.Read(ref _revision);
+    public HostBridgeDownloadAttemptState AttemptState =>
+        (HostBridgeDownloadAttemptState)Volatile.Read(ref _attemptState);
+    public DateTime StateChangedAtUtc =>
+        new(Interlocked.Read(ref _stateChangedAtUtcTicks), DateTimeKind.Utc);
+
+    internal void InitializeAttempt(string normalizedId, Guid attemptId, DateTime changedAtUtc)
+    {
+        _downloadId = normalizedId;
+        _attemptId = attemptId;
+        Interlocked.Exchange(ref _revision, 1);
+        Volatile.Write(ref _attemptState, (int)HostBridgeDownloadAttemptState.Queued);
+        Interlocked.Exchange(ref _stateChangedAtUtcTicks, changedAtUtc.Ticks);
+    }
+
+    internal void RestoreAttempt(
+        Guid attemptId,
+        long revision,
+        HostBridgeDownloadAttemptState attemptState,
+        DateTime stateChangedAtUtc)
+    {
+        _attemptId = attemptId;
+        Interlocked.Exchange(ref _revision, revision);
+        Volatile.Write(ref _attemptState, (int)attemptState);
+        Interlocked.Exchange(ref _stateChangedAtUtcTicks, stateChangedAtUtc.Ticks);
+    }
+
+    internal HostBridgeQueueMutationKey MutationKey() =>
+        new(_downloadId, _attemptId, Revision);
+
     public string AlbumId { get; init; } = string.Empty;
     public string Title { get; init; } = string.Empty;
     public string Artist { get; init; } = string.Empty;
@@ -145,6 +186,18 @@ public sealed class HostBridgeDownloadItemDto
     [JsonPropertyName("progress")]
     public double Progress { get; set; }
 
+    [JsonPropertyName("attemptId")]
+    public Guid AttemptId { get; set; }
+
+    [JsonPropertyName("revision")]
+    public long Revision { get; set; }
+
+    [JsonPropertyName("attemptState")]
+    public HostBridgeDownloadAttemptState AttemptState { get; set; }
+
+    [JsonPropertyName("stateChangedAtUtc")]
+    public DateTime StateChangedAtUtc { get; set; }
+
     /// <summary>Capture all observable state from <paramref name="item"/> into a DTO.</summary>
     public static HostBridgeDownloadItemDto FromItem(HostBridgeDownloadItem item) => new()
     {
@@ -158,6 +211,10 @@ public sealed class HostBridgeDownloadItemDto
         TotalSize   = item.TotalSize,
         Status      = item.GetStatus(),
         Progress    = item.GetProgress(),
+        AttemptId   = item.AttemptId,
+        Revision    = item.Revision,
+        AttemptState = item.AttemptState,
+        StateChangedAtUtc = item.StateChangedAtUtc,
     };
 
     /// <summary>
@@ -181,6 +238,7 @@ public sealed class HostBridgeDownloadItemDto
         };
         item.SetStatus(Status);
         item.SetProgress(Progress);
+        item.RestoreAttempt(AttemptId, Revision, AttemptState, StateChangedAtUtc);
         return item;
     }
 }
@@ -216,11 +274,13 @@ public sealed class HostBridgeDownloadItemDto
 public sealed class HostBridgeDownloadTrackerStore<TItem>
     where TItem : HostBridgeDownloadItem
 {
-    private readonly ConcurrentDictionary<string, TItem> _items = new();
+    private readonly ConcurrentDictionary<string, TItem> _items =
+        new(StringComparer.OrdinalIgnoreCase);
     private readonly TimeSpan _completedRetention;
     private readonly string? _persistencePath;
     private readonly Func<HostBridgeDownloadItemDto, TItem> _itemFactory;
     private readonly Action<string>? _onWarn;
+    private readonly HostBridgeQueueStoreOptions _options;
     private readonly object _persistLock = new();
 
     private static readonly JsonSerializerOptions _jsonOptions = new()
@@ -254,16 +314,21 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     /// cannot be loaded (corruption, partial write, etc.). The store starts empty. Without
     /// this callback, corruption is silently swallowed so the plugin continues to function.
     /// </param>
+    /// <param name="options">
+    /// Optional queue contract settings. Defaults to the backward-compatible LegacyV1 contract.
+    /// </param>
     public HostBridgeDownloadTrackerStore(
         TimeSpan? completedRetention = null,
         string? persistencePath = null,
         Func<HostBridgeDownloadItemDto, TItem>? itemFactory = null,
-        Action<string>? onWarn = null)
+        Action<string>? onWarn = null,
+        HostBridgeQueueStoreOptions? options = null)
     {
         _completedRetention = completedRetention ?? TimeSpan.FromMinutes(30);
         _persistencePath    = persistencePath;
         _onWarn             = onWarn;
         _itemFactory        = itemFactory ?? DefaultItemFactory;
+        _options            = options ?? new HostBridgeQueueStoreOptions();
 
         if (_persistencePath != null)
             LoadFromDisk();
@@ -336,10 +401,16 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     public void AddOrReplace(TItem item)
     {
         if (item is null) throw new ArgumentNullException(nameof(item));
-        if (string.IsNullOrWhiteSpace(item.DownloadId))
-            throw new ArgumentException("DownloadId must be non-empty.", nameof(item));
+        if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2)
+        {
+            var result = TryAddAttempt(item);
+            if (!result.Applied)
+                throw new InvalidOperationException($"An attempt with DownloadId '{item.DownloadId}' already exists.");
+            return;
+        }
 
-        _items[item.DownloadId] = item;
+        var normalized = NormalizeDownloadId(item.DownloadId);
+        _items[normalized] = item;
         PersistToDisk();
     }
 
@@ -359,10 +430,9 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     public bool TryAdd(TItem item)
     {
         if (item is null) throw new ArgumentNullException(nameof(item));
-        if (string.IsNullOrWhiteSpace(item.DownloadId))
-            throw new ArgumentException("DownloadId must be non-empty.", nameof(item));
 
-        var added = _items.TryAdd(item.DownloadId, item);
+        var normalized = NormalizeDownloadId(item.DownloadId);
+        var added = _items.TryAdd(normalized, item);
         if (added)
             PersistToDisk();
         return added;
@@ -374,12 +444,26 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     /// </summary>
     public bool TryGet(string downloadId, [NotNullWhen(true)] out TItem? item)
     {
-        if (string.IsNullOrWhiteSpace(downloadId))
+        var normalized = NormalizeDownloadId(downloadId);
+        return _items.TryGetValue(normalized, out item);
+    }
+
+    public HostBridgeQueueMutationResult<TItem> TryAddAttempt(TItem item)
+    {
+        if (item is null) throw new ArgumentNullException(nameof(item));
+        if (_options.ContractVersion != HostBridgeQueueContractVersion.AttemptV2)
+            throw new InvalidOperationException("TryAddAttempt requires AttemptV2 store options.");
+
+        var normalized = NormalizeDownloadId(item.DownloadId);
+        item.InitializeAttempt(normalized, Guid.NewGuid(), EnsureUtc(_options.UtcNow()));
+        if (!_items.TryAdd(normalized, item))
         {
-            item = null;
-            return false;
+            var current = _items[normalized];
+            return new(false, HostBridgeQueueResultCodes.Conflict, current.MutationKey(), current);
         }
-        return _items.TryGetValue(downloadId, out item);
+
+        PersistToDisk();
+        return new(true, HostBridgeQueueResultCodes.Applied, item.MutationKey(), item);
     }
 
     /// <summary>
@@ -431,7 +515,8 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     /// </summary>
     public bool Remove(string downloadId, bool deleteData, out TItem? removed, Action<Exception>? onDeleteError = null)
     {
-        if (!_items.TryRemove(downloadId, out removed))
+        var normalized = NormalizeDownloadId(downloadId);
+        if (!_items.TryRemove(normalized, out removed))
         {
             return false;
         }
@@ -516,6 +601,20 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     private static bool IsActiveStatus(HostBridgeDownloadItemStatus status)
         => status is HostBridgeDownloadItemStatus.Queued
             or HostBridgeDownloadItemStatus.Downloading;
+
+    private static string NormalizeDownloadId(string downloadId)
+    {
+        if (string.IsNullOrWhiteSpace(downloadId))
+            throw new ArgumentException("DownloadId must be non-empty.", nameof(downloadId));
+        return downloadId.Trim();
+    }
+
+    private static DateTime EnsureUtc(DateTime value) => value.Kind switch
+    {
+        DateTimeKind.Utc => value,
+        DateTimeKind.Local => value.ToUniversalTime(),
+        _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
+    };
 
     // OS-aware same-directory comparison for the cross-attempt cleanup guard. Canonicalizes
     // separator and "."/".." spellings, then compares case-sensitively on Linux (the production
