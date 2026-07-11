@@ -324,6 +324,9 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     private const int MaxReplaceAttempts = 5;
     private const int ErrorSharingViolation = 32;
     private const int ErrorLockViolation = 33;
+    private const long MaxPersistenceBytes = 16L * 1024 * 1024;
+    private const int MaxPersistedItems = 10_000;
+    private const int MaxPersistedStringLength = 32 * 1024;
 
     private readonly ConcurrentDictionary<string, TItem> _items;
     private readonly TimeSpan _completedRetention;
@@ -835,9 +838,20 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
         try
         {
+            if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2 &&
+                new FileInfo(_persistencePath).Length > MaxPersistenceBytes)
+            {
+                DisablePersistenceWrites($"maximum persistence size of {MaxPersistenceBytes} bytes exceeded");
+                return;
+            }
+
             var json = File.ReadAllText(_persistencePath);
             if (string.IsNullOrWhiteSpace(json))
+            {
+                if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2)
+                    DisablePersistenceWrites("empty or whitespace persistence content");
                 return;
+            }
 
             using var document = JsonDocument.Parse(json);
             if (_options.ContractVersion == HostBridgeQueueContractVersion.LegacyV1)
@@ -848,6 +862,8 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
             if (document.RootElement.ValueKind == JsonValueKind.Array)
             {
+                if (!ValidateItemCount(document.RootElement))
+                    return;
                 MigrateV1Snapshot(document.RootElement);
                 return;
             }
@@ -875,6 +891,8 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 return;
             }
 
+            if (!ValidateItemCount(itemsElement))
+                return;
             LoadV2Snapshot(itemsElement);
         }
         catch (Exception ex)
@@ -976,6 +994,12 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         var candidates = new List<(HostBridgeDownloadItemDto Dto, string NormalizedId, string CanonicalJson, string Hash)>();
         foreach (var element in root.EnumerateArray())
         {
+            if (ContainsOversizedString(element))
+            {
+                DisablePersistenceWrites($"maximum string length of {MaxPersistedStringLength} characters exceeded");
+                return;
+            }
+
             HostBridgeDownloadItemDto? dto;
             try
             {
@@ -988,14 +1012,15 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             }
 
             if (dto == null || string.IsNullOrWhiteSpace(dto.DownloadId) ||
-                !Enum.IsDefined(typeof(HostBridgeDownloadItemStatus), dto.Status))
+                !Enum.IsDefined(typeof(HostBridgeDownloadItemStatus), dto.Status) ||
+                !Enum.IsDefined(typeof(HostBridgeDownloadAttemptState), dto.AttemptState))
             {
                 DisablePersistenceWrites("malformed V1 entry");
                 return;
             }
 
             var normalizedId = NormalizeDownloadId(dto.DownloadId);
-            var canonicalJson = JsonSerializer.Serialize(dto, _jsonOptions);
+            var canonicalJson = CanonicalizeV1Dto(dto);
             var hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonicalJson)));
             candidates.Add((dto, normalizedId, canonicalJson, hash));
         }
@@ -1037,6 +1062,12 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         var recoveredAny = false;
         foreach (var element in itemsElement.EnumerateArray())
         {
+            if (ContainsOversizedString(element))
+            {
+                DisablePersistenceWrites($"maximum string length of {MaxPersistedStringLength} characters exceeded");
+                return;
+            }
+
             HostBridgeDownloadItemDto? dto;
             try
             {
@@ -1050,6 +1081,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
             if (dto == null || string.IsNullOrWhiteSpace(dto.DownloadId) ||
                 dto.AttemptId == Guid.Empty || dto.Revision < 1 ||
+                !Enum.IsDefined(typeof(HostBridgeDownloadItemStatus), dto.Status) ||
                 !Enum.IsDefined(typeof(HostBridgeDownloadAttemptState), dto.AttemptState) ||
                 dto.StateChangedAtUtc == default)
             {
@@ -1129,6 +1161,40 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         }
     }
 
+    private bool ValidateItemCount(JsonElement items)
+    {
+        if (items.GetArrayLength() <= MaxPersistedItems)
+            return true;
+
+        DisablePersistenceWrites($"maximum item count of {MaxPersistedItems} exceeded");
+        return false;
+    }
+
+    private static bool ContainsOversizedString(JsonElement element)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.String:
+                return element.GetString()!.Length > MaxPersistedStringLength;
+            case JsonValueKind.Object:
+                foreach (var property in element.EnumerateObject())
+                {
+                    if (ContainsOversizedString(property.Value))
+                        return true;
+                }
+                return false;
+            case JsonValueKind.Array:
+                foreach (var child in element.EnumerateArray())
+                {
+                    if (ContainsOversizedString(child))
+                        return true;
+                }
+                return false;
+            default:
+                return false;
+        }
+    }
+
     private void DisablePersistenceWrites(string reason)
     {
         _persistenceWriteDisabled = true;
@@ -1180,6 +1246,34 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         return new Guid(hash.AsSpan(0, 16));
     }
 
+    private static string CanonicalizeV1Dto(HostBridgeDownloadItemDto dto)
+    {
+        using var stream = new MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            writer.WriteStartObject();
+            writer.WriteString("downloadId", dto.DownloadId);
+            writer.WriteString("albumId", dto.AlbumId);
+            writer.WriteString("title", dto.Title);
+            writer.WriteString("artist", dto.Artist);
+            writer.WriteString("outputPath", dto.OutputPath);
+            writer.WriteString("startedAt", dto.StartedAt);
+            if (dto.CompletedAt.HasValue)
+                writer.WriteString("completedAt", dto.CompletedAt.Value);
+            else
+                writer.WriteNull("completedAt");
+            writer.WriteNumber("totalSize", dto.TotalSize);
+            writer.WriteString("status", dto.Status.ToString());
+            writer.WriteNumber("progress", dto.Progress);
+            writer.WriteString("attemptId", dto.AttemptId);
+            writer.WriteNumber("revision", dto.Revision);
+            writer.WriteString("attemptState", dto.AttemptState.ToString());
+            writer.WriteString("stateChangedAtUtc", dto.StateChangedAtUtc);
+            writer.WriteEndObject();
+        }
+        return Encoding.UTF8.GetString(stream.ToArray());
+    }
+
     private static DateTime MigrationStateChangedAtUtc(HostBridgeDownloadItemDto dto)
     {
         var value = dto.CompletedAt ?? (dto.StartedAt == default ? DateTime.UnixEpoch : dto.StartedAt);
@@ -1209,6 +1303,11 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
                 var dtos = new List<HostBridgeDownloadItemDto>(_items.Count);
                 foreach (var kv in _items)
                     dtos.Add(HostBridgeDownloadItemDto.FromItem(kv.Value));
+                if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2)
+                {
+                    dtos.Sort(static (left, right) =>
+                        StringComparer.Ordinal.Compare(left.DownloadId, right.DownloadId));
+                }
 
                 var dir = Path.GetDirectoryName(_persistencePath);
                 if (!string.IsNullOrEmpty(dir))

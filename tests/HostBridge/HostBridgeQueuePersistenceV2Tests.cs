@@ -168,6 +168,37 @@ public sealed class HostBridgeQueuePersistenceV2Tests : IDisposable
     }
 
     [Theory]
+    [InlineData("")]
+    [InlineData("   \r\n\t")]
+    public void EmptyOrWhitespaceV2_FailsClosedAndLaterMutationPreservesBytes(string malformed)
+    {
+        var path = TempFile();
+        File.WriteAllText(path, malformed);
+        var warnings = new List<string>();
+
+        var store = V2(path, warnings.Add);
+        var added = store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "memory-only" });
+        var transitioned = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Preparing);
+
+        Assert.True(transitioned.Applied);
+        Assert.Equal(malformed, File.ReadAllText(path));
+        Assert.NotEmpty(warnings);
+    }
+
+    [Fact]
+    public void MalformedNonemptyV2_LaterMutationPreservesOriginalBytes()
+    {
+        var path = TempFile();
+        const string malformed = "{not-json";
+        File.WriteAllText(path, malformed);
+
+        var store = V2(path);
+        Assert.True(store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "memory-only" }).Applied);
+
+        Assert.Equal(malformed, File.ReadAllText(path));
+    }
+
+    [Theory]
     [InlineData("{}")]
     [InlineData("{\"schemaVersion\":\"2\",\"items\":[]}")]
     [InlineData("{\"schemaVersion\":2,\"items\":{}}")]
@@ -183,6 +214,91 @@ public sealed class HostBridgeQueuePersistenceV2Tests : IDisposable
         Assert.Empty(store.GetSnapshot());
         Assert.Equal(malformed, File.ReadAllText(path));
         Assert.NotEmpty(warnings);
+    }
+
+    [Fact]
+    public void InvalidPersistedStatus_FailsWholeV2SnapshotClosed()
+    {
+        var path = TempFile();
+        const string invalid = "{\"schemaVersion\":2,\"items\":[{\"downloadId\":\"would-be-valid\",\"status\":\"Completed\",\"attemptId\":\"c7ef2460-f5e7-4c91-9266-5ce763ad0065\",\"revision\":1,\"attemptState\":\"CompletedImportable\",\"stateChangedAtUtc\":\"2026-07-11T12:00:00Z\"},{\"downloadId\":\"bad-status\",\"status\":99,\"attemptId\":\"b7ef2460-f5e7-4c91-9266-5ce763ad0065\",\"revision\":1,\"attemptState\":\"Queued\",\"stateChangedAtUtc\":\"2026-07-11T12:00:00Z\"}]}";
+        File.WriteAllText(path, invalid);
+
+        var store = V2(path);
+        Assert.True(store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "memory-only" }).Applied);
+
+        Assert.Single(store.GetSnapshot());
+        Assert.Equal(invalid, File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void InvalidPersistedAttemptState_FailsV1MigrationClosed()
+    {
+        var path = TempFile();
+        const string invalid = "[{\"downloadId\":\"bad-attempt-state\",\"status\":\"Completed\",\"attemptState\":99}]";
+        File.WriteAllText(path, invalid);
+
+        var store = V2(path);
+        Assert.True(store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "memory-only" }).Applied);
+
+        Assert.Single(store.GetSnapshot());
+        Assert.Equal(invalid, File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void V1Migration_MultiIdReorderProducesIdenticalBytesAndAttemptIds()
+    {
+        const string alpha = "{\"downloadId\":\"alpha\",\"status\":\"Completed\"}";
+        const string bravo = "{\"downloadId\":\"bravo\",\"status\":\"Failed\"}";
+        const string echo = "{\"downloadId\":\"echo\",\"status\":\"Cancelled\"}";
+        const string mike = "{\"downloadId\":\"mike\",\"status\":\"Completed\"}";
+        const string xray = "{\"downloadId\":\"xray\",\"status\":\"Failed\"}";
+        const string zulu = "{\"downloadId\":\"zulu\",\"status\":\"Cancelled\"}";
+        var firstPath = TempFile();
+        var secondPath = TempFile();
+        File.WriteAllText(firstPath, $"[{zulu},{alpha},{mike},{bravo},{xray},{echo}]");
+        File.WriteAllText(secondPath, $"[{echo},{xray},{bravo},{mike},{alpha},{zulu}]");
+
+        var first = V2(firstPath).GetSnapshot().OrderBy(x => x.DownloadId).ToArray();
+        var second = V2(secondPath).GetSnapshot().OrderBy(x => x.DownloadId).ToArray();
+
+        Assert.Equal(File.ReadAllText(firstPath), File.ReadAllText(secondPath));
+        Assert.Equal(first.Select(x => x.AttemptId), second.Select(x => x.AttemptId));
+
+        using var document = JsonDocument.Parse(File.ReadAllText(firstPath));
+        Assert.Equal(
+            new[] { "alpha", "bravo", "echo", "mike", "xray", "zulu" },
+            document.RootElement.GetProperty("items")
+                .EnumerateArray()
+                .Select(item => item.GetProperty("downloadId").GetString()));
+    }
+
+    [Fact]
+    public void V1Migration_CanonicalDtoHasPinnedAttemptId()
+    {
+        var path = TempFile();
+        File.WriteAllText(path, "[{\"downloadId\":\"stable\",\"status\":\"Completed\"}]");
+
+        var migrated = V2(path).GetSnapshot().Single();
+
+        Assert.Equal(Guid.Parse("f2b18429-b1b6-e042-4d8e-bd75aec825db"), migrated.AttemptId);
+    }
+
+    [Fact]
+    public void V1DuplicatePrecedence_PrefersFailedThenCancelledThenActive()
+    {
+        var path = TempFile();
+        File.WriteAllText(path, """
+[
+  {"downloadId":"same","title":"active","status":"Downloading"},
+  {"downloadId":"SAME","title":"cancelled","status":"Cancelled"},
+  {"downloadId":" same ","title":"failed","status":"Failed"}
+]
+""");
+
+        var migrated = V2(path, evidence: _ => new(true, true, false)).GetSnapshot().Single();
+
+        Assert.Equal("failed", migrated.Title);
+        Assert.Equal(HostBridgeDownloadAttemptState.Failed, migrated.AttemptState);
     }
 
     [Theory]
@@ -246,6 +362,89 @@ public sealed class HostBridgeQueuePersistenceV2Tests : IDisposable
         Assert.Equal(5, restarted.Revision);
         Assert.Equal(originalTime.AddTicks(1), restarted.StateChangedAtUtc);
         Assert.Equal(HostBridgeDownloadAttemptState.Queued, restarted.AttemptState);
+    }
+
+    [Fact]
+    public void Restart_UnchangedRecoveryLeavesFileByteForByte()
+    {
+        var path = PersistV2Item(HostBridgeDownloadAttemptState.Queued);
+        var original = File.ReadAllText(path);
+
+        var store = V2(path);
+
+        Assert.Single(store.GetSnapshot());
+        Assert.Equal(original, File.ReadAllText(path));
+    }
+
+    [Fact]
+    public void OldCompletedImportable_SurvivesSnapshotRetentionSweep()
+    {
+        var path = TempFile();
+        var dto = new HostBridgeDownloadItemDto
+        {
+            DownloadId = "old-importable",
+            Status = HostBridgeDownloadItemStatus.Completed,
+            CompletedAt = DateTime.UtcNow.AddYears(-1),
+            AttemptId = Guid.Parse("b7ef2460-f5e7-4c91-9266-5ce763ad0065"),
+            Revision = 4,
+            AttemptState = HostBridgeDownloadAttemptState.CompletedImportable,
+            StateChangedAtUtc = DateTime.UtcNow.AddYears(-1),
+        };
+        var options = new JsonSerializerOptions { Converters = { new JsonStringEnumConverter() } };
+        File.WriteAllText(path, JsonSerializer.Serialize(new { schemaVersion = 2, items = new[] { dto } }, options));
+
+        Assert.Single(V2(path).GetSnapshot());
+    }
+
+    [Fact]
+    public void OversizedPersistenceFile_FailsClosedBeforeReadAndPreservesLength()
+    {
+        var path = TempFile();
+        const long oversizedLength = (16L * 1024 * 1024) + 1;
+        using (var stream = File.Create(path))
+            stream.SetLength(oversizedLength);
+        var warnings = new List<string>();
+
+        var store = V2(path, warnings.Add);
+        Assert.True(store.TryAddAttempt(new HostBridgeDownloadItem { DownloadId = "memory-only" }).Applied);
+
+        Assert.Equal(oversizedLength, new FileInfo(path).Length);
+        Assert.Contains(warnings, warning => warning.Contains("maximum persistence size", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void TooManyPersistedItems_FailsClosedWithoutCanonicalizingEntries()
+    {
+        var path = TempFile();
+        var oversized = "[" + string.Join(',', Enumerable.Repeat("{}", 10_001)) + "]";
+        File.WriteAllText(path, oversized);
+        var warnings = new List<string>();
+
+        var store = V2(path, warnings.Add);
+
+        Assert.Empty(store.GetSnapshot());
+        Assert.Equal(oversized, File.ReadAllText(path));
+        Assert.Contains(warnings, warning => warning.Contains("maximum item count", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void OversizedPersistedString_FailsClosedWithRedactedWarning()
+    {
+        var path = TempFile();
+        var secret = "SECRET-" + new string('x', (32 * 1024) + 1);
+        var malformed = JsonSerializer.Serialize(new[]
+        {
+            new { downloadId = "bounded", title = secret, status = "Completed" },
+        });
+        File.WriteAllText(path, malformed);
+        var warnings = new List<string>();
+
+        var store = V2(path, warnings.Add);
+
+        Assert.Empty(store.GetSnapshot());
+        Assert.Equal(malformed, File.ReadAllText(path));
+        Assert.Contains(warnings, warning => warning.Contains("maximum string length", StringComparison.Ordinal));
+        Assert.DoesNotContain(warnings, warning => warning.Contains("SECRET", StringComparison.Ordinal));
     }
 
     [Fact]
