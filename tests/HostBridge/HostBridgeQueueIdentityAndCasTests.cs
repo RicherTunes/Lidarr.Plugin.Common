@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.HostBridge;
 using Xunit;
@@ -173,4 +174,92 @@ public sealed class HostBridgeQueueIdentityAndCasTests
 
         Assert.Empty(exceptions);
     }
+
+    [Theory]
+    [InlineData("TryAdd")]
+    [InlineData("AddOrReplace")]
+    [InlineData("TryAddAttempt")]
+    public void AttemptV2_ReaddingStoredInstanceDoesNotRewriteAttemptMetadata(string insertionPath)
+    {
+        var clockCalls = 0;
+        var instant = new DateTime(2026, 7, 11, 17, 0, 0, DateTimeKind.Utc);
+        var store = Store(() => instant.AddTicks(Interlocked.Increment(ref clockCalls)));
+        var item = new HostBridgeDownloadItem { DownloadId = "same-instance" };
+        Assert.True(store.TryAddAttempt(item).Applied);
+        var captured = Metadata(item);
+
+        switch (insertionPath)
+        {
+            case "TryAdd":
+                Assert.False(store.TryAdd(item));
+                break;
+            case "AddOrReplace":
+                Assert.Throws<InvalidOperationException>(() => store.AddOrReplace(item));
+                break;
+            case "TryAddAttempt":
+                Assert.False(store.TryAddAttempt(item).Applied);
+                break;
+        }
+
+        Assert.Equal(captured, Metadata(item));
+        Assert.Equal(1, clockCalls);
+    }
+
+    [Fact]
+    public async Task AttemptV2_ConcurrentSameInstanceInsertionInitializesMetadataExactlyOnce()
+    {
+        var clockCalls = 0;
+        var instant = new DateTime(2026, 7, 11, 18, 0, 0, DateTimeKind.Utc);
+        var store = Store(() => instant.AddTicks(Interlocked.Increment(ref clockCalls)));
+        var item = new HostBridgeDownloadItem { DownloadId = "  concurrent-instance  " };
+        var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var snapshots = new ConcurrentBag<(Guid, long, HostBridgeDownloadAttemptState, DateTime)>();
+        var successes = 0;
+
+        var calls = Enumerable.Range(0, 60).Select(index => Task.Run(async () =>
+        {
+            await start.Task;
+            try
+            {
+                switch (index % 3)
+                {
+                    case 0:
+                        if (store.TryAdd(item)) Interlocked.Increment(ref successes);
+                        break;
+                    case 1:
+                        store.AddOrReplace(item);
+                        Interlocked.Increment(ref successes);
+                        break;
+                    case 2:
+                        if (store.TryAddAttempt(item).Applied) Interlocked.Increment(ref successes);
+                        break;
+                }
+            }
+            catch (InvalidOperationException)
+            {
+                // Expected for losing AddOrReplace calls.
+            }
+            finally
+            {
+                snapshots.Add(Metadata(item));
+            }
+        })).ToArray();
+
+        start.SetResult();
+        await Task.WhenAll(calls);
+
+        Assert.Equal(1, successes);
+        Assert.Equal(1, clockCalls);
+        var captured = Metadata(item);
+        Assert.NotEqual(Guid.Empty, captured.Item1);
+        Assert.Equal(1, captured.Item2);
+        Assert.Equal(HostBridgeDownloadAttemptState.Queued, captured.Item3);
+        Assert.Equal(DateTimeKind.Utc, captured.Item4.Kind);
+        Assert.All(snapshots, snapshot => Assert.Equal(captured, snapshot));
+        Assert.Equal("concurrent-instance", item.DownloadId);
+    }
+
+    private static (Guid, long, HostBridgeDownloadAttemptState, DateTime) Metadata(
+        HostBridgeDownloadItem item) =>
+        (item.AttemptId, item.Revision, item.AttemptState, item.StateChangedAtUtc);
 }

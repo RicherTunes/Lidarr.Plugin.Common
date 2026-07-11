@@ -44,6 +44,8 @@ public class HostBridgeDownloadItem
     private long _revision;
     private int _attemptState = (int)HostBridgeDownloadAttemptState.Queued;
     private long _stateChangedAtUtcTicks;
+    private int _attemptInitialized;
+    private readonly object _attemptInitializationLock = new();
     private int _status = (int)HostBridgeDownloadItemStatus.Queued;
     private long _progressBits;
 
@@ -70,11 +72,37 @@ public class HostBridgeDownloadItem
 
     internal void InitializeAttempt(string normalizedId, Guid attemptId, DateTime changedAtUtc)
     {
+        lock (_attemptInitializationLock)
+        {
+            if (_attemptInitialized != 0)
+                return;
+
+            InitializeAttemptCore(normalizedId, attemptId, changedAtUtc);
+        }
+    }
+
+    internal void InitializeAttempt(
+        string normalizedId,
+        Func<Guid> attemptIdFactory,
+        Func<DateTime> changedAtUtcFactory)
+    {
+        lock (_attemptInitializationLock)
+        {
+            if (_attemptInitialized != 0)
+                return;
+
+            InitializeAttemptCore(normalizedId, attemptIdFactory(), changedAtUtcFactory());
+        }
+    }
+
+    private void InitializeAttemptCore(string normalizedId, Guid attemptId, DateTime changedAtUtc)
+    {
         _downloadId = normalizedId;
         _attemptId = attemptId;
-        Interlocked.Exchange(ref _revision, 1);
         Volatile.Write(ref _attemptState, (int)HostBridgeDownloadAttemptState.Queued);
         Interlocked.Exchange(ref _stateChangedAtUtcTicks, changedAtUtc.Ticks);
+        Interlocked.Exchange(ref _revision, 1);
+        Volatile.Write(ref _attemptInitialized, 1);
     }
 
     internal void RestoreAttempt(
@@ -87,6 +115,8 @@ public class HostBridgeDownloadItem
         Interlocked.Exchange(ref _revision, revision);
         Volatile.Write(ref _attemptState, (int)attemptState);
         Interlocked.Exchange(ref _stateChangedAtUtcTicks, stateChangedAtUtc.Ticks);
+        if (attemptId != Guid.Empty || revision != 0)
+            Volatile.Write(ref _attemptInitialized, 1);
     }
 
     internal HostBridgeQueueMutationKey MutationKey() =>
@@ -474,7 +504,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             throw new InvalidOperationException("TryAddAttempt requires AttemptV2 store options.");
 
         var normalized = NormalizeDownloadId(item.DownloadId);
-        item.InitializeAttempt(normalized, Guid.NewGuid(), EnsureUtc(_options.UtcNow()));
+        item.InitializeAttempt(normalized, Guid.NewGuid, () => EnsureUtc(_options.UtcNow()));
         while (true)
         {
             if (_items.TryAdd(normalized, item))
