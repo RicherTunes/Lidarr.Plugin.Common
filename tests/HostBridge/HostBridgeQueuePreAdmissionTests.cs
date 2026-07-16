@@ -552,6 +552,25 @@ public class HostBridgeQueuePreAdmissionTests : IDisposable
         Assert.Same(existing, current);
     }
 
+    // The concurrent stress test below reads the persistence file while up to 64 commits
+    // concurrently File.Replace it. On Windows a reader that opens mid-replace gets a
+    // transient sharing violation (the store retries its own side; an unretried raw
+    // File.ReadAllText racing it is a test bug, not a product bug). Retry briefly.
+    private static string ReadPersistedSnapshotWithRetry(string path)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                return File.ReadAllText(path);
+            }
+            catch (IOException) when (attempt < 100)
+            {
+                Thread.Sleep(5);
+            }
+        }
+    }
+
     [Fact]
     public async Task ConcurrentAcceptedAdmissions_AlwaysCommitBeforeRegistrationAndWork()
     {
@@ -582,7 +601,7 @@ public class HostBridgeQueuePreAdmissionTests : IDisposable
                     try
                     {
                         if (!tracker.TryGet(id, out _)) orderingViolations.Enqueue("work-before-commit");
-                        if (!File.ReadAllText(persistencePath).Contains(id, StringComparison.OrdinalIgnoreCase))
+                        if (!ReadPersistedSnapshotWithRetry(persistencePath).Contains(id, StringComparison.OrdinalIgnoreCase))
                             orderingViolations.Enqueue("work-before-persist");
                         if (!registered.ContainsKey(id)) orderingViolations.Enqueue("work-before-register");
                     }
@@ -602,7 +621,7 @@ public class HostBridgeQueuePreAdmissionTests : IDisposable
                     RegisterCancellation = (id, item) =>
                     {
                         Assert.True(tracker.TryGet(id, out _));
-                        Assert.Contains(id, File.ReadAllText(persistencePath), StringComparison.OrdinalIgnoreCase);
+                        Assert.Contains(id, ReadPersistedSnapshotWithRetry(persistencePath), StringComparison.OrdinalIgnoreCase);
                         Assert.True(registered.TryAdd(id, 0));
                         return new HostBridgeDownloadCancellationRegistration(CancellationToken.None);
                     },

@@ -681,9 +681,14 @@ public sealed class FileRemovalJournal : IRemovalJournal
             using var handle = File.OpenHandle(directory, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
             RandomAccess.FlushToDisk(handle);
         }
-        catch (Exception error) when (error is NotSupportedException or PlatformNotSupportedException)
+        catch (Exception error) when (error is
+            NotSupportedException or PlatformNotSupportedException or UnauthorizedAccessException or IOException)
         {
-            // Some managed runtimes/filesystems cannot open directory handles. The replace remains durable.
+            // Directory-handle fsync is best-effort. .NET's public file APIs refuse to open a
+            // directory on Unix (SafeFileHandle.Init throws EACCES-mapped UnauthorizedAccessException
+            // for read access), and some runtimes/filesystems cannot flush directory handles at all.
+            // The record replace itself is already durable (temp write-through + atomic rename);
+            // only the parent-entry flush is skipped, matching Windows behavior above.
         }
     }
 
