@@ -115,6 +115,47 @@ jobs:
       - name: Materialize and test template package
         shell: pwsh
         run: ./scripts/ci/smoke-lidarr-plugin-template.ps1 -Configuration Release
+  dependency-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      # See build-test job comment: replace actions/checkout@v4 with a native git clone
+      # that only touches the Gitea instance (no external DNS required).
+      - name: Checkout
+        shell: bash
+        run: |
+          set -e
+          BRANCH="${GITHUB_HEAD_REF:-${GITHUB_REF_NAME:-main}}"
+          AUTH_HEADER="$(printf 'x-access-token:%s' '${{ secrets.GITHUB_TOKEN }}' | base64 | tr -d '\n')"
+          git -c "http.http://192.168.2.59:3001/.extraheader=AUTHORIZATION: basic $AUTH_HEADER" \
+            clone --depth=50 --branch "$BRANCH" \
+            "http://192.168.2.59:3001/RicherTunes/Lidarr.Plugin.Common" .
+      - name: Install .NET SDK
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /opt/pwsh
+          tar -xzf /tmp/pwsh.tgz -C /opt/pwsh
+          chmod +x /opt/pwsh/pwsh
+          echo "/opt/pwsh" >> "$GITHUB_PATH"
+      # && chaining: a failing self-test must fail the step (see lint job note).
+      - name: Dependency-CVE gate (fail on High+, direct + transitive)
+        shell: pwsh
+        run: |
+          ./scripts/tests/Test-CheckVulnerablePackages.ps1 && `
+          ./scripts/ci/check-vulnerable-packages.ps1 -Target src/Lidarr.Plugin.Common.csproj && `
+          ./scripts/ci/check-vulnerable-packages.ps1 -Target tests/Lidarr.Plugin.Common.Tests.csproj
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 15

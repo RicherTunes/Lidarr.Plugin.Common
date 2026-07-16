@@ -61,6 +61,23 @@ jobs:
         shell: pwsh
         run: ./scripts/ci/smoke-lidarr-plugin-template.ps1 -Configuration Release
 
+  dependency-scan:
+    if: ${{ github.server_url == 'https://github.com' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      # && chaining: a failing self-test must fail the step (see lint job note).
+      - name: Dependency-CVE gate (fail on High+, direct + transitive)
+        shell: pwsh
+        run: |
+          ./scripts/tests/Test-CheckVulnerablePackages.ps1 && `
+          ./scripts/ci/check-vulnerable-packages.ps1 -Target src/Lidarr.Plugin.Common.csproj && `
+          ./scripts/ci/check-vulnerable-packages.ps1 -Target tests/Lidarr.Plugin.Common.Tests.csproj
+
   lint:
     if: ${{ github.server_url == 'https://github.com' }}
     runs-on: ubuntu-latest
