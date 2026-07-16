@@ -1,0 +1,149 @@
+name: CI
+# Gitea-primary CI scaffold (modeled on the tidalarr/qobuzarr workflows). The lint job
+# runs Common's shared policy gates; the verify job builds + tests the plugin. The
+# plugin-root .github/workflows/ci.yml is a guarded mirror; Gitea owns the merge gate.
+#
+# PREREQUISITE: the lint, verify, and dependency-scan jobs call scripts from the
+# Common submodule. Vendor it before the first push:
+#   git submodule add <common-repo-url> ext/Lidarr.Plugin.Common
+#   git rev-parse HEAD:ext/Lidarr.Plugin.Common > ext-common-sha.txt
+# (see the README's "Continuous Integration" section).
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+jobs:
+  secret-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+      - name: Gitleaks secret scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Integrity-pin the secret scanner itself: a moved tag or tampered asset
+          # would otherwise be trusted silently, defeating the scan it performs.
+          GITLEAKS_SHA256=ba6dbb656933921c775ee5a2d1c13a91046e7952e9d919f9bac4cec61d628e7d
+          curl -sSL https://github.com/gitleaks/gitleaks/releases/download/v8.18.4/gitleaks_8.18.4_linux_x64.tar.gz -o /tmp/gitleaks.tgz
+          echo "${GITLEAKS_SHA256}  /tmp/gitleaks.tgz" | sha256sum -c -
+          tar -xzf /tmp/gitleaks.tgz -C /tmp gitleaks
+          /tmp/gitleaks detect --source . --no-banner --redact --exit-code 1
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      # Pin guard: the submodule gitlink and the ext-common-sha.txt sentinel must agree
+      # (the gitlink is invisible in plain diffs; the sentinel keeps it reviewable).
+      - name: Common submodule pin guard
+        shell: bash
+        run: bash ext/Lidarr.Plugin.Common/scripts/repin-common-submodule.sh --verify-only --path ext/Lidarr.Plugin.Common
+      # The bare runner image has no pwsh; fetch the self-contained release tarball.
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /opt/pwsh
+          tar -xzf /tmp/pwsh.tgz -C /opt/pwsh
+          chmod +x /opt/pwsh/pwsh
+          echo "/opt/pwsh" >> "$GITHUB_PATH"
+      - name: Install .NET SDK
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+      - name: Common lint gates
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runner = './ext/Lidarr.Plugin.Common/scripts/ci/run-plugin-lint-gates.ps1'
+          if (-not (Test-Path $runner)) {
+            Write-Error "Shared lint runner not found: $runner"
+            exit 1
+          }
+          $global:LASTEXITCODE = 0
+          & $runner -RepoPath . -CommonRoot ext/Lidarr.Plugin.Common -Mode ci
+          $runnerExitCode = if ($null -eq $global:LASTEXITCODE) { 0 } else { [int]$global:LASTEXITCODE }
+          exit $runnerExitCode
+
+  dependency-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Install PowerShell
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://github.com/PowerShell/PowerShell/releases/download/v7.4.6/powershell-7.4.6-linux-x64.tar.gz -o /tmp/pwsh.tgz
+          mkdir -p /opt/pwsh
+          tar -xzf /tmp/pwsh.tgz -C /opt/pwsh
+          chmod +x /opt/pwsh/pwsh
+          echo "/opt/pwsh" >> "$GITHUB_PATH"
+      - name: Install .NET SDK
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+      # && chaining: a failing invocation must fail the step (sequential lines mask
+      # earlier exit codes - the step reports only the last command's).
+      - name: Dependency-CVE gate (fail on High+, direct + transitive)
+        shell: pwsh
+        run: |
+          ./ext/Lidarr.Plugin.Common/scripts/ci/check-vulnerable-packages.ps1 -Target src/MyPlugin/MyPlugin.csproj && `
+          ./ext/Lidarr.Plugin.Common/scripts/ci/check-vulnerable-packages.ps1 -Target tests/MyPlugin.Tests/MyPlugin.Tests.csproj
+
+  verify:
+    needs: [lint, secret-scan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      DOTNET_CLI_TELEMETRY_OPTOUT: "1"
+      DOTNET_NOLOGO: "true"
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - name: Common submodule pin guard
+        shell: bash
+        run: bash ext/Lidarr.Plugin.Common/scripts/repin-common-submodule.sh --verify-only --path ext/Lidarr.Plugin.Common
+      - name: Install .NET SDK
+        shell: bash
+        run: |
+          set -e
+          curl -sSL https://dot.net/v1/dotnet-install.sh -o /tmp/dotnet-install.sh
+          bash /tmp/dotnet-install.sh --channel 8.0 --install-dir "$HOME/.dotnet"
+          echo "$HOME/.dotnet" >> "$GITHUB_PATH"
+          echo "$HOME/.dotnet/tools" >> "$GITHUB_PATH"
+          echo "DOTNET_ROOT=$HOME/.dotnet" >> "$GITHUB_ENV"
+      # Scaffold verification: build + full test suite (includes the ecosystem parity
+      # suite in tests/MyPlugin.Tests). Once the plugin wires host packaging, graduate
+      # this job to Common's shared local-ci pipeline like the sibling plugins:
+      #   run: pwsh ./scripts/verify-local.ps1
+      # (see tidalarr/qobuzarr for the script; it delegates to
+      # ext/Lidarr.Plugin.Common/scripts/local-ci.ps1).
+      - name: Build (Release)
+        run: dotnet build src/MyPlugin/MyPlugin.csproj -c Release -p:LidarrPluginCommonRepoRoot=$PWD/ext/Lidarr.Plugin.Common
+      - name: Test (Release)
+        run: dotnet test tests/MyPlugin.Tests/MyPlugin.Tests.csproj -c Release -p:LidarrPluginCommonRepoRoot=$PWD/ext/Lidarr.Plugin.Common

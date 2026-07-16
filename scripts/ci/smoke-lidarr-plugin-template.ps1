@@ -177,6 +177,45 @@ try {
 
     Assert-NoTemplateBuildArtifacts -GeneratedRoot $outputRoot
 
+    # Drift-free-starting-point contract: a 6th plugin must be BORN with the ecosystem
+    # guards. Assert the parity test subclass, both CI workflow scaffolds, and the
+    # parity-checked root files all materialized (dotnet-new default excludes could
+    # silently drop dot-directories; this catches that class of regression).
+    $requiredScaffoldFiles = @(
+        "tests/$PluginName.Tests/${PluginName}EcosystemParityTests.cs",
+        ".gitea/workflows/ci.yml",
+        ".github/workflows/ci.yml",
+        "Directory.Build.props",
+        "Directory.Packages.props",
+        "global.json",
+        "VERSION"
+    )
+    foreach ($relative in $requiredScaffoldFiles) {
+        $candidate = Join-Path $outputRoot $relative
+        if (-not (Test-Path -LiteralPath $candidate)) {
+            throw "Materialized template is missing required scaffold file: $relative"
+        }
+    }
+
+    # Structural sanity for the CI scaffolds (same cheap checks as the F2 workflow gate:
+    # a workflow without on:/jobs: keys is silently ignored by both platforms).
+    foreach ($workflowRelative in @(".gitea/workflows/ci.yml", ".github/workflows/ci.yml")) {
+        $workflowText = Get-Content -LiteralPath (Join-Path $outputRoot $workflowRelative) -Raw
+        if ($workflowText -notmatch "(?m)^on:") {
+            throw "$workflowRelative is missing a top-level 'on:' trigger key"
+        }
+        if ($workflowText -notmatch "(?m)^jobs:") {
+            throw "$workflowRelative is missing a top-level 'jobs:' key"
+        }
+        if ($workflowText -notmatch [regex]::Escape($PluginName)) {
+            throw "$workflowRelative was not template-tokenized (no '$PluginName' project paths)"
+        }
+    }
+    $githubMirrorText = Get-Content -LiteralPath (Join-Path $outputRoot ".github/workflows/ci.yml") -Raw
+    if ($githubMirrorText -notmatch [regex]::Escape("github.server_url == 'https://github.com'")) {
+        throw ".github/workflows/ci.yml mirror is missing the github.com server guard"
+    }
+
     $nugetConfig = @"
 <?xml version="1.0" encoding="utf-8"?>
 <configuration>
@@ -192,6 +231,18 @@ try {
 
     Invoke-Checked dotnet @("build", $pluginProject, "-c", $Configuration)
     Invoke-Checked dotnet @("test", $testProject, "-c", $Configuration)
+
+    # Prove the parity guard actually EXECUTED (a filter that matches nothing still
+    # exits 0, so a silently-dropped parity class would otherwise go unnoticed).
+    Write-Host "> dotnet test $testProject -c $Configuration --no-build --filter Category=Parity"
+    $parityOutput = & dotnet test $testProject -c $Configuration --no-build --filter "Category=Parity" 2>&1 | ForEach-Object { "$_" }
+    $parityOutput | ForEach-Object { Write-Host $_ }
+    if ($LASTEXITCODE -ne 0) {
+        throw "Parity test lane failed with exit code $LASTEXITCODE"
+    }
+    if (-not ($parityOutput -match 'Passed:\s*[1-9]')) {
+        throw "Parity lane ran zero tests - the ${PluginName}EcosystemParityTests class did not execute"
+    }
 } finally {
     $env:DOTNET_CLI_HOME = $oldDotnetHome
     $env:NUGET_PACKAGES = $oldNugetPackages

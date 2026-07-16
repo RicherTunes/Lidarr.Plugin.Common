@@ -10,8 +10,11 @@
     <ProjectReference Include="$(LidarrPluginCommonRepoRoot)/src/Abstractions/Lidarr.Plugin.Abstractions.csproj" />
   </ItemGroup>
   <ItemGroup Condition="'$(LidarrPluginCommonRepoRoot)' == ''">
-    <PackageReference Include="Lidarr.Plugin.Common" Version="$(LidarrPluginCommonVersion)" />
-    <PackageReference Include="Lidarr.Plugin.Abstractions" Version="$(LidarrPluginCommonVersion)" />
+    <!-- VersionOverride (not Version): the repo uses Central Package Management
+         (Directory.Packages.props); a plain Version attribute is a NU1008 error there.
+         These two stay project-local because their default tracks LidarrPluginCommonVersion. -->
+    <PackageReference Include="Lidarr.Plugin.Common" VersionOverride="$(LidarrPluginCommonVersion)" />
+    <PackageReference Include="Lidarr.Plugin.Abstractions" VersionOverride="$(LidarrPluginCommonVersion)" />
   </ItemGroup>
   <ItemGroup>
     <None Include="../../plugin.json" Link="plugin.json" CopyToOutputDirectory="PreserveNewest" />

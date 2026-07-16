@@ -7,6 +7,11 @@
   "minHostVersion": "3.0.0",
   "description": "Lidarr streaming plugin scaffold.",
   "author": "RicherTunes",
+  "homepage": "https://github.com/RicherTunes/MyPlugin",
+  "license": "MIT",
+  "tags": ["streaming", "lidarr-plugin"],
+  "targetFramework": "net8.0",
+  "rootNamespace": "MyPlugin",
   "capabilities": [],
   "requiredSettings": [
     "BaseUrl"
