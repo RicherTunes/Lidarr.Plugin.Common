@@ -84,7 +84,6 @@ var response = await deduplicator.GetOrCreateAsync(key, () => http.SendAsync(req
 ## Authentication
 
 - `OAuthDelegatingHandler` — injects bearer tokens; single-flight refresh on 401 using an `IStreamingTokenProvider`.
-- `TokenDelegatingHandler` — simple bearer injection when refresh is managed elsewhere.
 - `StreamingTokenManager<TSession, TCredentials>` — refresh/persist session models, timer-assisted expiry checks, and events.
 
 Example: token manager + OAuth handler
