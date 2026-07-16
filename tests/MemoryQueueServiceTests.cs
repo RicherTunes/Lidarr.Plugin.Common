@@ -10,6 +10,7 @@ using Xunit;
 namespace Lidarr.Plugin.Common.Tests
 {
     [Trait("Category", "Unit")]
+    [Trait("Category", "CLI")]
     public class MemoryQueueServiceTests
     {
         [Fact]
