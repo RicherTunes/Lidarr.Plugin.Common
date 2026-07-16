@@ -1,0 +1,41 @@
+<Project>
+  <!-- Central Package Management: single source of truth for package versions,
+       parity-checked by Common's EcosystemParityTestBase. -->
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <!-- Disable for Lidarr/Common submodule projects (they pin their own versions). -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('ext\Lidarr')) OR $(MSBuildProjectDirectory.Contains('ext/Lidarr'))">
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+
+  <ItemGroup Label="Host-coupled pins (Lidarr ALC safety)">
+    <!-- These versions MUST match the Lidarr host's shipped AssemblyVersions. A merged
+         plugin DLL that stamps a different major AssemblyRef fails multi-plugin discovery
+         at runtime ("Could not load file or assembly ... Version=X.0.0.0"). Do NOT accept
+         dependency-bot bumps for these; Common's parity check
+         (DirectoryPackagesProps_HostVersionsMatchCanonical) fails CI on drift.
+         Declared up front even though the scaffold does not reference them all yet -
+         the pin must exist BEFORE the first reference is added, not after the first
+         runtime crash. -->
+    <PackageVersion Include="Microsoft.Extensions.DependencyInjection" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Http" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Logging" Version="8.0.1" />
+    <PackageVersion Include="Microsoft.Extensions.Logging.Abstractions" Version="8.0.3" />
+    <PackageVersion Include="FluentValidation" Version="9.5.4" />
+    <PackageVersion Include="NLog" Version="5.4.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Test Framework">
+    <!-- xunit must match Lidarr.Plugin.Common.TestKit's xunit.extensibility.core pin
+         (2.9.3) or NuGet reports NU1107. -->
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.11.1" />
+  </ItemGroup>
+
+  <ItemGroup Label="Build Tools">
+    <PackageVersion Include="Microsoft.SourceLink.GitHub" Version="8.0.0" />
+  </ItemGroup>
+</Project>

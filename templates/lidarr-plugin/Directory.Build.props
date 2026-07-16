@@ -1,0 +1,60 @@
+<Project>
+  <!--
+    MyPlugin Directory.Build.props
+    Mirrors the ecosystem-canonical build settings enforced by Common's
+    EcosystemParityTestBase (see tests/MyPlugin.Tests/MyPluginEcosystemParityTests.cs).
+    Every marker below is parity-checked - do not remove without updating the parity suite.
+  -->
+
+  <!-- ILRepack Configuration: disable the package's automatic target. Ecosystem plugins
+       drive merging through their own packaging target instead (see any sibling plugin's
+       PluginPackaging.targets); the scaffold has no packaging target yet, but the flag is
+       load-bearing the moment ILRepack.Lib.MSBuild.Task is referenced. -->
+  <PropertyGroup>
+    <ILRepackEnabled>false</ILRepackEnabled>
+  </PropertyGroup>
+
+  <!-- Version Management: the VERSION file at the repo root is the single version source. -->
+  <PropertyGroup>
+    <VersionFromFile Condition="'$(VersionFromFile)' == '' And Exists('$(MSBuildThisFileDirectory)VERSION')">$([System.IO.File]::ReadAllText('$(MSBuildThisFileDirectory)VERSION').Trim())</VersionFromFile>
+    <Version Condition="'$(Version)' == '' And '$(VersionFromFile)' != ''">$(VersionFromFile)</Version>
+    <Version Condition="'$(Version)' == ''">0.1.0-dev</Version>
+    <VersionPrefix Condition="'$(VersionPrefix)' == '' And '$(VersionFromFile)' != ''">$([System.Text.RegularExpressions.Regex]::Match('$(VersionFromFile)', '^\d+\.\d+\.\d+').Value)</VersionPrefix>
+    <AssemblyVersion Condition="'$(AssemblyVersion)' == '' And '$(VersionPrefix)' != ''">$(VersionPrefix).0</AssemblyVersion>
+    <FileVersion Condition="'$(FileVersion)' == '' And '$(VersionPrefix)' != ''">$(VersionPrefix).0</FileVersion>
+  </PropertyGroup>
+
+  <!-- SourceLink + Deterministic Builds -->
+  <PropertyGroup>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+    <Deterministic>true</Deterministic>
+  </PropertyGroup>
+
+  <!-- Common Build Settings -->
+  <PropertyGroup>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <!-- Warning Suppressions (keep this list SHORT - suppressions accrete silently).
+       NU1507: CPM + multiple NuGet sources without source mapping is expected while the
+       ecosystem restores from both a local/private feed and nuget.org. -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);NU1507</NoWarn>
+  </PropertyGroup>
+
+  <!-- SourceLink Package Reference (version supplied by Directory.Packages.props) -->
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" PrivateAssets="All" />
+  </ItemGroup>
+
+  <!-- Exclude external/submodule directories from central package management.
+       The ecosystem vendors Common as ext/Lidarr.Plugin.Common (plus optional ext/Lidarr
+       host sources); those repos manage their own package versions. -->
+  <PropertyGroup Condition="$(MSBuildProjectDirectory.Contains('ext\Lidarr')) OR $(MSBuildProjectDirectory.Contains('ext/Lidarr'))">
+    <ManagePackageVersionsCentrally>false</ManagePackageVersionsCentrally>
+  </PropertyGroup>
+</Project>
