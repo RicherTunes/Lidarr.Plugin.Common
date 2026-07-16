@@ -173,4 +173,41 @@ public class HostBridgeDownloadTrackerTests
         Assert.NotNull(item);
         Assert.Equal("find-me", item.DownloadId);
     }
+
+    [Fact]
+    public void LegacyV1_DownloadIdIdentityRemainsCaseSensitive()
+    {
+        var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>();
+        store.AddOrReplace(new HostBridgeDownloadItem { DownloadId = "Release-ID" });
+        store.AddOrReplace(new HostBridgeDownloadItem { DownloadId = "release-id" });
+
+        Assert.Equal(2, store.GetSnapshot().Count());
+        Assert.True(store.TryGet("Release-ID", out var upper));
+        Assert.True(store.TryGet("release-id", out var lower));
+        Assert.NotSame(upper, lower);
+    }
+
+    [Fact]
+    public void LegacyV1_DownloadIdIdentityPreservesNonBlankWhitespace()
+    {
+        var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>();
+        var item = new HostBridgeDownloadItem { DownloadId = "  raw-id  " };
+        store.AddOrReplace(item);
+
+        Assert.True(store.TryGet("  raw-id  ", out var raw));
+        Assert.Same(item, raw);
+        Assert.False(store.TryGet("raw-id", out _));
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(" ")]
+    [InlineData("\t\r\n")]
+    public void LegacyV1_TryGetBlankReturnsFalse(string downloadId)
+    {
+        var store = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>();
+
+        Assert.False(store.TryGet(downloadId, out var item));
+        Assert.Null(item);
+    }
 }

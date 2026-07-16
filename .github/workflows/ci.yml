@@ -47,6 +47,13 @@ jobs:
       # Matches the Build step's -m:1. --blame-hang-timeout catches post-test process-exit hangs.
       - name: Test (full unit suite, excl. quarantined)
         run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release --filter "State!=Quarantined" -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 10m
+      # C-10: the six CLI test files (CLIServicesTryGet/ConfigCommand/JsonConfigService/
+      # MemoryQueueService/FileStateService/LiveDashboard) are Compile-Removed from the test
+      # project unless IncludeCLIFramework=true, and no lane ever set it -- those tests were
+      # dead in CI. This step opts the optional CLI framework in and runs the Category=CLI
+      # slice (the same six classes) so the CLI surface stays compiled and tested.
+      - name: Test (CLI framework lane, Category=CLI)
+        run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release -p:IncludeCLIFramework=true --filter "Category=CLI&State!=Quarantined" -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 10m
 
   template:
     if: ${{ github.server_url == 'https://github.com' }}
