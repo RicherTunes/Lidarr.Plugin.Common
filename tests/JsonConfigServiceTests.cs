@@ -17,6 +17,7 @@ namespace Lidarr.Plugin.Common.Tests
     /// - Error handling
     /// </summary>
     [Trait("Category", "Unit")]
+    [Trait("Category", "CLI")]
     public class JsonConfigServiceTests : IDisposable
     {
         private readonly string _tempConfigRoot;

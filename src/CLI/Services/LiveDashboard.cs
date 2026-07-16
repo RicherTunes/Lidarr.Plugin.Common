@@ -73,7 +73,12 @@ namespace Lidarr.Plugin.Common.CLI.Services
                 while (!cancellationToken.IsCancellationRequested)
                 {
                     await DisplayDashboardAsync();
-                    await Task.Delay(RefreshIntervalMs, cancellationToken);
+                    // Clamp to >= 1ms: Task.Delay(0) completes synchronously, and with the
+                    // mock/headless render path also synchronous the loop degenerates into a
+                    // synchronous hot spin on the StartAsync caller's thread — StartAsync never
+                    // returns and the process cannot exit (hung the CLI test lane's testhost).
+                    // A 1ms floor keeps the loop asynchronous and cancellation-responsive.
+                    await Task.Delay(Math.Max(RefreshIntervalMs, 1), cancellationToken);
                 }
             }
             catch (OperationCanceledException)
@@ -135,8 +140,13 @@ namespace Lidarr.Plugin.Common.CLI.Services
                     _ => "❓"
                 };
 
-                var progressBar = item.Status == DownloadStatus.Downloading 
-                    ? $"[{item.ProgressPercent}/100]" 
+                // [[ / ]] render as literal brackets. Table.AddRow(params string[]) parses each
+                // cell as Spectre markup EAGERLY (even when the layout is never written to a
+                // console), so unescaped "[67/100]" is a malformed markup tag and threw
+                // InvalidOperationException for every Downloading row — the real root cause of
+                // the "flaky on Linux CI" LiveDashboard quarantines (Issue #318).
+                var progressBar = item.Status == DownloadStatus.Downloading
+                    ? $"[[{item.ProgressPercent}/100]]"
                     : item.Status.ToString();
 
                 queueTable.AddRow(
