@@ -5,6 +5,7 @@ $script:AllowedCategories = @(
     'Benchmark',
     'BugFix',
     'Calibration',
+    'CLI',
     'Compliance',
     'Concurrency',
     'Configuration',
