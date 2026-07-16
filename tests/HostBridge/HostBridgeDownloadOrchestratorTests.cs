@@ -1,5 +1,8 @@
 using System;
+using System.Collections.Concurrent;
 using System.IO;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.HostBridge;
@@ -60,25 +63,83 @@ public class HostBridgeDownloadOrchestratorTests
             StartedAt = DateTime.UtcNow
         };
 
-    private static async Task<HostBridgeDownloadItem> WaitForPersistedItemAsync(
-        string path,
-        string downloadId,
-        Func<HostBridgeDownloadItem, bool> predicate)
+    private static readonly JsonSerializerOptions PersistenceJsonOptions = new()
     {
-        var deadline = DateTime.UtcNow.AddSeconds(5);
-        while (DateTime.UtcNow < deadline)
-        {
-            var reloaded = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
-                persistencePath: path);
-            if (reloaded.TryGet(downloadId, out var loaded) && loaded is not null && predicate(loaded))
-            {
-                return loaded;
-            }
+        Converters = { new JsonStringEnumConverter() },
+    };
 
-            await Task.Delay(50);
+    private static HostBridgeDownloadItem? ReadPersistedItem(string path, string downloadId)
+    {
+        var persisted = JsonSerializer.Deserialize<HostBridgeDownloadItemDto[]>(
+            File.ReadAllText(path),
+            PersistenceJsonOptions);
+        if (persisted is null)
+            return null;
+
+        foreach (var dto in persisted)
+        {
+            if (dto.DownloadId == downloadId)
+                return dto.ToItem();
         }
 
-        throw new TimeoutException("Persisted tracker state did not match the expected predicate.");
+        return null;
+    }
+
+    [Fact]
+    public async Task StartTrackedDownloadAsync_RetriesFinalPersistenceWhenSnapshotIsTemporarilyLocked()
+    {
+        if (!OperatingSystem.IsWindows())
+            return;
+
+        var path = Path.Combine(Path.GetTempPath(), "hbd-locked-" + Guid.NewGuid().ToString("N"), "tracker.json");
+        try
+        {
+            var warnings = new ConcurrentQueue<string>();
+            var tracker = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
+                persistencePath: path,
+                onWarn: warnings.Enqueue);
+            var orchestrator = MakeOrchestrator();
+            var mayComplete = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var mutationFinished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var persistenceFinished = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            orchestrator.FinalPersistenceCompleted = id => persistenceFinished.TrySetResult(id);
+
+            var downloadId = await orchestrator.StartTrackedDownloadAsync(
+                new TestSettings(),
+                tracker,
+                Snapshotter(),
+                ItemFactory(),
+                async (_, __, item, ___) =>
+                {
+                    await mayComplete.Task.ConfigureAwait(false);
+                    item.SetStatus(HostBridgeDownloadItemStatus.Completed);
+                    item.SetProgress(100);
+                    item.CompletedAt = DateTime.UtcNow;
+                    mutationFinished.TrySetResult(true);
+                });
+
+            using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read))
+            {
+                mayComplete.TrySetResult(true);
+                await mutationFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                await Task.Delay(100);
+            }
+
+            Assert.Equal(downloadId, await persistenceFinished.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            var loaded = ReadPersistedItem(path, downloadId);
+
+            Assert.NotNull(loaded);
+            Assert.Equal(HostBridgeDownloadItemStatus.Completed, loaded!.GetStatus());
+            Assert.Empty(warnings);
+        }
+        finally
+        {
+            var dir = Path.GetDirectoryName(path);
+            if (!string.IsNullOrEmpty(dir))
+            {
+                try { Directory.Delete(dir, recursive: true); } catch { /* best-effort */ }
+            }
+        }
     }
 
     // ---------------------------------------------------------------------------
@@ -275,7 +336,8 @@ public class HostBridgeDownloadOrchestratorTests
             var tracker = new HostBridgeDownloadTrackerStore<HostBridgeDownloadItem>(
                 persistencePath: path);
             var settings = new TestSettings();
-            var doWorkFinished = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var persistenceFinished = new TaskCompletionSource<string>(TaskCreationOptions.RunContinuationsAsynchronously);
+            orchestrator.FinalPersistenceCompleted = id => persistenceFinished.TrySetResult(id);
 
             var downloadId = await orchestrator.StartTrackedDownloadAsync(
                 settings,
@@ -287,19 +349,17 @@ public class HostBridgeDownloadOrchestratorTests
                     item.SetStatus(HostBridgeDownloadItemStatus.Completed);
                     item.SetProgress(100);
                     item.CompletedAt = DateTime.UtcNow;
-                    doWorkFinished.TrySetResult(true);
                     return Task.CompletedTask;
                 });
 
-            await doWorkFinished.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            var loaded = await WaitForPersistedItemAsync(
-                path,
-                downloadId,
-                item => item.GetStatus() == HostBridgeDownloadItemStatus.Completed &&
-                        Math.Abs(item.GetProgress() - 100) < 0.0001 &&
-                        item.CompletedAt.HasValue);
+            Assert.Equal(downloadId, await persistenceFinished.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+            var loaded = ReadPersistedItem(path, downloadId);
 
-            Assert.Equal(downloadId, loaded.DownloadId);
+            Assert.NotNull(loaded);
+            Assert.Equal(downloadId, loaded!.DownloadId);
+            Assert.Equal(HostBridgeDownloadItemStatus.Completed, loaded.GetStatus());
+            Assert.Equal(100, loaded.GetProgress());
+            Assert.True(loaded.CompletedAt.HasValue);
         }
         finally
         {
