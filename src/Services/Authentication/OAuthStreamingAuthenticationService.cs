@@ -40,6 +40,16 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         Task<TSession> RefreshTokensAsync(TSession session);
 
         /// <summary>
+        /// Refreshes an expired access token using refresh token, observing caller cancellation.
+        /// Cancellation abandons the caller's wait; it never aborts a shared in-flight refresh
+        /// (refresh tokens are single-use on rotating providers).
+        /// </summary>
+        /// <param name="session">Current session with refresh token</param>
+        /// <param name="cancellationToken">Token that abandons this caller's wait when cancelled</param>
+        /// <returns>Updated session with new tokens</returns>
+        Task<TSession> RefreshTokensAsync(TSession session, CancellationToken cancellationToken) => RefreshTokensAsync(session);
+
+        /// <summary>
         /// Revokes tokens and ends session
         /// </summary>
         /// <param name="session">Session to revoke</param>
@@ -94,6 +104,14 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         private string? _lastRefreshTokenIn;
         private TSession? _lastRefreshSessionOut;
         private readonly TimeSpan _flowExpirationTime = TimeSpan.FromMinutes(10);
+
+        /// <summary>
+        /// Upper bound on a single token-refresh attempt. A hung auth server must never
+        /// wedge every token consumer for the process lifetime — when this elapses the
+        /// in-flight refresh fails with <see cref="TimeoutException"/> (without clearing
+        /// the cached session) and the next caller retries. Override to tune per service.
+        /// </summary>
+        protected virtual TimeSpan RefreshTimeout => TimeSpan.FromSeconds(100);
 
         protected OAuthStreamingAuthenticationService(IPKCEGenerator pkceGenerator = null)
         {
@@ -203,10 +221,22 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// <summary>
         /// Refreshes tokens using refresh token with automatic retry
         /// </summary>
-        public virtual async Task<TSession> RefreshTokensAsync(TSession session)
+        public virtual Task<TSession> RefreshTokensAsync(TSession session)
+            => RefreshTokensAsync(session, CancellationToken.None);
+
+        /// <summary>
+        /// Refreshes tokens using refresh token with automatic retry, observing caller cancellation.
+        /// The refresh itself is bounded by <see cref="RefreshTimeout"/> so a hung auth server can
+        /// never wedge every token consumer for the process lifetime. Caller cancellation abandons
+        /// only this caller's wait — the shared single-flight refresh keeps running so an
+        /// already-consumed (rotated) refresh token is never stranded mid-flight.
+        /// </summary>
+        public virtual async Task<TSession> RefreshTokensAsync(TSession session, CancellationToken cancellationToken)
         {
             if (session == null)
                 throw new ArgumentNullException(nameof(session));
+
+            cancellationToken.ThrowIfCancellationRequested();
 
             var refreshToken = ExtractRefreshToken(session);
             if (string.IsNullOrEmpty(refreshToken))
@@ -225,7 +255,6 @@ namespace Lidarr.Plugin.Common.Services.Authentication
             //           flight; both await the same Task. (The leader is the one caller
             //           that observed both fields empty/non-matching and started the work.)
             Task<TSession> inFlight;
-            bool initiator;
             lock (_refreshLock)
             {
                 // Tier 1: late-arrival cache hit (the Windows-CI hot path).
@@ -241,43 +270,59 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                 }
 
                 // Tier 2: join in-flight promise.
-                if (_pendingRefresh != null)
+                if (_pendingRefresh == null)
                 {
-                    inFlight = _pendingRefresh;
-                    initiator = false;
+                    var started = DoRefreshAsync(refreshToken);
+                    _pendingRefresh = started;
+
+                    // Clear the promise when the WORK completes — not when the initiating
+                    // caller stops waiting. A caller that abandons its wait (cancellation)
+                    // must leave the promise in place so late joiners still coalesce onto
+                    // the same single-use refresh instead of starting a second one.
+                    _ = started.ContinueWith(
+                        t =>
+                        {
+                            _ = t.Exception; // observe faults; they surface via awaiting callers
+                            lock (_refreshLock)
+                            {
+                                if (ReferenceEquals(_pendingRefresh, started))
+                                {
+                                    _pendingRefresh = null;
+                                }
+                            }
+                        },
+                        CancellationToken.None,
+                        TaskContinuationOptions.ExecuteSynchronously,
+                        TaskScheduler.Default);
+
+                    // Use the local reference: if DoRefreshAsync completed synchronously the
+                    // continuation above has already run (Monitor is reentrant) and nulled
+                    // _pendingRefresh — reading the field back here would NRE.
+                    inFlight = started;
                 }
                 else
                 {
-                    _pendingRefresh = DoRefreshAsync(refreshToken);
                     inFlight = _pendingRefresh;
-                    initiator = true;
                 }
             }
 
-            try
-            {
-                return await inFlight.ConfigureAwait(false);
-            }
-            finally
-            {
-                if (initiator)
-                {
-                    lock (_refreshLock)
-                    {
-                        if (ReferenceEquals(_pendingRefresh, inFlight))
-                        {
-                            _pendingRefresh = null;
-                        }
-                    }
-                }
-            }
+            // WaitAsync: caller cancellation abandons this caller's wait without cancelling
+            // the shared refresh; DoRefreshAsync bounds the work itself via RefreshTimeout,
+            // so the promise always completes even when a provider override hangs.
+            return await inFlight.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
 
         private async Task<TSession> DoRefreshAsync(string refreshToken)
         {
+            using var timeoutCts = new CancellationTokenSource(RefreshTimeout);
             try
             {
-                var refreshedSession = await RefreshTokensInternalAsync(refreshToken).ConfigureAwait(false);
+                // WaitAsync bounds even legacy single-arg overrides that ignore the token:
+                // the abandoned provider call may keep running in the background, but token
+                // consumers stop being wedged behind it (audit C-4/C-5).
+                var refreshedSession = await RefreshTokensInternalAsync(refreshToken, timeoutCts.Token)
+                    .WaitAsync(timeoutCts.Token)
+                    .ConfigureAwait(false);
                 await CacheSessionAsync(refreshedSession).ConfigureAwait(false);
                 // Publish to the late-arrival cache so callers that reach the gate AFTER
                 // _pendingRefresh clears still dedup against this completed refresh.
@@ -287,6 +332,19 @@ namespace Lidarr.Plugin.Common.Services.Authentication
                     _lastRefreshSessionOut = refreshedSession;
                 }
                 return refreshedSession;
+            }
+            catch (OperationCanceledException ex) when (timeoutCts.IsCancellationRequested)
+            {
+                // Timeout is transient: the persisted session (and its refresh token) may
+                // still be perfectly valid, so do NOT clear it — clearing here is the
+                // forced-relogin bug class (T-2). Evict only the late-arrival cache so the
+                // next caller performs a real refresh attempt.
+                lock (_refreshLock)
+                {
+                    _lastRefreshTokenIn = null;
+                    _lastRefreshSessionOut = null;
+                }
+                throw new TimeoutException($"OAuth token refresh timed out after {RefreshTimeout.TotalSeconds:F0}s", ex);
             }
             catch (Exception ex)
             {
@@ -348,6 +406,16 @@ namespace Lidarr.Plugin.Common.Services.Authentication
         /// Refreshes tokens using refresh token (service-specific implementation)
         /// </summary>
         protected abstract Task<TSession> RefreshTokensInternalAsync(string refreshToken);
+
+        /// <summary>
+        /// Cancellation-aware variant of <see cref="RefreshTokensInternalAsync(string)"/>.
+        /// The token fires when <see cref="RefreshTimeout"/> elapses; well-behaved overrides
+        /// should forward it into their HTTP call so the request is actually aborted.
+        /// Defaults to the legacy single-argument override, whose wait is still bounded
+        /// externally even though the provider call itself cannot be interrupted.
+        /// </summary>
+        protected virtual Task<TSession> RefreshTokensInternalAsync(string refreshToken, CancellationToken cancellationToken)
+            => RefreshTokensInternalAsync(refreshToken);
 
         /// <summary>
         /// Revokes tokens (service-specific implementation)
