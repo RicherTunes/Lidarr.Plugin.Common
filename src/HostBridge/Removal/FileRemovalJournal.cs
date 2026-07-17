@@ -428,6 +428,13 @@ public sealed class FileRemovalJournal : IRemovalJournal
 
     public ValueTask DisposeAsync()
     {
+        Close();
+        return ValueTask.CompletedTask;
+    }
+
+    // Synchronous release seam for callers running under a lock (the durable removal coordinator).
+    internal void Close()
+    {
         lock (_gate)
         {
             if (!_disposed)
@@ -436,8 +443,6 @@ public sealed class FileRemovalJournal : IRemovalJournal
                 _lease.UnbindJournal(this);
             }
         }
-
-        return ValueTask.CompletedTask;
     }
 
     private RemovalJournalResult<RemovalJournalEntry> ReadCore(RemovalOperationId operationId)

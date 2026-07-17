@@ -99,13 +99,19 @@ public sealed class SafeOwnedRoot : IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
+        Close();
+        return ValueTask.CompletedTask;
+    }
+
+    // Synchronous release seam for callers running under a lock (the durable removal coordinator),
+    // where awaiting DisposeAsync is impossible. The underlying work is purely synchronous.
+    internal void Close()
+    {
         if (!_disposed)
         {
             _disposed = true;
             _markerStream.Dispose();
         }
-
-        return ValueTask.CompletedTask;
     }
 
     internal RemovalJournalError RevalidateForJournal()

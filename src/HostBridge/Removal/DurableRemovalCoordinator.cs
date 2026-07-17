@@ -146,7 +146,7 @@ internal static class DurableRemovalCoordinator
         }
         finally
         {
-            Sync(root.DisposeAsync());
+            root.Close();
         }
     }
 
@@ -247,12 +247,12 @@ internal static class DurableRemovalCoordinator
             }
             finally
             {
-                Sync(journal.DisposeAsync());
+                journal.Close();
             }
         }
         finally
         {
-            Sync(lease.DisposeAsync());
+            lease.Close();
         }
     }
 
@@ -512,13 +512,19 @@ internal static class DurableRemovalCoordinator
         _ => DateTime.SpecifyKind(value, DateTimeKind.Utc),
     };
 
-    private static T Sync<T>(ValueTask<T> valueTask) =>
-        valueTask.IsCompletedSuccessfully ? valueTask.Result : valueTask.AsTask().GetAwaiter().GetResult();
-
-    private static void Sync(ValueTask valueTask)
+    // Every SafeOwnedRoot / RemovalWriterLease / FileRemovalJournal operation the coordinator calls
+    // completes synchronously (they return ValueTask.FromResult over synchronous cores), and the
+    // coordinator runs under the store's membership lock where awaiting is impossible. Consuming the
+    // already-completed ValueTask via .Result is the intended fast path — never a blocking
+    // sync-over-async drain (see the sync-over-async CI gate). Disposal uses the sync Close() seams.
+    private static T Sync<T>(ValueTask<T> valueTask)
     {
-        if (valueTask.IsCompletedSuccessfully)
-            return;
-        valueTask.AsTask().GetAwaiter().GetResult();
+        if (!valueTask.IsCompleted)
+        {
+            throw new InvalidOperationException(
+                "Removal primitives are expected to complete synchronously under the membership lock.");
+        }
+
+        return valueTask.Result;
     }
 }

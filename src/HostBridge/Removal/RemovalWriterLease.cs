@@ -88,9 +88,12 @@ public sealed class RemovalWriterLease : IAsyncDisposable
 
     public ValueTask DisposeAsync()
     {
-        _stream.Dispose();
+        Close();
         return ValueTask.CompletedTask;
     }
+
+    // Synchronous release seam for callers running under a lock (the durable removal coordinator).
+    internal void Close() => _stream.Dispose();
 }
 
 public readonly record struct RemovalWriterLeaseAcquireResult(
