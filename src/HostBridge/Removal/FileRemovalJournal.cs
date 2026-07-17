@@ -104,6 +104,17 @@ public sealed class FileRemovalJournal : IRemovalJournal
                 return ValueTask.FromResult(Failure<FileRemovalJournal>(RemovalJournalError.Corrupt));
             }
 
+            // Bounded sweep of crash-abandoned temps (5B item 2). A process killed mid-write leaves
+            // a uniquely named <id>.json.tmp.<pid>.<hex> orphan; before this sweep a single orphan
+            // made every Create/Scan fail closed as Corrupt, bricking the journal. The single-writer
+            // lease is already held here, so no live temp can exist — every temp is stale. Fail
+            // closed only on genuine corruption (BoundsExceeded on an oversized directory); never on
+            // stale temps. Non-temp, non-canonical entries are left untouched so the later fail-closed
+            // Scan still surfaces them.
+            var sweep = SweepAbandonedTemps(directory);
+            if (sweep != RemovalJournalError.None)
+                return ValueTask.FromResult(Failure<FileRemovalJournal>(sweep));
+
             var journal = new FileRemovalJournal(root, lease, directory, hooks);
             return ValueTask.FromResult(lease.TryBindJournal(root, journal)
                 ? Success(journal)
@@ -639,6 +650,85 @@ public sealed class FileRemovalJournal : IRemovalJournal
     // (matches RelativeStagingPath's canonical separator — 5B item 4).
     private static string CanonicalQuarantine(RemovalOperationId operationId) =>
         string.Join('/', ".lpc-trash", operationId.ToString());
+
+    private static RemovalJournalError SweepAbandonedTemps(string directory)
+    {
+        try
+        {
+            // Bound the enumeration exactly like ScanAsync/CreateCore: an oversized directory is
+            // suspicious, so fail closed rather than attempt an unbounded delete loop.
+            var entries = Directory
+                .EnumerateFileSystemEntries(directory, "*", SearchOption.TopDirectoryOnly)
+                .Take(MaxRecordCount + 1)
+                .ToArray();
+            if (entries.Length > MaxRecordCount)
+                return RemovalJournalError.BoundsExceeded;
+
+            foreach (var entry in entries)
+            {
+                var name = Path.GetFileName(entry);
+                if (!IsTempFileName(name) || SafeOwnedRoot.IsLink(entry))
+                    continue;
+
+                try
+                {
+                    File.Delete(entry);
+                }
+                catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+                {
+                    // Best-effort: a temp we cannot unlink is left in place. It is uniquely named
+                    // and never referenced by any operation, and the bounded enumeration above keeps
+                    // its presence from bricking the journal.
+                }
+            }
+
+            return RemovalJournalError.None;
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return RemovalJournalError.DurabilityFailure;
+        }
+    }
+
+    // Strict temp grammar mirroring TempFileName: <32hex>.json.tmp.<digits>.<32hex>.
+    private static bool IsTempFileName(string name)
+    {
+        const string middle = ".json.tmp.";
+        if (name.Length < 32 + middle.Length + 1 + 1
+            || !Guid.TryParseExact(name.AsSpan(0, 32), "N", out _)
+            || name.AsSpan(0, 32).IndexOfAnyInRange('A', 'F') >= 0)
+        {
+            return false;
+        }
+
+        var rest = name.AsSpan(32);
+        if (!rest.StartsWith(middle, StringComparison.Ordinal))
+            return false;
+
+        var tail = rest[middle.Length..];
+        var dot = tail.IndexOf('.');
+        if (dot <= 0)
+            return false;
+
+        var pid = tail[..dot];
+        foreach (var character in pid)
+        {
+            if (character is < '0' or > '9')
+                return false;
+        }
+
+        var random = tail[(dot + 1)..];
+        if (random.Length != 32 || random.IndexOfAnyInRange('A', 'F') >= 0)
+            return false;
+
+        foreach (var character in random)
+        {
+            if (!(character is >= '0' and <= '9' or >= 'a' and <= 'f'))
+                return false;
+        }
+
+        return true;
+    }
 
     private static bool IsCanonicalRecordFileName(string name)
     {

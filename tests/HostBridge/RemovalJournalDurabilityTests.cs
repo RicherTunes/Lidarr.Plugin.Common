@@ -319,6 +319,78 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
     }
 
     [Fact]
+    public async Task Open_SweepsCrashAbandonedTempsAndKeepsCanonicalRecordsUsable()
+    {
+        // 5B item 2: a crash mid-write leaves a *.json.tmp.<pid>.<hex> orphan. Before the sweep,
+        // that single orphan made Create/Scan fail closed (Corrupt) forever, bricking the journal.
+        await using var root = await OpenRootAsync(Path.Combine(_fixtureRoot, "temp-sweep"));
+        var acquired = await RemovalWriterLease.AcquireAsync(root);
+        Assert.True(acquired.Acquired, acquired.Code);
+        await using var lease = acquired.Lease!;
+        var journalDir = Path.Combine(
+            root.RootPath,
+            FileRemovalJournal.RelativeJournalDirectory.Replace('/', Path.DirectorySeparatorChar));
+
+        RemovalOperationId durableId;
+        var firstOpen = await FileRemovalJournal.OpenAsync(root, lease);
+        Assert.True(firstOpen.Succeeded, firstOpen.Error.ToString());
+        var record = NewRecord(root, RemovalOperationId.New(), DateTime.UtcNow);
+        durableId = record.OperationId;
+        Assert.True((await firstOpen.Value!.CreateAsync(record)).Succeeded);
+        await firstOpen.Value!.DisposeAsync();
+
+        // Simulate crash-abandoned temps left behind by an interrupted write/replace.
+        for (var index = 0; index < 3; index++)
+        {
+            File.WriteAllText(
+                Path.Combine(
+                    journalDir,
+                    FileRemovalJournal.TempFileName(RemovalOperationId.New(), 4242 + index, Guid.NewGuid().ToString("N"))),
+                "partial write interrupted by crash");
+        }
+
+        var reopened = await FileRemovalJournal.OpenAsync(root, lease);
+
+        Assert.True(reopened.Succeeded, reopened.Error.ToString());
+        await using var journal = reopened.Value!;
+        Assert.Empty(Directory.EnumerateFiles(journalDir, "*.tmp.*"));
+        var scan = await journal.ScanAsync();
+        Assert.True(scan.Succeeded, scan.Error.ToString());
+        Assert.Single(scan.Entries);
+        Assert.Equal(durableId, scan.Entries[0].Record.OperationId);
+        Assert.True((await journal.CreateAsync(NewRecord(root, RemovalOperationId.New(), DateTime.UtcNow))).Succeeded);
+    }
+
+    [Fact]
+    public async Task Open_LeavesGenuinelyCorruptEntriesForFailClosedScan()
+    {
+        // The sweep must only remove temps — a non-temp, non-canonical file is genuine corruption
+        // and must survive open so Scan still fails closed.
+        await using var root = await OpenRootAsync(Path.Combine(_fixtureRoot, "temp-sweep-corrupt"));
+        var acquired = await RemovalWriterLease.AcquireAsync(root);
+        Assert.True(acquired.Acquired, acquired.Code);
+        await using var lease = acquired.Lease!;
+        var journalDir = Path.Combine(
+            root.RootPath,
+            FileRemovalJournal.RelativeJournalDirectory.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(journalDir);
+        File.WriteAllText(
+            Path.Combine(journalDir, FileRemovalJournal.TempFileName(RemovalOperationId.New(), 7, Guid.NewGuid().ToString("N"))),
+            "stale temp");
+        File.WriteAllText(Path.Combine(journalDir, "unknown.entry"), "{}");
+
+        var opened = await FileRemovalJournal.OpenAsync(root, lease);
+
+        Assert.True(opened.Succeeded, opened.Error.ToString());
+        await using var journal = opened.Value!;
+        Assert.Empty(Directory.EnumerateFiles(journalDir, "*.tmp.*"));
+        Assert.True(File.Exists(Path.Combine(journalDir, "unknown.entry")));
+        var scan = await journal.ScanAsync();
+        Assert.False(scan.Succeeded);
+        Assert.Equal(RemovalJournalError.Corrupt, scan.Error);
+    }
+
+    [Fact]
     public void JournalNames_AreFrozenAndConcurrentTempsAreUnique()
     {
         var id = new RemovalOperationId(Guid.Parse("00112233-4455-6677-8899-aabbccddeeff"));
