@@ -12,8 +12,11 @@ public sealed class RemovalNeutralizationTests : IDisposable
         Path.GetTempPath(), "removal-neutralization-" + Guid.NewGuid().ToString("N"));
 
     [Fact]
-    public async Task DeleteData_IsDeferredAfterBoundedCancellation()
+    public async Task DeleteData_DurablyDeletesAfterBoundedCancellation()
     {
+        // Flipped 5A neutralization pin: deleteData:true under AttemptV2 now performs the durable
+        // two-phase deletion (quarantine -> physical delete) once the worker is bounded, instead of
+        // returning QUEUE_REMOVAL_DEFERRED.
         var fixture = DownloadingFixture();
 
         var result = await fixture.Store.RemoveAttemptAsync(
@@ -22,13 +25,13 @@ public sealed class RemovalNeutralizationTests : IDisposable
             fixture.StopWorker,
             TimeSpan.FromSeconds(1));
 
-        Assert.Equal(HostBridgeQueueResultCodes.RemovalDeferred, result.Code);
-        Assert.True(result.MappingRetained);
-        Assert.False(result.StateRemoved);
-        Assert.False(result.FilesRemoved);
-        Assert.True(fixture.Store.TryGet(fixture.Key.DownloadId, out _));
-        Assert.True(Directory.Exists(fixture.OutputPath));
-        Assert.True(File.Exists(Path.Combine(fixture.OutputPath, "partial.flac")));
+        Assert.Equal(HostBridgeQueueResultCodes.Removed, result.Code);
+        Assert.False(result.MappingRetained);
+        Assert.True(result.StateRemoved);
+        Assert.True(result.FilesRemoved);
+        Assert.Equal(QueueRemovalDurability.Durable, result.Durability);
+        Assert.False(fixture.Store.TryGet(fixture.Key.DownloadId, out _));
+        Assert.False(Directory.Exists(fixture.OutputPath));
     }
 
     [Fact]

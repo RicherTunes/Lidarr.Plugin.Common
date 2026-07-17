@@ -366,6 +366,66 @@ public sealed class FileRemovalJournal : IRemovalJournal
         }
     }
 
+    /// <summary>
+    /// Removes a fully-completed record from the WAL entirely (both the live and any compacted
+    /// mapping), keeping the journal bounded in steady state. Unlike compaction (which retains a
+    /// <c>.compacted</c> tombstone), purge is the coordinator's terminal step once the physical
+    /// deletion is durably recorded — the operation is resolved and needs no further replay.
+    /// Idempotent: purging an already-absent record succeeds.
+    /// </summary>
+    internal ValueTask<RemovalJournalResult<bool>> PurgeAsync(
+        RemovalJournalEntry expectedCompleted,
+        CancellationToken cancellationToken = default)
+    {
+        lock (_gate)
+        {
+            return PurgeCore(expectedCompleted, cancellationToken);
+        }
+    }
+
+    private ValueTask<RemovalJournalResult<bool>> PurgeCore(
+        RemovalJournalEntry expectedCompleted,
+        CancellationToken cancellationToken)
+    {
+        ThrowIfDisposed();
+        var availability = AvailabilityError();
+        if (availability != RemovalJournalError.None)
+            return ValueTask.FromResult(Failure<bool>(availability));
+        cancellationToken.ThrowIfCancellationRequested();
+        var completionValid =
+            expectedCompleted.Record is { State: RemovalJournalState.Deleted, CompletionKind: RemovalCompletionKind.AutomaticDeletion }
+            || expectedCompleted.Record is { State: RemovalJournalState.Quarantined, CompletionKind: RemovalCompletionKind.ManualAcknowledgement };
+        if (!completionValid)
+        {
+            return ValueTask.FromResult(Failure<bool>(RemovalJournalError.InvalidTransition));
+        }
+
+        var path = RecordPath(expectedCompleted.Record.OperationId);
+        var compactedPath = CompactedPath(expectedCompleted.Record.OperationId);
+        if (!File.Exists(path) && !File.Exists(compactedPath))
+            return ValueTask.FromResult(Success(true));
+
+        var current = ReadCore(expectedCompleted.Record.OperationId);
+        if (!current.Succeeded)
+            return ValueTask.FromResult(Failure<bool>(current.Error));
+        if (current.Value != expectedCompleted)
+            return ValueTask.FromResult(Failure<bool>(RemovalJournalError.Conflict));
+
+        try
+        {
+            if (File.Exists(path) && !SafeOwnedRoot.IsLink(path))
+                File.Delete(path);
+            if (File.Exists(compactedPath) && !SafeOwnedRoot.IsLink(compactedPath))
+                File.Delete(compactedPath);
+            FlushDirectoryIfSupported(_directory);
+            return ValueTask.FromResult(Success(true));
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return ValueTask.FromResult(Failure<bool>(RemovalJournalError.DurabilityFailure));
+        }
+    }
+
     public ValueTask DisposeAsync()
     {
         lock (_gate)

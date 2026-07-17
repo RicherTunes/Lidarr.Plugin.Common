@@ -59,11 +59,17 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
     }
 
     [Fact]
-    public async Task ActiveRemoval_PersistsCancelling_AwaitsWorker_ThenDefersDeletion()
+    public async Task ActiveRemoval_PersistsCancelling_AwaitsWorker_ThenDurablyDeletes()
     {
+        // Flipped 5A neutralization pin: after the worker is bounded and the attempt reaches the
+        // terminal Cancelled state, the durable coordinator quarantines then deletes the owned tree
+        // and drops the mapping. Safe on the re-grab path because the attempt is now terminal and
+        // AnotherActiveOwnerExists is checked (under the lock) before the quarantine move.
         var path = TempFile();
+        var output = Child("active");
+        File.WriteAllText(Path.Combine(output, "partial.flac"), "cancelled work");
         var store = V2(path, OwnedRoot());
-        var added = store.TryAddAttempt(Item("active", Child("active")));
+        var added = store.TryAddAttempt(Item("active", output));
         var preparing = store.TryTransition(added.Current, HostBridgeDownloadAttemptState.Preparing);
         var downloading = store.TryTransition(preparing.Current, HostBridgeDownloadAttemptState.Downloading);
         var releaseWorker = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -82,12 +88,13 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         releaseWorker.SetResult();
         var result = await removal;
         Assert.True(observedCancelling);
-        Assert.False(result.StateRemoved);
-        Assert.False(result.FilesRemoved);
-        Assert.True(result.MappingRetained);
-        Assert.Equal(HostBridgeQueueResultCodes.RemovalDeferred, result.Code);
-        Assert.True(store.TryGet("ACTIVE", out var retained));
-        Assert.Equal(HostBridgeDownloadAttemptState.Cancelled, retained!.AttemptState);
+        Assert.True(result.StateRemoved);
+        Assert.True(result.FilesRemoved);
+        Assert.False(result.MappingRetained);
+        Assert.Equal(HostBridgeQueueResultCodes.Removed, result.Code);
+        Assert.Equal(QueueRemovalDurability.Durable, result.Durability);
+        Assert.False(store.TryGet("ACTIVE", out _));
+        Assert.False(Directory.Exists(output));
     }
 
     [Fact]
@@ -170,7 +177,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(Directory.Exists(output));
     }
 
-    [Theory(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Theory]
     [InlineData("root")]
     [InlineData("sibling")]
     [InlineData("dotdot")]
@@ -199,7 +206,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(Directory.Exists(Path.GetFullPath(target)));
     }
 
-    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Fact]
     public async Task MissingInRootTarget_IsSuccessfulDeleteNoOp()
     {
         var root = OwnedRoot();
@@ -217,7 +224,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.False(result.SafeOrphanRetained);
     }
 
-    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Fact]
     public async Task AnotherActiveAttemptOwningCanonicalPath_PreservesFilesButRemovesTerminalRecord()
     {
         var output = Child("shared");
@@ -239,7 +246,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(Directory.Exists(output));
     }
 
-    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Fact]
     public async Task TerminalAttempt_SkipsWorkerAndRemovesDirectly()
     {
         var output = Child("terminal");
@@ -289,7 +296,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(Directory.Exists(output));
     }
 
-    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Fact]
     public async Task TargetReparsePoint_IsRetainedAndOutsideTargetSurvives()
     {
         var root = OwnedRoot();
@@ -312,7 +319,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Fact]
     public async Task RootReparsePoint_IsRetainedAndOutsideTargetSurvives()
     {
         Directory.CreateDirectory(_root);
@@ -337,7 +344,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Fact]
     public async Task NestedReparsePoint_IsRetainedAndOutsideTargetSurvives()
     {
         var target = Child("nested-link");
@@ -363,7 +370,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Fact]
     public async Task DanglingTargetSymlink_IsRetainedOnUnix()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -385,7 +392,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(IsReparsePoint(link));
     }
 
-    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Fact]
     public async Task DanglingRootSymlink_IsRetainedOnUnix()
     {
         if (OperatingSystem.IsWindows()) return;
@@ -408,7 +415,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(IsReparsePoint(linkRoot));
     }
 
-    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Fact]
     public async Task RootFilesystemIdentityIsRevalidatedAtRemovalTime()
     {
         Directory.CreateDirectory(_root);
@@ -435,7 +442,7 @@ public sealed class HostBridgeQueueRemovalV2Tests : IDisposable
         Assert.True(File.Exists(evidence));
     }
 
-    [Fact(Skip = "Superseded by 5A deferred removal until the durable coordinator lands.")]
+    [Fact]
     public async Task ConfiguredOwnedRoot_IsSnapshottedWhenStoreIsConstructed()
     {
         var originalRoot = OwnedRoot();

@@ -958,14 +958,47 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
                 if (deleteData)
                 {
-                    return new(
+                    // Durable removal coordinator (5B): with no owned staging root the store cannot
+                    // safely delete, so deletion stays deferred (mapping + files retained).
+                    if (string.IsNullOrWhiteSpace(_ownedStagingRoot))
+                    {
+                        return new(
+                            true, false, false, true,
+                            HostBridgeQueueResultCodes.RemovalDeferred, null, attached);
+                    }
+
+                    // The re-grab guard and the mapping removal both run here, while the membership
+                    // and mutation locks are still held, so the guard is atomic through the
+                    // coordinator's quarantine move.
+                    var outcome = DurableRemovalCoordinator.Execute(
+                        _ownedStagingRoot,
+                        removalKey,
+                        attached.OutputPath,
+                        () => AnotherActiveOwnerExists(attached),
+                        () =>
+                        {
+                            _items.TryRemove(new KeyValuePair<string, TItem>(normalized, attached));
+                            return PersistToDisk();
+                        },
+                        _options.UtcNow,
+                        _options.RemovalFaultHooks,
+                        _options.RemovalJournalHooks);
+
+                    warning = outcome.Warning;
+                    result = new HostBridgeQueueRemovalResult<TItem>(
                         true,
-                        false,
-                        false,
-                        true,
-                        HostBridgeQueueResultCodes.RemovalDeferred,
-                        null,
-                        attached);
+                        outcome.StateRemoved,
+                        outcome.FilesRemoved,
+                        outcome.SafeOrphanRetained,
+                        outcome.Code,
+                        outcome.OperationId,
+                        attached)
+                    {
+                        RemovalState = outcome.State,
+                        Durability = outcome.Durability,
+                    };
+
+                    goto notify;
                 }
 
                 if (!_items.TryRemove(new KeyValuePair<string, TItem>(normalized, attached)))
@@ -983,9 +1016,53 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             }
         }
 
+        notify:
+
         try { NotifyWarning(warning); }
         catch { /* removal is committed; diagnostics observers cannot roll it back */ }
         return result;
+    }
+
+    /// <summary>
+    /// Replays or abandons any crash-interrupted durable removals recorded in the removal WAL under
+    /// the owned staging root. Plugins call this once at startup (AttemptV2 stores with a configured
+    /// <see cref="HostBridgeQueueStoreOptions.OwnedStagingRoot"/>) so an interrupted deletion is
+    /// finished — or safely abandoned — before normal queue operations resume. Idempotent and safe
+    /// to re-run after a crash mid-recovery. No-op for LegacyV1 or when no owned staging root is
+    /// configured.
+    /// </summary>
+    public Task RecoverPendingRemovalsAsync(CancellationToken cancellationToken = default)
+    {
+        if (_options.ContractVersion != HostBridgeQueueContractVersion.AttemptV2
+            || string.IsNullOrWhiteSpace(_ownedStagingRoot))
+        {
+            return Task.CompletedTask;
+        }
+
+        return DurableRemovalCoordinator.RecoverAsync(_ownedStagingRoot, _options.UtcNow, cancellationToken);
+    }
+
+    // Cross-attempt re-grab guard for the durable removal coordinator. Returns true when any OTHER
+    // tracked attempt is still active (non-terminal) at the same canonical directory as the one
+    // being removed — that download now owns the directory lifecycle, so its files must be kept.
+    private bool AnotherActiveOwnerExists(TItem removing)
+    {
+        if (string.IsNullOrWhiteSpace(removing.OutputPath))
+            return false;
+
+        foreach (var kvp in _items)
+        {
+            var other = kvp.Value;
+            if (other is null || ReferenceEquals(other, removing) || string.IsNullOrWhiteSpace(other.OutputPath))
+                continue;
+            if (SameDirectory(other.OutputPath, removing.OutputPath)
+                && !HostBridgeQueueStateMachine.IsTerminal(other.AttemptState))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>

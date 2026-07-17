@@ -71,6 +71,11 @@ public sealed class HostBridgeQueueStoreOptions
     public Func<DateTime> UtcNow { get; init; } = static () => DateTime.UtcNow;
     public Func<HostBridgeDownloadItemDto, HostBridgeRestartEvidence> RestartEvidence { get; init; } =
         static _ => new(false, false, false);
+
+    // Test-only crash-fault injection seams for the durable removal coordinator. Internal so they
+    // never widen the public API; visible to the friend test assembly via InternalsVisibleTo.
+    internal IDurableRemovalFaultHooks? RemovalFaultHooks { get; init; }
+    internal IRemovalJournalDurabilityHooks? RemovalJournalHooks { get; init; }
 }
 
 public static class HostBridgeQueueResultCodes
