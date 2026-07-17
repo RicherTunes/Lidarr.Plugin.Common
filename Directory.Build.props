@@ -16,7 +16,7 @@
          Plugins pinning to chore branch tip are claiming 1.18.0 in their plugin.json /
          manifest.json so the cross-plugin VersionContract test stays in lockstep.
          Drop the "-dev" suffix and tag as v1.18.0 when the next release is cut. -->
-    <Version>1.18.0-dev</Version>
+    <Version>1.18.0</Version>
   </PropertyGroup>
 
   <PropertyGroup Condition="'$(UseHostVersioning)' == 'true'">

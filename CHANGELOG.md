@@ -35,6 +35,20 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+## [1.18.0] - 2026-07-17
+**Upgrade note:** Re-pin to pick up cover-art/lyrics tag embedding, the OAuth-refresh timeout, HLS/CENC/query-optimizer seams, the AttemptV2 durable-queue groundwork, and a dependency-CVE gate that patched two High CVEs; recompile-only for all ecosystem plugins.
+
+**Highlights**
+- `IAudioArtworkEmbedder` / `TagLibAudioArtworkEmbedder` + `LyricsEnricher` tag embedding so downloaded albums import into Lidarr with embedded cover art and lyrics.
+- OAuth refresh path gains cancellation + a bounded `RefreshTimeout` so a hung auth server no longer wedges every token consumer.
+- New shared seams: `HlsManifestParser`, `CencSampleDecryptor`, `HeuristicQueryOptimizer`, `AlbumSizeEstimator`, `MultiQualityReleaseBuilder`, `CappedSearchChain`, and `SimpleDownloadOrchestrator` naming/payload-validation extension points.
+- AttemptV2 queue contract + durable-removal WAL groundwork in `HostBridge` (opt-in; LegacyV1 default is byte-for-byte unchanged).
+- New dependency-CVE CI gate; first run patched CVE-2026-33116 / CVE-2026-26171 (both High).
+
+**Breaking changes:** Numeric-only — `SearchStopPolicy` enum members were renumbered (`AccumulateAll` moved `0 → 1`, `Unknown = 0` added) and `SearchPlanExecutor` now throws on `Unknown`/undefined values instead of defaulting to accumulate-all. Callers that reference members by name (all ecosystem plugins) are unaffected on recompile; only code relying on the persisted raw integer `0` needs migration.
+**Deprecations:** `IAuthFailureGateRegistry` / `AuthFailureGateRegistry` marked `[Obsolete(error: false)]` (scheduled for removal in v2.0.0).
+**Dependency changes:** Added a direct floor `PackageReference` on `System.Security.Cryptography.Xml` 8.0.3 (patches transitive 8.0.2; both High CVEs). Retired the `Microsoft.CodeAnalysis.PublicApiAnalyzers` package and its baselines.
+
 ### Added
 - **templates/lidarr-plugin: a 6th plugin is now born with the ecosystem guards.** The scaffold gains (1) `MyPluginEcosystemParityTests` — an `EcosystemParityTestBase` subclass with the load-bearing `PluginAssembly` override (without it 14/16 behavior checks silently skip) and `[Trait("Category","Parity")]`, following the tidalarr/qobuzarr adoption pattern; (2) the root files that suite pins: `Directory.Build.props` (ILRepackEnabled=false, VERSION-file versioning, SourceLink, Deterministic, ext/ CPM exclusion), `Directory.Packages.props` (CPM + the six host-coupled canonical pins declared up front), `global.json` (8.0.100/latestFeature), `VERSION`, and the previously-missing `plugin.json` fields (homepage/license/tags/targetFramework/rootNamespace); (3) CI scaffolds — `.gitea/workflows/ci.yml` (secret scan, submodule pin guard, shared lint runner, dependency-CVE scan via `check-vulnerable-packages.ps1`, build+test verify) plus the `github.server_url`-guarded `.github/workflows/ci.yml` mirror, modeled on tidalarr's live workflows; and (4) `services.AddBridgeDefaults()` in the module scaffold so `Check_RegistersBridgeDefaults` passes from day one. The smoke script now additionally asserts the parity class + workflows + root files materialize, structurally validates both workflows (on:/jobs:/tokenization/github guard), and re-runs the materialized test project filtered to `Category=Parity` requiring >=1 executed test (a silently-dropped parity class can no longer fake-green the smoke). Honest limitation (documented in the template README): the smoke cannot execute the workflows themselves — they call Common-submodule scripts that exist only after the author vendors `ext/Lidarr.Plugin.Common`.
 - **Behavior-pinning tests for four previously-untested public APIs.** `BackendHealthDelegatingHandler` (stubbed inner handler + `FakeTimeProvider`: pass-through, mark-down only on connection-class failures, fast-fail short-circuit inside the grace window, grace expiry + success clearing the down-state, per-baseUrl cache slots under one provider, fixed-provider labeling), `NamedServiceRateLimiter` (blank-service normalization to the canonical name, shortcut helpers, dispose contract: query methods throw / record methods become silent no-ops / wrapped inner limiter disposed too), `PerformanceMonitor` (metric aggregation per kind, error/cache-hit rates, 1000-event buffer bound, `Reset`, exactly-one final flush on `Dispose`; the periodic timer is parked with a 1-hour interval so no wall-clock races), and `HealthCheckHelper` (healthy/unhealthy/exception result shapes, default + custom error codes, message transform, `OperationCanceledException` rethrow, token forwarding, and the characterized capability-drop asymmetry on the exception path).
@@ -81,6 +95,8 @@ Template to copy when drafting a release:
 
 ### Deprecations
 - **`IAuthFailureGateRegistry` / `AuthFailureGateRegistry`** — deprecated in favour of a direct `ConcurrentDictionary<string, AuthFailureGate>` per-plugin. A Wave-26 adversarial audit found zero non-test plugin consumers across all four ecosystem repos; every real call-site builds its own gate map so it can pair a custom `IAuthFailureHandler` (e.g. `SlidingWindowAuthFailureHandler`) with each gate — something the registry cannot do because it hard-wires `DefaultAuthFailureHandler` internally. Both the interface and the concrete class are marked `[Obsolete(error: false)]`. They will be removed in v2.0.0.
+
+[Full diff](https://github.com/RicherTunes/Lidarr.Plugin.Common/compare/v1.17.0...v1.18.0)
 
 ## [1.17.0] - 2026-05-25
 **Upgrade note:** Wave 21 parity helpers for plugin ecosystem consistency.

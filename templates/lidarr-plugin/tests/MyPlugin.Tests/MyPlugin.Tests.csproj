@@ -3,7 +3,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
-    <LidarrPluginCommonVersion>1.18.0-dev</LidarrPluginCommonVersion>
+    <LidarrPluginCommonVersion>1.18.0</LidarrPluginCommonVersion>
     <LidarrPluginCommonTestKitVersion>1.1.8</LidarrPluginCommonTestKitVersion>
   </PropertyGroup>
   <ItemGroup>
