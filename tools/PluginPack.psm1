@@ -205,16 +205,27 @@ function Resolve-PluginPackVersion {
     # MSBuild evaluation handles Directory.Build.props, VERSION files, expressions,
     # and conditional properties — authoritative whenever the fast path abstains.
     if (-not $version) {
+        $previousNoLogo = $env:DOTNET_NOLOGO
         try {
+            # On a cold machine/container the FIRST dotnet invocation prints the
+            # first-run banner, which contains version-shaped numbers ("Welcome to
+            # .NET 8.0!") — a substring regex over the whole output matched the
+            # banner's 8.0.x instead of the evaluated property. Suppress the banner
+            # AND only accept a line that IS a version, taking the last such line.
+            $env:DOTNET_NOLOGO = '1'
             $msbuildOutput = & dotnet msbuild $CsprojPath -getProperty:Version -nologo 2>&1
             if ($LASTEXITCODE -eq 0 -and $msbuildOutput) {
-                $rawVersion = ($msbuildOutput | Out-String).Trim()
-                if ($rawVersion -match '(\d+\.\d+\.\d+(?:-[\w\.\+]+)?)') {
-                    $version = $matches[1]
+                $versionLine = @($msbuildOutput | ForEach-Object { "$_".Trim() } |
+                    Where-Object { $_ -match '^\d+\.\d+\.\d+(?:-[\w\.\+]+)?$' }) | Select-Object -Last 1
+                if ($versionLine) {
+                    $version = $versionLine
                 }
             }
         } catch {
             # MSBuild evaluation failed; caller applies its own fallback.
+        }
+        finally {
+            $env:DOTNET_NOLOGO = $previousNoLogo
         }
     }
 
