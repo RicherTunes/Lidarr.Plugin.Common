@@ -19,6 +19,9 @@ Each release entry should include:
 Template to copy when drafting a release:
 
 ```md
+### Fixed
+- **`PluginPack.psm1` no longer names packages after conditional `<Version>` fallback literals.** The XML fast path read `<Version Condition="...">0.1.0-dev</Version>` verbatim (conditions are not statically evaluable), so a repo whose real version comes from a `VERSION` file via `Directory.Build.props` packaged as `0.1.0-dev` (caught staging qobuzarr v0.5.12). Extracted `Resolve-PluginPackVersion`: the XML fast path is trusted only for condition-free, expression-free nodes; everything else defers to `dotnet msbuild -getProperty:Version`. Self-tested (`scripts/tests/Test-PluginPackVersionResolution.ps1`, wired into both lint jobs).
+
 ## [x.y.z] - YYYY-MM-DD
 **Upgrade note:** <one-sentence summary>
 
