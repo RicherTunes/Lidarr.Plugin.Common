@@ -958,14 +958,47 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
                 if (deleteData)
                 {
-                    return new(
+                    // Durable removal coordinator (5B): with no owned staging root the store cannot
+                    // safely delete, so deletion stays deferred (mapping + files retained).
+                    if (string.IsNullOrWhiteSpace(_ownedStagingRoot))
+                    {
+                        return new(
+                            true, false, false, true,
+                            HostBridgeQueueResultCodes.RemovalDeferred, null, attached);
+                    }
+
+                    // The re-grab guard and the mapping removal both run here, while the membership
+                    // and mutation locks are still held, so the guard is atomic through the
+                    // coordinator's quarantine move.
+                    var outcome = DurableRemovalCoordinator.Execute(
+                        _ownedStagingRoot,
+                        removalKey,
+                        attached.OutputPath,
+                        () => AnotherActiveOwnerExists(attached),
+                        () =>
+                        {
+                            _items.TryRemove(new KeyValuePair<string, TItem>(normalized, attached));
+                            return PersistToDisk();
+                        },
+                        _options.UtcNow,
+                        _options.RemovalFaultHooks,
+                        _options.RemovalJournalHooks);
+
+                    warning = outcome.Warning;
+                    result = new HostBridgeQueueRemovalResult<TItem>(
                         true,
-                        false,
-                        false,
-                        true,
-                        HostBridgeQueueResultCodes.RemovalDeferred,
-                        null,
-                        attached);
+                        outcome.StateRemoved,
+                        outcome.FilesRemoved,
+                        outcome.SafeOrphanRetained,
+                        outcome.Code,
+                        outcome.OperationId,
+                        attached)
+                    {
+                        RemovalState = outcome.State,
+                        Durability = outcome.Durability,
+                    };
+
+                    goto notify;
                 }
 
                 if (!_items.TryRemove(new KeyValuePair<string, TItem>(normalized, attached)))
@@ -983,9 +1016,53 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
             }
         }
 
+        notify:
+
         try { NotifyWarning(warning); }
         catch { /* removal is committed; diagnostics observers cannot roll it back */ }
         return result;
+    }
+
+    /// <summary>
+    /// Replays or abandons any crash-interrupted durable removals recorded in the removal WAL under
+    /// the owned staging root. Plugins call this once at startup (AttemptV2 stores with a configured
+    /// <see cref="HostBridgeQueueStoreOptions.OwnedStagingRoot"/>) so an interrupted deletion is
+    /// finished — or safely abandoned — before normal queue operations resume. Idempotent and safe
+    /// to re-run after a crash mid-recovery. No-op for LegacyV1 or when no owned staging root is
+    /// configured.
+    /// </summary>
+    public Task RecoverPendingRemovalsAsync(CancellationToken cancellationToken = default)
+    {
+        if (_options.ContractVersion != HostBridgeQueueContractVersion.AttemptV2
+            || string.IsNullOrWhiteSpace(_ownedStagingRoot))
+        {
+            return Task.CompletedTask;
+        }
+
+        return DurableRemovalCoordinator.RecoverAsync(_ownedStagingRoot, _options.UtcNow, cancellationToken);
+    }
+
+    // Cross-attempt re-grab guard for the durable removal coordinator. Returns true when any OTHER
+    // tracked attempt is still active (non-terminal) at the same canonical directory as the one
+    // being removed — that download now owns the directory lifecycle, so its files must be kept.
+    private bool AnotherActiveOwnerExists(TItem removing)
+    {
+        if (string.IsNullOrWhiteSpace(removing.OutputPath))
+            return false;
+
+        foreach (var kvp in _items)
+        {
+            var other = kvp.Value;
+            if (other is null || ReferenceEquals(other, removing) || string.IsNullOrWhiteSpace(other.OutputPath))
+                continue;
+            if (SameDirectory(other.OutputPath, removing.OutputPath)
+                && !HostBridgeQueueStateMachine.IsTerminal(other.AttemptState))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -1037,6 +1114,9 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
     private List<TItem> CollectSnapshot(out bool evicted)
     {
+        if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2)
+            return CollectSnapshotV2(out evicted);
+
         var now = DateTime.UtcNow;
         var result = new List<TItem>(_items.Count);
         evicted = false;
@@ -1045,8 +1125,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         {
             var item = kv.Value;
             var status = item.GetStatus();
-            if (_options.ContractVersion == HostBridgeQueueContractVersion.LegacyV1 &&
-                IsTerminalStatus(status) &&
+            if (IsTerminalStatus(status) &&
                 item.CompletedAt.HasValue &&
                 now - item.CompletedAt.Value > _completedRetention)
             {
@@ -1059,6 +1138,55 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         }
 
         return result;
+    }
+
+    // Bounded auto-eviction for AttemptV2 terminal items (5B item 3). Policy: count high-water
+    // ONLY, oldest-terminal-first. TTL eviction is deliberately OFF for AttemptV2 — terminal items
+    // are UI/audit evidence and the store pins that a year-old CompletedImportable survives the
+    // snapshot sweep (unlike LegacyV1's time-boxed sweep). The count high-water is a pure safety
+    // valve: when more than TerminalRetentionHighWater terminal items are retained, the oldest
+    // surplus terminal items (by StateChangedAtUtc) are evicted so a burst of completions never
+    // drifts into the hard 10k/16 MB persistence bound and its explicit rejection. Non-terminal
+    // items are never evicted, so restart-recovery evidence is always preserved. Eviction removes
+    // only the queue mapping (never files) and runs under the membership lock, so it cannot race the
+    // durable removal coordinator.
+    private List<TItem> CollectSnapshotV2(out bool evicted)
+    {
+        evicted = false;
+        var survivors = new List<KeyValuePair<string, TItem>>(_items.Count);
+        List<KeyValuePair<string, TItem>>? terminal = null;
+
+        foreach (var kv in _items)
+        {
+            if (HostBridgeQueueStateMachine.IsTerminal(kv.Value.AttemptState))
+                (terminal ??= new List<KeyValuePair<string, TItem>>()).Add(kv);
+
+            survivors.Add(kv);
+        }
+
+        var highWater = _options.TerminalRetentionHighWater;
+        if (terminal is not null && highWater >= 0 && terminal.Count > highWater)
+        {
+            var evictKeys = terminal
+                .OrderBy(static kv => kv.Value.StateChangedAtUtc)
+                .ThenBy(static kv => kv.Key, StringComparer.Ordinal)
+                .Take(terminal.Count - highWater)
+                .Select(static kv => kv.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var kv in terminal)
+            {
+                if (evictKeys.Contains(kv.Key) && _items.TryRemove(kv))
+                    evicted = true;
+            }
+
+            return survivors
+                .Where(kv => !evictKeys.Contains(kv.Key))
+                .Select(static kv => kv.Value)
+                .ToList();
+        }
+
+        return survivors.Select(static kv => kv.Value).ToList();
     }
 
     private static string NormalizeDownloadId(string downloadId)

@@ -267,6 +267,129 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
         Assert.Equal(4096, Encoding.UTF8.GetByteCount(RelativeStagingPath.Create(new string('a', 4096)).Value));
     }
 
+    [Theory]
+    [InlineData("attempts/download", "attempts/download")]
+    [InlineData("attempts\\download", "attempts/download")]
+    [InlineData("a\\b/c\\d", "a/b/c/d")]
+    [InlineData(".lpc-trash\\00112233445566778899aabbccddeeff", ".lpc-trash/00112233445566778899aabbccddeeff")]
+    public void RelativeStagingPath_CanonicalValueIsForwardSlashOnEveryOs(string input, string expected)
+    {
+        // OS-portability (5B item 4): the serialized value must be identical regardless of the
+        // writing OS's Path.DirectorySeparatorChar, so a state file round-trips Windows<->Linux.
+        Assert.Equal(expected, RelativeStagingPath.Create(input).Value);
+    }
+
+    [Theory]
+    [InlineData("/etc/passwd")]
+    [InlineData("\\windows\\system32")]
+    public void RelativeStagingPath_RejectsLeadingSeparatorOnEveryOs(string value)
+    {
+        Assert.Throws<ArgumentException>(() => RelativeStagingPath.Create(value));
+    }
+
+    [Fact]
+    public void RelativeStagingPath_ToNativeRelativePath_UsesHostSeparator()
+    {
+        var native = RelativeStagingPath.Create("a\\b/c").ToNativeRelativePath();
+        Assert.Equal(string.Join(Path.DirectorySeparatorChar, "a", "b", "c"), native);
+    }
+
+    [Fact]
+    public async Task Record_QuarantineAndSourceSerializeWithForwardSlashOnEveryOs()
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        var record = fixture.NewRecord() with
+        {
+            SourceRelativePath = RelativeStagingPath.Create("attempts\\deep\\download"),
+        };
+        var created = await fixture.Journal.CreateAsync(record);
+        Assert.True(created.Succeeded, created.Error.ToString());
+
+        var json = File.ReadAllText(fixture.RecordPath(record.OperationId));
+
+        // No escaped backslash separators leak into the persisted document on any OS.
+        Assert.DoesNotContain("\\\\", json, StringComparison.Ordinal);
+        Assert.Contains("\"attempts/deep/download\"", json, StringComparison.Ordinal);
+        Assert.Contains(".lpc-trash/" + record.OperationId, json, StringComparison.Ordinal);
+
+        // And it reads back cleanly (byte-canonical) on the current OS.
+        var read = await fixture.Journal.ReadAsync(record.OperationId);
+        Assert.True(read.Succeeded, read.Error.ToString());
+        Assert.Equal("attempts/deep/download", read.Value.Record.SourceRelativePath.Value);
+    }
+
+    [Fact]
+    public async Task Open_SweepsCrashAbandonedTempsAndKeepsCanonicalRecordsUsable()
+    {
+        // 5B item 2: a crash mid-write leaves a *.json.tmp.<pid>.<hex> orphan. Before the sweep,
+        // that single orphan made Create/Scan fail closed (Corrupt) forever, bricking the journal.
+        await using var root = await OpenRootAsync(Path.Combine(_fixtureRoot, "temp-sweep"));
+        var acquired = await RemovalWriterLease.AcquireAsync(root);
+        Assert.True(acquired.Acquired, acquired.Code);
+        await using var lease = acquired.Lease!;
+        var journalDir = Path.Combine(
+            root.RootPath,
+            FileRemovalJournal.RelativeJournalDirectory.Replace('/', Path.DirectorySeparatorChar));
+
+        RemovalOperationId durableId;
+        var firstOpen = await FileRemovalJournal.OpenAsync(root, lease);
+        Assert.True(firstOpen.Succeeded, firstOpen.Error.ToString());
+        var record = NewRecord(root, RemovalOperationId.New(), DateTime.UtcNow);
+        durableId = record.OperationId;
+        Assert.True((await firstOpen.Value!.CreateAsync(record)).Succeeded);
+        await firstOpen.Value!.DisposeAsync();
+
+        // Simulate crash-abandoned temps left behind by an interrupted write/replace.
+        for (var index = 0; index < 3; index++)
+        {
+            File.WriteAllText(
+                Path.Combine(
+                    journalDir,
+                    FileRemovalJournal.TempFileName(RemovalOperationId.New(), 4242 + index, Guid.NewGuid().ToString("N"))),
+                "partial write interrupted by crash");
+        }
+
+        var reopened = await FileRemovalJournal.OpenAsync(root, lease);
+
+        Assert.True(reopened.Succeeded, reopened.Error.ToString());
+        await using var journal = reopened.Value!;
+        Assert.Empty(Directory.EnumerateFiles(journalDir, "*.tmp.*"));
+        var scan = await journal.ScanAsync();
+        Assert.True(scan.Succeeded, scan.Error.ToString());
+        Assert.Single(scan.Entries);
+        Assert.Equal(durableId, scan.Entries[0].Record.OperationId);
+        Assert.True((await journal.CreateAsync(NewRecord(root, RemovalOperationId.New(), DateTime.UtcNow))).Succeeded);
+    }
+
+    [Fact]
+    public async Task Open_LeavesGenuinelyCorruptEntriesForFailClosedScan()
+    {
+        // The sweep must only remove temps — a non-temp, non-canonical file is genuine corruption
+        // and must survive open so Scan still fails closed.
+        await using var root = await OpenRootAsync(Path.Combine(_fixtureRoot, "temp-sweep-corrupt"));
+        var acquired = await RemovalWriterLease.AcquireAsync(root);
+        Assert.True(acquired.Acquired, acquired.Code);
+        await using var lease = acquired.Lease!;
+        var journalDir = Path.Combine(
+            root.RootPath,
+            FileRemovalJournal.RelativeJournalDirectory.Replace('/', Path.DirectorySeparatorChar));
+        Directory.CreateDirectory(journalDir);
+        File.WriteAllText(
+            Path.Combine(journalDir, FileRemovalJournal.TempFileName(RemovalOperationId.New(), 7, Guid.NewGuid().ToString("N"))),
+            "stale temp");
+        File.WriteAllText(Path.Combine(journalDir, "unknown.entry"), "{}");
+
+        var opened = await FileRemovalJournal.OpenAsync(root, lease);
+
+        Assert.True(opened.Succeeded, opened.Error.ToString());
+        await using var journal = opened.Value!;
+        Assert.Empty(Directory.EnumerateFiles(journalDir, "*.tmp.*"));
+        Assert.True(File.Exists(Path.Combine(journalDir, "unknown.entry")));
+        var scan = await journal.ScanAsync();
+        Assert.False(scan.Succeeded);
+        Assert.Equal(RemovalJournalError.Corrupt, scan.Error);
+    }
+
     [Fact]
     public void JournalNames_AreFrozenAndConcurrentTempsAreUnique()
     {

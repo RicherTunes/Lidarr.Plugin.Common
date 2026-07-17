@@ -71,6 +71,22 @@ public sealed class HostBridgeQueueStoreOptions
     public Func<DateTime> UtcNow { get; init; } = static () => DateTime.UtcNow;
     public Func<HostBridgeDownloadItemDto, HostBridgeRestartEvidence> RestartEvidence { get; init; } =
         static _ => new(false, false, false);
+
+    /// <summary>
+    /// AttemptV2 count high-water for terminal (CompletedImportable/Failed/Cancelled) items. When
+    /// more than this many terminal items are retained, the oldest terminal items (by
+    /// <see cref="HostBridgeDownloadItem.StateChangedAtUtc"/>) are evicted from the snapshot even
+    /// before their retention TTL expires, keeping the store clear of the hard 10k/16 MB persistence
+    /// bound during a burst of completions. Default 5000 — deliberately generous (half the hard cap)
+    /// so normal use never loses UI evidence; non-terminal items are never evicted, so restart
+    /// recovery evidence is always preserved. Ignored for LegacyV1.
+    /// </summary>
+    public int TerminalRetentionHighWater { get; init; } = 5000;
+
+    // Test-only crash-fault injection seams for the durable removal coordinator. Internal so they
+    // never widen the public API; visible to the friend test assembly via InternalsVisibleTo.
+    internal IDurableRemovalFaultHooks? RemovalFaultHooks { get; init; }
+    internal IRemovalJournalDurabilityHooks? RemovalJournalHooks { get; init; }
 }
 
 public static class HostBridgeQueueResultCodes
