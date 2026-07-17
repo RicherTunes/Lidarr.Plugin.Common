@@ -1114,6 +1114,9 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
     private List<TItem> CollectSnapshot(out bool evicted)
     {
+        if (_options.ContractVersion == HostBridgeQueueContractVersion.AttemptV2)
+            return CollectSnapshotV2(out evicted);
+
         var now = DateTime.UtcNow;
         var result = new List<TItem>(_items.Count);
         evicted = false;
@@ -1122,8 +1125,7 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         {
             var item = kv.Value;
             var status = item.GetStatus();
-            if (_options.ContractVersion == HostBridgeQueueContractVersion.LegacyV1 &&
-                IsTerminalStatus(status) &&
+            if (IsTerminalStatus(status) &&
                 item.CompletedAt.HasValue &&
                 now - item.CompletedAt.Value > _completedRetention)
             {
@@ -1136,6 +1138,55 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         }
 
         return result;
+    }
+
+    // Bounded auto-eviction for AttemptV2 terminal items (5B item 3). Policy: count high-water
+    // ONLY, oldest-terminal-first. TTL eviction is deliberately OFF for AttemptV2 — terminal items
+    // are UI/audit evidence and the store pins that a year-old CompletedImportable survives the
+    // snapshot sweep (unlike LegacyV1's time-boxed sweep). The count high-water is a pure safety
+    // valve: when more than TerminalRetentionHighWater terminal items are retained, the oldest
+    // surplus terminal items (by StateChangedAtUtc) are evicted so a burst of completions never
+    // drifts into the hard 10k/16 MB persistence bound and its explicit rejection. Non-terminal
+    // items are never evicted, so restart-recovery evidence is always preserved. Eviction removes
+    // only the queue mapping (never files) and runs under the membership lock, so it cannot race the
+    // durable removal coordinator.
+    private List<TItem> CollectSnapshotV2(out bool evicted)
+    {
+        evicted = false;
+        var survivors = new List<KeyValuePair<string, TItem>>(_items.Count);
+        List<KeyValuePair<string, TItem>>? terminal = null;
+
+        foreach (var kv in _items)
+        {
+            if (HostBridgeQueueStateMachine.IsTerminal(kv.Value.AttemptState))
+                (terminal ??= new List<KeyValuePair<string, TItem>>()).Add(kv);
+
+            survivors.Add(kv);
+        }
+
+        var highWater = _options.TerminalRetentionHighWater;
+        if (terminal is not null && highWater >= 0 && terminal.Count > highWater)
+        {
+            var evictKeys = terminal
+                .OrderBy(static kv => kv.Value.StateChangedAtUtc)
+                .ThenBy(static kv => kv.Key, StringComparer.Ordinal)
+                .Take(terminal.Count - highWater)
+                .Select(static kv => kv.Key)
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var kv in terminal)
+            {
+                if (evictKeys.Contains(kv.Key) && _items.TryRemove(kv))
+                    evicted = true;
+            }
+
+            return survivors
+                .Where(kv => !evictKeys.Contains(kv.Key))
+                .Select(static kv => kv.Value)
+                .ToList();
+        }
+
+        return survivors.Select(static kv => kv.Value).ToList();
     }
 
     private static string NormalizeDownloadId(string downloadId)
