@@ -496,6 +496,30 @@ function Invoke-PluginCleanup {
         }
     }
 
+    # Remove orphaned culture satellite directories. `dotnet build -o <shared>` also
+    # lands the output of every project in the graph — including OutputItemType=Analyzer
+    # references, whose Roslyn dependencies bring cs/de/... Microsoft.CodeAnalysis
+    # satellite resources. The root-level sweep above never entered subdirectories, so
+    # those satellites shipped in the zip (caught staging qobuzarr v0.5.12: 26 extra
+    # DLLs). A satellite is kept only when its base assembly is kept.
+    foreach ($cultureDir in Get-ChildItem -LiteralPath $PublishPath -Directory) {
+        $satellites = @(Get-ChildItem -LiteralPath $cultureDir.FullName -Filter '*.resources.dll' -ErrorAction SilentlyContinue)
+        foreach ($satellite in $satellites) {
+            $baseDll = ($satellite.Name -replace '\.resources\.dll$', '.dll')
+            $isKept = $false
+            foreach ($pattern in $keepPatterns) {
+                if ($baseDll -like $pattern) { $isKept = $true; break }
+            }
+            if (-not $isKept) {
+                Write-Host "  Removing satellite: $($cultureDir.Name)/$($satellite.Name)" -ForegroundColor DarkGray
+                Remove-Item -LiteralPath $satellite.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if (-not (Get-ChildItem -LiteralPath $cultureDir.FullName -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $cultureDir.FullName -Force -ErrorAction SilentlyContinue
+        }
+    }
+
     # Remove deps.json (not needed for plugin)
     Get-ChildItem -LiteralPath $PublishPath -Filter '*.deps.json' | Remove-Item -Force -ErrorAction SilentlyContinue
 

@@ -100,6 +100,30 @@ try {
     Test-Assertion 'unresolved $(...) expression falls through to MSBuild evaluation' {
         (Resolve-PluginPackVersion -CsprojPath (Join-Path $proj3 'Expr.csproj')) -eq '7.7.7'
     }
+    # ---- Case 4: cleanup removes orphaned culture satellite dirs -----------------
+    # `dotnet build -o <shared>` also lands the OutputItemType=Analyzer project's
+    # Roslyn satellites (cs/de/... Microsoft.CodeAnalysis*.resources.dll) in the
+    # publish dir; the root-level sweep never entered subdirectories, so 26
+    # satellite DLLs nearly shipped in qobuzarr v0.5.12.
+    $pub = Join-Path $tempRoot 'publish'
+    New-Item -ItemType Directory -Path (Join-Path $pub 'cs') -Force | Out-Null
+    New-Item -ItemType Directory -Path (Join-Path $pub 'de') -Force | Out-Null
+    Set-Content (Join-Path $pub 'Lidarr.Plugin.Fake.dll') 'x'
+    Set-Content (Join-Path $pub 'plugin.json') '{}'
+    Set-Content (Join-Path $pub 'cs/Microsoft.CodeAnalysis.resources.dll') 'x'
+    Set-Content (Join-Path $pub 'de/Microsoft.CodeAnalysis.CSharp.resources.dll') 'x'
+    # A satellite belonging to a KEPT assembly must survive.
+    Set-Content (Join-Path $pub 'cs/Lidarr.Plugin.Fake.resources.dll') 'x'
+
+    Invoke-PluginCleanup -PublishPath $pub -AssemblyName 'Lidarr.Plugin.Fake'
+
+    Test-Assertion 'cleanup removes orphaned culture satellites' {
+        -not (Test-Path (Join-Path $pub 'cs/Microsoft.CodeAnalysis.resources.dll')) -and
+        -not (Test-Path (Join-Path $pub 'de'))
+    }
+    Test-Assertion 'cleanup keeps satellites of kept assemblies' {
+        Test-Path (Join-Path $pub 'cs/Lidarr.Plugin.Fake.resources.dll')
+    }
 }
 finally {
     Remove-Item -Recurse -Force $tempRoot -ErrorAction SilentlyContinue
