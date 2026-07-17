@@ -635,8 +635,10 @@ public sealed class FileRemovalJournal : IRemovalJournal
 
     private string CompactedPath(RemovalOperationId operationId) => Path.Combine(_directory, CompactedFileName(operationId));
 
+    // Forward-slash canonical so the persisted quarantine path is byte-identical across OSes
+    // (matches RelativeStagingPath's canonical separator — 5B item 4).
     private static string CanonicalQuarantine(RemovalOperationId operationId) =>
-        string.Join(Path.DirectorySeparatorChar, ".lpc-trash", operationId.ToString());
+        string.Join('/', ".lpc-trash", operationId.ToString());
 
     private static bool IsCanonicalRecordFileName(string name)
     {

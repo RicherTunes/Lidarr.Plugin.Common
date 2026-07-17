@@ -267,6 +267,57 @@ public sealed class RemovalJournalDurabilityTests : IDisposable
         Assert.Equal(4096, Encoding.UTF8.GetByteCount(RelativeStagingPath.Create(new string('a', 4096)).Value));
     }
 
+    [Theory]
+    [InlineData("attempts/download", "attempts/download")]
+    [InlineData("attempts\\download", "attempts/download")]
+    [InlineData("a\\b/c\\d", "a/b/c/d")]
+    [InlineData(".lpc-trash\\00112233445566778899aabbccddeeff", ".lpc-trash/00112233445566778899aabbccddeeff")]
+    public void RelativeStagingPath_CanonicalValueIsForwardSlashOnEveryOs(string input, string expected)
+    {
+        // OS-portability (5B item 4): the serialized value must be identical regardless of the
+        // writing OS's Path.DirectorySeparatorChar, so a state file round-trips Windows<->Linux.
+        Assert.Equal(expected, RelativeStagingPath.Create(input).Value);
+    }
+
+    [Theory]
+    [InlineData("/etc/passwd")]
+    [InlineData("\\windows\\system32")]
+    public void RelativeStagingPath_RejectsLeadingSeparatorOnEveryOs(string value)
+    {
+        Assert.Throws<ArgumentException>(() => RelativeStagingPath.Create(value));
+    }
+
+    [Fact]
+    public void RelativeStagingPath_ToNativeRelativePath_UsesHostSeparator()
+    {
+        var native = RelativeStagingPath.Create("a\\b/c").ToNativeRelativePath();
+        Assert.Equal(string.Join(Path.DirectorySeparatorChar, "a", "b", "c"), native);
+    }
+
+    [Fact]
+    public async Task Record_QuarantineAndSourceSerializeWithForwardSlashOnEveryOs()
+    {
+        await using var fixture = await JournalFixture.CreateAsync(_fixtureRoot);
+        var record = fixture.NewRecord() with
+        {
+            SourceRelativePath = RelativeStagingPath.Create("attempts\\deep\\download"),
+        };
+        var created = await fixture.Journal.CreateAsync(record);
+        Assert.True(created.Succeeded, created.Error.ToString());
+
+        var json = File.ReadAllText(fixture.RecordPath(record.OperationId));
+
+        // No escaped backslash separators leak into the persisted document on any OS.
+        Assert.DoesNotContain("\\\\", json, StringComparison.Ordinal);
+        Assert.Contains("\"attempts/deep/download\"", json, StringComparison.Ordinal);
+        Assert.Contains(".lpc-trash/" + record.OperationId, json, StringComparison.Ordinal);
+
+        // And it reads back cleanly (byte-canonical) on the current OS.
+        var read = await fixture.Journal.ReadAsync(record.OperationId);
+        Assert.True(read.Succeeded, read.Error.ToString());
+        Assert.Equal("attempts/deep/download", read.Value.Record.SourceRelativePath.Value);
+    }
+
     [Fact]
     public void JournalNames_AreFrozenAndConcurrentTempsAreUnique()
     {
