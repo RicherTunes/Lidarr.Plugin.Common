@@ -3,7 +3,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <LidarrPluginCommonVersion>1.18.0-dev</LidarrPluginCommonVersion>
+    <LidarrPluginCommonVersion>1.18.0</LidarrPluginCommonVersion>
   </PropertyGroup>
   <ItemGroup Condition="'$(LidarrPluginCommonRepoRoot)' != ''">
     <ProjectReference Include="$(LidarrPluginCommonRepoRoot)/src/Lidarr.Plugin.Common.csproj" />
