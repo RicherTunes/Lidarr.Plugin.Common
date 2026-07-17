@@ -154,6 +154,84 @@ function Assert-PluginAssemblyHasNoMergedReferences {
         throw "Plugin assembly '$AssemblyPath' still has external merged assembly reference(s): $($violations -join ', '). Rebuild with PluginPackaging.targets/ILRepack internalization before packaging; do not rely on removed sidecars."
     }
 }
+function Resolve-PluginPackVersion {
+    <#
+    .SYNOPSIS
+        Resolves the version the plugin package (zip name, metadata) should carry.
+    .DESCRIPTION
+        The XML fast path is trusted ONLY for a <Version>/<AssemblyVersion> node that
+        (a) carries no Condition attribute and (b) contains no $(...) expression.
+        A conditional node is a fallback literal MSBuild may never apply (e.g.
+        `<Version Condition="'$(Version)' == ''">0.1.0-dev</Version>` while
+        Directory.Build.props supplies the real version from a VERSION file) —
+        reading it verbatim once shipped a release candidate named 0.1.0-dev.
+        Everything else defers to `dotnet msbuild -getProperty:Version`, which
+        evaluates Directory.Build.props, VERSION-file plumbing, and conditions.
+    #>
+    param(
+        [Parameter(Mandatory = $true)]
+        [string]$CsprojPath,
+
+        # Optional pre-parsed csproj XML (avoids a re-read when the caller has it).
+        [xml]$ProjectXml
+    )
+
+    if (-not $ProjectXml) {
+        [xml]$ProjectXml = Get-Content -LiteralPath $CsprojPath -Raw
+    }
+
+    $version = $null
+    foreach ($propertyName in @('Version', 'AssemblyVersion')) {
+        $nodes = @($ProjectXml.Project.PropertyGroup.$propertyName)
+        # Statically trustworthy = a node without a Condition attribute. PowerShell
+        # surfaces attribute-less simple elements as plain strings; elements with
+        # attributes come through as XmlElement.
+        $trustworthy = $nodes | Where-Object {
+            $null -ne $_ -and (
+                ($_ -isnot [System.Xml.XmlElement]) -or (-not $_.HasAttribute('Condition'))
+            )
+        } | Select-Object -Last 1
+
+        if ($null -ne $trustworthy) {
+            $rawVersion = if ($trustworthy -is [System.Xml.XmlNode]) { $trustworthy.InnerText } else { "$trustworthy" }
+            $rawVersion = $rawVersion.Trim()
+            if ($rawVersion -and $rawVersion -notmatch '\$\(') {
+                $version = $rawVersion
+                break
+            }
+        }
+    }
+
+    # MSBuild evaluation handles Directory.Build.props, VERSION files, expressions,
+    # and conditional properties — authoritative whenever the fast path abstains.
+    if (-not $version) {
+        $previousNoLogo = $env:DOTNET_NOLOGO
+        try {
+            # On a cold machine/container the FIRST dotnet invocation prints the
+            # first-run banner, which contains version-shaped numbers ("Welcome to
+            # .NET 8.0!") — a substring regex over the whole output matched the
+            # banner's 8.0.x instead of the evaluated property. Suppress the banner
+            # AND only accept a line that IS a version, taking the last such line.
+            $env:DOTNET_NOLOGO = '1'
+            $msbuildOutput = & dotnet msbuild $CsprojPath -getProperty:Version -nologo 2>&1
+            if ($LASTEXITCODE -eq 0 -and $msbuildOutput) {
+                $versionLine = @($msbuildOutput | ForEach-Object { "$_".Trim() } |
+                    Where-Object { $_ -match '^\d+\.\d+\.\d+(?:-[\w\.\+]+)?$' }) | Select-Object -Last 1
+                if ($versionLine) {
+                    $version = $versionLine
+                }
+            }
+        } catch {
+            # MSBuild evaluation failed; caller applies its own fallback.
+        }
+        finally {
+            $env:DOTNET_NOLOGO = $previousNoLogo
+        }
+    }
+
+    return $version
+}
+
 function New-PluginPackage {
     [CmdletBinding()]
     param(
@@ -235,41 +313,10 @@ function New-PluginPackage {
     $assemblyName = $projectXml.Project.PropertyGroup.AssemblyName | Select-Object -Last 1
     if (-not $assemblyName) { $assemblyName = [IO.Path]::GetFileNameWithoutExtension($csprojPath) }
     
-    # Resolve Version: try XML parsing first, then MSBuild evaluation as fallback
-    # MSBuild evaluation handles Directory.Build.props, VERSION files, and conditional properties
-    $version = $null
-    $versionNode = $projectXml.Project.PropertyGroup.Version | Select-Object -Last 1
-    if (-not $versionNode) { $versionNode = $projectXml.Project.PropertyGroup.AssemblyVersion | Select-Object -Last 1 }
-    if ($versionNode) {
-        $rawVersion = $null
-        if ($versionNode -is [System.Xml.XmlNode]) {
-            $rawVersion = $versionNode.InnerText
-        } else {
-            $rawVersion = "$versionNode"
-        }
-        $rawVersion = $rawVersion.Trim()
-        # Check if the value contains unresolved MSBuild expressions like $(Version), $(VersionPrefix), etc.
-        if ($rawVersion -and $rawVersion -notmatch '\$\(') {
-            $version = $rawVersion
-        }
-    }
-    
-    # Fallback: Use MSBuild to evaluate the Version property (handles Directory.Build.props, VERSION files, expressions, etc.)
-    if (-not $version) {
-        try {
-            $msbuildOutput = & dotnet msbuild $csprojPath -getProperty:Version -nologo 2>&1
-            if ($LASTEXITCODE -eq 0 -and $msbuildOutput) {
-                $rawVersion = ($msbuildOutput | Out-String).Trim()
-                # Extract semver pattern (X.Y.Z or X.Y.Z-suffix) from potentially noisy output
-                if ($rawVersion -match '(\d+\.\d+\.\d+(?:-[\w\.\+]+)?)') {
-                    $version = $matches[1]
-                }
-            }
-        } catch {
-            # MSBuild evaluation failed, continue to fallback
-        }
-    }
-    
+    # Resolve Version via the shared resolver (XML fast path only for statically
+    # trustworthy nodes; MSBuild evaluation otherwise — see Resolve-PluginPackVersion).
+    $version = Resolve-PluginPackVersion -CsprojPath $csprojPath -ProjectXml $projectXml
+
     # Final validation: ensure version is a valid semver-like string
     if (-not $version -or $version -notmatch '^\d+\.\d+\.\d+') { 
         $version = '0.0.0' 
@@ -457,6 +504,30 @@ function Invoke-PluginCleanup {
             $xml = [IO.Path]::ChangeExtension($dll.FullName, '.xml')
             if (Test-Path -LiteralPath $pdb) { Remove-Item -LiteralPath $pdb -Force -ErrorAction SilentlyContinue }
             if (Test-Path -LiteralPath $xml) { Remove-Item -LiteralPath $xml -Force -ErrorAction SilentlyContinue }
+        }
+    }
+
+    # Remove orphaned culture satellite directories. `dotnet build -o <shared>` also
+    # lands the output of every project in the graph — including OutputItemType=Analyzer
+    # references, whose Roslyn dependencies bring cs/de/... Microsoft.CodeAnalysis
+    # satellite resources. The root-level sweep above never entered subdirectories, so
+    # those satellites shipped in the zip (caught staging qobuzarr v0.5.12: 26 extra
+    # DLLs). A satellite is kept only when its base assembly is kept.
+    foreach ($cultureDir in Get-ChildItem -LiteralPath $PublishPath -Directory) {
+        $satellites = @(Get-ChildItem -LiteralPath $cultureDir.FullName -Filter '*.resources.dll' -ErrorAction SilentlyContinue)
+        foreach ($satellite in $satellites) {
+            $baseDll = ($satellite.Name -replace '\.resources\.dll$', '.dll')
+            $isKept = $false
+            foreach ($pattern in $keepPatterns) {
+                if ($baseDll -like $pattern) { $isKept = $true; break }
+            }
+            if (-not $isKept) {
+                Write-Host "  Removing satellite: $($cultureDir.Name)/$($satellite.Name)" -ForegroundColor DarkGray
+                Remove-Item -LiteralPath $satellite.FullName -Force -ErrorAction SilentlyContinue
+            }
+        }
+        if (-not (Get-ChildItem -LiteralPath $cultureDir.FullName -ErrorAction SilentlyContinue)) {
+            Remove-Item -LiteralPath $cultureDir.FullName -Force -ErrorAction SilentlyContinue
         }
     }
 
@@ -869,5 +940,5 @@ function Assert-CanonicalAbstractions {
     return $true
 }
 
-Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage, Invoke-PluginCleanup, Assert-PluginAssemblyHasNoMergedReferences, Get-CanonicalAbstractionsConfig, Install-CanonicalAbstractions, Assert-CanonicalAbstractions
+Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage, Resolve-PluginPackVersion, Invoke-PluginCleanup, Assert-PluginAssemblyHasNoMergedReferences, Get-CanonicalAbstractionsConfig, Install-CanonicalAbstractions, Assert-CanonicalAbstractions
 # end-snippet

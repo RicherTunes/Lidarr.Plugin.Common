@@ -19,6 +19,9 @@ Each release entry should include:
 Template to copy when drafting a release:
 
 ```md
+### Fixed
+- **`PluginPack.psm1` no longer names packages after conditional `<Version>` fallback literals.** The XML fast path read `<Version Condition="...">0.1.0-dev</Version>` verbatim (conditions are not statically evaluable), so a repo whose real version comes from a `VERSION` file via `Directory.Build.props` packaged as `0.1.0-dev` (caught staging qobuzarr v0.5.12). Extracted `Resolve-PluginPackVersion`: the XML fast path is trusted only for condition-free, expression-free nodes; everything else defers to `dotnet msbuild -getProperty:Version`. Additionally, `Invoke-PluginCleanup` now removes orphaned culture satellite directories: `dotnet build -o <shared>` also lands OutputItemType=Analyzer projects' Roslyn satellites (`cs/…/Microsoft.CodeAnalysis*.resources.dll`) in the publish dir, and the root-level sweep never entered subdirectories — 26 satellite DLLs nearly shipped in the same release (the packaging-closure gate treats extra files as informational, so it never fired). Satellites survive only when their base assembly is kept. Self-tested (`scripts/tests/Test-PluginPackVersionResolution.ps1`, wired into the dependency-scan jobs).
+
 ## [x.y.z] - YYYY-MM-DD
 **Upgrade note:** <one-sentence summary>
 

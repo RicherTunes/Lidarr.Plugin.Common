@@ -78,6 +78,9 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       # && chaining: a failing self-test must fail the step (see lint job note).
+      - name: PluginPack version-resolution self-test
+        shell: pwsh
+        run: ./scripts/tests/Test-PluginPackVersionResolution.ps1
       - name: Dependency-CVE gate (fail on High+, direct + transitive)
         shell: pwsh
         run: |
