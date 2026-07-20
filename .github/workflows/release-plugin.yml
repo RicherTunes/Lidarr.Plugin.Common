@@ -149,7 +149,7 @@ jobs:
 
     # ── Toolchain ────────────────────────────────────────────────────────────
     - name: Setup .NET
-      uses: actions/setup-dotnet@v5  # TODO: pin to SHA after PR #514
+      uses: actions/setup-dotnet@v6  # TODO: pin to SHA after PR #514
       with:
         dotnet-version: ${{ inputs.dotnet_version }}
 
