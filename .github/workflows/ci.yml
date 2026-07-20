@@ -10,7 +10,7 @@
 # Translation vs .gitea/workflows/ci.yml:
 #   - Checkout     : actions/checkout@v4 (replaces the Gitea-only hand-rolled git-clone that
 #                    targeted 192.168.2.59:3001; Common has no submodules)
-#   - .NET SDK     : actions/setup-dotnet@v4 replaces the curl dotnet-install.sh block
+#   - .NET SDK     : actions/setup-dotnet@v6 replaces the curl dotnet-install.sh block
 #   - PowerShell   : ubuntu-latest ships pwsh -- "Install PowerShell" tarball step removed
 #   - Docker CLI   : ubuntu-latest ships docker -- "Install Docker CLI" apt step removed
 #   - SourceLink   : -p:EnableSourceLink=false removed from build and test; GitHub origin maps
@@ -33,7 +33,7 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Restore
@@ -54,7 +54,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-dotnet@v4
+      - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '8.0.x'
       - name: Materialize and test template package

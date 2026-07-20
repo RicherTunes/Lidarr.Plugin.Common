@@ -148,7 +148,7 @@ jobs:
     # ── Toolchain (only when something changed) ───────────────────────────────
     - name: Setup .NET
       if: steps.update.outputs.changed == 'true' && inputs.include_build_verify == true
-      uses: actions/setup-dotnet@v5  # TODO: pin to SHA after PR #514
+      uses: actions/setup-dotnet@v6  # TODO: pin to SHA after PR #514
       with:
         dotnet-version: ${{ inputs.dotnet_version }}
 
