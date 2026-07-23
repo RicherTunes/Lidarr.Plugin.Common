@@ -109,12 +109,15 @@
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection" Version="8.0.25" />
     <PackageReference Include="Microsoft.AspNetCore.DataProtection.Extensions" Version="8.0.25" />
-    <!-- Direct floor over DataProtection's transitive System.Security.Cryptography.Xml 8.0.2,
-         which carries CVE-2026-33116 / CVE-2026-26171 (both High, patched in 8.0.3).
+    <!-- Direct floor over DataProtection's transitive System.Security.Cryptography.Xml
+         (originally 8.0.2 with CVE-2026-33116 / CVE-2026-26171 patched in 8.0.3; the
+         2026-07 advisory wave — e.g. CVE-2026-50527 / CVE-2026-47304, five High GHSAs —
+         flags 8.0.0-8.0.3 and is patched in 8.0.4).
          Stays on the 8.0.x line for the same host-ALC AssemblyVersion reason as
          ProtectedData above. Remove once Microsoft.AspNetCore.DataProtection depends
-         on >= 8.0.3 itself (the check-vulnerable-packages.ps1 CI gate will flag regressions). -->
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
+         on a non-vulnerable version itself (the check-vulnerable-packages.ps1 CI gate
+         will flag regressions). -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.4" />
   </ItemGroup>
   <!-- CLI Framework Dependencies - Optional for development/testing only -->
   <!-- Production consumers: exclude pre-release dependencies by default -->
