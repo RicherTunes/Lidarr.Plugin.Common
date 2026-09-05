@@ -229,6 +229,9 @@ jobs:
       - name: Workflow content integrity self-test (F2)
         shell: pwsh
         run: ./scripts/tests/Test-WorkflowContentsValid.ps1
+      - name: E2E authfail module import regression
+        shell: pwsh
+        run: ./scripts/tests/Test-E2EAuthfailImport.ps1
       - name: Test-project dropout guard self-test (F4)
         shell: pwsh
         run: ./scripts/tests/Test-VerifyTestProjectsGated.ps1

@@ -534,13 +534,13 @@ function Invoke-AuthFailRedactionGate {
             $result.ModeResults[$mode] = $testResult
 
             if ($testResult.Success) {
-                Write-Host "Mode $mode: Failed as expected (HTTP $($testResult.HttpCode))" -ForegroundColor Green
+                Write-Host "Mode ${mode}: Failed as expected (HTTP $($testResult.HttpCode))" -ForegroundColor Green
                 if ($testResult.RetryAfter) {
                     Write-Host "  Retry-After header: $($testResult.RetryAfter)" -ForegroundColor DarkGray
                 }
             }
             else {
-                Write-Host "Mode $mode: $($testResult.Error)" -ForegroundColor Yellow
+                Write-Host "Mode ${mode}: $($testResult.Error)" -ForegroundColor Yellow
                 # For non-critical modes, we warn but don't fail the whole gate
                 # The test may return a different error code than expected
                 if ($mode -eq "401") {
