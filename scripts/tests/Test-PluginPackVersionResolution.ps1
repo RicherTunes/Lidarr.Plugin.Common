@@ -11,7 +11,7 @@
     stamped 0.5.12 from the VERSION file via Directory.Build.props.
 
     Cases:
-      - Unconditional <Version> literal            -> used directly (fast path)
+      - Unconditional <Version> literal            -> evaluated by MSBuild
       - CONDITIONAL <Version> fallback only        -> ignored; MSBuild evaluation wins
         (temp project with Directory.Build.props VERSION-file plumbing -> real version)
       - Unresolved MSBuild expression in <Version> -> ignored (existing behavior kept)
@@ -43,7 +43,7 @@ $tempRoot = Join-Path ([IO.Path]::GetTempPath()) ("pluginpack-version-test-" + [
 New-Item -ItemType Directory -Path $tempRoot | Out-Null
 
 try {
-    # ---- Case 1: unconditional literal is used directly -----------------------
+    # ---- Case 1: unconditional literal resolves through MSBuild ---------------
     $proj1 = Join-Path $tempRoot 'Plain'
     New-Item -ItemType Directory -Path $proj1 | Out-Null
     @'
@@ -55,7 +55,7 @@ try {
 </Project>
 '@ | Set-Content (Join-Path $proj1 'Plain.csproj')
 
-    Test-Assertion 'unconditional <Version> literal is used directly' {
+    Test-Assertion 'unconditional <Version> literal resolves correctly through MSBuild' {
         (Resolve-PluginPackVersion -CsprojPath (Join-Path $proj1 'Plain.csproj')) -eq '2.3.4'
     }
 
@@ -100,6 +100,59 @@ try {
     Test-Assertion 'unresolved $(...) expression falls through to MSBuild evaluation' {
         (Resolve-PluginPackVersion -CsprojPath (Join-Path $proj3 'Expr.csproj')) -eq '7.7.7'
     }
+    # Parent conditions and late imports cannot be evaluated from literal XML.
+    $conditionalGroup = Join-Path $tempRoot 'ConditionalGroup.csproj'
+    @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework><Version>2.3.4</Version></PropertyGroup>
+  <PropertyGroup Condition="'never' == 'always'"><Version>9.9.9</Version></PropertyGroup>
+</Project>
+'@ | Set-Content $conditionalGroup
+    Test-Assertion 'false parent PropertyGroup cannot override the evaluated version' {
+        (Resolve-PluginPackVersion -CsprojPath $conditionalGroup) -eq '2.3.4'
+    }
+    $late = Join-Path $tempRoot 'Late'
+    New-Item -ItemType Directory -Path $late | Out-Null
+    '<Project><PropertyGroup><Version>4.5.6</Version></PropertyGroup></Project>' | Set-Content (Join-Path $late 'Directory.Build.targets')
+    '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework><Version>2.3.4</Version></PropertyGroup></Project>' | Set-Content (Join-Path $late 'Late.csproj')
+    Test-Assertion 'late Directory.Build.targets version override is authoritative' {
+        (Resolve-PluginPackVersion -CsprojPath (Join-Path $late 'Late.csproj')) -eq '4.5.6'
+    }
+    $assembly = Join-Path $tempRoot 'Assembly.csproj'
+    '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework><AssemblyVersion>1.0.0.0</AssemblyVersion><VersionPrefix>7.8.9</VersionPrefix><VersionSuffix>rc-1</VersionSuffix></PropertyGroup></Project>' | Set-Content $assembly
+    Test-Assertion 'package version is not AssemblyVersion and supports hyphenated prereleases' {
+        (Resolve-PluginPackVersion -CsprojPath $assembly) -eq '7.8.9-rc-1'
+    }
+    Test-Assertion 'the same explicit Version build override reaches version evaluation' {
+        (Resolve-PluginPackVersion -CsprojPath (Join-Path $proj1 'Plain.csproj') -ExtraBuildArgs @('-p:Version=6.7.8')) -eq '6.7.8'
+    }
+    $configuration = Join-Path $tempRoot 'Configuration.csproj'
+    @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework><Version>2.2.2</Version></PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'"><Version>8.8.8</Version></PropertyGroup>
+</Project>
+'@ | Set-Content $configuration
+    Test-Assertion 'version evaluation uses the same Release configuration as packaging' {
+        (Resolve-PluginPackVersion -CsprojPath $configuration -Configuration Release) -eq '8.8.8'
+    }
+    $ci = Join-Path $tempRoot 'Ci.csproj'
+    @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net8.0</TargetFramework><Version>2.2.2</Version></PropertyGroup>
+  <PropertyGroup Condition="'$(ContinuousIntegrationBuild)' == 'true'"><Version>5.5.5</Version></PropertyGroup>
+</Project>
+'@ | Set-Content $ci
+    Test-Assertion 'version evaluation uses the packaging CI property defaults' {
+        (Resolve-PluginPackVersion -CsprojPath $ci) -eq '5.5.5'
+    }
+    $broken = Join-Path $tempRoot 'Broken.csproj'
+    '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup><Import Project="does-not-exist.props" /></Project>' | Set-Content $broken
+    Test-Assertion 'failed MSBuild evaluation cannot fall back to a fabricated package version' {
+        try { $null = Resolve-PluginPackVersion -CsprojPath $broken; $false }
+        catch { $_.Exception.Message -match 'MSBuild.*version|version.*MSBuild' }
+    }
+
     # ---- Case 4: cleanup removes orphaned culture satellite dirs -----------------
     # `dotnet build -o <shared>` also lands the OutputItemType=Analyzer project's
     # Roslyn satellites (cs/de/... Microsoft.CodeAnalysis*.resources.dll) in the

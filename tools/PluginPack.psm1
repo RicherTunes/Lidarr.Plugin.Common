@@ -1,5 +1,12 @@
 # snippet-skip-compile
 # snippet:plugin-pack
+function Get-PluginPackPropertyArguments {
+    param([string]$Configuration, [string]$Framework, [string[]]$ExtraBuildArgs = @())
+    # One property context for both compilation and package identity evaluation.
+    @("-p:Configuration=$Configuration", "-p:TargetFramework=$Framework",
+        '-p:CopyLocalLockFileAssemblies=true', '-p:ContinuousIntegrationBuild=true') + $ExtraBuildArgs
+}
+
 function Get-PluginOutput {
     [CmdletBinding()]
     param(
@@ -27,9 +34,8 @@ function Get-PluginOutput {
     # Abstractions/Common projects; parallel builds can run GenerateDepsFile for one project twice at
     # once and collide on `*.deps.json` ("being used by another process"), an intermittent packaging
     # failure. Serializing removes the race at negligible cost for these small project graphs.
-    $buildArgs = @($projectPath, '-c', $Configuration, '-f', $Framework, '-o', $publishDirectory, '-m:1',
-        '/p:CopyLocalLockFileAssemblies=true', '/p:ContinuousIntegrationBuild=true')
-    if ($ExtraBuildArgs) { $buildArgs += $ExtraBuildArgs }
+    $buildArgs = @($projectPath, '-o', $publishDirectory, '-m:1') +
+        @(Get-PluginPackPropertyArguments -Configuration $Configuration -Framework $Framework -ExtraBuildArgs $ExtraBuildArgs)
     # Capture build output so failures are diagnosable. Previously piped to Out-Null,
     # which made CI packaging failures impossible to triage (generic "dotnet build failed"
     # with no compiler/MSBuild error). On failure, replay the captured output to stderr.
@@ -157,79 +163,83 @@ function Assert-PluginAssemblyHasNoMergedReferences {
 function Resolve-PluginPackVersion {
     <#
     .SYNOPSIS
-        Resolves the version the plugin package (zip name, metadata) should carry.
+        Resolves the package version through MSBuild, in the actual build context.
     .DESCRIPTION
-        The XML fast path is trusted ONLY for a <Version>/<AssemblyVersion> node that
-        (a) carries no Condition attribute and (b) contains no $(...) expression.
-        A conditional node is a fallback literal MSBuild may never apply (e.g.
-        `<Version Condition="'$(Version)' == ''">0.1.0-dev</Version>` while
-        Directory.Build.props supplies the real version from a VERSION file) —
-        reading it verbatim once shipped a release candidate named 0.1.0-dev.
-        Everything else defers to `dotnet msbuild -getProperty:Version`, which
-        evaluates Directory.Build.props, VERSION-file plumbing, and conditions.
+        XML literals are not authoritative: parent conditions, imported targets,
+        configuration and command-line properties can override them. AssemblyVersion
+        is a different contract. Never fabricate a version when evaluation fails.
     #>
     param(
-        [Parameter(Mandatory = $true)]
-        [string]$CsprojPath,
-
-        # Optional pre-parsed csproj XML (avoids a re-read when the caller has it).
-        [xml]$ProjectXml
+        [Parameter(Mandatory = $true)][string]$CsprojPath,
+        # Retained for compatibility with callers of the previous XML-based API.
+        [xml]$ProjectXml,
+        [string]$Configuration = 'Release',
+        [string]$Framework = 'net8.0',
+        [string[]]$ExtraBuildArgs = @()
     )
-
-    if (-not $ProjectXml) {
-        [xml]$ProjectXml = Get-Content -LiteralPath $CsprojPath -Raw
+    $previousNoLogo = $env:DOTNET_NOLOGO
+    try {
+        $env:DOTNET_NOLOGO = '1'
+        $evaluationArgs = @($CsprojPath) +
+            @(Get-PluginPackPropertyArguments -Configuration $Configuration -Framework $Framework -ExtraBuildArgs $ExtraBuildArgs) +
+            @('-getProperty:Version', '-nologo')
+        $msbuildOutput = & dotnet msbuild @evaluationArgs 2>&1
+        $evaluationExit = $LASTEXITCODE
+        if ($evaluationExit -ne 0) { throw "MSBuild version evaluation failed (exit $evaluationExit) for '$CsprojPath': $msbuildOutput" }
+        # Accept only a complete version line, never numbers embedded in banners.
+        $version = @($msbuildOutput | ForEach-Object { "$_".Trim() } |
+            Where-Object { $_ -match '^\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$' }) | Select-Object -Last 1
+        if (-not $version) { throw "MSBuild returned no valid package version for '$CsprojPath'." }
+        return $version
     }
+    finally {
+        $env:DOTNET_NOLOGO = $previousNoLogo
+    }
+}
 
-    $version = $null
-    foreach ($propertyName in @('Version', 'AssemblyVersion')) {
-        $nodes = @($ProjectXml.Project.PropertyGroup.$propertyName)
-        # Statically trustworthy = a node without a Condition attribute. PowerShell
-        # surfaces attribute-less simple elements as plain strings; elements with
-        # attributes come through as XmlElement.
-        $trustworthy = $nodes | Where-Object {
-            $null -ne $_ -and (
-                ($_ -isnot [System.Xml.XmlElement]) -or (-not $_.HasAttribute('Condition'))
-            )
-        } | Select-Object -Last 1
-
-        if ($null -ne $trustworthy) {
-            $rawVersion = if ($trustworthy -is [System.Xml.XmlNode]) { $trustworthy.InnerText } else { "$trustworthy" }
-            $rawVersion = $rawVersion.Trim()
-            if ($rawVersion -and $rawVersion -notmatch '\$\(') {
-                $version = $rawVersion
-                break
+function Assert-PluginPackageIdentity {
+    <# Validates the artifact's own records without extracting or loading code. #>
+    param(
+        [Parameter(Mandatory)][string]$ZipPath,
+        [string]$ExpectedVersion,
+        [switch]$RequireVersionedFileName
+    )
+    $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $ZipPath).Path)
+    try {
+        $documents = @{}
+        foreach ($name in @('plugin.json', 'package-metadata.json')) {
+            $entries = @($archive.Entries | Where-Object { $_.FullName -ceq $name })
+            if ($entries.Count -ne 1 -or $entries[0].Length -gt 1MB) {
+                throw "Package identity requires exactly one bounded root '$name'."
             }
+            $reader = [IO.StreamReader]::new($entries[0].Open())
+            try { $documents[$name] = $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable }
+            finally { $reader.Dispose() }
+            if ($documents[$name] -isnot [System.Collections.IDictionary]) { throw "Package identity record '$name' must be an object." }
+        }
+        $manifest = $documents['plugin.json']
+        $metadata = $documents['package-metadata.json']
+        $id = [string]$manifest['id']
+        $version = [string]$manifest['version']
+        $framework = [string]$metadata['framework']
+        if ($id -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$' -or
+            $version -notmatch '^\d+\.\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$' -or
+            [string]::IsNullOrWhiteSpace($framework)) {
+            throw 'Package identity contains an invalid ID, version, or framework.'
+        }
+        $declaredFrameworks = @($manifest['targetFramework']) + @($manifest['targetFrameworks'])
+        if ([string]$metadata['packageId'] -cne $id -or [string]$metadata['version'] -cne $version -or
+            $declaredFrameworks -cnotcontains $framework) {
+            throw 'Package identity mismatch between plugin.json and package-metadata.json.'
+        }
+        if ($ExpectedVersion -and $ExpectedVersion -cne $version) {
+            throw "Package identity mismatch: manifest '$version' does not match evaluated build '$ExpectedVersion'."
+        }
+        if ($RequireVersionedFileName -and [IO.Path]::GetFileName($ZipPath) -cne "$id-$version-$framework.zip") {
+            throw "Package identity mismatch: filename must be '$id-$version-$framework.zip'."
         }
     }
-
-    # MSBuild evaluation handles Directory.Build.props, VERSION files, expressions,
-    # and conditional properties — authoritative whenever the fast path abstains.
-    if (-not $version) {
-        $previousNoLogo = $env:DOTNET_NOLOGO
-        try {
-            # On a cold machine/container the FIRST dotnet invocation prints the
-            # first-run banner, which contains version-shaped numbers ("Welcome to
-            # .NET 8.0!") — a substring regex over the whole output matched the
-            # banner's 8.0.x instead of the evaluated property. Suppress the banner
-            # AND only accept a line that IS a version, taking the last such line.
-            $env:DOTNET_NOLOGO = '1'
-            $msbuildOutput = & dotnet msbuild $CsprojPath -getProperty:Version -nologo 2>&1
-            if ($LASTEXITCODE -eq 0 -and $msbuildOutput) {
-                $versionLine = @($msbuildOutput | ForEach-Object { "$_".Trim() } |
-                    Where-Object { $_ -match '^\d+\.\d+\.\d+(?:-[\w\.\+]+)?$' }) | Select-Object -Last 1
-                if ($versionLine) {
-                    $version = $versionLine
-                }
-            }
-        } catch {
-            # MSBuild evaluation failed; caller applies its own fallback.
-        }
-        finally {
-            $env:DOTNET_NOLOGO = $previousNoLogo
-        }
-    }
-
-    return $version
+    finally { $archive.Dispose() }
 }
 
 function New-PluginPackage {
@@ -313,15 +323,8 @@ function New-PluginPackage {
     $assemblyName = $projectXml.Project.PropertyGroup.AssemblyName | Select-Object -Last 1
     if (-not $assemblyName) { $assemblyName = [IO.Path]::GetFileNameWithoutExtension($csprojPath) }
     
-    # Resolve Version via the shared resolver (XML fast path only for statically
-    # trustworthy nodes; MSBuild evaluation otherwise — see Resolve-PluginPackVersion).
-    $version = Resolve-PluginPackVersion -CsprojPath $csprojPath -ProjectXml $projectXml
-
-    # Final validation: ensure version is a valid semver-like string
-    if (-not $version -or $version -notmatch '^\d+\.\d+\.\d+') { 
-        $version = '0.0.0' 
-        Write-Host "Warning: Could not determine valid version, using $version" -ForegroundColor Yellow
-    }
+    # Use exactly the configuration/framework/overrides used to build the DLL.
+    $version = Resolve-PluginPackVersion -CsprojPath $csprojPath -Configuration $Configuration -Framework $Framework -ExtraBuildArgs $ExtraBuildArgs
 
     # Step 1: Merge assemblies (if requested) - BEFORE cleanup so deps exist
     if ($MergeAssemblies.IsPresent) {
@@ -395,6 +398,7 @@ function New-PluginPackage {
     }
 
     Compress-Archive -Path (Join-Path $publishPath '*') -DestinationPath $zipPath
+    Assert-PluginPackageIdentity -ZipPath $zipPath -ExpectedVersion $version -RequireVersionedFileName
     Write-Host "Created plugin package: $zipPath" -ForegroundColor Green
 
     # Post-package guardrail: canonical Abstractions sidecars are forbidden for
@@ -940,5 +944,5 @@ function Assert-CanonicalAbstractions {
     return $true
 }
 
-Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage, Resolve-PluginPackVersion, Invoke-PluginCleanup, Assert-PluginAssemblyHasNoMergedReferences, Get-CanonicalAbstractionsConfig, Install-CanonicalAbstractions, Assert-CanonicalAbstractions
+Export-ModuleMember -Function Get-PluginOutput, Test-PluginManifest, New-PluginPackage, Resolve-PluginPackVersion, Assert-PluginPackageIdentity, Invoke-PluginCleanup, Assert-PluginAssemblyHasNoMergedReferences, Get-CanonicalAbstractionsConfig, Install-CanonicalAbstractions, Assert-CanonicalAbstractions
 # end-snippet
