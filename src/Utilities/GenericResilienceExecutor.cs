@@ -173,10 +173,12 @@ namespace Lidarr.Plugin.Common.Utilities
                 while (true)
                 {
                     effectiveToken.ThrowIfCancellationRequested();
+                    if (attempt > 0) budget.ThrowIfRetryExpired();
                     attempt++;
 
                     var attemptRequest = await cloneRequestAsync(request).ConfigureAwait(false);
                     effectiveToken.ThrowIfCancellationRequested();
+                    if (attempt > 1) budget.ThrowIfRetryExpired();
                     var response = await sendAsync(attemptRequest, effectiveToken).ConfigureAwait(false);
 
                     var status = getStatusCode(response);
@@ -219,9 +221,9 @@ namespace Lidarr.Plugin.Common.Utilities
                     }
 
 #if NET8_0_OR_GREATER
-                    await DelayAsync(delay, tp, effectiveToken).ConfigureAwait(false);
+                    await ResilienceDelay.DelayAsync(delay, effectiveToken, tp).ConfigureAwait(false);
 #else
-                    await Task.Delay(delay, effectiveToken).ConfigureAwait(false);
+                    await ResilienceDelay.DelayAsync(delay, effectiveToken).ConfigureAwait(false);
 #endif
                 }
             }
@@ -239,20 +241,5 @@ namespace Lidarr.Plugin.Common.Utilities
             }
         }
 
-#if NET8_0_OR_GREATER
-        private static async Task DelayAsync(TimeSpan delay, TimeProvider timeProvider, CancellationToken cancellationToken)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            if (delay <= TimeSpan.Zero)
-            {
-                return;
-            }
-
-            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            using var ctr = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
-            using var timer = timeProvider.CreateTimer(static state => ((TaskCompletionSource<object?>)state!).TrySetResult(null), tcs, delay, Timeout.InfiniteTimeSpan);
-            await tcs.Task.ConfigureAwait(false);
-        }
-#endif
     }
 }

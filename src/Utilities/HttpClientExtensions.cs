@@ -404,6 +404,8 @@ namespace Lidarr.Plugin.Common.Utilities
                 } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                 while (true)
                 {
+                    effectiveToken.ThrowIfCancellationRequested();
+                    if (attempt > 0) budget.ThrowIfRetryExpired();
                     attempt++;
 
                     using var attemptRequest = await CloneForRetryAsync(request).ConfigureAwait(false);
@@ -428,6 +430,7 @@ namespace Lidarr.Plugin.Common.Utilities
                         catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                     }
                     effectiveToken.ThrowIfCancellationRequested();
+                    if (attempt > 1) budget.ThrowIfRetryExpired();
                     response = await httpClient.SendAsync(
                             attemptRequest,
                             HttpCompletionOption.ResponseHeadersRead,
@@ -645,7 +648,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     }
                     catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                     response.Dispose();
-                    await Task.Delay(delay, effectiveToken).ConfigureAwait(false);
+                    await ResilienceDelay.DelayAsync(delay, effectiveToken).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException ex) when (timeout.IsTimeout)
@@ -752,6 +755,8 @@ namespace Lidarr.Plugin.Common.Utilities
                 try { Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                 while (true)
                 {
+                    effectiveToken.ThrowIfCancellationRequested();
+                    if (attempt > 0) budget.ThrowIfRetryExpired();
                     attempt++;
 
                     using var attemptRequest = await CloneForRetryAsync(request).ConfigureAwait(false);
@@ -776,6 +781,7 @@ namespace Lidarr.Plugin.Common.Utilities
                         catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                     }
                     effectiveToken.ThrowIfCancellationRequested();
+                    if (attempt > 1) budget.ThrowIfRetryExpired();
                     response = await httpClient.SendAsync(
                             attemptRequest,
                             HttpCompletionOption.ResponseHeadersRead,
@@ -827,7 +833,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     }
                     catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                     response.Dispose();
-                    await DelayAsync(delay, timeProvider, effectiveToken).ConfigureAwait(false);
+                    await ResilienceDelay.DelayAsync(delay, effectiveToken, timeProvider).ConfigureAwait(false);
                 }
             }
             catch (OperationCanceledException ex) when (timeout.IsTimeout)
@@ -862,14 +868,6 @@ namespace Lidarr.Plugin.Common.Utilities
             return null;
         }
 
-        private static async Task DelayAsync(TimeSpan delay, TimeProvider timeProvider, CancellationToken cancellationToken)
-        {
-            if (delay <= TimeSpan.Zero) return;
-            var tcs = new TaskCompletionSource<object?>(TaskCreationOptions.RunContinuationsAsynchronously);
-            using var ctr = cancellationToken.Register(() => tcs.TrySetCanceled(cancellationToken));
-            using var timer = timeProvider.CreateTimer(static s => ((TaskCompletionSource<object?>)s!).TrySetResult(null), tcs, delay, Timeout.InfiniteTimeSpan);
-            await tcs.Task.ConfigureAwait(false);
-        }
 #endif
 
         /// <summary>
