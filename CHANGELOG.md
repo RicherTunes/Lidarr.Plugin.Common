@@ -38,6 +38,10 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed — queue snapshot consistency
+- Shared tracker DTO capture and mutation keys use one synchronized observation rather than mixing fields across attempt updates. A dedicated per-item snapshot lock coordinates mutable base fields without acquiring another item's mutation lock during persistence. Existing live-item snapshot and separate-setter contracts, public signatures, and persistence schema are unchanged.
+- Legacy retention revalidates exact object identity and current terminal/completion state before eviction, preventing an old enumerated entry from deleting a replacement, including value-equal plugin subclasses. Completion time is sampled once, preventing a nullable-value race. Existing retention thresholds and AttemptV2 retention/removal policies are preserved.
+
 ### Fixed — HTTP helper ownership and cloning
 - JSON GET/POST helpers dispose their owned responses on success and failure, and POST also disposes its generated request content when sending fails or is cancelled. Both reuse the shared cancellation-aware content reader and observe caller cancellation after buffering; caller-owned clients remain usable. Existing GET/POST differences in serializer defaults, empty/null payloads, and media-type handling are preserved.
 - Both public request-cloning helpers delegate to one implementation. Options copy by name/value without per-option reflection; typed retrieval, headers, version policy, and the distinction between one-off reads and retry-body caching are retained. Failed or cancelled body serialization propagates once rather than being attempted a second time; unfinished clones are disposed without disposing caller content. Both APIs reject a missing source with `ArgumentNullException`.
