@@ -38,6 +38,10 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed — retry wait boundaries
+- Generic and typed HTTP retries use one bounded delay helper. Long retry waits are split into native-supported timer intervals, fractional waits round upward, and elapsed time is rechecked after every signal so an early callback cannot authorize an early retry. Caller cancellation remains effective between intervals; no response connection is retained while waiting.
+- Retry admission is rechecked after waiting and after request cloning. A retry whose budget has already elapsed now raises an explicit retry-budget `TimeoutException` instead of sending again; first-attempt behavior and exact-boundary admission are preserved. Existing operation-timeout limits and their cancellation semantics are unchanged.
+
 ### Fixed — jitter bounds
 - Policy jitter preserves inclusive nonnegative duration bounds without 32-bit millisecond narrowing or upper-end overflow. Fixed and fractional durations retain exact ticks; whole-millisecond configurations retain their existing sampling grid.
 - A backoff-plus-jitter sum that cannot fit any finite retry budget returns the original usable response instead of overflowing or shortening the delay. Explicit `Retry-After` values still bypass the policy fallback; no public API or dependency changes.

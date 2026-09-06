@@ -44,6 +44,17 @@ namespace Lidarr.Plugin.Common.Utilities
             }
         }
 
+        // Once a response has been disposed to release its connection, budget
+        // expiry is an explicit timeout, not permission to send another request.
+        // Equality stays admitted: existing typed waits may clamp to the boundary.
+        public void ThrowIfRetryExpired()
+        {
+            if (!CanFitDelay(TimeSpan.Zero))
+            {
+                throw new TimeoutException("The retry budget expired before the next attempt could start.");
+            }
+        }
+
         // Generic execution intentionally admits a zero delay at exact exhaustion.
         // Keep that contract distinct from typed HTTP's Remaining > 0 requirement.
         public bool CanFitDelay(TimeSpan delay)
