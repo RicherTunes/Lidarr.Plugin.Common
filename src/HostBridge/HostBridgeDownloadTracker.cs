@@ -52,6 +52,14 @@ public class HostBridgeDownloadItem
     private readonly object _attemptInitializationLock = new();
     private int _status = (int)HostBridgeDownloadItemStatus.Queued;
     private long _progressBits;
+    private DateTime _startedAt = DateTime.UtcNow;
+    private long _totalSize;
+
+    // A leaf lock: only base-field reads/writes and exact legacy eviction happen here.
+    // Never acquire membership, MutationSync, persistence, or invoke user code while held.
+    // Separate from MutationSync so persistence can capture different items without
+    // acquiring another store's mutation lock (items can be shared between stores).
+    internal object SnapshotSync { get; } = new();
 
     // Store-owned CAS synchronization. Internal for deterministic friend-assembly tests,
     // but never exposed through the public item API and never supplied by callers.
@@ -67,11 +75,11 @@ public class HostBridgeDownloadItem
 
     public string DownloadId
     {
-        get => _downloadId;
-        init => _downloadId = value;
+        get { lock (SnapshotSync) return _downloadId; }
+        init { lock (SnapshotSync) _downloadId = value; }
     }
 
-    public Guid AttemptId => _attemptId;
+    public Guid AttemptId { get { lock (SnapshotSync) return _attemptId; } }
     public long Revision => Interlocked.Read(ref _revision);
     public HostBridgeDownloadAttemptState AttemptState =>
         (HostBridgeDownloadAttemptState)Volatile.Read(ref _attemptState);
@@ -105,12 +113,15 @@ public class HostBridgeDownloadItem
 
     private void InitializeAttemptCore(string normalizedId, Guid attemptId, DateTime changedAtUtc)
     {
-        _downloadId = normalizedId;
-        _attemptId = attemptId;
-        Volatile.Write(ref _attemptState, (int)HostBridgeDownloadAttemptState.Queued);
-        Interlocked.Exchange(ref _stateChangedAtUtcTicks, changedAtUtc.Ticks);
-        Interlocked.Exchange(ref _revision, 1);
-        Volatile.Write(ref _attemptInitialized, 1);
+        lock (SnapshotSync)
+        {
+            _downloadId = normalizedId;
+            _attemptId = attemptId;
+            Volatile.Write(ref _attemptState, (int)HostBridgeDownloadAttemptState.Queued);
+            Interlocked.Exchange(ref _stateChangedAtUtcTicks, changedAtUtc.Ticks);
+            Interlocked.Exchange(ref _revision, 1);
+            Volatile.Write(ref _attemptInitialized, 1);
+        }
     }
 
     internal void RestoreAttempt(
@@ -119,25 +130,32 @@ public class HostBridgeDownloadItem
         HostBridgeDownloadAttemptState attemptState,
         DateTime stateChangedAtUtc)
     {
-        _attemptId = attemptId;
-        Interlocked.Exchange(ref _revision, revision);
-        Volatile.Write(ref _attemptState, (int)attemptState);
-        Interlocked.Exchange(ref _stateChangedAtUtcTicks, stateChangedAtUtc.Ticks);
-        if (attemptId != Guid.Empty || revision != 0)
-            Volatile.Write(ref _attemptInitialized, 1);
+        lock (SnapshotSync)
+        {
+            _attemptId = attemptId;
+            Interlocked.Exchange(ref _revision, revision);
+            Volatile.Write(ref _attemptState, (int)attemptState);
+            Interlocked.Exchange(ref _stateChangedAtUtcTicks, stateChangedAtUtc.Ticks);
+            if (attemptId != Guid.Empty || revision != 0)
+                Volatile.Write(ref _attemptInitialized, 1);
+        }
     }
 
-    internal HostBridgeQueueMutationKey MutationKey() =>
-        new(_downloadId, _attemptId, Revision);
+    internal HostBridgeQueueMutationKey MutationKey()
+    {
+        lock (SnapshotSync)
+            return new(_downloadId, _attemptId, _revision);
+    }
 
     internal void ApplyTransition(HostBridgeDownloadAttemptState target, DateTime changedAtUtc)
     {
-        Volatile.Write(ref _attemptState, (int)target);
-        Interlocked.Increment(ref _revision);
-        var nextTicks = Math.Max(
-            changedAtUtc.Ticks,
-            Interlocked.Read(ref _stateChangedAtUtcTicks) + 1);
-        Interlocked.Exchange(ref _stateChangedAtUtcTicks, nextTicks);
+        lock (SnapshotSync)
+        {
+            Volatile.Write(ref _attemptState, (int)target);
+            Interlocked.Increment(ref _revision);
+            var nextTicks = Math.Max(changedAtUtc.Ticks, _stateChangedAtUtcTicks + 1);
+            Interlocked.Exchange(ref _stateChangedAtUtcTicks, nextTicks);
+        }
     }
 
     public string AlbumId { get; init; } = string.Empty;
@@ -145,7 +163,11 @@ public class HostBridgeDownloadItem
     public string Artist { get; init; } = string.Empty;
     public string OutputPath { get; init; } = string.Empty;
 
-    public DateTime StartedAt { get; set; } = DateTime.UtcNow;
+    public DateTime StartedAt
+    {
+        get { lock (SnapshotSync) return _startedAt; }
+        set { lock (SnapshotSync) _startedAt = value; }
+    }
 
     /// <summary>
     /// Time the download reached a terminal state (Completed / Failed / Cancelled). Backed by an
@@ -166,14 +188,19 @@ public class HostBridgeDownloadItem
             var ticks = value.HasValue && value.Value != DateTime.MinValue
                 ? value.Value.Ticks
                 : 0;
-            Interlocked.Exchange(ref _completedAtTicks, ticks);
+            lock (SnapshotSync)
+                Interlocked.Exchange(ref _completedAtTicks, ticks);
         }
     }
 
     /// <summary>
     /// Total size in bytes when known (some plugins emit size estimates from album metadata).
     /// </summary>
-    public long TotalSize { get; set; }
+    public long TotalSize
+    {
+        get => Interlocked.Read(ref _totalSize);
+        set { lock (SnapshotSync) Interlocked.Exchange(ref _totalSize, value); }
+    }
 
     /// <summary>Thread-safe status read.</summary>
     public HostBridgeDownloadItemStatus GetStatus()
@@ -181,7 +208,9 @@ public class HostBridgeDownloadItem
 
     /// <summary>Thread-safe status write.</summary>
     public void SetStatus(HostBridgeDownloadItemStatus value)
-        => Volatile.Write(ref _status, (int)value);
+    {
+        lock (SnapshotSync) Volatile.Write(ref _status, (int)value);
+    }
 
     /// <summary>Thread-safe progress read (double, atomic via bit-pattern Interlocked).</summary>
     public double GetProgress()
@@ -189,7 +218,9 @@ public class HostBridgeDownloadItem
 
     /// <summary>Thread-safe progress write.</summary>
     public void SetProgress(double value)
-        => Interlocked.Exchange(ref _progressBits, BitConverter.DoubleToInt64Bits(value));
+    {
+        lock (SnapshotSync) Interlocked.Exchange(ref _progressBits, BitConverter.DoubleToInt64Bits(value));
+    }
 }
 
 /// <summary>
@@ -246,24 +277,33 @@ public sealed class HostBridgeDownloadItemDto
     [JsonPropertyName("stateChangedAtUtc")]
     public DateTime StateChangedAtUtc { get; set; }
 
-    /// <summary>Capture all observable state from <paramref name="item"/> into a DTO.</summary>
-    public static HostBridgeDownloadItemDto FromItem(HostBridgeDownloadItem item) => new()
+    /// <summary>
+    /// Capture base state at one observation point. Separate public setter calls remain
+    /// separate mutations; this does not make a caller's multi-call update transactional.
+    /// </summary>
+    public static HostBridgeDownloadItemDto FromItem(HostBridgeDownloadItem item)
     {
-        DownloadId  = item.DownloadId,
-        AlbumId     = item.AlbumId,
-        Title       = item.Title,
-        Artist      = item.Artist,
-        OutputPath  = item.OutputPath,
-        StartedAt   = item.StartedAt,
-        CompletedAt = item.CompletedAt,
-        TotalSize   = item.TotalSize,
-        Status      = item.GetStatus(),
-        Progress    = item.GetProgress(),
-        AttemptId   = item.AttemptId,
-        Revision    = item.Revision,
-        AttemptState = item.AttemptState,
-        StateChangedAtUtc = item.StateChangedAtUtc,
-    };
+        lock (item.SnapshotSync)
+        {
+            return new()
+            {
+                DownloadId  = item.DownloadId,
+                AlbumId     = item.AlbumId,
+                Title       = item.Title,
+                Artist      = item.Artist,
+                OutputPath  = item.OutputPath,
+                StartedAt   = item.StartedAt,
+                CompletedAt = item.CompletedAt,
+                TotalSize   = item.TotalSize,
+                Status      = item.GetStatus(),
+                Progress    = item.GetProgress(),
+                AttemptId   = item.AttemptId,
+                Revision    = item.Revision,
+                AttemptState = item.AttemptState,
+                StateChangedAtUtc = item.StateChangedAtUtc,
+            };
+        }
+    }
 
     /// <summary>
     /// Reconstruct a base <see cref="HostBridgeDownloadItem"/> from this DTO.
@@ -339,7 +379,9 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
     private readonly string? _ownedStagingRoot;
     private bool _persistenceWriteDisabled;
 
-    // AttemptV2 lock order is membership -> item.MutationSync -> persistence.
+    // AttemptV2 lock order is membership -> item.MutationSync -> persistence -> SnapshotSync.
+    // SnapshotSync is a leaf: a capture never acquires another item's mutation lock.
+    // Legacy membership writes and eviction share membership, but release it before I/O.
     // Persistence warnings are captured under these locks and dispatched only after every
     // acquired lock has been released. Never acquire an earlier lock from a later one.
     private readonly object _membershipLock = new();
@@ -527,7 +569,8 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         if (string.IsNullOrWhiteSpace(item.DownloadId))
             throw new ArgumentException("DownloadId must be non-empty.", nameof(item));
 
-        _items[item.DownloadId] = item;
+        lock (_membershipLock)
+            _items[item.DownloadId] = item;
         PersistAndNotify();
     }
 
@@ -552,7 +595,9 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         if (string.IsNullOrWhiteSpace(item.DownloadId))
             throw new ArgumentException("DownloadId must be non-empty.", nameof(item));
 
-        var added = _items.TryAdd(item.DownloadId, item);
+        bool added;
+        lock (_membershipLock)
+            added = _items.TryAdd(item.DownloadId, item);
         if (added)
             PersistAndNotify();
         return added;
@@ -795,8 +840,11 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
         }
         else
         {
-            if (!_items.TryRemove(key, out removed))
-                return false;
+            lock (_membershipLock)
+            {
+                if (!_items.TryRemove(key, out removed))
+                    return false;
+            }
             PersistAndNotify();
         }
 
@@ -1123,21 +1171,42 @@ public sealed class HostBridgeDownloadTrackerStore<TItem>
 
         foreach (var kv in _items)
         {
-            var item = kv.Value;
-            var status = item.GetStatus();
-            if (IsTerminalStatus(status) &&
-                item.CompletedAt.HasValue &&
-                now - item.CompletedAt.Value > _completedRetention)
-            {
-                _items.TryRemove(kv.Key, out _);
-                evicted = true;
-                continue;
-            }
-
-            result.Add(item);
+            var survivor = CollectLegacyItem(kv, now, out var removed);
+            evicted |= removed;
+            if (survivor is not null)
+                result.Add(survivor);
         }
 
         return result;
+    }
+
+    // Revalidate the enumerated candidate under the same lock as every live legacy
+    // membership write. Comparing values with TryRemove(pair) is insufficient: a
+    // plugin subclass may define value equality for two distinct download objects.
+    internal TItem? CollectLegacyItem(KeyValuePair<string, TItem> candidate, DateTime now, out bool evicted)
+    {
+        if (_options.ContractVersion != HostBridgeQueueContractVersion.LegacyV1)
+            throw new InvalidOperationException("Legacy retention cannot be applied to an AttemptV2 store.");
+        evicted = false;
+        lock (_membershipLock)
+        {
+            if (!_items.TryGetValue(candidate.Key, out var current))
+                return null;
+            if (!ReferenceEquals(current, candidate.Value))
+                return current;
+
+            lock (current.SnapshotSync)
+            {
+                var completedAt = current.CompletedAt;
+                if (IsTerminalStatus(current.GetStatus()) && completedAt.HasValue &&
+                    now - completedAt.Value > _completedRetention)
+                {
+                    evicted = _items.TryRemove(candidate.Key, out _);
+                    return null;
+                }
+                return current;
+            }
+        }
     }
 
     // Bounded auto-eviction for AttemptV2 terminal items (5B item 3). Policy: count high-water

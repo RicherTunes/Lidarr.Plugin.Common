@@ -38,6 +38,10 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed — queue snapshot consistency
+- Shared tracker DTO capture and mutation keys use one synchronized observation rather than mixing fields across attempt updates. A dedicated per-item snapshot lock coordinates mutable base fields without acquiring another item's mutation lock during persistence. Existing live-item snapshot and separate-setter contracts, public signatures, and persistence schema are unchanged.
+- Legacy retention revalidates exact object identity and current terminal/completion state before eviction, preventing an old enumerated entry from deleting a replacement, including value-equal plugin subclasses. Completion time is sampled once, preventing a nullable-value race. Existing retention thresholds and AttemptV2 retention/removal policies are preserved.
+
 ### Changed — canonical typed Retry-After resolution
 - Typed HTTP retries, download retry hints, LLM error mapping, and rate-limit telemetry now delegate header-duration calculation to `RateLimitHeaderUtilities`. Caller-specific missing/expired-header fallback, download jitter, response ownership, and LLM body-hint precedence are preserved. Telemetry reuses its captured observation timestamp; supplied clocks are read only for HTTP-date resolution.
 - Negative constructed delta values are normalized before typed retry telemetry and download jitter, preventing negative reported/scheduled delays. Four source-adoption guards and behavioral contract tests cover the consolidated paths; raw string/body parsers and public signatures remain unchanged.
