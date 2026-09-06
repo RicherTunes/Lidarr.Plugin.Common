@@ -38,6 +38,10 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Changed — canonical typed Retry-After resolution
+- Typed HTTP retries, download retry hints, LLM error mapping, and rate-limit telemetry now delegate header-duration calculation to `RateLimitHeaderUtilities`. Caller-specific missing/expired-header fallback, download jitter, response ownership, and LLM body-hint precedence are preserved. Telemetry reuses its captured observation timestamp; supplied clocks are read only for HTTP-date resolution.
+- Negative constructed delta values are normalized before typed retry telemetry and download jitter, preventing negative reported/scheduled delays. Four source-adoption guards and behavioral contract tests cover the consolidated paths; raw string/body parsers and public signatures remain unchanged.
+
 ### Fixed — host-gate lifecycle
 - Registry-backed concurrency leases now reserve their gates before waiting. Clear, shutdown, and idle cleanup cannot dispose a gate underneath an active request or queued acquisition; partial acquisition rolls back permits before returning reservations.
 - Retiring gates remain the sole same-key concurrency authority until their last reservation returns. Reuse can rearm sweeping without creating an independent replacement limit. Idle age is monotonic and restarts when the last request returns; callbacks from an earlier sweeper generation cannot clean a later generation.

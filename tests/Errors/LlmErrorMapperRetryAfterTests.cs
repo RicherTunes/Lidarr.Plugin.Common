@@ -2,6 +2,7 @@ using System;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Errors;
 using Xunit;
 
@@ -104,6 +105,35 @@ public class LlmErrorMapperRetryAfterTests
         // the canonical RateLimitHeaderUtilities.ResolveRetryAfter.
         var header = new RetryConditionHeaderValue(TimeSpan.FromSeconds(-5));
         Assert.Equal(TimeSpan.Zero, LlmErrorMapper.ParseRetryAfterHeader(header));
+    }
+
+    [Theory]
+    [InlineData("missing", 7)]
+    [InlineData("malformed", 7)]
+    [InlineData("zero", 0)]
+    [InlineData("negative-typed", 0)]
+    [InlineData("past-date", 0)]
+    [InlineData("delta", 12)]
+    public async Task MapHttpError_HeaderPresencePreservesBodyFallbackAndCallerOwnership(string form, int expectedSeconds)
+    {
+        using var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+        {
+            Content = new StringContent("caller still owns the response")
+        };
+        switch (form)
+        {
+            case "missing": break;
+            case "malformed": Assert.True(response.Headers.TryAddWithoutValidation("Retry-After", "not-a-delay")); break;
+            case "zero": response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.Zero); break;
+            case "negative-typed": response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(-1)); break;
+            case "past-date": response.Headers.RetryAfter = new RetryConditionHeaderValue(DateTimeOffset.MinValue); break;
+            case "delta": response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(12)); break;
+            default: throw new ArgumentOutOfRangeException(nameof(form));
+        }
+
+        var error = Assert.IsType<RateLimitException>(LlmErrorMapper.MapHttpError("test", response, "{\"retry_after\":7}"));
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), error.RetryAfter);
+        Assert.Equal("caller still owns the response", await response.Content.ReadAsStringAsync());
     }
 
     [Fact]
