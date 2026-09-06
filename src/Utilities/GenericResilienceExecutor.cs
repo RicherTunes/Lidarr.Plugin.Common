@@ -160,9 +160,9 @@ namespace Lidarr.Plugin.Common.Utilities
             var effectiveToken = timeoutCts?.Token ?? cancellationToken;
 #if NET8_0_OR_GREATER
             var tp = timeProvider ?? TimeProvider.System;
-            var deadline = tp.GetUtcNow().UtcDateTime + policy.RetryBudget;
+            var startedAt = tp.GetTimestamp();
 #else
-            var deadline = DateTime.UtcNow + policy.RetryBudget;
+            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
 #endif
             var attempt = 0;
 
@@ -213,11 +213,11 @@ namespace Lidarr.Plugin.Common.Utilities
                     }
 
 #if NET8_0_OR_GREATER
-                    var now = tp.GetUtcNow().UtcDateTime;
+                    var elapsed = tp.GetElapsedTime(startedAt);
 #else
-                    var now = DateTime.UtcNow;
+                    var elapsed = stopwatch.Elapsed;
 #endif
-                    if (delay > deadline - now)
+                    if (elapsed > policy.RetryBudget || delay > policy.RetryBudget - elapsed)
                     {
                         return response;
                     }

@@ -202,9 +202,13 @@ public sealed class ResiliencePolicy
             }
 
             // Backoff grows exponentially but is capped by MaxBackoff.
-            var multiplier = Math.Pow(2, attempt - 1);
-            var proposed = TimeSpan.FromMilliseconds(InitialBackoff.TotalMilliseconds * multiplier);
-            return proposed <= MaxBackoff ? proposed : MaxBackoff;
+            var exponent = attempt - 1;
+            if (exponent >= 63 || InitialBackoff.Ticks > (MaxBackoff.Ticks >> exponent))
+            {
+                return MaxBackoff;
+            }
+
+            return TimeSpan.FromTicks(InitialBackoff.Ticks << exponent);
         }
 
         internal TimeSpan ComputeJitter()
