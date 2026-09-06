@@ -21,10 +21,11 @@
     Example: ghcr.io/hotio/lidarr:nightly-3.1.3.4970
 
 .PARAMETER ContainerName
-    Docker container name. Default: lidarr-multi-plugin-smoke
+    Docker container name. Defaults to a unique name for each run. Existing names
+    are refused, never removed. Required explicitly with PreserveState/CleanState.
 
 .PARAMETER Port
-    Host port to bind Lidarr to. Default: 8689
+    Loopback host port to bind Lidarr to. Default: 0 (Docker chooses a free port).
 
 .PARAMETER StartupTimeoutSeconds
     Max time to wait for Lidarr startup. Default: 120
@@ -177,8 +178,10 @@
 param(
     [string]$LidarrTag = "nightly-3.1.3.4970",
     [string]$LidarrImage,
-    [string]$ContainerName = "lidarr-multi-plugin-smoke",
-    [int]$Port = 8689,
+    [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')]
+    [string]$ContainerName,
+    [ValidateRange(0, 65535)]
+    [int]$Port = 0,
     [int]$StartupTimeoutSeconds = 120,
     [int]$SchemaTimeoutSeconds = 60,
     [switch]$RunMediumGate,
@@ -207,6 +210,7 @@ param(
     [switch]$UseExistingConfigForSearchGate,
     [switch]$UseExistingConfigForDownloadClientGate,
     [switch]$UseExistingConfigForGrabGate,
+    [ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')]
     [string]$PluginsOwner = "RicherTunes",
     [string]$HostBinPath = "/app/bin",
     [string[]]$HostOverrideAssembly = @(),
@@ -216,9 +220,23 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Stop"
 $ProgressPreference = "SilentlyContinue"
+$script:SmokeRunId = [guid]::NewGuid().ToString('N')
+$script:OwnedContainerId = $null
+$script:EphemeralWorkRoot = $null
+$script:WorkRootLease = $null
+$script:PrimaryFailure = $null
+if ([string]::IsNullOrWhiteSpace($ContainerName)) {
+    if ($PreserveState -or $CleanState) {
+        throw 'PreserveState and CleanState require an explicit ContainerName.'
+    }
+    $ContainerName = "lidarr-smoke-$($script:SmokeRunId)"
+}
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptDir
+# Reports outlive disposable /config and plugin mounts; never put diagnostics
+# inside the state root that Cleanup removes after a smoke run.
+$script:SmokeArtifactRoot = Join-Path $repoRoot "artifacts/e2e/smoke/$($script:SmokeRunId)"
 
 # Import e2e-gates module for preflight packaging validation
 Import-Module (Join-Path $scriptDir "lib/e2e-gates.psm1") -Force
@@ -236,6 +254,8 @@ Import-Module (Join-Path $scriptDir "lib/e2e-authfail.psm1") -Force
 Import-Module (Join-Path $scriptDir "lib/e2e-stub-http.psm1") -Force
 # Import drift sentinel module for stub-vs-live drift detection
 Import-Module (Join-Path $scriptDir "lib/e2e-drift-sentinel.psm1") -Force
+# The packager owns artifact identity and compiled host requirements for every caller.
+Import-Module (Join-Path $repoRoot 'tools/PluginPack.psm1') -Force
 
 $image = if ([string]::IsNullOrWhiteSpace($LidarrImage)) { "ghcr.io/hotio/lidarr:$LidarrTag" } else { $LidarrImage.Trim() }
 
@@ -283,14 +303,26 @@ $expectations = @{
         DownloadClients = @()
         ImportLists = @("Brainarr")
     }
+    "applemusicarr" = @{
+        Indexers = @("AppleMusicLidarrIndexer")
+        DownloadClients = @("AppleMusicLidarrDownloadClient")
+        ImportLists = @()
+    }
+    "amazonmusicarr" = @{
+        Indexers = @("AmazonmusicLidarrIndexer")
+        DownloadClients = @("AmazonmusicLidarrDownloadClient")
+        ImportLists = @()
+    }
 }
 
 function Get-PluginFolderName {
     param([Parameter(Mandatory = $true)][string]$Name)
 
-    $n = $Name.Trim()
-    if ([string]::IsNullOrWhiteSpace($n)) { return $n }
-    if ($n.Length -eq 1) { return $n.ToUpperInvariant() }
+    $n = $Name.Trim().ToLowerInvariant()
+    if (-not $expectations.ContainsKey($n)) {
+        throw "Unknown plugin '$Name': no smoke role contract is configured."
+    }
+    if ($n -eq 'applemusicarr') { return 'AppleMusicarr' }
     return $n.Substring(0, 1).ToUpperInvariant() + $n.Substring(1)
 }
 
@@ -692,24 +724,142 @@ function Test-LidarrApiWithBackoff {
     return $null
 }
 
-function Cleanup {
-    if (-not $KeepRunning) {
-        & docker rm -f $ContainerName 2>$null | Out-Null
+function Start-SmokeContainer {
+    param([Parameter(Mandatory)][string[]]$DockerArguments)
+
+    # Acquire ownership at create, not run: failed starts still need cleanup,
+    # while a name collision must never authorize deletion of another container.
+    if ($script:OwnedContainerId) { throw 'This run already owns a smoke container.' }
+    $identityDirectory = Join-Path ([IO.Path]::GetTempPath()) "lidarr-smoke-id-$([guid]::NewGuid().ToString('N'))"
+    New-Item -ItemType Directory -Path $identityDirectory -ErrorAction Stop | Out-Null
+    try {
+        $cidFile = Join-Path $identityDirectory 'container.id'
+        # Docker's dedicated ID receipt cannot be confused with stderr warnings.
+        $created = & docker create --cidfile $cidFile --label "org.richertunes.smoke-run=$($script:SmokeRunId)" @DockerArguments 2>&1
+        $createExit = $LASTEXITCODE
+        $id = if (Test-Path -LiteralPath $cidFile) { (Get-Content -LiteralPath $cidFile -Raw).Trim() } else { '' }
+        if ($id -match '^[a-f0-9]{64}$') { $script:OwnedContainerId = $id }
+        if ($createExit -ne 0 -or -not $script:OwnedContainerId) {
+            throw "Docker create failed (exit $createExit): $created"
+        }
+        $started = & docker start $script:OwnedContainerId 2>&1
+        $startExit = $LASTEXITCODE
+        if ($startExit -ne 0) { throw "Docker start failed (exit $startExit): $started" }
+    }
+    finally {
+        Remove-Item -LiteralPath $identityDirectory -Recurse -Force
     }
 }
 
-trap {
-    $err = $_
-    Cleanup
-    throw $err
+function Cleanup {
+    if ($KeepRunning) { return }
+    if (-not [string]::IsNullOrWhiteSpace($script:OwnedContainerId)) {
+        $id = $script:OwnedContainerId
+        if ($id -notmatch '^[a-f0-9]{64}$') { throw 'Refusing cleanup of an invalid container identity.' }
+        $inspection = & docker inspect --format '{{json .Config.Labels}}' $id 2>&1
+        $inspectExit = $LASTEXITCODE
+        if ($inspectExit -ne 0) { throw "Cannot verify smoke container ownership (exit $inspectExit)." }
+        $labels = ($inspection | Out-String) | ConvertFrom-Json -AsHashtable
+        if (-not $labels -or $labels['org.richertunes.smoke-run'] -ne $script:SmokeRunId) {
+            throw 'Refusing cleanup: container ownership label does not match this run.'
+        }
+        $removed = & docker rm --force $id 2>&1
+        $removeExit = $LASTEXITCODE
+        if ($removeExit -ne 0) { throw "Owned smoke container cleanup failed (exit $removeExit): $removed" }
+        $script:OwnedContainerId = $null
+    }
+    # Only a freshly created disposable root is registered here. Persistent and
+    # caller-owned state is never deleted implicitly, nor is a live mount deleted.
+    if ($script:EphemeralWorkRoot) {
+        if (Test-Path -LiteralPath $script:EphemeralWorkRoot) {
+            $directory = Get-Item -LiteralPath $script:EphemeralWorkRoot -Force
+            if ($directory.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Refusing cleanup of redirected smoke state.' }
+            Remove-Item -LiteralPath $script:EphemeralWorkRoot -Recurse -Force
+        }
+        $script:EphemeralWorkRoot = $null
+    }
+}
+
+function Assert-SmokeContainerNameAvailable {
+    param([Parameter(Mandatory)][string]$Name)
+    $existingNames = & docker ps -a --format '{{.Names}}' 2>&1
+    if ($LASTEXITCODE -ne 0) { throw 'Could not enumerate Docker containers.' }
+    if (@($existingNames) -contains $Name) { throw "Container '$Name' already exists; refusing to replace it." }
+}
+
+function Initialize-SmokeWorkRoot {
+    param(
+        [Parameter(Mandatory)][string]$WorkRootBase,
+        [Parameter(Mandatory)][ValidatePattern('^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')][string]$Name,
+        [switch]$Preserve,
+        [switch]$Clean
+    )
+    New-Item -ItemType Directory -Force -Path $WorkRootBase | Out-Null
+    if ($Preserve -or $Clean) {
+        # The stable inode must not be unlinked after releasing the lease.
+        $leasePath = Join-Path $WorkRootBase ".$Name.smoke.lock"
+        $script:WorkRootLease = [IO.File]::Open($leasePath, [IO.FileMode]::OpenOrCreate, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
+        # The initial name check may be stale after a competing KeepRunning run.
+        Assert-SmokeContainerNameAvailable -Name $Name
+        $state = Join-Path $WorkRootBase $Name
+        if ($Clean -and (Test-Path -LiteralPath $state)) { Remove-Item -LiteralPath $state -Recurse -Force }
+        New-Item -ItemType Directory -Force -Path $state | Out-Null
+        return (Resolve-Path -LiteralPath $state).Path
+    }
+    # Disposable runs never reuse state and do not leave per-run lock files.
+    $state = Join-Path $WorkRootBase "$Name-$($script:SmokeRunId)"
+    New-Item -ItemType Directory -Path $state -ErrorAction Stop | Out-Null
+    $script:EphemeralWorkRoot = (Resolve-Path -LiteralPath $state).Path
+    return $script:EphemeralWorkRoot
+}
+
+function Get-SmokeArtifactPath {
+    param([Parameter(Mandatory)][ValidatePattern('^[A-Za-z0-9][A-Za-z0-9_.-]*$')][string]$FileName)
+    New-Item -ItemType Directory -Path $script:SmokeArtifactRoot -Force | Out-Null
+    return Join-Path $script:SmokeArtifactRoot $FileName
+}
+
+function Assert-SmokeSchemas {
+    param(
+        [Parameter(Mandatory)][AllowEmptyCollection()][string[]]$PluginNames,
+        [AllowNull()][object[]]$IndexerSchemas = @(),
+        [AllowNull()][object[]]$DownloadClientSchemas = @(),
+        [AllowNull()][object[]]$ImportListSchemas = @()
+    )
+    if ($PluginNames.Count -eq 0) { throw 'No plugins selected for schema verification.' }
+    $schemas = @{ Indexers = $IndexerSchemas; DownloadClients = $DownloadClientSchemas; ImportLists = $ImportListSchemas }
+    $missing = [System.Collections.Generic.List[string]]::new()
+    foreach ($plugin in $PluginNames) {
+        $null = Get-PluginFolderName -Name $plugin
+        $contract = $expectations[$plugin.Trim()]
+        foreach ($role in @('Indexers', 'DownloadClients', 'ImportLists')) {
+            foreach ($implementation in $contract[$role]) {
+                if (@($schemas[$role] | Where-Object { $_.implementation -eq $implementation }).Count -eq 0) {
+                    $missing.Add("${plugin}/${role}: $implementation")
+                } else {
+                    Write-Host "PASS ${role}: $implementation" -ForegroundColor Green
+                }
+            }
+        }
+    }
+    if ($missing.Count -gt 0) { throw "Missing plugin implementations: $($missing -join '; ')" }
 }
 
 try {
-    Ensure-DockerAvailable
-
     if ($PluginZip.Count -eq 0) {
         throw "No plugins specified. Provide at least one -PluginZip name=path argument."
     }
+    $selected = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    foreach ($spec in $PluginZip) {
+        $parts = $spec.Split('=', 2)
+        if ($parts.Count -ne 2) { throw "Invalid PluginZip; expected name=path: $spec" }
+        $name = $parts[0].Trim()
+        $null = Get-PluginFolderName -Name $name
+        if (-not $selected.Add($name)) { throw "Duplicate plugin specification: $name" }
+    }
+    Ensure-DockerAvailable
+    # A requested name is never a cleanup permission. Fail before touching its state.
+    Assert-SmokeContainerNameAvailable -Name $ContainerName
 
     Write-Host "=== Multi-Plugin Docker Smoke Test ===" -ForegroundColor Cyan
     Write-Host "Lidarr tag: $LidarrTag"
@@ -724,18 +874,11 @@ try {
         $WorkRoot.Trim()
     }
 
-    $workRoot = Join-Path $workRootBase $ContainerName
+    $workRoot = Initialize-SmokeWorkRoot -WorkRootBase $workRootBase -Name $ContainerName -Preserve:$PreserveState -Clean:$CleanState
     $pluginsRoot = Join-Path $workRoot "plugins"
     $configRoot = Join-Path $workRoot "config"
     $musicRoot = Join-Path $workRoot "music"
     $downloadsRoot = Join-Path $workRoot "downloads"
-
-    if ($CleanState -and (Test-Path $workRoot)) {
-        Remove-Item -Recurse -Force $workRoot
-    }
-    elseif ((-not $PreserveState) -and (Test-Path $workRoot)) {
-        Remove-Item -Recurse -Force $workRoot
-    }
 
     if (Test-Path $pluginsRoot) {
         Remove-Item -Recurse -Force $pluginsRoot
@@ -774,6 +917,7 @@ try {
             throw "Packaging preflight failed for '$name': $($preflightResult.Errors -join '; ')"
         }
 
+        Assert-PluginPackageIdentity -ZipPath $zipPath -ValidateHostRequirements
         $pluginZipPaths.Add((Resolve-Path -LiteralPath $zipPath).Path) | Out-Null
 
         $folderName = Get-PluginFolderName $name
@@ -790,17 +934,15 @@ try {
 
     Assert-HostSupportsPlugins -LidarrImage $image -LidarrTag $LidarrTag -ZipPaths $pluginZipPaths.ToArray()
 
-    & docker rm -f $ContainerName 2>$null | Out-Null
-
     $pluginMount = $pluginsRoot.Replace('\', '/')
     $configMount = $configRoot.Replace('\', '/')
     $musicMount = $musicRoot.Replace('\', '/')
     $downloadsMount = $downloadsRoot.Replace('\', '/')
 
+    $hostPort = if ($Port -eq 0) { '' } else { [string]$Port }
     $dockerArgs = @(
-        "run", "-d",
         "--name", $ContainerName,
-        "-p", "${Port}:8686",
+        "-p", "127.0.0.1:${hostPort}:8686",
         "-v", "${configMount}:/config",
         "-v", "${pluginMount}:/config/plugins"
     )
@@ -842,12 +984,15 @@ try {
         $image
     )
 
-    $startResult = & docker @dockerArgs 2>&1
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to start container:`n$startResult"
+    Start-SmokeContainer -DockerArguments $dockerArgs
+    $binding = & docker port $script:OwnedContainerId 8686/tcp 2>&1
+    $bindingExit = $LASTEXITCODE
+    $bindingText = ($binding | Out-String).Trim()
+    if ($bindingExit -ne 0 -or $bindingText -notmatch '^127\.0\.0\.1:(\d+)$') {
+        throw "Could not resolve the loopback-only smoke port (exit $bindingExit)."
     }
-
-    $lidarrUrl = "http://localhost:$Port"
+    $Port = [int]$Matches[1]
+    $lidarrUrl = "http://127.0.0.1:$Port"
 
     Write-Host "Waiting for config.xml + API key..." -ForegroundColor Yellow
     $apiKey = $null
@@ -880,6 +1025,9 @@ try {
     }
 
     Write-Host "Lidarr online: v$($status.version)" -ForegroundColor Green
+    foreach ($packagePath in $pluginZipPaths) {
+        Assert-PluginPackageIdentity -ZipPath $packagePath -ValidateHostRequirements -HostVersion ([version]$status.version)
+    }
 
     Write-Host "Checking schemas for plugin implementations..." -ForegroundColor Yellow
     $schemaStart = Get-Date
@@ -953,64 +1101,8 @@ try {
         throw "Failed to fetch schema endpoints within ${SchemaTimeoutSeconds}s (missing: $($missing -join ', '))."
     }
 
-    $failed = $false
-
-    foreach ($plugin in $pluginNames) {
-        if (-not $expectations.ContainsKey($plugin)) {
-            Write-Host "No expectations configured for '$plugin' (skipping schema assertions)" -ForegroundColor Yellow
-            continue
-        }
-
-        $exp = $expectations[$plugin]
-
-        foreach ($impl in $exp.Indexers) {
-            $found = $indexerSchemas | Where-Object { $_.implementation -eq $impl }
-            if ($found) {
-                Write-Host "✓ indexer/schema contains $impl" -ForegroundColor Green
-            }
-            else {
-                Write-Host "✗ indexer/schema missing $impl" -ForegroundColor Red
-                $failed = $true
-            }
-        }
-
-        foreach ($impl in $exp.DownloadClients) {
-            $found = $downloadClientSchemas | Where-Object { $_.implementation -eq $impl }
-            if ($found) {
-                Write-Host "✓ downloadclient/schema contains $impl" -ForegroundColor Green
-            }
-            else {
-                Write-Host "✗ downloadclient/schema missing $impl" -ForegroundColor Red
-                $failed = $true
-            }
-        }
-
-        foreach ($impl in $exp.ImportLists) {
-            $found = $importListSchemas | Where-Object { $_.implementation -eq $impl }
-            if ($found) {
-                Write-Host "✓ importlist/schema contains $impl" -ForegroundColor Green
-            }
-            else {
-                Write-Host "✗ importlist/schema missing $impl" -ForegroundColor Red
-                $failed = $true
-            }
-        }
-    }
-
-    if ($failed) {
-        Write-Host "`nAvailable indexer implementations (sample):" -ForegroundColor Yellow
-        $indexerSchemas | ForEach-Object { $_.implementation } | Sort-Object -Unique | Select-Object -First 80 | ForEach-Object { Write-Host "  - $_" }
-
-        Write-Host "`nAvailable download client implementations (sample):" -ForegroundColor Yellow
-        $downloadClientSchemas | ForEach-Object { $_.implementation } | Sort-Object -Unique | Select-Object -First 80 | ForEach-Object { Write-Host "  - $_" }
-
-        if ($importListSchemas) {
-            Write-Host "`nAvailable import list implementations (sample):" -ForegroundColor Yellow
-            $importListSchemas | ForEach-Object { $_.implementation } | Sort-Object -Unique | Select-Object -First 80 | ForEach-Object { Write-Host "  - $_" }
-        }
-
-        exit 1
-    }
+    Assert-SmokeSchemas -PluginNames $pluginNames.ToArray() `
+        -IndexerSchemas $indexerSchemas -DownloadClientSchemas $downloadClientSchemas -ImportListSchemas $importListSchemas
 
     $configuredIndexerNames = New-Object System.Collections.Generic.List[string]
     $configuredDownloadClientNames = New-Object System.Collections.Generic.List[string]
@@ -1903,7 +1995,7 @@ try {
             }
 
             # Write JSON artifact for triage/trending
-            $driftArtifactPath = Join-Path $WorkRoot "artifacts/e2e/drift-sentinel.json"
+            $driftArtifactPath = Get-SmokeArtifactPath -FileName 'drift-sentinel.json'
 
             $driftResult = Invoke-DriftSentinel `
                 -Providers $driftProviders `
@@ -1929,6 +2021,19 @@ try {
 
     Write-Host "`n Multi-plugin schema smoke test passed." -ForegroundColor Green
 }
+catch {
+    $script:PrimaryFailure = $_
+    throw
+}
 finally {
-    Cleanup
+    try {
+        Cleanup
+    }
+    catch {
+        if ($null -eq $script:PrimaryFailure) { throw }
+        Write-Warning "Smoke cleanup also failed: $($_.Exception.Message)"
+    }
+    finally {
+        if ($null -ne $script:WorkRootLease) { $script:WorkRootLease.Dispose() }
+    }
 }

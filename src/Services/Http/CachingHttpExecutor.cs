@@ -413,13 +413,7 @@ namespace Lidarr.Plugin.Common.Services.Http
         {
             var retryAfter = response.Headers.RetryAfter;
             if (retryAfter is null) return null;
-            if (retryAfter.Delta.HasValue) return retryAfter.Delta.Value;
-            if (retryAfter.Date.HasValue)
-            {
-                var delta = retryAfter.Date.Value - DateTimeOffset.UtcNow;
-                return delta > TimeSpan.Zero ? delta : TimeSpan.Zero;
-            }
-            return null;
+            return RateLimitHeaderUtilities.ResolveRetryAfter(retryAfter);
         }
 
         private async Task<CachedHttpResponse<TPayload>> BuildResultFromCachedAsync<TPayload>(

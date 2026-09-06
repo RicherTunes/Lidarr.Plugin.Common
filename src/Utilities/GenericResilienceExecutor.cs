@@ -207,13 +207,17 @@ namespace Lidarr.Plugin.Common.Utilities
 
                     var retryAfter = getRetryAfterDelay(response);
                     var delay = retryAfter ?? policy.ComputeDelay(attempt) + policy.ComputeJitter();
+                    if (delay < TimeSpan.Zero)
+                    {
+                        delay = TimeSpan.Zero;
+                    }
 
 #if NET8_0_OR_GREATER
                     var now = tp.GetUtcNow().UtcDateTime;
 #else
                     var now = DateTime.UtcNow;
 #endif
-                    if (now + delay > deadline)
+                    if (delay > deadline - now)
                     {
                         return response;
                     }

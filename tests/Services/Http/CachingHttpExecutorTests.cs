@@ -469,6 +469,30 @@ namespace Lidarr.Plugin.Common.Tests.Services.Http
         }
 
         [Fact]
+        public async Task Should_RetryAndReturnOk_WhenNegativeRetryAfterHasPositiveRetryBudget()
+        {
+            var policy = CachePolicy.Disabled;
+            var tp = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            var provider = new StaticPolicyProvider(policy);
+            var cache = new TestCache(tp, provider);
+            using var handler = new ScriptedHandler((call, _) =>
+            {
+                if (call != 1) return NewOk();
+                var response = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+                response.Headers.RetryAfter = new RetryConditionHeaderValue(TimeSpan.FromSeconds(-1));
+                return response;
+            });
+            using var client = new HttpClient(handler);
+            var resilience = ResiliencePolicy.Default.With(maxRetries: 2, retryBudget: TimeSpan.FromSeconds(5));
+            var exec = new CachingHttpExecutor(client, cache, resilience, provider, timeProvider: tp);
+
+            var result = await exec.SendAsync(NewBuilder(), NewKey(), policy);
+
+            Assert.Equal(2, handler.Calls);
+            Assert.Equal(HttpStatusCode.OK, result.StatusCode);
+        }
+
+        [Fact]
         public async Task RetryAfter_OnFirst429_TransparentlyRetriesAndReturnsCachedMiss()
         {
             // 429 should be retried by GenericResilienceExecutor; the second attempt succeeds and the cached

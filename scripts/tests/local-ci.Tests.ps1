@@ -149,16 +149,18 @@ Describe 'Docker exit-code guardrails' {
         $content | Should -Match 'if\s*\(\$dockerVersionExit\s*-ne\s*0\)'
     }
 
-    It 'Captures docker create and run exits with dedicated variables' {
+    It 'Captures extraction create status and delegates smoke with an exit guard' {
         $content = Get-Content -LiteralPath $script:LocalCiScript -Raw
 
         $content | Should -Match '\$createOutput\s*=\s*&\s*docker create'
         $content | Should -Match '\$createExit\s*=\s*\$LASTEXITCODE'
         $content | Should -Match 'if\s*\(\$createExit\s*-ne\s*0\s*-or\s*-not\s*\$containerId\)'
 
-        $content | Should -Match '\$runOutput\s*=\s*&\s*docker run -d'
-        $content | Should -Match '\$runExit\s*=\s*\$LASTEXITCODE'
-        $content | Should -Match 'if\s*\(\$runExit\s*-ne\s*0\)'
+        $content | Should -Match 'multi-plugin-docker-smoke-test\.ps1'
+        $content | Should -Match '& pwsh -NoProfile -File \$smokeRunner'
+        $content | Should -Match '\$smokeExit\s*=\s*\$LASTEXITCODE'
+        $content | Should -Match 'if\s*\(\$smokeExit\s*-ne\s*0\)'
+        $content | Should -Not -Match '& docker run -d'
     }
 }
 

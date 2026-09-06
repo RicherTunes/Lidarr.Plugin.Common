@@ -4,12 +4,132 @@ using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Utilities;
+using Microsoft.Extensions.Time.Testing;
 using Xunit;
 
 namespace Lidarr.Plugin.Common.Tests
 {
     public class GenericResilienceExecutorTests
     {
+        [Fact]
+        public async Task Should_ReturnUsableOriginalResponse_WhenNegativeRetryAfterMeetsExpiredBudget()
+        {
+            var tp = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            var policy = ResiliencePolicy.Default.With(maxRetries: 2, retryBudget: TimeSpan.FromSeconds(5));
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://negative-retry-after.test/resource");
+            using var original = new HttpResponseMessage(HttpStatusCode.TooManyRequests)
+            {
+                Content = new StringContent("retry later")
+            };
+            using var success = new HttpResponseMessage(HttpStatusCode.OK);
+            var attempts = 0;
+
+            var response = await GenericResilienceExecutor.ExecuteWithResilienceAsync<HttpRequestMessage, HttpResponseMessage>(
+                request,
+                (_, _) =>
+                {
+                    attempts++;
+                    if (attempts == 1)
+                    {
+                        tp.Advance(TimeSpan.FromSeconds(6));
+                        return Task.FromResult(original);
+                    }
+
+                    return Task.FromResult(success);
+                },
+                r => Task.FromResult(r),
+                r => r.RequestUri?.Host,
+                r => (int)r.StatusCode,
+                _ => TimeSpan.FromSeconds(-10),
+                policy,
+                tp);
+
+            Assert.Equal(1, attempts);
+            Assert.Same(original, response);
+            Assert.Equal(HttpStatusCode.TooManyRequests, response.StatusCode);
+            Assert.Equal("retry later", await response.Content.ReadAsStringAsync());
+        }
+
+        [Fact]
+        public async Task Should_ReturnUsableOriginalResponse_WhenMaxValueRetryAfterExceedsBudget()
+        {
+            var tp = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            var policy = ResiliencePolicy.Default.With(maxRetries: 2, retryBudget: TimeSpan.FromSeconds(5));
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://max-retry-after.test/resource");
+            using var original = new HttpResponseMessage(HttpStatusCode.ServiceUnavailable)
+            {
+                Content = new StringContent("retry later")
+            };
+            var attempts = 0;
+
+            var response = await GenericResilienceExecutor.ExecuteWithResilienceAsync<HttpRequestMessage, HttpResponseMessage>(
+                request,
+                (_, _) =>
+                {
+                    attempts++;
+                    return Task.FromResult(original);
+                },
+                r => Task.FromResult(r),
+                r => r.RequestUri?.Host,
+                r => (int)r.StatusCode,
+                _ => TimeSpan.MaxValue,
+                policy,
+                tp);
+
+            Assert.Equal(1, attempts);
+            Assert.Same(original, response);
+            Assert.Equal(HttpStatusCode.ServiceUnavailable, response.StatusCode);
+            Assert.Equal("retry later", await response.Content.ReadAsStringAsync());
+        }
+
+        [Fact]
+        public async Task Should_UsePolicyBackoffAndRetry_WhenRetryAfterIsAbsent()
+        {
+            var tp = new FakeTimeProvider(new DateTimeOffset(2026, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            var policy = ResiliencePolicy.Default.With(
+                maxRetries: 2,
+                retryBudget: TimeSpan.FromSeconds(5),
+                initialBackoff: TimeSpan.FromSeconds(2),
+                maxBackoff: TimeSpan.FromSeconds(2),
+                jitterMin: TimeSpan.Zero,
+                jitterMax: TimeSpan.Zero);
+            using var request = new HttpRequestMessage(HttpMethod.Get, "https://absent-retry-after.test/resource");
+            using var original = new HttpResponseMessage(HttpStatusCode.TooManyRequests);
+            using var success = new HttpResponseMessage(HttpStatusCode.OK);
+            using var cts = new CancellationTokenSource();
+            var attempts = 0;
+
+            var pending = GenericResilienceExecutor.ExecuteWithResilienceAsync<HttpRequestMessage, HttpResponseMessage>(
+                request,
+                (_, _) => Task.FromResult(++attempts == 1 ? original : success),
+                r => Task.FromResult(r),
+                r => r.RequestUri?.Host,
+                r => (int)r.StatusCode,
+                r => r.Headers.RetryAfter?.Delta,
+                policy,
+                tp,
+                cts.Token);
+
+            try
+            {
+                Assert.Equal(1, attempts);
+                Assert.False(pending.IsCompleted);
+                tp.Advance(TimeSpan.FromMilliseconds(1999));
+                Assert.Equal(1, attempts);
+                Assert.False(pending.IsCompleted);
+                tp.Advance(TimeSpan.FromMilliseconds(1));
+
+                using var response = await pending;
+                Assert.Equal(2, attempts);
+                Assert.Same(success, response);
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+            }
+            finally
+            {
+                cts.Cancel();
+            }
+        }
+
         [Fact]
         public async Task ExecuteWithResilience_RetriesOn429_WithRetryAfter()
         {

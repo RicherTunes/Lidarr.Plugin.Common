@@ -16,7 +16,7 @@
       CommonPath, LidarrDockerVersion, ExpectedContentsFile
     Optional keys:
       SolutionFile, BuildFlags, TestProjects, PackageParams,
-      WarningBudget, WarningBudgetEnforce, RequireHermeticTests, RequireDeterministicTests
+      WarningBudget, WarningBudgetEnforce, WarningBudgetMetric, RequireHermeticTests, RequireDeterministicTests
 
 .PARAMETER SkipExtract
     Reuse previously extracted host assemblies (fast rerun).
@@ -122,7 +122,10 @@ function Invoke-Stage {
 }
 
 function Get-WarningCountFromOutput {
-    param([object[]]$OutputLines)
+    param(
+        [object[]]$OutputLines,
+        [AllowEmptyCollection()][System.Collections.Generic.HashSet[string]]$SeenDiagnostics
+    )
 
     if (-not $OutputLines) {
         return 0
@@ -130,13 +133,25 @@ function Get-WarningCountFromOutput {
 
     $text = ($OutputLines | ForEach-Object { "$_" }) -join "`n"
 
-    # Prefer MSBuild summary count when available.
     $summaryMatches = [regex]::Matches($text, '(?im)^\s*(\d+)\s+Warning\(s\)\s*$')
-    if ($summaryMatches.Count -gt 0) {
-        return [int]$summaryMatches[$summaryMatches.Count - 1].Groups[1].Value
+    $summary = if ($summaryMatches.Count -gt 0) { [int]$summaryMatches[$summaryMatches.Count - 1].Groups[1].Value } else { 0 }
+    if ($null -ne $SeenDiagnostics) {
+        # Opt-in diagnostic accounting shares one set across build/test stages.
+        # Preserve source location, project, code and message; strip presentation
+        # only. A repeated compilation of the same warning is not new debt.
+        $lines = @($OutputLines | ForEach-Object { ("$_" -replace '\x1b\[[0-9;]*m', '').Trim() } |
+            Where-Object { $_ -match '(?i):\s*warning\s' })
+        $newDiagnostics = 0
+        $represented = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($line in $lines) {
+            $null = $represented.Add($line)
+            if ($SeenDiagnostics.Add($line)) { $newDiagnostics++ }
+        }
+        # Repeated output cannot stand in for an unrepresented summary warning.
+        return $newDiagnostics + [Math]::Max(0, $summary - $represented.Count)
     }
-
-    # Fallback: count warning lines.
+    # Existing callers retain occurrence-based accounting.
+    if ($summaryMatches.Count -gt 0) { return $summary }
     return [regex]::Matches($text, '(?im):\s*warning\s').Count
 }
 
@@ -166,6 +181,15 @@ $testProjects   = $Config['TestProjects']
 $packageParams  = $Config['PackageParams']
 $warningBudget  = if ($Config.ContainsKey('WarningBudget') -and $Config.WarningBudget -ne $null -and "$($Config.WarningBudget)".Trim()) { [int]$Config.WarningBudget } else { $null }
 $warningBudgetEnforce = [bool]$Config['WarningBudgetEnforce']
+$warningBudgetMetric = if ($Config.ContainsKey('WarningBudgetMetric')) { [string]$Config['WarningBudgetMetric'] } else { 'Occurrences' }
+if ($warningBudgetMetric -notin @('Occurrences', 'UniqueDiagnostics')) {
+    throw "Unsupported warning budget metric: $warningBudgetMetric"
+}
+if ($null -ne $warningBudget -and $warningBudget -lt 0) { throw 'WarningBudget must not be negative.' }
+$script:WarningDiagnostics = $null
+if ($warningBudgetMetric -eq 'UniqueDiagnostics') {
+    $script:WarningDiagnostics = [System.Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+}
 $requireDeterministicTests = [bool]($Config['RequireDeterministicTests'] -or $Config['RequireHermeticTests'])
 
 # Validate Common submodule
@@ -385,7 +409,7 @@ $buildOk = Invoke-Stage -Name 'BUILD' -Number "$currentStage/5" -Required -Actio
     $buildOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
     if ($buildExit -ne 0) { throw "dotnet build failed" }
 
-    $buildWarnings = Get-WarningCountFromOutput -OutputLines $buildOutput
+    $buildWarnings = Get-WarningCountFromOutput -OutputLines $buildOutput -SeenDiagnostics $script:WarningDiagnostics
     $script:BuildWarningCount = $buildWarnings
     "Warnings: $buildWarnings"
 }
@@ -543,7 +567,7 @@ if ($SkipTests) {
             $tbExit = $LASTEXITCODE
             $tbOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
             if ($tbExit -ne 0) { throw "Test project build failed: $testProj" }
-            $script:TestBuildWarningCount += Get-WarningCountFromOutput -OutputLines $tbOutput
+            $script:TestBuildWarningCount += Get-WarningCountFromOutput -OutputLines $tbOutput -SeenDiagnostics $script:WarningDiagnostics
 
             # Run tests with the Common-owned deterministic CI filter.
             $resultsDir = Join-Path ([System.IO.Path]::GetTempPath()) "local-ci-trx-$([guid]::NewGuid().ToString('N').Substring(0,8))"
@@ -558,7 +582,7 @@ if ($SkipTests) {
             $testOutput = & dotnet test @testArgs 2>&1
             $testExitCode = $LASTEXITCODE
             $testOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
-            $script:TestRunWarningCount += Get-WarningCountFromOutput -OutputLines $testOutput
+            $script:TestRunWarningCount += Get-WarningCountFromOutput -OutputLines $testOutput -SeenDiagnostics $script:WarningDiagnostics
 
             # Parse TRX for counts
             $trxFiles = Get-ChildItem -Path $resultsDir -Filter '*.trx' -ErrorAction SilentlyContinue
@@ -599,64 +623,20 @@ if ($SkipTests) {
 
 if ($IncludeSmoke) {
     $smokeOk = Invoke-Stage -Name 'SMOKE' -Number 'S' -Action {
-        $image = "ghcr.io/hotio/lidarr:$dockerVersion"
-        $containerName = "local-ci-smoke-$($repoName.ToLower())"
-
-        # Find the ZIP to mount
+        # One owner for mounts, API authentication, role assertions, ports, and
+        # container cleanup. Invoke in a child so its exit cannot terminate the
+        # stage runner before SUMMARY records the result.
         if (-not $zipPath -or -not (Test-Path -LiteralPath $zipPath)) {
             throw "No plugin ZIP available for smoke test"
         }
-
-        Write-Host "  Starting Lidarr container for smoke test..."
-
-        # Extract ZIP to temp directory for mounting
-        $smokeDir = Join-Path ([System.IO.Path]::GetTempPath()) "local-ci-smoke-$([guid]::NewGuid().ToString('N').Substring(0,8))"
-        New-Item -ItemType Directory -Path $smokeDir -Force | Out-Null
-        Expand-Archive -LiteralPath $zipPath -DestinationPath $smokeDir -Force
-
-        try {
-            & docker rm -f $containerName 2>$null | Out-Null
-            $runOutput = & docker run -d --name $containerName `
-                -v "${smokeDir}:/plugins/$repoName" `
-                -e "PUID=1000" -e "PGID=1000" `
-                -p 8686:8686 `
-                $image 2>&1
-            $runExit = $LASTEXITCODE
-            $runOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
-
-            if ($runExit -ne 0) { throw "Failed to start Lidarr container" }
-
-            # Wait for API readiness (up to 60s)
-            $maxWait = 60
-            $waited = 0
-            $ready = $false
-            while ($waited -lt $maxWait) {
-                Start-Sleep -Seconds 2
-                $waited += 2
-                try {
-                    $response = Invoke-RestMethod -Uri 'http://localhost:8686/api/v1/system/status' -Method Get -TimeoutSec 5 -ErrorAction SilentlyContinue
-                    if ($response) { $ready = $true; break }
-                }
-                catch { }
-            }
-
-            if (-not $ready) { throw "Lidarr did not become ready within ${maxWait}s" }
-
-            Write-Host "  Lidarr API ready. Checking plugin registration..."
-
-            # Check schema endpoint for plugin
-            $schema = Invoke-RestMethod -Uri 'http://localhost:8686/api/v1/importlist/schema' -Method Get -TimeoutSec 10
-            $pluginEntry = $schema | Where-Object { $_.implementation -match $repoName }
-            if ($pluginEntry) {
-                "Plugin registered in schema"
-            } else {
-                throw "Plugin not found in Lidarr schema endpoint"
-            }
-        }
-        finally {
-            & docker rm -f $containerName 2>$null | Out-Null
-            Remove-Item -LiteralPath $smokeDir -Recurse -Force -ErrorAction SilentlyContinue
-        }
+        $smokeRunner = Join-Path $commonPath 'scripts/multi-plugin-docker-smoke-test.ps1'
+        if (-not (Test-Path -LiteralPath $smokeRunner)) { throw "Shared smoke runner missing: $smokeRunner" }
+        $package = (Resolve-Path -LiteralPath $zipPath).Path
+        & pwsh -NoProfile -File $smokeRunner -LidarrTag $dockerVersion `
+            -PluginZip "$($repoName.ToLowerInvariant())=$package" -Port 0
+        $smokeExit = $LASTEXITCODE
+        if ($smokeExit -ne 0) { throw "Shared smoke verification failed (exit $smokeExit)." }
+        'Plugin registered in all required host schemas'
     }
 }
 
@@ -679,6 +659,7 @@ foreach ($stage in $script:StageResults.Keys) {
 }
 
 $totalWarnings = [int]($script:BuildWarningCount + $script:TestBuildWarningCount + $script:TestRunWarningCount)
+Write-Host "  Warning budget metric: $warningBudgetMetric"
 if ($warningBudget -ne $null) {
     if ($totalWarnings -le $warningBudget) {
         Write-Host "  WARNING BUDGET ...................... PASS  ($totalWarnings/$warningBudget)" -ForegroundColor Green
