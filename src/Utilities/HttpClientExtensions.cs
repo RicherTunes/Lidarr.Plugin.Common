@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Reflection;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -852,11 +851,13 @@ namespace Lidarr.Plugin.Common.Utilities
             JsonSerializerOptions options = null,
             CancellationToken cancellationToken = default)
         {
-            var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
+            using var response = await httpClient.GetAsync(url, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
+            cancellationToken.ThrowIfCancellationRequested();
 
             var contentType = response.Content.Headers.ContentType?.MediaType;
             var payload = await HttpContentLightUp.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
 
             if (string.IsNullOrWhiteSpace(payload))
             {
@@ -895,12 +896,14 @@ namespace Lidarr.Plugin.Common.Utilities
             CancellationToken cancellationToken = default)
         {
             var json = JsonSerializer.Serialize(data, options);
-            var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
+            using var content = new StringContent(json, System.Text.Encoding.UTF8, "application/json");
 
-            var response = await httpClient.PostAsync(url, content, cancellationToken);
+            using var response = await httpClient.PostAsync(url, content, cancellationToken).ConfigureAwait(false);
             response.EnsureSuccessStatusCode();
+            cancellationToken.ThrowIfCancellationRequested();
 
-            var responseContent = await response.Content.ReadAsStringAsync();
+            var responseContent = await HttpContentLightUp.ReadAsStringAsync(response.Content, cancellationToken).ConfigureAwait(false);
+            cancellationToken.ThrowIfCancellationRequested();
             return JsonSerializer.Deserialize<TResponse>(responseContent, options);
         }
 
@@ -1153,57 +1156,16 @@ namespace Lidarr.Plugin.Common.Utilities
             return "[redacted]";
         }
 
-        public static async Task<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage request)
-        {
-            var clone = new HttpRequestMessage(request.Method, request.RequestUri)
-            {
-                Version = request.Version
-            };
-
-            clone.VersionPolicy = request.VersionPolicy;
-            CopyHttpRequestOptions(request, clone);
-            // Copy headers
-            foreach (var header in request.Headers)
-            {
-                clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
-            }
-
-            // Copy content if present
-            if (request.Content != null)
-            {
-                var contentBytes = await request.Content.ReadAsByteArrayAsync();
-                clone.Content = new ByteArrayContent(contentBytes);
-
-                // Copy content headers
-                foreach (var header in request.Content.Headers)
-                {
-                    clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
-                }
-            }
-
-            return clone;
-        }
-
-        private static readonly MethodInfo HttpRequestOptionsSetMethod = typeof(System.Net.Http.HttpRequestOptions)
-            .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-            .First(m => m.Name == "Set" && m.IsGenericMethodDefinition && m.GetParameters().Length == 2);
+        public static Task<HttpRequestMessage> CloneHttpRequestMessageAsync(HttpRequestMessage request)
+            => CloneRequestAsync(request, reuseBufferedBody: false);
 
         private static void CopyHttpRequestOptions(HttpRequestMessage source, HttpRequestMessage destination)
         {
             foreach (var option in source.Options)
             {
-                var value = option.Value;
-                if (value is null)
-                {
-                    destination.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), null);
-                    continue;
-                }
-
-                var valueType = value.GetType();
-                var keyType = typeof(HttpRequestOptionsKey<>).MakeGenericType(valueType);
-                var keyInstance = Activator.CreateInstance(keyType, option.Key);
-                var setMethod = HttpRequestOptionsSetMethod.MakeGenericMethod(valueType);
-                setMethod.Invoke(destination.Options, new[] { keyInstance, value });
+                // Options are keyed by name and store object values. Typed retrieval
+                // checks the value, not the generic key used to insert it.
+                destination.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), option.Value);
             }
         }
         private static TimeSpan? GetTypedRetryDelay(HttpResponseMessage response, TimeProvider? timeProvider = null)
@@ -1225,7 +1187,10 @@ namespace Lidarr.Plugin.Common.Utilities
         /// <summary>
         /// Clone a request for retry, buffering the original content once and reusing across attempts.
         /// </summary>
-        public static async Task<HttpRequestMessage> CloneForRetryAsync(HttpRequestMessage request)
+        public static Task<HttpRequestMessage> CloneForRetryAsync(HttpRequestMessage request)
+            => CloneRequestAsync(request, reuseBufferedBody: true);
+
+        private static async Task<HttpRequestMessage> CloneRequestAsync(HttpRequestMessage request, bool reuseBufferedBody)
         {
             if (request == null) throw new ArgumentNullException(nameof(request));
 
@@ -1235,39 +1200,47 @@ namespace Lidarr.Plugin.Common.Utilities
                 VersionPolicy = request.VersionPolicy
             };
 
-            CopyHttpRequestOptions(request, clone);
-
-            foreach (var header in request.Headers)
+            try
             {
-                clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
-            }
-
-            if (request.Content != null)
-            {
-                // Buffer once into request.Options, then reuse
-                byte[]? bodyBytes = null;
-                try
+                CopyHttpRequestOptions(request, clone);
+                foreach (var header in request.Headers)
                 {
-                    if (!request.Options.TryGetValue(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.BufferedBodyKey, out bodyBytes) || bodyBytes == null)
+                    clone.Headers.TryAddWithoutValidation(header.Key, header.Value);
+                }
+
+                var sourceContent = request.Content;
+                if (sourceContent != null)
+                {
+                    byte[]? bodyBytes = null;
+                    if (reuseBufferedBody)
                     {
-                        bodyBytes = await request.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                        request.Options.Set(Lidarr.Plugin.Common.Services.Http.PluginHttpOptions.BufferedBodyKey, bodyBytes);
+                        request.Options.TryGetValue(PluginHttpOptions.BufferedBodyKey, out bodyBytes);
+                    }
+                    if (bodyBytes == null)
+                    {
+                        // A failed or cancelled read is not permission to consume the
+                        // caller's body a second time. Only successful reads are cached.
+                        bodyBytes = await sourceContent.ReadAsByteArrayAsync().ConfigureAwait(false);
+                        if (reuseBufferedBody)
+                        {
+                            request.Options.Set(PluginHttpOptions.BufferedBodyKey, bodyBytes);
+                        }
+                    }
+
+                    clone.Content = new ByteArrayContent(bodyBytes);
+                    foreach (var header in sourceContent.Headers)
+                    {
+                        clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
                     }
                 }
-                catch
-                {
-                    // As a last resort, fall back to reading the stream fresh
-                    bodyBytes = await request.Content.ReadAsByteArrayAsync().ConfigureAwait(false);
-                }
 
-                clone.Content = new ByteArrayContent(bodyBytes ?? Array.Empty<byte>());
-                foreach (var header in request.Content.Headers)
-                {
-                    clone.Content.Headers.TryAddWithoutValidation(header.Key, header.Value);
-                }
+                return clone;
             }
-
-            return clone;
+            catch
+            {
+                clone.Dispose();
+                throw;
+            }
         }
 
         private static TimeSpan GetJitter()
