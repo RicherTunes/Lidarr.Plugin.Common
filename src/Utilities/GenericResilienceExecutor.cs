@@ -157,9 +157,9 @@ namespace Lidarr.Plugin.Common.Utilities
 #endif
             var effectiveToken = timeout.Token;
 #if NET8_0_OR_GREATER
-            var startedAt = tp.GetTimestamp();
+            var budget = new ResilienceBudget(policy.RetryBudget, tp);
 #else
-            var stopwatch = System.Diagnostics.Stopwatch.StartNew();
+            var budget = new ResilienceBudget(policy.RetryBudget);
 #endif
             var attempt = 0;
 
@@ -199,12 +199,7 @@ namespace Lidarr.Plugin.Common.Utilities
                         delay = TimeSpan.Zero;
                     }
 
-#if NET8_0_OR_GREATER
-                    var elapsed = tp.GetElapsedTime(startedAt);
-#else
-                    var elapsed = stopwatch.Elapsed;
-#endif
-                    if (elapsed > policy.RetryBudget || delay > policy.RetryBudget - elapsed)
+                    if (!budget.CanFitDelay(delay))
                     {
                         return response;
                     }

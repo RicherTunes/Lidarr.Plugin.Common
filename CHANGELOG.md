@@ -43,6 +43,7 @@ Template to copy when drafting a release:
 - Generic and HTTP executors share operation-timeout ownership. Supplied clocks drive timeout cancellation as well as backoff; timeout expiry is reported consistently during gate waits, sending and backoff, while caller cancellation retains precedence. Cancellation observed after request cloning or before a zero-delay retry prevents another send. The existing operation-wide timeout window is not reset per attempt; public signatures and retry-budget policies are unchanged.
 
 ### Fixed
+- Generic and typed HTTP execution now use one internal elapsed-budget implementation, including both manual redirect paths. Typed requests no longer construct calendar deadlines that overflow or change retry admission when UTC jumps. Absolute Retry-After dates still use UTC, and the existing typed delay-clamping and generic exact-exhaustion policies remain distinct and unchanged.
 - Retry budgets use elapsed timestamps instead of wall-clock deadlines, so clock corrections and extreme valid budgets cannot extend, truncate, or overflow the budget calculation. Existing retry admission and response ownership semantics are preserved.
 - Exponential policy backoff is capped using bounded integer-tick arithmetic before scaling can overflow; very large attempt counts remain constant-time and fractional-millisecond delays retain exact tick precision.
 
