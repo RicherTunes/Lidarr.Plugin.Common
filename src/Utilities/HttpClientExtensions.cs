@@ -353,15 +353,8 @@ namespace Lidarr.Plugin.Common.Utilities
             if (request == null) throw new ArgumentNullException(nameof(request));
 
             retryBudget ??= TimeSpan.FromSeconds(60);
-            using var timeoutCts = perRequestTimeout.HasValue
-                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
-                : null;
-            if (perRequestTimeout.HasValue)
-            {
-                timeoutCts!.CancelAfter(perRequestTimeout.Value);
-            }
-
-            var effectiveToken = timeoutCts?.Token ?? cancellationToken;
+            using var timeout = new ResilienceTimeout(perRequestTimeout, cancellationToken);
+            var effectiveToken = timeout.Token;
             var deadline = DateTime.UtcNow + retryBudget.Value;
             var attempt = 0;
             var redirectCount = 0;
@@ -394,22 +387,21 @@ namespace Lidarr.Plugin.Common.Utilities
             var aggregateEffective = Math.Max(1, maxTotalConcurrencyPerHost);
             var aggregateGate = HostGateRegistry.GetAggregate(host, aggregateEffective);
 
-            using (var waitActivity = Observability.Activity.StartActivity("host.gate.wait", ActivityKind.Internal))
-            {
-                waitActivity?.SetTag("net.host", host ?? "__unknown__");
-                waitActivity?.SetTag("profile", profileTag);
-                await aggregateGate.WaitAsync(effectiveToken).ConfigureAwait(false);
-                await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
-            }
-
-            // Track inflight per host (approximate). Increment on acquire; decrement on release.
-            try {
-#if NET8_0_OR_GREATER
-                Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
-#endif
-            } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+            HostGateLease? gateLease = null;
             try
             {
+                using (var waitActivity = Observability.Activity.StartActivity("host.gate.wait", ActivityKind.Internal))
+                {
+                    waitActivity?.SetTag("net.host", host ?? "__unknown__");
+                    waitActivity?.SetTag("profile", profileTag);
+                    gateLease = await HostGateLease.AcquireAsync(aggregateGate, gate, effectiveToken).ConfigureAwait(false);
+                }
+                // Only count requests that actually own both permits.
+                try {
+#if NET8_0_OR_GREATER
+                    Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
+#endif
+                } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                 while (true)
                 {
                     attempt++;
@@ -435,22 +427,12 @@ namespace Lidarr.Plugin.Common.Utilities
                         }
                         catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                     }
-                    try
-                    {
-                        response = await httpClient.SendAsync(
-                                attemptRequest,
-                                HttpCompletionOption.ResponseHeadersRead,
-                                effectiveToken)
-                            .ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException ex) when (perRequestTimeout.HasValue &&
-                                                               timeoutCts!.IsCancellationRequested &&
-                                                               !cancellationToken.IsCancellationRequested)
-                    {
-                        throw new TimeoutException(
-                            $"HTTP request to {Scrub.Url(request.RequestUri?.ToString() ?? string.Empty)} exceeded the per-request timeout of {perRequestTimeout.Value}.",
-                            ex);
-                    }
+                    effectiveToken.ThrowIfCancellationRequested();
+                    response = await httpClient.SendAsync(
+                            attemptRequest,
+                            HttpCompletionOption.ResponseHeadersRead,
+                            effectiveToken)
+                        .ConfigureAwait(false);
 
                     if ((int)response.StatusCode >= 200 && (int)response.StatusCode < 300)
                     {
@@ -517,23 +499,18 @@ namespace Lidarr.Plugin.Common.Utilities
                                     }
                                     catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
-                                    // Release current gates before acquiring new ones
-                                    try { gate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
-                                    try { aggregateGate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                                    // Relinquish old ownership before a cancellable acquisition.
+                                    var previousLease = gateLease;
+                                    gateLease = null;
+                                    previousLease.Dispose();
 
                                     host = newHost;
                                     hostKey = host ?? "__unknown__";
                                     if (!string.IsNullOrWhiteSpace(profileTag)) hostKey = hostKey + "|" + profileTag;
 
-                                    // Acquire new gates for redirected host
                                     var newAggregate = HostGateRegistry.GetAggregate(host, aggregateEffective);
-                                    await newAggregate.WaitAsync(effectiveToken).ConfigureAwait(false);
                                     var newGate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
-                                    await newGate.WaitAsync(effectiveToken).ConfigureAwait(false);
-
-                                    // Swap references so finalizer releases the currently-held gates
-                                    aggregateGate = newAggregate;
-                                    gate = newGate;
+                                    gateLease = await HostGateLease.AcquireAsync(newAggregate, newGate, effectiveToken).ConfigureAwait(false);
 
                                     try
                                     {
@@ -550,6 +527,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                 // Continue immediately without backoff; do not count against retry budget
                                 continue;
                             }
+                            catch (OperationCanceledException) { response.Dispose(); throw; }
                             catch (InvalidOperationException) { throw; } // LOOP-004: an SSRF redirect refusal must propagate, not be swallowed
                             catch (HttpRequestException) { throw; } // Transient redirect-target DNS failures must stay retryable for callers
                             catch (Exception swallowEx) { SwallowToTrace(swallowEx); /* fall through to return */ }
@@ -597,20 +575,17 @@ namespace Lidarr.Plugin.Common.Utilities
                                     }
                                     catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
-                                    try { gate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
-                                    try { aggregateGate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                                    var previousLease = gateLease;
+                                    gateLease = null;
+                                    previousLease.Dispose();
 
                                     host = newHost;
                                     hostKey = host ?? "__unknown__";
                                     if (!string.IsNullOrWhiteSpace(profileTag)) hostKey = hostKey + "|" + profileTag;
 
                                     var newAggregate = HostGateRegistry.GetAggregate(host, aggregateEffective);
-                                    await newAggregate.WaitAsync(effectiveToken).ConfigureAwait(false);
                                     var newGate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
-                                    await newGate.WaitAsync(effectiveToken).ConfigureAwait(false);
-
-                                    aggregateGate = newAggregate;
-                                    gate = newGate;
+                                    gateLease = await HostGateLease.AcquireAsync(newAggregate, newGate, effectiveToken).ConfigureAwait(false);
 
                                     try
                                     {
@@ -626,6 +601,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                 // Continue without backoff; redirect handling should not consume retry budget
                                 continue;
                             }
+                            catch (OperationCanceledException) { response.Dispose(); throw; }
                             catch (InvalidOperationException) { throw; } // LOOP-004: an SSRF redirect refusal must propagate, not be swallowed
                             catch (HttpRequestException) { throw; } // Transient redirect-target DNS failures must stay retryable for callers
                             catch (Exception swallowEx) { SwallowToTrace(swallowEx); /* fall through to return */ }
@@ -673,15 +649,22 @@ namespace Lidarr.Plugin.Common.Utilities
                     await Task.Delay(delay, effectiveToken).ConfigureAwait(false);
                 }
             }
+            catch (OperationCanceledException ex) when (timeout.IsTimeout)
+            {
+                throw new TimeoutException(
+                    $"HTTP request to {Scrub.Url(request.RequestUri?.ToString() ?? string.Empty)} exceeded the per-request timeout of {perRequestTimeout}.", ex);
+            }
             finally
             {
-                gate.Release();
-                aggregateGate.Release();
-                try {
+                if (gateLease is not null)
+                {
+                    gateLease.Dispose();
+                    try {
 #if NET8_0_OR_GREATER
-                    Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
+                        Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__"));
 #endif
-                } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                    } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                }
             }
         }
 
@@ -726,15 +709,8 @@ namespace Lidarr.Plugin.Common.Utilities
             if (timeProvider == null) throw new ArgumentNullException(nameof(timeProvider));
 
             retryBudget ??= TimeSpan.FromSeconds(60);
-            using var timeoutCts = perRequestTimeout.HasValue
-                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
-                : null;
-            if (perRequestTimeout.HasValue)
-            {
-                timeoutCts!.CancelAfter(perRequestTimeout.Value);
-            }
-
-            var effectiveToken = timeoutCts?.Token ?? cancellationToken;
+            using var timeout = new ResilienceTimeout(perRequestTimeout, cancellationToken, timeProvider);
+            var effectiveToken = timeout.Token;
             var deadline = timeProvider.GetUtcNow().UtcDateTime + retryBudget.Value;
             var attempt = 0;
 
@@ -765,17 +741,16 @@ namespace Lidarr.Plugin.Common.Utilities
             var aggregateEffective = Math.Max(1, maxTotalConcurrencyPerHost);
             var aggregateGate = HostGateRegistry.GetAggregate(host, aggregateEffective);
 
-            using (var waitActivity = Observability.Activity.StartActivity("host.gate.wait", ActivityKind.Internal))
-            {
-                waitActivity?.SetTag("net.host", host ?? "__unknown__");
-                waitActivity?.SetTag("profile", profileTag);
-                await aggregateGate.WaitAsync(effectiveToken).ConfigureAwait(false);
-                await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
-            }
-
-            try { Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+            HostGateLease? gateLease = null;
             try
             {
+                using (var waitActivity = Observability.Activity.StartActivity("host.gate.wait", ActivityKind.Internal))
+                {
+                    waitActivity?.SetTag("net.host", host ?? "__unknown__");
+                    waitActivity?.SetTag("profile", profileTag);
+                    gateLease = await HostGateLease.AcquireAsync(aggregateGate, gate, effectiveToken).ConfigureAwait(false);
+                }
+                try { Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                 while (true)
                 {
                     attempt++;
@@ -801,22 +776,12 @@ namespace Lidarr.Plugin.Common.Utilities
                         }
                         catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                     }
-                    try
-                    {
-                        response = await httpClient.SendAsync(
-                                attemptRequest,
-                                HttpCompletionOption.ResponseHeadersRead,
-                                effectiveToken)
-                            .ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException ex) when (perRequestTimeout.HasValue &&
-                                                               timeoutCts!.IsCancellationRequested &&
-                                                               !cancellationToken.IsCancellationRequested)
-                    {
-                        throw new TimeoutException(
-                            $"Request exceeded the per-request timeout of {perRequestTimeout.Value}.",
-                            ex);
-                    }
+                    effectiveToken.ThrowIfCancellationRequested();
+                    response = await httpClient.SendAsync(
+                            attemptRequest,
+                            HttpCompletionOption.ResponseHeadersRead,
+                            effectiveToken)
+                        .ConfigureAwait(false);
 
                     var status = (int)response.StatusCode;
                     var retryable = status == (int)HttpStatusCode.RequestTimeout
@@ -867,11 +832,17 @@ namespace Lidarr.Plugin.Common.Utilities
                     await DelayAsync(delay, timeProvider, effectiveToken).ConfigureAwait(false);
                 }
             }
+            catch (OperationCanceledException ex) when (timeout.IsTimeout)
+            {
+                throw new TimeoutException($"Request exceeded the per-request timeout of {perRequestTimeout}.", ex);
+            }
             finally
             {
-                try { gate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
-                try { aggregateGate.Release(); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
-                try { Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                if (gateLease is not null)
+                {
+                    gateLease.Dispose();
+                    try { Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
+                }
             }
         }
 

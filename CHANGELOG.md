@@ -38,6 +38,10 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed — cancellation ownership
+- Shared HTTP execution now acquires aggregate/profile concurrency permits through one lease, rolls back partial acquisition, and releases only currently owned permits during cross-host redirects. Redirect cancellation propagates instead of being swallowed and disposes the abandoned redirect response.
+- Generic and HTTP executors share operation-timeout ownership. Supplied clocks drive timeout cancellation as well as backoff; timeout expiry is reported consistently during gate waits, sending and backoff, while caller cancellation retains precedence. Cancellation observed after request cloning or before a zero-delay retry prevents another send. The existing operation-wide timeout window is not reset per attempt; public signatures and retry-budget policies are unchanged.
+
 ### Fixed
 - Retry budgets use elapsed timestamps instead of wall-clock deadlines, so clock corrections and extreme valid budgets cannot extend, truncate, or overflow the budget calculation. Existing retry admission and response ownership semantics are preserved.
 - Exponential policy backoff is capped using bounded integer-tick arithmetic before scaling can overflow; very large attempt counts remain constant-time and fractional-millisecond delays retain exact tick precision.
