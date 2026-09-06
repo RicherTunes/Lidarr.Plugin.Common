@@ -355,7 +355,7 @@ namespace Lidarr.Plugin.Common.Utilities
             retryBudget ??= TimeSpan.FromSeconds(60);
             using var timeout = new ResilienceTimeout(perRequestTimeout, cancellationToken);
             var effectiveToken = timeout.Token;
-            var deadline = DateTime.UtcNow + retryBudget.Value;
+            var budget = new ResilienceBudget(retryBudget.Value);
             var attempt = 0;
             var redirectCount = 0;
             const int maxRedirects = 10;
@@ -478,7 +478,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                 // deadline check below the retryable path is skipped by the redirect `continue`,
                                 // so it must also be enforced here.
                                 redirectCount++;
-                                if (redirectCount > maxRedirects || DateTime.UtcNow >= deadline)
+                                if (redirectCount > maxRedirects || budget.Remaining <= TimeSpan.Zero)
                                 {
                                     try { httpActivity?.SetTag("resilience.redirects.exhausted", redirectCount); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                                     return response;
@@ -555,7 +555,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                 // deadline check below the retryable path is skipped by the redirect `continue`,
                                 // so it must also be enforced here.
                                 redirectCount++;
-                                if (redirectCount > maxRedirects || DateTime.UtcNow >= deadline)
+                                if (redirectCount > maxRedirects || budget.Remaining <= TimeSpan.Zero)
                                 {
                                     try { httpActivity?.SetTag("resilience.redirects.exhausted", redirectCount); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                                     return response;
@@ -610,7 +610,6 @@ namespace Lidarr.Plugin.Common.Utilities
                     }
 
                     DownloadTelemetryContext.RecordRetry(response.StatusCode);
-                    var now = DateTime.UtcNow;
                     // Prefer Retry-After absolute date over delta; do not add jitter when an absolute date is provided
                     TimeSpan delay;
                     var preferred = GetRetryDelayPreferredDate(response);
@@ -622,7 +621,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     {
                         delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt))) + GetJitter();
                     }
-                    var remaining = deadline - now;
+                    var remaining = budget.Remaining;
                     if (remaining <= TimeSpan.Zero)
                     {
                         try { httpActivity?.SetTag("resilience.deadline.exhausted", true); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
@@ -711,7 +710,7 @@ namespace Lidarr.Plugin.Common.Utilities
             retryBudget ??= TimeSpan.FromSeconds(60);
             using var timeout = new ResilienceTimeout(perRequestTimeout, cancellationToken, timeProvider);
             var effectiveToken = timeout.Token;
-            var deadline = timeProvider.GetUtcNow().UtcDateTime + retryBudget.Value;
+            var budget = new ResilienceBudget(retryBudget.Value, timeProvider);
             var attempt = 0;
 
             Uri? currentUri = request.RequestUri;
@@ -804,8 +803,7 @@ namespace Lidarr.Plugin.Common.Utilities
                         delay = TimeSpan.FromSeconds(Math.Min(30, Math.Pow(2, attempt))) + GetJitter();
                     }
 
-                    var now = timeProvider.GetUtcNow().UtcDateTime;
-                    var remaining = deadline - now;
+                    var remaining = budget.Remaining;
                     if (remaining <= TimeSpan.Zero)
                     {
                         try { httpActivity?.SetTag("resilience.deadline.exhausted", true); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
