@@ -69,6 +69,35 @@ namespace Lidarr.Plugin.Common.Tests.Hygiene
             Assert.DoesNotContain("private static TimeSpan ResolveRetryAfter", source);
         }
 
+        [Fact]
+        public void Typed_http_retries_delegate_header_resolution_to_the_canonical_helper()
+        {
+            var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "Utilities", "HttpClientExtensions.cs"));
+            Assert.Contains("RateLimitHeaderUtilities.ResolveRetryAfter", source);
+            Assert.DoesNotContain("ra.Date.Value -", source);
+            Assert.DoesNotContain("if (ra.Delta.HasValue) return ra.Delta.Value;", source);
+        }
+
+        [Fact]
+        public void Llm_error_mapper_delegates_typed_header_resolution_to_the_canonical_helper()
+        {
+            var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "Errors", "LlmErrorMapper.cs"));
+            Assert.Contains("RateLimitHeaderUtilities.ResolveRetryAfter(header)", source);
+            Assert.DoesNotContain("header.Date.Value -", source);
+            Assert.DoesNotContain("header.Delta.Value", source);
+        }
+
+        [Theory]
+        [InlineData("Services/Http/RateLimitTelemetryHandler.cs")]
+        [InlineData("Base/BaseStreamingDownloadClient.cs")]
+        public void Remaining_typed_header_consumers_use_the_canonical_resolver(string relativePath)
+        {
+            var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", relativePath.Replace('/', Path.DirectorySeparatorChar)));
+            Assert.Contains("RateLimitHeaderUtilities.ResolveRetryAfter", source);
+            Assert.DoesNotContain("ra.Date.Value -", source);
+            Assert.DoesNotContain("ra.Delta", source);
+        }
+
         private static IEnumerable<string> EnumerateTextSources(string repoRoot)
         {
             foreach (var file in Directory.EnumerateFiles(repoRoot, "*", SearchOption.AllDirectories))

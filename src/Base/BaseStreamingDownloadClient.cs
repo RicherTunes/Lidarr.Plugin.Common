@@ -623,12 +623,11 @@ namespace Lidarr.Plugin.Common.Base
                     var ra = response.Headers?.RetryAfter;
                     if (ra != null)
                     {
-                        if (ra.Delta.HasValue) return ra.Delta.Value + TimeSpan.FromMilliseconds(RandomProvider.Next(50, 250));
-                        if (ra.Date.HasValue)
-                        {
-                            var delta = ra.Date.Value - DateTimeOffset.UtcNow;
-                            if (delta > TimeSpan.Zero) return delta + TimeSpan.FromMilliseconds(RandomProvider.Next(50, 250));
-                        }
+                        var delay = Lidarr.Plugin.Common.Services.Http.RateLimitHeaderUtilities.ResolveRetryAfter(ra);
+                        // Preserve download jitter and expired-date policy fallback;
+                        // only the header's duration calculation is shared.
+                        if (!ra.Date.HasValue || delay > TimeSpan.Zero)
+                            return delay + TimeSpan.FromMilliseconds(RandomProvider.Next(50, 250));
                     }
                 }
                 catch { /* ignore */ }
