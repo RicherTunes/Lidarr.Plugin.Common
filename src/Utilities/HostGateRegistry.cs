@@ -1,231 +1,225 @@
 using System;
-using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
 using System.Threading;
 
 namespace Lidarr.Plugin.Common.Utilities
 {
     internal static class HostGateRegistry
     {
-        private sealed class GateState
+        // All membership, reference counts, limit changes and retirement are guarded
+        // by LifecycleLock. No lock is held while waiting for a permit or sending HTTP.
+        internal sealed class GateState
         {
-            private readonly object _lock = new();
-
-            public GateState(int limit)
+            internal GateState(string key, int limit, Dictionary<string, GateState> owner)
             {
+                Key = key;
+                Owner = owner;
                 Semaphore = new SemaphoreSlim(limit, int.MaxValue);
                 Limit = limit;
-                LastUsedUtc = DateTime.UtcNow;
+                LastUsedTimestamp = Stopwatch.GetTimestamp();
             }
 
-            public SemaphoreSlim Semaphore { get; }
-            public int Limit { get; private set; }
-            public DateTime LastUsedUtc { get; private set; }
+            internal string Key { get; }
+            internal Dictionary<string, GateState> Owner { get; }
+            internal SemaphoreSlim Semaphore { get; }
+            internal int Limit { get; set; }
+            internal int References { get; set; }
+            internal long LastUsedTimestamp { get; set; }
+            internal bool RetireWhenIdle { get; set; }
+        }
 
-            public void EnsureLimit(int requestedLimit)
+        // A reservation protects both queued and running operations, including the
+        // interval between lookup and WaitAsync. Dispose only after permit release.
+        internal sealed class Reservation : IDisposable
+        {
+            private readonly GateState _profile;
+            private readonly GateState? _aggregate;
+            private int _released;
+
+            internal Reservation(GateState profile, GateState? aggregate)
             {
-                if (requestedLimit <= Limit)
-                {
-                    return;
-                }
-
-                lock (_lock)
-                {
-                    if (requestedLimit <= Limit)
-                    {
-                        return;
-                    }
-
-                    var delta = requestedLimit - Limit;
-                    Semaphore.Release(delta);
-                    Limit = requestedLimit;
-                }
+                _profile = profile;
+                _aggregate = aggregate;
             }
 
-            public void Touch()
+            internal SemaphoreSlim Profile => _profile.Semaphore;
+            internal SemaphoreSlim? Aggregate => _aggregate?.Semaphore;
+
+            public void Dispose()
             {
-                LastUsedUtc = DateTime.UtcNow;
+                if (Interlocked.Exchange(ref _released, 1) != 0) return;
+                lock (LifecycleLock)
+                {
+                    Return(_profile);
+                    if (_aggregate is not null) Return(_aggregate);
+                }
             }
         }
 
-        private static readonly ConcurrentDictionary<string, GateState> Gates = new();
-        private static readonly ConcurrentDictionary<string, GateState> AggregateGates = new();
+        private static readonly Dictionary<string, GateState> Gates = new(StringComparer.Ordinal);
+        private static readonly Dictionary<string, GateState> AggregateGates = new(StringComparer.Ordinal);
         private static readonly object LifecycleLock = new();
         private static readonly TimeSpan IdleTtl = TimeSpan.FromMinutes(10);
         private static readonly TimeSpan SweepInterval = TimeSpan.FromMinutes(5);
-        // Nullable so Shutdown() can null it via Interlocked.Exchange (readonly would prevent that).
         private static Timer? _sweeper;
+        private static object? _sweepGeneration;
 
-        static HostGateRegistry()
-        {
-            // Background sweeper to dispose idle gates and avoid unbounded growth in long-lived processes.
-            _sweeper = new Timer(_ => Sweep(), null, SweepInterval, SweepInterval);
-        }
-
-        // Test/diagnostic observability: whether the idle-gate sweeper timer is currently armed.
         internal static bool IsSweeperActive => Volatile.Read(ref _sweeper) is not null;
 
-        // Re-arm the sweeper lazily after a prior Shutdown() nulled it. Lidarr keeps the host
-        // process alive across plugin reloads, so without this the first unload's Shutdown()
-        // would kill idle-gate eviction permanently and every subsequently-added gate (each
-        // owning a SemaphoreSlim) would accumulate forever.
         private static void EnsureSweeper()
         {
-            if (Volatile.Read(ref _sweeper) is not null)
-            {
-                return;
-            }
-
-            var timer = new Timer(_ => Sweep(), null, SweepInterval, SweepInterval);
-            // Only install if still null; if another thread won the race, dispose ours.
-            if (Interlocked.CompareExchange(ref _sweeper, timer, null) is not null)
-            {
-                timer.Dispose();
-            }
+            if (_sweeper is not null) return;
+            var generation = new object();
+            var timer = new Timer(Sweep, generation, SweepInterval, SweepInterval);
+            _sweepGeneration = generation;
+            _sweeper = timer;
         }
 
+        private static GateState GetOrCreate(Dictionary<string, GateState> owner, string? host, int requestedLimit)
+        {
+            if (requestedLimit < 1) throw new ArgumentOutOfRangeException(nameof(requestedLimit));
+            host ??= "__unknown__";
+            EnsureSweeper();
+            if (!owner.TryGetValue(host, out var state))
+            {
+                state = new GateState(host, requestedLimit, owner);
+                owner.Add(host, state);
+            }
+            else if (requestedLimit > state.Limit)
+            {
+                state.Semaphore.Release(requestedLimit - state.Limit);
+                state.Limit = requestedLimit;
+            }
+            state.LastUsedTimestamp = Stopwatch.GetTimestamp();
+            return state;
+        }
+
+        // Raw access is retained for existing diagnostics and test fixtures only.
+        // Production users must reserve through HostGateLease before any await.
         public static SemaphoreSlim Get(string? host, int requestedLimit)
         {
-            host ??= "__unknown__";
-            lock (LifecycleLock)
-            {
-                EnsureSweeper();
-                var gate = Gates.AddOrUpdate(
-                    host,
-                    _ => new GateState(requestedLimit),
-                    (_, existing) =>
-                    {
-                        existing.EnsureLimit(requestedLimit);
-                        return existing;
-                    });
-
-                gate.Touch();
-                return gate.Semaphore;
-            }
+            lock (LifecycleLock) return GetOrCreate(Gates, host, requestedLimit).Semaphore;
         }
 
         public static SemaphoreSlim GetAggregate(string? host, int requestedLimit)
         {
-            host ??= "__unknown__";
+            lock (LifecycleLock) return GetOrCreate(AggregateGates, host, requestedLimit).Semaphore;
+        }
+
+        internal static Reservation Reserve(string? profileHost, int profileLimit, string? aggregateHost = null, int? aggregateLimit = null)
+        {
             lock (LifecycleLock)
             {
-                EnsureSweeper();
-                var gate = AggregateGates.AddOrUpdate(
-                    host,
-                    _ => new GateState(requestedLimit),
-                    (_, existing) =>
-                    {
-                        existing.EnsureLimit(requestedLimit);
-                        return existing;
-                    });
+                if (profileLimit < 1) throw new ArgumentOutOfRangeException(nameof(profileLimit));
+                if (aggregateLimit.HasValue && aggregateLimit.Value < 1) throw new ArgumentOutOfRangeException(nameof(aggregateLimit));
+                var profile = GetOrCreate(Gates, profileHost, profileLimit);
+                var aggregate = aggregateLimit.HasValue ? GetOrCreate(AggregateGates, aggregateHost, aggregateLimit.Value) : null;
+                var reservation = new Reservation(profile, aggregate);
+                var profileReferences = checked(profile.References + 1);
+                var aggregateReferences = aggregate is null ? 0 : checked(aggregate.References + 1);
+                profile.References = profileReferences;
+                if (aggregate is not null) aggregate.References = aggregateReferences;
+                return reservation;
+            }
+        }
 
-                gate.Touch();
-                return gate.Semaphore;
+        private static void Return(GateState state)
+        {
+            state.References--;
+            if (state.References != 0) return;
+            state.LastUsedTimestamp = Stopwatch.GetTimestamp();
+            if (state.RetireWhenIdle) RemoveIfQuiescent(state);
+        }
+
+        private static void RemoveIfQuiescent(GateState state)
+        {
+            // CurrentCount additionally protects manually held diagnostic permits.
+            // Real operations are protected by References, not a semaphore snapshot.
+            if (state.References != 0 || state.Semaphore.CurrentCount != state.Limit) return;
+            if (state.Owner.TryGetValue(state.Key, out var current) && ReferenceEquals(current, state))
+            {
+                state.Owner.Remove(state.Key);
+                state.Semaphore.Dispose();
             }
         }
 
         public static bool TryGetState(string? host, out (SemaphoreSlim Semaphore, int Limit) state)
         {
-            host ??= "__unknown__";
-
-            if (Gates.TryGetValue(host, out var gate))
+            lock (LifecycleLock)
             {
-                state = (gate.Semaphore, gate.Limit);
-                return true;
+                if (Gates.TryGetValue(host ?? "__unknown__", out var gate))
+                {
+                    state = (gate.Semaphore, gate.Limit);
+                    return true;
+                }
+                state = default;
+                return false;
             }
+        }
 
-            state = default;
-            return false;
+        private static void Retire(GateState state)
+        {
+            state.RetireWhenIdle = true;
+            RemoveIfQuiescent(state);
         }
 
         public static void Clear(string? host)
         {
             host ??= "__unknown__";
-
-            if (Gates.TryRemove(host, out var gate))
+            lock (LifecycleLock)
             {
-                gate.Semaphore.Dispose();
-            }
-            if (AggregateGates.TryRemove(host, out var agg))
-            {
-                agg.Semaphore.Dispose();
+                if (Gates.TryGetValue(host, out var gate)) Retire(gate);
+                if (AggregateGates.TryGetValue(host, out var aggregate)) Retire(aggregate);
             }
         }
 
         /// <summary>
-        /// Disposes the background sweeper Timer, clears all gate entries, and resets internal
-        /// state so the registry is safe to use again after the next call to <see cref="Get"/>
-        /// or <see cref="GetAggregate"/> (the timer is re-created lazily on first access).
-        /// <para>
-        /// Call this during plugin unload / Dispose to prevent the static Timer from continuing
-        /// to fire against an already-unloaded AssemblyLoadContext.  Safe to call multiple times
-        /// (idempotent) and safe to call even if the registry has never been accessed.
-        /// </para>
+        /// Stops idle sweeping and retires entries. Existing reservations can drain;
+        /// their semaphores are disposed on the last return, never under a waiter.
+        /// Reuse restarts sweeping. Same-key traffic shares any draining gate rather
+        /// than creating a second concurrency budget during a reload.
         /// </summary>
         public static void Shutdown()
         {
             lock (LifecycleLock)
             {
-                // Swap the sweeper with a sentinel null so concurrent Sweep() calls are no-ops.
-                var sweeper = Interlocked.Exchange(ref _sweeper, null);
-                sweeper?.Dispose();
+                var timer = _sweeper;
+                _sweeper = null;
+                _sweepGeneration = null;
+                timer?.Dispose();
+                foreach (var gate in Gates.Values.ToArray()) Retire(gate);
+                foreach (var gate in AggregateGates.Values.ToArray()) Retire(gate);
+            }
+        }
 
-                // Drain Gates
-                foreach (var kv in Gates)
-                {
-                    if (Gates.TryRemove(kv.Key, out var removed))
-                    {
-                        try { removed.Semaphore.Dispose(); } catch { /* best-effort */ }
-                    }
-                }
+        // Exercise exactly the production sweep under deterministic age thresholds.
+        internal static void SweepIdle(TimeSpan minimumIdleAge)
+        {
+            if (minimumIdleAge < TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(minimumIdleAge));
+            lock (LifecycleLock) SweepIdleUnderLock(minimumIdleAge);
+        }
 
-                // Drain AggregateGates
-                foreach (var kv in AggregateGates)
+        private static void SweepIdleUnderLock(TimeSpan minimumIdleAge)
+        {
+            foreach (var gate in Gates.Values.Concat(AggregateGates.Values).ToArray())
+            {
+                if (gate.References == 0 && Stopwatch.GetElapsedTime(gate.LastUsedTimestamp) >= minimumIdleAge)
                 {
-                    if (AggregateGates.TryRemove(kv.Key, out var removed))
-                    {
-                        try { removed.Semaphore.Dispose(); } catch { /* best-effort */ }
-                    }
+                    RemoveIfQuiescent(gate);
                 }
             }
         }
 
-        private static void Sweep()
+        private static void Sweep(object? generation)
         {
-            // Guard: Shutdown() may have nulled out the sweeper reference.
-            if (_sweeper is null)
+            lock (LifecycleLock)
             {
-                return;
-            }
-
-            try
-            {
-                var now = DateTime.UtcNow;
-                foreach (var kv in Gates)
-                {
-                    var state = kv.Value;
-                    if (state.Semaphore.CurrentCount == state.Limit && (now - state.LastUsedUtc) > IdleTtl)
-                    {
-                        if (Gates.TryRemove(kv.Key, out var removed))
-                        {
-                            removed.Semaphore.Dispose();
-                        }
-                    }
-                }
-                foreach (var kv in AggregateGates)
-                {
-                    var state = kv.Value;
-                    if (state.Semaphore.CurrentCount == state.Limit && (now - state.LastUsedUtc) > IdleTtl)
-                    {
-                        if (AggregateGates.TryRemove(kv.Key, out var removed))
-                        {
-                            removed.Semaphore.Dispose();
-                        }
-                    }
-                }
-            }
-            catch
-            {
-                // best-effort cleanup; ignore sweep errors
+                // A callback queued before Shutdown must not operate on a later
+                // timer generation, even if Get has already rearmed the registry.
+                if (_sweeper is null || !ReferenceEquals(generation, _sweepGeneration)) return;
+                SweepIdleUnderLock(IdleTtl);
             }
         }
     }
