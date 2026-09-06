@@ -197,12 +197,69 @@ function Resolve-PluginPackVersion {
     }
 }
 
+function Assert-PluginReferencedHost {
+    param(
+        [Parameter(Mandatory)][IO.Compression.ZipArchive]$Archive,
+        [Parameter(Mandatory)][System.Collections.IDictionary]$Manifest,
+        [version]$HostVersion
+    )
+    $minimum = $null
+    if (-not [version]::TryParse([string]$Manifest['minHostVersion'], [ref]$minimum)) {
+        throw 'Host requirement: manifest minimum must be a valid host version.'
+    }
+    $main = [string]$Manifest['main']
+    $entries = @($Archive.Entries | Where-Object { $_.FullName -ceq $main })
+    if ($main -notmatch '^Lidarr\.Plugin\.[A-Za-z0-9_.-]+\.dll$' -or $entries.Count -ne 1 -or
+        $entries[0].Length -gt 256MB) {
+        throw 'Host requirement: exactly one bounded main assembly is required.'
+    }
+    $buffer = [IO.MemoryStream]::new()
+    $stream = $entries[0].Open()
+    try {
+        $block = [byte[]]::new(64KB)
+        while (($read = $stream.Read($block, 0, $block.Length)) -gt 0) {
+            if ($buffer.Length + $read -gt 256MB) { throw 'Host requirement: main assembly exceeds the metadata inspection limit.' }
+            $buffer.Write($block, 0, $read)
+        }
+        $buffer.Position = 0
+        $required = [version]'0.0.0.0'
+        try {
+            # Metadata-only inspection: never load or execute plugin code, and
+            # never resolve its dependencies in the PowerShell process.
+            $pe = [System.Reflection.PortableExecutable.PEReader]::new($buffer)
+            try {
+                $reader = [System.Reflection.Metadata.PEReaderExtensions]::GetMetadataReader($pe)
+                if (-not $reader.IsAssembly) { throw 'The PE is not a managed assembly.' }
+                foreach ($handle in $reader.AssemblyReferences) {
+                    $reference = $reader.GetAssemblyReference($handle)
+                    $name = $reader.GetString($reference.Name)
+                    if (($name -eq 'Lidarr' -or $name.StartsWith('Lidarr.', [StringComparison]::Ordinal)) -and
+                        -not $name.StartsWith('Lidarr.Plugin.', [StringComparison]::Ordinal) -and $reference.Version -gt $required) {
+                        $required = $reference.Version
+                    }
+                }
+            }
+            finally { $pe.Dispose() }
+        }
+        catch { throw "Host requirement: unreadable main assembly metadata: $($_.Exception.Message)" }
+        if ($minimum -lt $required) {
+            throw "Host requirement: declared minimum '$minimum' understates the compiled Lidarr reference '$required'."
+        }
+        if ($null -ne $HostVersion -and $HostVersion -lt $minimum) {
+            throw "Host requirement: selected host '$HostVersion' is older than required '$minimum'."
+        }
+    }
+    finally { $stream.Dispose(); $buffer.Dispose() }
+}
+
 function Assert-PluginPackageIdentity {
     <# Validates the artifact's own records without extracting or loading code. #>
     param(
         [Parameter(Mandatory)][string]$ZipPath,
         [string]$ExpectedVersion,
-        [switch]$RequireVersionedFileName
+        [switch]$RequireVersionedFileName,
+        [switch]$ValidateHostRequirements,
+        [version]$HostVersion
     )
     $archive = [IO.Compression.ZipFile]::OpenRead((Resolve-Path -LiteralPath $ZipPath).Path)
     try {
@@ -237,6 +294,9 @@ function Assert-PluginPackageIdentity {
         }
         if ($RequireVersionedFileName -and [IO.Path]::GetFileName($ZipPath) -cne "$id-$version-$framework.zip") {
             throw "Package identity mismatch: filename must be '$id-$version-$framework.zip'."
+        }
+        if ($ValidateHostRequirements -or $null -ne $HostVersion) {
+            Assert-PluginReferencedHost -Archive $archive -Manifest $manifest -HostVersion $HostVersion
         }
     }
     finally { $archive.Dispose() }
@@ -398,7 +458,7 @@ function New-PluginPackage {
     }
 
     Compress-Archive -Path (Join-Path $publishPath '*') -DestinationPath $zipPath
-    Assert-PluginPackageIdentity -ZipPath $zipPath -ExpectedVersion $version -RequireVersionedFileName
+    Assert-PluginPackageIdentity -ZipPath $zipPath -ExpectedVersion $version -RequireVersionedFileName -ValidateHostRequirements
     Write-Host "Created plugin package: $zipPath" -ForegroundColor Green
 
     # Post-package guardrail: canonical Abstractions sidecars are forbidden for

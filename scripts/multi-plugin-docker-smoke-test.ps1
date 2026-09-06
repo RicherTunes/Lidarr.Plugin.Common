@@ -254,6 +254,8 @@ Import-Module (Join-Path $scriptDir "lib/e2e-authfail.psm1") -Force
 Import-Module (Join-Path $scriptDir "lib/e2e-stub-http.psm1") -Force
 # Import drift sentinel module for stub-vs-live drift detection
 Import-Module (Join-Path $scriptDir "lib/e2e-drift-sentinel.psm1") -Force
+# The packager owns artifact identity and compiled host requirements for every caller.
+Import-Module (Join-Path $repoRoot 'tools/PluginPack.psm1') -Force
 
 $image = if ([string]::IsNullOrWhiteSpace($LidarrImage)) { "ghcr.io/hotio/lidarr:$LidarrTag" } else { $LidarrImage.Trim() }
 
@@ -915,6 +917,7 @@ try {
             throw "Packaging preflight failed for '$name': $($preflightResult.Errors -join '; ')"
         }
 
+        Assert-PluginPackageIdentity -ZipPath $zipPath -ValidateHostRequirements
         $pluginZipPaths.Add((Resolve-Path -LiteralPath $zipPath).Path) | Out-Null
 
         $folderName = Get-PluginFolderName $name
@@ -1022,6 +1025,9 @@ try {
     }
 
     Write-Host "Lidarr online: v$($status.version)" -ForegroundColor Green
+    foreach ($packagePath in $pluginZipPaths) {
+        Assert-PluginPackageIdentity -ZipPath $packagePath -ValidateHostRequirements -HostVersion ([version]$status.version)
+    }
 
     Write-Host "Checking schemas for plugin implementations..." -ForegroundColor Yellow
     $schemaStart = Get-Date

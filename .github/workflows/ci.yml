@@ -84,6 +84,9 @@ jobs:
       - name: Packaged identity consistency regression
         shell: pwsh
         run: ./scripts/tests/Test-PluginPackageIdentity.ps1
+      - name: Compiled host requirement regression
+        shell: pwsh
+        run: ./scripts/tests/Test-PluginHostRequirements.ps1
       - name: Dependency-CVE gate (fail on High+, direct + transitive)
         shell: pwsh
         run: |
