@@ -383,10 +383,7 @@ namespace Lidarr.Plugin.Common.Utilities
             }
             catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
-            var gate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
             var aggregateEffective = Math.Max(1, maxTotalConcurrencyPerHost);
-            var aggregateGate = HostGateRegistry.GetAggregate(host, aggregateEffective);
-
             HostGateLease? gateLease = null;
             try
             {
@@ -394,7 +391,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 {
                     waitActivity?.SetTag("net.host", host ?? "__unknown__");
                     waitActivity?.SetTag("profile", profileTag);
-                    gateLease = await HostGateLease.AcquireAsync(aggregateGate, gate, effectiveToken).ConfigureAwait(false);
+                    gateLease = await HostGateLease.AcquireAsync(host, hostKey, aggregateEffective, Math.Max(1, maxConcurrencyPerHost), effectiveToken).ConfigureAwait(false);
                 }
                 // Only count requests that actually own both permits.
                 try {
@@ -511,9 +508,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                     hostKey = host ?? "__unknown__";
                                     if (!string.IsNullOrWhiteSpace(profileTag)) hostKey = hostKey + "|" + profileTag;
 
-                                    var newAggregate = HostGateRegistry.GetAggregate(host, aggregateEffective);
-                                    var newGate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
-                                    gateLease = await HostGateLease.AcquireAsync(newAggregate, newGate, effectiveToken).ConfigureAwait(false);
+                                    gateLease = await HostGateLease.AcquireAsync(host, hostKey, aggregateEffective, Math.Max(1, maxConcurrencyPerHost), effectiveToken).ConfigureAwait(false);
 
                                     try
                                     {
@@ -586,9 +581,7 @@ namespace Lidarr.Plugin.Common.Utilities
                                     hostKey = host ?? "__unknown__";
                                     if (!string.IsNullOrWhiteSpace(profileTag)) hostKey = hostKey + "|" + profileTag;
 
-                                    var newAggregate = HostGateRegistry.GetAggregate(host, aggregateEffective);
-                                    var newGate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
-                                    gateLease = await HostGateLease.AcquireAsync(newAggregate, newGate, effectiveToken).ConfigureAwait(false);
+                                    gateLease = await HostGateLease.AcquireAsync(host, hostKey, aggregateEffective, Math.Max(1, maxConcurrencyPerHost), effectiveToken).ConfigureAwait(false);
 
                                     try
                                     {
@@ -739,9 +732,7 @@ namespace Lidarr.Plugin.Common.Utilities
             }
             catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
 
-            var gate = HostGateRegistry.Get(hostKey, Math.Max(1, maxConcurrencyPerHost));
             var aggregateEffective = Math.Max(1, maxTotalConcurrencyPerHost);
-            var aggregateGate = HostGateRegistry.GetAggregate(host, aggregateEffective);
 
             HostGateLease? gateLease = null;
             try
@@ -750,7 +741,7 @@ namespace Lidarr.Plugin.Common.Utilities
                 {
                     waitActivity?.SetTag("net.host", host ?? "__unknown__");
                     waitActivity?.SetTag("profile", profileTag);
-                    gateLease = await HostGateLease.AcquireAsync(aggregateGate, gate, effectiveToken).ConfigureAwait(false);
+                    gateLease = await HostGateLease.AcquireAsync(host, hostKey, aggregateEffective, Math.Max(1, maxConcurrencyPerHost), effectiveToken).ConfigureAwait(false);
                 }
                 try { Observability.Metrics.RateLimiterInflight.Add(1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                 while (true)

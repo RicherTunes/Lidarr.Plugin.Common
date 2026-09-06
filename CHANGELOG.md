@@ -38,6 +38,11 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed — host-gate lifecycle
+- Registry-backed concurrency leases now reserve their gates before waiting. Clear, shutdown, and idle cleanup cannot dispose a gate underneath an active request or queued acquisition; partial acquisition rolls back permits before returning reservations.
+- Retiring gates remain the sole same-key concurrency authority until their last reservation returns. Reuse can rearm sweeping without creating an independent replacement limit. Idle age is monotonic and restarts when the last request returns; callbacks from an earlier sweeper generation cannot clean a later generation.
+- Generic HTTP execution, both typed HTTP paths, and cross-host redirects share the protected acquisition path. No public signatures, configured concurrency limits, plugin manifests, or dependencies change. Shutdown remains nonblocking: noncooperative operations retain their reservation until they actually finish.
+
 ### Fixed — retry wait boundaries
 - Generic and typed HTTP retries use one bounded delay helper. Long retry waits are split into native-supported timer intervals, fractional waits round upward, and elapsed time is rechecked after every signal so an early callback cannot authorize an early retry. Caller cancellation remains effective between intervals; no response connection is retained while waiting.
 - Retry admission is rechecked after waiting and after request cloning. A retry whose budget has already elapsed now raises an explicit retry-budget `TimeoutException` instead of sending again; first-attempt behavior and exact-boundary admission are preserved. Existing operation-timeout limits and their cancellation semantics are unchanged.
