@@ -2,9 +2,11 @@
 
 ## Integration boundary
 
-Candidate branch: `fix/http-helper-ownership-20260906`, based on Gitea main `e09f7791d1357b5316817b9fd9c5616e28e0704f`.
+Candidate branch: `fix/http-helper-ownership-20260906`, Common PR #130. Initial implementation commit: `20c4ffbe88e95afa05f11aad392b757e9a06c262`, based on Gitea main `e09f7791d1357b5316817b9fd9c5616e28e0704f`.
 
-This is independent of the gate-lifecycle candidate `c79db2350b83b1bceadb192d2dc2793d68842d27` (PR #129). That branch, the original user checkouts, consumer branches and consumer pins were not changed. This report is not a claim that either candidate is merged or adopted by the five plugins.
+While this candidate was being prepared, the user's integration advanced Gitea main to `2ca87d49f2d3fe77d88730a5339595775c8274a5`, merging the prior gate-lifecycle PR #129 (`c79db2350b83b1bceadb192d2dc2793d68842d27`). That new main was brought into this candidate branch only. Production edits combined automatically; the sole conflict was the two Unreleased changelog entries, resolved by retaining both. The imported gate implementation/tests match new main exactly. The incremental candidate remains five files and only one changed production file.
+
+No main/master merge was performed by this pass. The gate-lifecycle source branch, original user checkouts, consumer branches and consumer pins were not changed. PR #130 is a review candidate, not a completed five-plugin rollout.
 
 ## Debt removed and behavior fixed
 
@@ -28,16 +30,17 @@ Existing differences are retained: GET uses case-insensitive defaults, accepts e
 - Final focused HTTP/OAuth/new-test run: 112 passed, 0 failed, 0 skipped. The final new-test set contains 35 cases.
 - Completed full default suite (before those five supplemental cases): 7,535 passed, 0 failed, seven existing skips. The later full run with the supplemental cases was started separately, but its status-query action was blocked; no unconfirmed result from that invocation is used for acceptance.
 - Separate optional CLI lane: 196 passed, 0 failed, 0 skipped. Its generated 26-line lockfile additions were removed from this candidate; no dependency change is included.
+- After importing the user's new main at `2ca87d4`: the combined full default suite passed **7,568 tests, zero failures, seven existing skips**; the combined focused suite passed **140 tests**, and the rebuilt combined CLI lane passed **196 tests**. These are directly observed separate receipts, not arithmetic extrapolations from earlier runs.
 
-Accepted receipts are under `artifacts/http-helper-ownership/`: `red/json-ownership-red.trx`, `red/clone-red-json-green.trx`, `green/ownership-cloning-green.trx`, `green/http-helper-final-focused.trx`, `full/http-helper-full.trx`, and `cli/http-helper-cli.trx`. The 35-case final focused result is confirmed; do not add the five supplemental cases to the earlier full-suite count and present the sum as an observed full-run result.
+Accepted receipts are under `artifacts/http-helper-ownership/`: `red/json-ownership-red.trx`, `red/clone-red-json-green.trx`, `green/ownership-cloning-green.trx`, `green/http-helper-final-focused.trx`, `full/http-helper-full.trx`, and `cli/http-helper-cli.trx`. The final combined candidate is covered by `combined-main/combined-main-focused.trx`, `combined-main/combined-main-full.trx`, and `combined-main/combined-main-cli.trx`; its full-run log explicitly records 7,568 passing tests.
 
 One earlier broad filtered test invocation exceeded its tool timeout and yielded no accepted completion receipt. It is not counted as a pass. The owned full-suite runs are separate executions, not inferred results.
 
 ## Review and static validation
 
-The read-only Codex review is retained at `artifacts/http-helper-ownership/independent-review.md`; verdict: APPROVE, scoped source review only. The reviewer did not run tests or establish consumer/runtime acceptance. Production code remained unchanged after that review.
+The first read-only Codex review is retained at `artifacts/http-helper-ownership/independent-review.md`; verdict: APPROVE, scoped source review only. A second independent integration review in `artifacts/http-helper-ownership/combined-main-review.md` also returned APPROVE after inspecting the final 35 cases and the diff against newly merged main. Neither reviewer ran tests or established consumer/runtime acceptance. The helper implementation hunks remained unchanged after the first review. Gate-lifecycle changes were imported verbatim from the user's new main, not rewritten by this pass.
 
-Targeted production analyzer verification and the documentation-reference sentinel passed. Whitespace verification of the new test files returned success with a workspace-loading warning; no formatting changes were requested. Remaining source-reviewed boundaries include unfinished-clone disposal (no production-only test hook was introduced) and cancellation during synchronous deserialization, which is not forcibly interruptible by these helpers.
+Targeted production analyzer verification, the sync-over-async gate and the documentation-reference sentinel passed on the combined candidate. Whitespace verification of the new test files returned success with a workspace-loading warning; no formatting changes were requested. Remaining source-reviewed boundaries include unfinished-clone disposal (no production-only test hook was introduced) and cancellation during synchronous deserialization, which is not forcibly interruptible by these helpers.
 
 ## Five-plugin survey and safe reuse
 
@@ -49,7 +52,7 @@ Common's production retry clone call sites include `OAuthDelegatingHandler` and 
 
 ## Remaining integration gates and debt
 
-Consumer repinning, parity/build/package validation, five-plugin Docker coexistence and combined validation with PR #129 remain separate acceptance gates. Earlier Docker receipts are not evidence for this candidate. No live external music services or credentials were used by the new tests.
+Combined source validation with merged PR #129 is complete: 140 focused tests, 7,568 full-suite tests and 196 CLI tests passed as recorded above. Consumer repinning, parity/build/package validation and five-plugin Docker coexistence remain separate acceptance gates. Remote CI on the updated PR head has not been verified in this pass; it must not be labeled passed from local evidence. Earlier Docker receipts are not evidence for this candidate. No live external music services or credentials were used by the new tests.
 
 This pass does not claim zero technical debt. The two legacy typed Retry-After parsers still need contract-first consolidation; Qobuz's CLI adapter still mutates its shared client's timeout and warrants its own focused regression/repair. Mutable download-state snapshots, historical branch recovery and other recorded lifecycle work remain separate. Neither public APIs nor diagnostics were removed merely because a narrow symbol search found no callers.
 

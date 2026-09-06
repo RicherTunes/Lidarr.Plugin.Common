@@ -164,12 +164,10 @@ namespace Lidarr.Plugin.Common.Utilities
             var attempt = 0;
 
             var host = getHost(request);
-            var gate = HostGateRegistry.Get(host, Math.Max(1, policy.MaxConcurrencyPerHost));
-            var gateAcquired = false;
+            HostGateLease? gateLease = null;
             try
             {
-                await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
-                gateAcquired = true;
+                gateLease = await HostGateLease.AcquireAsync(host, Math.Max(1, policy.MaxConcurrencyPerHost), effectiveToken).ConfigureAwait(false);
                 while (true)
                 {
                     effectiveToken.ThrowIfCancellationRequested();
@@ -234,10 +232,7 @@ namespace Lidarr.Plugin.Common.Utilities
             }
             finally
             {
-                if (gateAcquired)
-                {
-                    gate.Release();
-                }
+                gateLease?.Dispose();
             }
         }
 
