@@ -38,6 +38,10 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed — HTTP helper ownership and cloning
+- JSON GET/POST helpers dispose their owned responses on success and failure, and POST also disposes its generated request content when sending fails or is cancelled. Both reuse the shared cancellation-aware content reader and observe caller cancellation after buffering; caller-owned clients remain usable. Existing GET/POST differences in serializer defaults, empty/null payloads, and media-type handling are preserved.
+- Both public request-cloning helpers delegate to one implementation. Options copy by name/value without per-option reflection; typed retrieval, headers, version policy, and the distinction between one-off reads and retry-body caching are retained. Failed or cancelled body serialization propagates once rather than being attempted a second time; unfinished clones are disposed without disposing caller content. Both APIs reject a missing source with `ArgumentNullException`.
+
 ### Fixed — host-gate lifecycle
 - Registry-backed concurrency leases now reserve their gates before waiting. Clear, shutdown, and idle cleanup cannot dispose a gate underneath an active request or queued acquisition; partial acquisition rolls back permits before returning reservations.
 - Retiring gates remain the sole same-key concurrency authority until their last reservation returns. Reuse can rearm sweeping without creating an independent replacement limit. Idle age is monotonic and restarts when the last request returns; callbacks from an earlier sweeper generation cannot clean a later generation.
