@@ -28,12 +28,25 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// <param name="retryAfter">The header value parsed by <see cref="HttpResponseMessage.Headers"/>.</param>
         /// <returns>A non-negative delay; <see cref="TimeSpan.Zero"/> when no wait is implied.</returns>
         public static TimeSpan ResolveRetryAfter(RetryConditionHeaderValue? retryAfter)
+            => ResolveRetryAfter(retryAfter, TimeProvider.System);
+
+        // The supplied clock affects HTTP-date resolution only. Delta values and
+        // absent headers do not require a wall-clock read.
+        internal static TimeSpan ResolveRetryAfter(RetryConditionHeaderValue? retryAfter, TimeProvider timeProvider)
+        {
+            ArgumentNullException.ThrowIfNull(timeProvider);
+            return ResolveRetryAfter(retryAfter, retryAfter?.Date is null ? default(DateTimeOffset) : timeProvider.GetUtcNow());
+        }
+
+        // Telemetry already owns an observation timestamp; reuse it rather than
+        // reading a second clock value and shifting the implied deadline.
+        internal static TimeSpan ResolveRetryAfter(RetryConditionHeaderValue? retryAfter, DateTimeOffset nowUtc)
         {
             if (retryAfter is null) return TimeSpan.Zero;
             if (retryAfter.Delta is { } delta) return delta > TimeSpan.Zero ? delta : TimeSpan.Zero;
             if (retryAfter.Date is { } date)
             {
-                TimeSpan untilDate = date - DateTimeOffset.UtcNow;
+                TimeSpan untilDate = date - nowUtc;
                 return untilDate > TimeSpan.Zero ? untilDate : TimeSpan.Zero;
             }
             return TimeSpan.Zero;

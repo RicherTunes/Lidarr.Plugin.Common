@@ -1380,6 +1380,7 @@ namespace Lidarr.Plugin.Common.Tests
         protected override ValidationResult ValidateDownloadSettings(TestSettings settings) => new ValidationResult();
 
         public Task InvokeApplyMetadataAsync(string filePath, StreamingTrack metadata) => ApplyMetadataTagsAsync(filePath, metadata);
+        public TimeSpan InvokeRetryDelay(int attempt, HttpResponseMessage? response) => GetDownloadRetryDelay(attempt, response);
     }
 
     internal sealed class TestSettings : BaseStreamingSettings

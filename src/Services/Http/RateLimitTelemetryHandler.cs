@@ -42,8 +42,7 @@ namespace Lidarr.Plugin.Common.Services.Http
 #else
                     var now = DateTimeOffset.UtcNow;
 #endif
-                    var delay = ra.Delta ?? (ra.Date.HasValue ? ra.Date.Value - now : TimeSpan.Zero);
-                    if (delay < TimeSpan.Zero) delay = TimeSpan.Zero;
+                    var delay = RateLimitHeaderUtilities.ResolveRetryAfter(ra, now);
                     _observer.RecordRetryAfter(delay, now);
                 }
             }

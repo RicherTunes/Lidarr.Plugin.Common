@@ -3,7 +3,8 @@
 ## Integration boundary
 
 Candidate branch: `fix/queue-snapshot-consistency-20260906`.
-Base: Gitea Common main `57fd6fe3300be38c86e97e84abf82c477b7c718b`, which includes the gate-lifecycle and HTTP-helper ownership changes.
+Original base: Gitea Common main `57fd6fe3300be38c86e97e84abf82c477b7c718b`, which includes the gate-lifecycle and HTTP-helper ownership changes.
+The user merged Retry-After PR #132 during validation. The candidate was then combined with main `cbced3d0f50908965f816a0e506d9c567e5ebc6b` in this isolated worktree only. Queue production code and both queue test files were unchanged by that integration; the only manual conflict resolution retained both Unreleased changelog sections. The combined focused suite passed 467 tests, the combined full default suite passed 7,650 with seven existing skips, and the separate combined CLI lane passed 196. All three completed without failures; these are inspected receipts, not sums inferred from prior runs.
 Worktree: `C:/Users/Alexandre/.devspace/worktrees/common-361d4696`.
 
 The user is integrating the preceding candidates. This pass changes only Common in an isolated worktree. It does not merge main/master, modify consumer pins, update the user's other branches, or delete worktrees. Publishing this candidate is not ecosystem acceptance. Independent review, required remote CI, and downstream adoption remain separate gates.
@@ -57,8 +58,11 @@ The helper rejects AttemptV2 stores; V2 high-water retention and durable removal
 | Initial regression run before production changes | 1 | 5 | 0 |
 | Initial affected identity/CAS/hardening run after repair | 58 | 0 | 0 |
 | Full HostBridge-focused suite | 417 | 0 | 0 |
-| Final full Common default suite | 7,590 | 0 | 7 |
-| Separate CLI lane | 196 | 0 | 0 |
+| Full Common default suite before latest-main integration | 7,590 | 0 | 7 |
+| Separate CLI lane before latest-main integration | 196 | 0 | 0 |
+| Combined latest-main focused suite | 467 | 0 | 0 |
+| Combined latest-main full default suite | 7,650 | 0 | 7 |
+| Combined latest-main separate CLI lane | 196 | 0 | 0 |
 | New regression and boundary cases | 22 | 0 | 0 |
 
 The 22 new cases passed ten consecutive repetitions, totaling 220 successful case executions. These repetitions are additional runs, not additional distinct tests.
@@ -72,6 +76,9 @@ Accepted receipts live under `artifacts/queue-snapshots/`:
 - `full/queue-snapshot-full.trx`
 - `cli/queue-snapshot-cli.trx`
 - `repeated/queue-snapshot-repeat-1.trx` through `queue-snapshot-repeat-10.trx`
+- `combined/queue-snapshot-combined-focused.trx`
+- `combined/queue-snapshot-combined-full.trx`
+- `combined/queue-snapshot-combined-cli.trx`
 
 Targeted production analyzer verification and diff checks passed. The optional CLI build's generated 26-line lockfile delta was removed; no package change is included. No new tests were skipped, and the seven full-suite skips remain explicitly unexecuted coverage.
 

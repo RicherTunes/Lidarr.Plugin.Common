@@ -605,9 +605,9 @@ namespace Lidarr.Plugin.Common.Utilities
                     }
 
                     DownloadTelemetryContext.RecordRetry(response.StatusCode);
-                    // Prefer Retry-After absolute date over delta; do not add jitter when an absolute date is provided
+                    // Preserve typed retry fallback policy; the shared helper resolves header values.
                     TimeSpan delay;
-                    var preferred = GetRetryDelayPreferredDate(response);
+                    var preferred = GetTypedRetryDelay(response);
                     if (preferred.HasValue)
                     {
                         delay = preferred.Value;
@@ -789,7 +789,7 @@ namespace Lidarr.Plugin.Common.Utilities
                     }
 
                     TimeSpan delay;
-                    var preferred = GetRetryDelayPreferredDate(response, timeProvider);
+                    var preferred = GetTypedRetryDelay(response, timeProvider);
                     if (preferred.HasValue)
                     {
                         delay = preferred.Value;
@@ -838,24 +838,6 @@ namespace Lidarr.Plugin.Common.Utilities
                     try { Observability.Metrics.RateLimiterInflight.Add(-1, new KeyValuePair<string, object?>("net.host", host ?? "__unknown__")); } catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
                 }
             }
-        }
-
-        private static TimeSpan? GetRetryDelayPreferredDate(HttpResponseMessage response, TimeProvider timeProvider)
-        {
-            try
-            {
-                var ra = response.Headers?.RetryAfter;
-                if (ra == null) return null;
-
-                if (ra.Date.HasValue)
-                {
-                    var delta = ra.Date.Value - timeProvider.GetUtcNow();
-                    if (delta > TimeSpan.Zero) return delta;
-                }
-                if (ra.Delta.HasValue) return ra.Delta.Value;
-            }
-            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
-            return null;
         }
 
 #endif
@@ -1186,22 +1168,19 @@ namespace Lidarr.Plugin.Common.Utilities
                 destination.Options.Set(new HttpRequestOptionsKey<object?>(option.Key), option.Value);
             }
         }
-        private static TimeSpan? GetRetryDelayPreferredDate(HttpResponseMessage response)
+        private static TimeSpan? GetTypedRetryDelay(HttpResponseMessage response, TimeProvider? timeProvider = null)
         {
             try
             {
-                var ra = response.Headers?.RetryAfter;
-                if (ra == null) return null;
+                var header = response.Headers.RetryAfter;
+                if (header is null) return null;
 
-                // Prefer absolute date when present
-                if (ra.Date.HasValue)
-                {
-                    var delta = ra.Date.Value - DateTimeOffset.UtcNow;
-                    if (delta > TimeSpan.Zero) return delta;
-                }
-                if (ra.Delta.HasValue) return ra.Delta.Value;
+                var delay = RateLimitHeaderUtilities.ResolveRetryAfter(header, timeProvider ?? TimeProvider.System);
+                // Legacy typed callers back off for expired dates, but an explicit
+                // zero (or clamped negative delta) still requests an immediate retry.
+                return header.Date.HasValue && delay == TimeSpan.Zero ? null : delay;
             }
-            catch (Exception swallowEx) { SwallowToTrace(swallowEx); /* ignore parse issues */ }
+            catch (Exception swallowEx) { SwallowToTrace(swallowEx); }
             return null;
         }
 
