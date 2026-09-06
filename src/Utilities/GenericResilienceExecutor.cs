@@ -149,17 +149,14 @@ namespace Lidarr.Plugin.Common.Utilities
             if (getRetryAfterDelay == null) throw new ArgumentNullException(nameof(getRetryAfterDelay));
             if (policy == null) throw new ArgumentNullException(nameof(policy));
 
-            using var timeoutCts = policy.PerRequestTimeout.HasValue
-                ? CancellationTokenSource.CreateLinkedTokenSource(cancellationToken)
-                : null;
-            if (policy.PerRequestTimeout.HasValue)
-            {
-                timeoutCts!.CancelAfter(policy.PerRequestTimeout.Value);
-            }
-
-            var effectiveToken = timeoutCts?.Token ?? cancellationToken;
 #if NET8_0_OR_GREATER
             var tp = timeProvider ?? TimeProvider.System;
+            using var timeout = new ResilienceTimeout(policy.PerRequestTimeout, cancellationToken, tp);
+#else
+            using var timeout = new ResilienceTimeout(policy.PerRequestTimeout, cancellationToken);
+#endif
+            var effectiveToken = timeout.Token;
+#if NET8_0_OR_GREATER
             var startedAt = tp.GetTimestamp();
 #else
             var stopwatch = System.Diagnostics.Stopwatch.StartNew();
@@ -168,29 +165,19 @@ namespace Lidarr.Plugin.Common.Utilities
 
             var host = getHost(request);
             var gate = HostGateRegistry.Get(host, Math.Max(1, policy.MaxConcurrencyPerHost));
-            await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
-
+            var gateAcquired = false;
             try
             {
+                await gate.WaitAsync(effectiveToken).ConfigureAwait(false);
+                gateAcquired = true;
                 while (true)
                 {
+                    effectiveToken.ThrowIfCancellationRequested();
                     attempt++;
 
                     var attemptRequest = await cloneRequestAsync(request).ConfigureAwait(false);
-
-                    TResponse response;
-                    try
-                    {
-                        response = await sendAsync(attemptRequest, effectiveToken).ConfigureAwait(false);
-                    }
-                    catch (OperationCanceledException ex) when (policy.PerRequestTimeout.HasValue &&
-                                                               timeoutCts!.IsCancellationRequested &&
-                                                               !cancellationToken.IsCancellationRequested)
-                    {
-                        throw new TimeoutException(
-                            $"Request exceeded the per-request timeout of {policy.PerRequestTimeout.Value}.",
-                            ex);
-                    }
+                    effectiveToken.ThrowIfCancellationRequested();
+                    var response = await sendAsync(attemptRequest, effectiveToken).ConfigureAwait(false);
 
                     var status = getStatusCode(response);
                     var retryable = status == (int)HttpStatusCode.RequestTimeout
@@ -234,15 +221,24 @@ namespace Lidarr.Plugin.Common.Utilities
 #endif
                 }
             }
+            catch (OperationCanceledException ex) when (timeout.IsTimeout)
+            {
+                throw new TimeoutException(
+                    $"Request exceeded the per-request timeout of {policy.PerRequestTimeout}.", ex);
+            }
             finally
             {
-                gate.Release();
+                if (gateAcquired)
+                {
+                    gate.Release();
+                }
             }
         }
 
 #if NET8_0_OR_GREATER
         private static async Task DelayAsync(TimeSpan delay, TimeProvider timeProvider, CancellationToken cancellationToken)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             if (delay <= TimeSpan.Zero)
             {
                 return;

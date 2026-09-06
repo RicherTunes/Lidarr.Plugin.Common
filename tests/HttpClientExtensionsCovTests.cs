@@ -290,28 +290,38 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public async Task ExecuteWithResilienceAsync_TimeProvider_ThrowsTimeoutException_WhenPerRequestTimeoutExceeded()
         {
-            // Line 737: throw new TimeoutException(...)
             var handler = new StubHandler(async (req, ct) =>
             {
-                await Task.Delay(TimeSpan.FromMilliseconds(5000), ct);
+                await Task.Delay(Timeout.InfiniteTimeSpan, ct);
                 return new HttpResponseMessage(HttpStatusCode.OK);
             });
 
+            using var caller = new CancellationTokenSource();
             using var client = new HttpClient(handler);
             using var request = new HttpRequestMessage(HttpMethod.Get, "https://timeout.example/data");
             var timeProvider = new FakeTimeProvider();
-
-            var ex = await Assert.ThrowsAsync<TimeoutException>(() =>
-                client.ExecuteWithResilienceAsync(
-                    request,
-                    maxRetries: 1,
-                    retryBudget: TimeSpan.FromSeconds(10),
-                    maxConcurrencyPerHost: 1,
-                    perRequestTimeout: TimeSpan.FromMilliseconds(100),
-                    timeProvider: timeProvider,
-                    CancellationToken.None));
-
-            Assert.Contains("per-request timeout", ex.Message);
+            var pending = client.ExecuteWithResilienceAsync(
+                request,
+                maxRetries: 1,
+                retryBudget: TimeSpan.FromSeconds(10),
+                maxConcurrencyPerHost: 1,
+                perRequestTimeout: TimeSpan.FromMilliseconds(100),
+                timeProvider: timeProvider,
+                caller.Token);
+            try
+            {
+                timeProvider.Advance(TimeSpan.FromMilliseconds(100));
+                var ex = await Assert.ThrowsAsync<TimeoutException>(async () => await pending.WaitAsync(TimeSpan.FromSeconds(5)));
+                Assert.Contains("per-request timeout", ex.Message);
+                Assert.IsAssignableFrom<OperationCanceledException>(ex.InnerException);
+            }
+            finally
+            {
+                caller.Cancel();
+                try { (await pending.WaitAsync(TimeSpan.FromSeconds(5))).Dispose(); }
+                catch (OperationCanceledException) { }
+                catch (TimeoutException) when (pending.IsCompleted) { }
+            }
         }
 #endif
 
