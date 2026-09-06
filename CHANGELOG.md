@@ -38,6 +38,10 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed — HTTP helper ownership and cloning
+- JSON GET/POST helpers dispose their owned responses on success and failure, and POST also disposes its generated request content when sending fails or is cancelled. Both reuse the shared cancellation-aware content reader and observe caller cancellation after buffering; caller-owned clients remain usable. Existing GET/POST differences in serializer defaults, empty/null payloads, and media-type handling are preserved.
+- Both public request-cloning helpers delegate to one implementation. Options copy by name/value without per-option reflection; typed retrieval, headers, version policy, and the distinction between one-off reads and retry-body caching are retained. Failed or cancelled body serialization propagates once rather than being attempted a second time; unfinished clones are disposed without disposing caller content. Both APIs reject a missing source with `ArgumentNullException`.
+
 ### Fixed — retry wait boundaries
 - Generic and typed HTTP retries use one bounded delay helper. Long retry waits are split into native-supported timer intervals, fractional waits round upward, and elapsed time is rechecked after every signal so an early callback cannot authorize an early retry. Caller cancellation remains effective between intervals; no response connection is retained while waiting.
 - Retry admission is rechecked after waiting and after request cloning. A retry whose budget has already elapsed now raises an explicit retry-budget `TimeoutException` instead of sending again; first-attempt behavior and exact-boundary admission are preserved. Existing operation-timeout limits and their cancellation semantics are unchanged.
