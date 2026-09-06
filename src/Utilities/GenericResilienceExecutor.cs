@@ -193,7 +193,16 @@ namespace Lidarr.Plugin.Common.Utilities
                     DownloadTelemetryContext.RecordRetry((HttpStatusCode)status);
 
                     var retryAfter = getRetryAfterDelay(response);
-                    var delay = retryAfter ?? policy.ComputeDelay(attempt) + policy.ComputeJitter();
+                    TimeSpan delay;
+                    if (retryAfter.HasValue)
+                    {
+                        delay = retryAfter.Value;
+                    }
+                    else if (!policy.TryComputeRetryDelay(attempt, out delay))
+                    {
+                        return response;
+                    }
+
                     if (delay < TimeSpan.Zero)
                     {
                         delay = TimeSpan.Zero;

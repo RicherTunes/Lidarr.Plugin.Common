@@ -38,6 +38,10 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed — jitter bounds
+- Policy jitter preserves inclusive nonnegative duration bounds without 32-bit millisecond narrowing or upper-end overflow. Fixed and fractional durations retain exact ticks; whole-millisecond configurations retain their existing sampling grid.
+- A backoff-plus-jitter sum that cannot fit any finite retry budget returns the original usable response instead of overflowing or shortening the delay. Explicit `Retry-After` values still bypass the policy fallback; no public API or dependency changes.
+
 ### Fixed — cancellation ownership
 - Shared HTTP execution now acquires aggregate/profile concurrency permits through one lease, rolls back partial acquisition, and releases only currently owned permits during cross-host redirects. Redirect cancellation propagates instead of being swallowed and disposes the abandoned redirect response.
 - Generic and HTTP executors share operation-timeout ownership. Supplied clocks drive timeout cancellation as well as backoff; timeout expiry is reported consistently during gate waits, sending and backoff, while caller cancellation retains precedence. Cancellation observed after request cloning or before a zero-delay retry prevents another send. The existing operation-wide timeout window is not reset per attempt; public signatures and retry-budget policies are unchanged.

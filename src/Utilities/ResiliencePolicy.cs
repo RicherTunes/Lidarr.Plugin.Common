@@ -213,20 +213,42 @@ public sealed class ResiliencePolicy
 
         internal TimeSpan ComputeJitter()
         {
-            if (JitterMax == TimeSpan.Zero)
+            var minimumTicks = JitterMin.Ticks;
+            var maximumTicks = JitterMax.Ticks;
+            if (minimumTicks == maximumTicks)
             {
-                return TimeSpan.Zero;
+                return JitterMin;
             }
 
-            var minMs = (int)JitterMin.TotalMilliseconds;
-            var maxMs = (int)JitterMax.TotalMilliseconds;
-            if (maxMs <= minMs)
+            // Preserve the historical whole-millisecond grid for aligned settings, including
+            // the defaults. Fractional settings retain their full, inclusive tick bounds.
+            var quantum = minimumTicks % TimeSpan.TicksPerMillisecond == 0 &&
+                          maximumTicks % TimeSpan.TicksPerMillisecond == 0
+                ? TimeSpan.TicksPerMillisecond
+                : 1L;
+            var minimum = minimumTicks / quantum;
+            var maximum = maximumTicks / quantum;
+
+            // Bounds are nonnegative. Shift the interval down instead of adding one to
+            // its upper bound, so an inclusive TimeSpan.MaxValue remains representable.
+            var sample = RandomProvider.NextInt64(minimum - 1, maximum) + 1;
+            return TimeSpan.FromTicks(sample * quantum);
+        }
+
+        internal bool TryComputeRetryDelay(int attempt, out TimeSpan delay)
+        {
+            var backoff = ComputeDelay(attempt);
+            var jitter = ComputeJitter();
+            if (jitter.Ticks > TimeSpan.MaxValue.Ticks - backoff.Ticks)
             {
-                return TimeSpan.FromMilliseconds(minMs);
+                // No representable finite retry budget can admit the mathematical sum.
+                // Refuse rather than overflow or shorten the server-facing retry delay.
+                delay = default;
+                return false;
             }
 
-            var jitterMs = RandomProvider.Next(minMs, maxMs + 1);
-            return TimeSpan.FromMilliseconds(jitterMs);
+            delay = backoff + jitter;
+            return true;
         }
     }
 }
