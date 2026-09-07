@@ -38,6 +38,12 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Added
+- **OpenAI Chat Completions provider base.** `OpenAiChatProviderBase` centralizes ordered request shaping, API-key headers, provider error hooks, health probes, auth-circuit callbacks, response parsing, and SSE decoding behind a transport-neutral seam for host-specific adapters.
+
+### Changed
+- Empty completion bodies, choice-less responses, missing completion content, and streams with no decoded events are provider errors instead of quiet empty successes. Malformed non-empty completion payloads still surface their raw content for caller salvage.
+
 ### Fixed — queue snapshot consistency
 - Shared tracker DTO capture and mutation keys use one synchronized observation rather than mixing fields across attempt updates. A dedicated per-item snapshot lock coordinates mutable base fields without acquiring another item's mutation lock during persistence. Existing live-item snapshot and separate-setter contracts, public signatures, and persistence schema are unchanged.
 - Legacy retention revalidates exact object identity and current terminal/completion state before eviction, preventing an old enumerated entry from deleting a replacement, including value-equal plugin subclasses. Completion time is sampled once, preventing a nullable-value race. Existing retention thresholds and AttemptV2 retention/removal policies are preserved.
