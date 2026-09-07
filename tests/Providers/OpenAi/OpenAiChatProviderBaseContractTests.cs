@@ -48,6 +48,18 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
     [Fact]
+    public async Task CompleteAsync_PreservesUnicodeAndHtmlInTheLegacyWireBody()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport);
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "<tag> café" });
+
+        Assert.Contains("<tag> café", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u003C", transport.LastCompletionRequest.JsonBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task CompleteAsync_OmitsTemperatureAndResponseFormatWhenHooksDisableThem()
     {
         var transport = new ScriptedTransport { Completion = new(200, OkBody) };
