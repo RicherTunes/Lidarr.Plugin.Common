@@ -6,13 +6,15 @@
 
 The runner parses counters from the published file rather than the temporary source. Missing TRX, an invalid/unwritable destination, failed copy, or malformed retained TRX fails the deterministic-test stage. Failed test executions still publish their TRX before the stage reports failure. The runner never deletes the durable destination.
 
-Gitea CI runs the real success/failure/skip receipt contract explicitly. `scripts/tests/Test-LocalCiTrxWorkflowWiring.ps1` guards that invocation against accidental removal or duplication.
+Gitea CI runs the real success/failure/skip receipt contract and its independent wiring guard explicitly. `scripts/tests/Test-LocalCiTrxWorkflowWiring.ps1` guards both invocations against accidental removal or duplication.
 
 This changes evidence retention only. It does not change dependencies, deterministic filters, skip behavior, warning budgets, package gates, or test result classification.
 
 ## TDD evidence
 
 Test-only commit `1cbb77f3956089f083eba25e743b6d0ee31f2dcf` introduced `scripts/tests/Test-LocalCiTrxRetention.ps1`. The initial run failed because the receipt module did not exist; `artifacts/shared-openai-chat/trx-retention-red.log` records that expected red. The test drives real successful and intentionally failing .NET test projects, then verifies retained files, literal counters, collision-free repeated publication, and fail-closed handling of an invalid destination.
+
+Independent review found that candidate `580da77ce8118544c963ac4774fea4d0600790f5` invoked the retention contract without invoking its wiring guard. Test-only commit `4031454` added the self-wiring assertion; `artifacts/shared-openai-chat/trx-workflow-self-wiring-red.log` records the genuine failure before the workflow fix.
 
 The first implementation run exposed a test-fixture error: the installed MSTest template no longer contained the assumed `Assert.Fail()` placeholder, so the intended failing input stayed green. That failed attempt is preserved in `artifacts/shared-openai-chat/trx-retention-green.log`. The fixture now writes an explicit failing test; the corrected contract run is preserved in `artifacts/shared-openai-chat/trx-retention-green-final.log`.
 
