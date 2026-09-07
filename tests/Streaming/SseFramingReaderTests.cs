@@ -2,6 +2,7 @@
 // Copyright (c) RicherTunes. All rights reserved.
 // </copyright>
 
+using System;
 using System.IO;
 using System.Text;
 using System.Threading;
