@@ -261,7 +261,7 @@ data: [DONE]
     {
         using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
         await using var stream = new AsyncOnlyStream("data: ignored\n\n");
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await foreach (var _ in new SseFramingReader(stream).ReadFramesAsync(cancellation.Token)) { });
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => CollectFramesAsync(new SseFramingReader(stream), cancellation.Token));
     }
 
     [Fact]
@@ -279,9 +279,12 @@ data: [DONE]
     }
 
     private static async Task<SseFrame[]> CollectFramesAsync(SseFramingReader reader)
+        => await CollectFramesAsync(reader, CancellationToken.None);
+
+    private static async Task<SseFrame[]> CollectFramesAsync(SseFramingReader reader, CancellationToken cancellationToken)
     {
         var frames = new System.Collections.Generic.List<SseFrame>();
-        await foreach (var frame in reader.ReadFramesAsync())
+        await foreach (var frame in reader.ReadFramesAsync(cancellationToken))
         {
             frames.Add(frame);
         }
