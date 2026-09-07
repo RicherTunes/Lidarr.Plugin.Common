@@ -8,6 +8,8 @@ The runner parses counters from the published file rather than the temporary sou
 
 Gitea CI runs the real success/failure/skip receipt contract and its independent wiring guard explicitly. `scripts/tests/Test-LocalCiTrxWorkflowWiring.ps1` guards both invocations against accidental removal or duplication.
 
+The receipt contract creates real temporary .NET test projects, so it runs in the SDK-equipped `build-test` job. The lightweight workflow-wiring guard remains in the PowerShell-only `lint` job. Test-only commit `e734142` made that placement mandatory; `artifacts/shared-openai-chat/trx-workflow-sdk-placement-red.log` records the prior incorrect lint placement.
+
 This changes evidence retention only. It does not change dependencies, deterministic filters, skip behavior, warning budgets, package gates, or test result classification.
 
 ## TDD evidence
