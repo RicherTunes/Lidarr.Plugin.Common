@@ -93,6 +93,15 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
     [Fact]
+    public async Task CompleteAsync_DoesNotExposeTheKnownApiKeyInMappedErrorText()
+    {
+        const string secret = "short-opaque-test-secret";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(400, $"{{\"message\":\"failed {secret}\"}}") }, apiKey: secret);
+        var exception = await Assert.ThrowsAsync<LlmProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
     public void TransportResponse_ExposesBufferedTransportExceptionForErrorMapping()
     {
         var property = typeof(OpenAiChatResponse).GetProperty("TransportException");
@@ -264,8 +273,8 @@ public sealed class OpenAiChatProviderBaseContractTests
         public TestProvider(IOpenAiChatTransport transport, bool sendsTemperature = true, bool supportsJson = true,
             IReadOnlyDictionary<string, string>? completionHeaders = null,
             Func<int, string?, TimeSpan?, Exception?, LlmProviderException>? errorMapper = null,
-            IOpenAiChatAuthCircuit? authCircuit = null, bool parseEmpty = false, TimeSpan? completionTimeout = null)
-            : base(transport, "test-key", "test-model", "test", "test-model", completionTimeout ?? TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), authCircuit)
+            IOpenAiChatAuthCircuit? authCircuit = null, bool parseEmpty = false, TimeSpan? completionTimeout = null, string apiKey = "test-key")
+            : base(transport, apiKey, "test-model", "test", "test-model", completionTimeout ?? TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), authCircuit)
         {
             _sendsTemperature = sendsTemperature;
             _supportsJson = supportsJson;
