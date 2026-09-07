@@ -547,10 +547,11 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
     [Fact]
-    public async Task CompleteAsync_SuccessCallbackCannotReplaceValidCompletion()
+    public async Task CompleteAsync_SuccessCallbackFailurePreservesOriginalFailurePolicy()
     {
         var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, authCircuit: new ThrowingSuccessCircuit());
-        Assert.Equal("ok", (await provider.CompleteAsync(new LlmRequest { Prompt = "hi" })).Content);
+        var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Equal("success callback failed", error.Message);
     }
 
 
