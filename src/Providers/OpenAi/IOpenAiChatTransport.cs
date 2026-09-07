@@ -16,6 +16,7 @@ public interface IOpenAiChatTransport
 
 /// <summary>Immutable outbound OpenAI Chat Completions request.</summary>
 public sealed record OpenAiChatRequest(
+    string ProviderId,
     Uri Endpoint,
     string JsonBody,
     IReadOnlyDictionary<string, string> Headers,
