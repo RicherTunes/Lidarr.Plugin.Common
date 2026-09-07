@@ -114,7 +114,7 @@ public sealed class OpenAiOriginalContractParityTests
     [Fact]
     public void UpdateModel_MapsThroughNormalizeModel()
     {
-        var provider = new ParityProvider(new RecordingTransport());
+        var provider = new ParityProvider(new RecordingTransport(), mapModels: true);
 
         provider.UpdateModel("  ");
         Assert.Equal("test-model", provider.ExposedCurrentModel);
@@ -140,15 +140,17 @@ public sealed class OpenAiOriginalContractParityTests
             string apiKey = "test-key",
             IReadOnlyDictionary<string, string>? completionHeaders = null,
             IOpenAiChatAuthCircuit? authCircuit = null,
-            double defaultTemperature = 0.7)
+            double defaultTemperature = 0.7,
+            bool mapModels = false)
             : base(transport, apiKey, "test-model", "testchat", "test-model", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), authCircuit)
         {
             _completionHeaders = completionHeaders;
             _defaultTemperature = defaultTemperature;
+            _mapModels = mapModels;
         }
 
         private readonly double _defaultTemperature;
-        private readonly bool _mapModels = true;
+        private readonly bool _mapModels;
 
         public override string DisplayName => "Test Chat";
         public override LlmProviderCapabilities Capabilities => new() { Flags = LlmCapabilityFlags.TextCompletion | LlmCapabilityFlags.SystemPrompt, UsesOpenAiCompatibleApi = true };
