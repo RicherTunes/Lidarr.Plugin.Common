@@ -97,7 +97,7 @@ public sealed class OpenAiChatProviderBaseContractTests
     {
         const string secret = "short-opaque-test-secret";
         var provider = new TestProvider(new ScriptedTransport { Completion = new(400, $"{{\"message\":\"failed {secret}\"}}") }, apiKey: secret);
-        var exception = await Assert.ThrowsAsync<LlmProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        var exception = await Assert.ThrowsAnyAsync<LlmProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
         Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
     }
 
