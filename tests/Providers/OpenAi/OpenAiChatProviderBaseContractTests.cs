@@ -106,6 +106,25 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
     [Fact]
+    public async Task StreamAsync_CallerCancellationDuringBlockedReadPropagatesAndDisposesResponse()
+    {
+        using var caller = new CancellationTokenSource();
+        var transport = new BlockingReadTransport();
+        var provider = new TestProvider(transport, completionTimeout: TimeSpan.FromSeconds(5));
+        var stream = provider.StreamAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromSeconds(5) }, caller.Token);
+
+        var enumeration = Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var _ in stream!) { }
+        });
+        await transport.ReadStarted.WaitAsync(TimeSpan.FromSeconds(1));
+        caller.Cancel();
+
+        await enumeration;
+        Assert.True(transport.Disposed);
+    }
+
+    [Fact]
     public async Task CheckHealthAsync_BareReturnedNonSuccessPreservesNumericHttpStatus()
     {
         var provider = new TestProvider(new ScriptedTransport { Completion = new(401, "denied") });
@@ -391,18 +410,31 @@ public sealed class OpenAiChatProviderBaseContractTests
 
     private sealed class BlockingReadTransport : IOpenAiChatTransport
     {
+        private readonly TaskCompletionSource<bool> _readStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool Disposed { get; private set; }
+        public Task ReadStarted => _readStarted.Task;
         public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromResult(new OpenAiChatResponse(200, OkBody));
         public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
-            => ValueTask.FromResult(new OpenAiChatStreamResponse(200, new BlockingReadStream(), dispose: () => { Disposed = true; return ValueTask.CompletedTask; }));
+            => ValueTask.FromResult(new OpenAiChatStreamResponse(200, new BlockingReadStream(_readStarted), dispose: () => { Disposed = true; return ValueTask.CompletedTask; }));
     }
 
     private sealed class BlockingReadStream : Stream
     {
+        private readonly TaskCompletionSource<bool> _readStarted;
+        public BlockingReadStream(TaskCompletionSource<bool> readStarted) => _readStarted = readStarted;
         public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false; public override long Length => 0; public override long Position { get => 0; set => throw new NotSupportedException(); }
         public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
-        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ContinueWith(_ => 0, cancellationToken);
-        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => new(Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ContinueWith(_ => 0, cancellationToken));
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            _readStarted.TrySetResult(true);
+            return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ContinueWith(_ => 0, cancellationToken);
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            _readStarted.TrySetResult(true);
+            return new(Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ContinueWith(_ => 0, cancellationToken));
+        }
         public override void Flush() { } public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask; public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(); public override void SetLength(long value) => throw new NotSupportedException(); public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
