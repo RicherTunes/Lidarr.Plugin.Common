@@ -6,6 +6,8 @@
 
 The runner parses counters from the published file rather than the temporary source. Missing TRX, an invalid/unwritable destination, failed copy, or malformed retained TRX fails the deterministic-test stage. Failed test executions still publish their TRX before the stage reports failure. The runner never deletes the durable destination.
 
+Gitea CI runs the real success/failure/skip receipt contract explicitly. `scripts/tests/Test-LocalCiTrxWorkflowWiring.ps1` guards that invocation against accidental removal or duplication.
+
 This changes evidence retention only. It does not change dependencies, deterministic filters, skip behavior, warning budgets, package gates, or test result classification.
 
 ## TDD evidence

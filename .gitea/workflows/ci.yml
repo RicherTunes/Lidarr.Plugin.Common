@@ -244,6 +244,9 @@ jobs:
       - name: Warning budget diagnostic accounting
         shell: pwsh
         run: ./scripts/tests/Test-WarningBudgetDiagnostics.ps1
+      - name: Durable local CI TRX receipt contract
+        shell: pwsh
+        run: ./scripts/tests/Test-LocalCiTrxRetention.ps1
       - name: Test-project dropout guard self-test (F4)
         shell: pwsh
         run: ./scripts/tests/Test-VerifyTestProjectsGated.ps1
