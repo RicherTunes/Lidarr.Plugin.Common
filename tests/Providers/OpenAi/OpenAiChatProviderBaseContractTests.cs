@@ -60,6 +60,28 @@ public sealed class OpenAiChatProviderBaseContractTests
         Assert.Contains($"\"temperature\":{wireValue}", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
     }
 
+    [Theory]
+    [InlineData(10, 5)]
+    [InlineData(2, 2)]
+    [InlineData(0, 5)]
+    [InlineData(-1, 5)]
+    public async Task CompleteAsync_RequestTimeoutCannotExtendOrDisableProviderTimeout(int requestSeconds, int expectedSeconds)
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport, completionTimeout: TimeSpan.FromSeconds(5));
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromSeconds(requestSeconds) });
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), transport.LastCompletionRequest!.Timeout);
+    }
+
+    [Fact]
+    public async Task StreamAsync_RequestTimeoutCannotExtendProviderTimeout()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody), StreamContent = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n" };
+        var provider = new TestProvider(transport, completionTimeout: TimeSpan.FromSeconds(5));
+        await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromSeconds(10) })!) { }
+        Assert.Equal(TimeSpan.FromSeconds(5), transport.LastStreamRequest!.Timeout);
+    }
+
     [Fact]
     public async Task CompleteAsync_PreservesUnicodeAndHtmlInTheLegacyWireBody()
     {
@@ -224,8 +246,8 @@ public sealed class OpenAiChatProviderBaseContractTests
         public TestProvider(IOpenAiChatTransport transport, bool sendsTemperature = true, bool supportsJson = true,
             IReadOnlyDictionary<string, string>? completionHeaders = null,
             Func<int, string?, TimeSpan?, Exception?, LlmProviderException>? errorMapper = null,
-            IOpenAiChatAuthCircuit? authCircuit = null, bool parseEmpty = false)
-            : base(transport, "test-key", "test-model", "test", "test-model", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), authCircuit)
+            IOpenAiChatAuthCircuit? authCircuit = null, bool parseEmpty = false, TimeSpan? completionTimeout = null)
+            : base(transport, "test-key", "test-model", "test", "test-model", completionTimeout ?? TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), authCircuit)
         {
             _sendsTemperature = sendsTemperature;
             _supportsJson = supportsJson;
@@ -258,6 +280,7 @@ public sealed class OpenAiChatProviderBaseContractTests
         public required OpenAiChatResponse Completion { get; set; }
         public string? StreamContent { get; init; }
         public OpenAiChatRequest? LastCompletionRequest { get; private set; }
+        public OpenAiChatRequest? LastStreamRequest { get; private set; }
 
         public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
         {
@@ -266,7 +289,10 @@ public sealed class OpenAiChatProviderBaseContractTests
         }
 
         public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
-            => ValueTask.FromResult(new OpenAiChatStreamResponse(200, StreamContent is null ? Stream.Null : new MemoryStream(System.Text.Encoding.UTF8.GetBytes(StreamContent))));
+        {
+            LastStreamRequest = request;
+            return ValueTask.FromResult(new OpenAiChatStreamResponse(200, StreamContent is null ? Stream.Null : new MemoryStream(System.Text.Encoding.UTF8.GetBytes(StreamContent))));
+        }
     }
 
     private sealed class CancellingTransport : IOpenAiChatTransport
