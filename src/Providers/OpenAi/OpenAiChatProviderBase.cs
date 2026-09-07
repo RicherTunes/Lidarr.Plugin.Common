@@ -96,7 +96,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
 
         try
         {
-            var response = await SendAsync(BuildRequestBody(request), request.Timeout ?? CompletionTimeout, cancellationToken).ConfigureAwait(false);
+            var response = await SendAsync(BuildRequestBody(request), ResolveRequestTimeout(request), cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != (int)HttpStatusCode.OK)
             {
                 throw MapHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, null);
@@ -177,7 +177,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Authorization"] = $"Bearer {_apiKey}", ["Accept"] = "text/event-stream" };
         AddStreamingRequestHeaders(headers);
-        await using var response = await _transport.OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, JsonSerializer.Serialize(BuildStreamingRequestBody(request), WireJsonOptions), headers, request.Timeout ?? CompletionTimeout), cancellationToken).ConfigureAwait(false);
+        await using var response = await _transport.OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, JsonSerializer.Serialize(BuildStreamingRequestBody(request), WireJsonOptions), headers, ResolveRequestTimeout(request)), cancellationToken).ConfigureAwait(false);
         if (response.StatusCode != (int)HttpStatusCode.OK) throw MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null);
         var emittedMeaningfulContent = false;
         var decoder = new OpenAiStreamDecoder();
@@ -207,6 +207,11 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
 
     private ProviderException InvalidResponse(string message) => new(ProviderId, LlmErrorCode.InvalidRequest, message);
     private static string? Truncate(string? body) => string.IsNullOrEmpty(body) || body.Length <= 500 ? body : body[..500];
+
+    private TimeSpan ResolveRequestTimeout(LlmRequest request)
+        => request.Timeout is { } requested && requested > TimeSpan.Zero && requested < CompletionTimeout
+            ? requested
+            : CompletionTimeout;
 
     private static JsonSerializerOptions CreateWireJsonOptions()
     {
