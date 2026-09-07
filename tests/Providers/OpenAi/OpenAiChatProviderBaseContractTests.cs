@@ -41,10 +41,23 @@ public sealed class OpenAiChatProviderBaseContractTests
         await provider.CompleteAsync(new LlmRequest { Prompt = "hi", Temperature = 1.0f });
 
         Assert.Equal(
-            "{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"temperature\":1,\"max_tokens\":2000,\"stream\":false}",
+            "{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"temperature\":1.0,\"max_tokens\":2000,\"stream\":false}",
             transport.LastCompletionRequest!.JsonBody);
         Assert.Equal("provider-authorized", transport.LastCompletionRequest.Headers["Authorization"]);
         Assert.Equal("visible-hook", transport.LastCompletionRequest.Headers["X-Provider"]);
+    }
+
+    [Theory]
+    [InlineData(0.0f, "0.0")]
+    [InlineData(1.0f, "1.0")]
+    public async Task CompleteAsync_PreservesIntegralTemperatureDecimalNotation(float temperature, string wireValue)
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport);
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi", Temperature = temperature });
+
+        Assert.Contains($"\"temperature\":{wireValue}", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
     }
 
     [Fact]
