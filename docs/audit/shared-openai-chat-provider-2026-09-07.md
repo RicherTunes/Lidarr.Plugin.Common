@@ -13,3 +13,5 @@ The first unpromoted stream fix was committed before its regression test and was
 Provider error mapping now removes the configured API key from surfaced mapped exception text. This is an intentional credential-hygiene improvement; caller cancellation remains unwrapped.
 
 The same boundary applies to health and stream transport exceptions. Secret-bearing causes are replaced by a redacted normalized provider exception; non-sensitive mapped errors retain their original identity.
+
+Streaming uses one linked `ResilienceTimeout` lease for connection and all decoder reads. A valid shorter request timeout tightens the provider limit; caller cancellation remains an unwrapped cancellation and internal expiry maps to a recoverable network timeout. Ten consecutive provider-contract runs are retained in the timing-repeat artifacts.
