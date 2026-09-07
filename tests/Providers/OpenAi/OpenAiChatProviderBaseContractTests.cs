@@ -184,7 +184,7 @@ public sealed class OpenAiChatProviderBaseContractTests
         var transport = new ScriptedTransport { Completion = new(503, "busy") };
         var provider = new TestProvider(transport, errorMapper: static (_, _, _, _) => new ProviderException("test", LlmErrorCode.QuotaExceeded, "custom health"));
         var health = await provider.CheckHealthAsync();
-        Assert.False(health.IsHealthy); Assert.Equal("QuotaExceeded", health.ErrorCode);
+        Assert.False(health.IsHealthy); Assert.Equal("503", health.ErrorCode);
         Assert.Equal("{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK\"}],\"max_tokens\":5}", transport.LastCompletionRequest!.JsonBody);
     }
 
