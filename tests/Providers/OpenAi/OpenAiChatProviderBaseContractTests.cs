@@ -393,6 +393,45 @@ public sealed class OpenAiChatProviderBaseContractTests
         Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task CompleteAsync_RedactsKnownKeyFromGenericTransportFailureAndInner()
+    {
+        const string secret = "completion-secret-key";
+        var provider = new TestProvider(new ThrowingTransport(secret), apiKey: secret);
+        var error = await Assert.ThrowsAnyAsync<LlmProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Equal(LlmErrorCode.ConnectionFailed, error.ErrorCode);
+        Assert.True(error.IsRetryable);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_SafeMappedExceptionRetainsOriginalIdentityAndInner()
+    {
+        var inner = new InvalidOperationException("safe inner");
+        var expected = new AuthenticationException("test", LlmErrorCode.AuthorizationFailed, "safe", inner);
+        var provider = new TestProvider(new MappedThrowingTransport(expected));
+        var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Same(expected, error);
+        Assert.Same(inner, error.InnerException);
+    }
+
+    [Fact]
+    public async Task StreamAsync_RedactsKnownKeyFromMappedReadFailureAndDisposesResponse()
+    {
+        const string secret = "read-secret-key";
+        var expected = new RateLimitException("test", $"limited {secret}", TimeSpan.FromSeconds(9));
+        var transport = new ReadFailureTransport(expected);
+        var provider = new TestProvider(transport, apiKey: secret);
+        var error = await Assert.ThrowsAsync<RateLimitException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+        Assert.Equal(TimeSpan.FromSeconds(9), error.RetryAfter);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        Assert.True(transport.Disposed);
+    }
+
 
     private sealed class TestProvider : OpenAiChatProviderBase
     {
@@ -465,6 +504,24 @@ public sealed class OpenAiChatProviderBaseContractTests
             => ValueTask.FromException<OpenAiChatResponse>(exception);
         public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
             => ValueTask.FromException<OpenAiChatStreamResponse>(exception);
+    }
+
+    private sealed class ReadFailureTransport(LlmProviderException exception) : IOpenAiChatTransport
+    {
+        public bool Disposed { get; private set; }
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new OpenAiChatResponse(200, OkBody));
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new OpenAiChatStreamResponse(200, new ThrowOnReadStream(exception), dispose: () => { Disposed = true; return ValueTask.CompletedTask; }));
+    }
+
+    private sealed class ThrowOnReadStream(Exception exception) : Stream
+    {
+        public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false; public override long Length => 0; public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => throw exception;
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => Task.FromException<int>(exception);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.FromException<int>(exception);
+        public override void Flush() { } public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(); public override void SetLength(long value) => throw new NotSupportedException(); public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class ThrowingTransport(string secret) : IOpenAiChatTransport
