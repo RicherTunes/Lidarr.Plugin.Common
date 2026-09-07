@@ -186,8 +186,10 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         if (response.StatusCode != (int)HttpStatusCode.OK) throw MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null);
         var emittedMeaningfulContent = false;
         var decoder = new OpenAiStreamDecoder();
-        await foreach (var chunk in decoder.DecodeAsync(response.Content, timeout.Token).ConfigureAwait(false))
+        await using var enumerator = decoder.DecodeAsync(response.Content, timeout.Token).GetAsyncEnumerator(timeout.Token);
+        while (await MoveNextStreamChunkAsync(enumerator, cancellationToken).ConfigureAwait(false))
         {
+            var chunk = enumerator.Current;
             var transformed = TransformStreamChunk(chunk);
             emittedMeaningfulContent |= !string.IsNullOrEmpty(transformed.ContentDelta) || !string.IsNullOrEmpty(transformed.ReasoningDelta);
             yield return transformed;
@@ -221,6 +223,12 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     private async ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken, CancellationToken callerCancellationToken)
     {
         try { return await _transport.OpenStreamAsync(request, cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (callerCancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) { throw SanitizeMappedException(LlmErrorMapper.MapException(ProviderId, exception)); }
+    }
+    private async ValueTask<bool> MoveNextStreamChunkAsync(IAsyncEnumerator<LlmStreamChunk> enumerator, CancellationToken callerCancellationToken)
+    {
+        try { return await enumerator.MoveNextAsync().ConfigureAwait(false); }
         catch (OperationCanceledException) when (callerCancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) { throw SanitizeMappedException(LlmErrorMapper.MapException(ProviderId, exception)); }
     }

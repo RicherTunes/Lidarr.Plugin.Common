@@ -65,8 +65,9 @@ public sealed class SseFramingReader
         var currentFrame = new SseFrameBuilder(_maxEventSize);
         var hasData = false;
 
-        while (!reader.EndOfStream && !cancellationToken.IsCancellationRequested)
+        while (true)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
             if (line == null)
             {
