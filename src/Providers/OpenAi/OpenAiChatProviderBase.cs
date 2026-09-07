@@ -98,11 +98,16 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         cancellationToken.ThrowIfCancellationRequested();
         using var scope = BeginCompletionScope();
         OnCompletionRequestStarting();
+        string? reason = null;
+        bool circuitOpen;
+        try { circuitOpen = _authCircuit?.IsOpen(ProviderId, _apiKey, out reason) == true; }
+        catch (LlmProviderException exception) { throw SanitizeException(exception); }
+        catch (Exception exception) { throw SanitizeException(LlmErrorMapper.MapException(ProviderId, exception)); }
+        if (circuitOpen)
+            throw new AuthenticationException(ProviderId, LlmErrorCode.AuthenticationFailed, SanitizeText("Auth circuit open: " + reason));
 
         try
         {
-            if (_authCircuit?.IsOpen(ProviderId, _apiKey, out var reason) == true)
-                throw new AuthenticationException(ProviderId, LlmErrorCode.AuthenticationFailed, SanitizeText("Auth circuit open: " + reason));
             var response = await SendAsync(BuildRequestBody(request), ResolveRequestTimeout(request), cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != (int)HttpStatusCode.OK)
             {
