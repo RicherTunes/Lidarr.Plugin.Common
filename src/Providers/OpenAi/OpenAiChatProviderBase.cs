@@ -1,9 +1,11 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Globalization;
 using System.Net;
 using System.Text.Json;
 using System.Text.Encodings.Web;
+using System.Text.Json.Serialization;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Abstractions.Llm;
@@ -15,7 +17,7 @@ namespace Lidarr.Plugin.Common.Providers.OpenAi;
 /// <summary>Shared template for API-key providers using the OpenAI Chat Completions wire format.</summary>
 public abstract class OpenAiChatProviderBase : ILlmProvider
 {
-    private static readonly JsonSerializerOptions WireJsonOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+    private static readonly JsonSerializerOptions WireJsonOptions = CreateWireJsonOptions();
     private readonly IOpenAiChatTransport _transport;
     private readonly IOpenAiChatAuthCircuit? _authCircuit;
     private readonly string _apiKey;
@@ -205,4 +207,18 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
 
     private ProviderException InvalidResponse(string message) => new(ProviderId, LlmErrorCode.InvalidRequest, message);
     private static string? Truncate(string? body) => string.IsNullOrEmpty(body) || body.Length <= 500 ? body : body[..500];
+
+    private static JsonSerializerOptions CreateWireJsonOptions()
+    {
+        var options = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        options.Converters.Add(new OpenAiDoubleConverter());
+        return options;
+    }
+
+    private sealed class OpenAiDoubleConverter : JsonConverter<double>
+    {
+        public override double Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.GetDouble();
+        public override void Write(Utf8JsonWriter writer, double value, JsonSerializerOptions options)
+            => writer.WriteRawValue(value.ToString("0.0###############", CultureInfo.InvariantCulture));
+    }
 }
