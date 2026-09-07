@@ -181,6 +181,26 @@ public sealed class OpenAiChatProviderBaseContractTests
         await Assert.ThrowsAsync<ProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
     }
 
+    [Fact]
+    public async Task StreamAsync_RejectsDoneOnlyStreamWithoutMeaningfulContent()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody), StreamContent = "data: [DONE]\n\n" });
+        var stream = provider.StreamAsync(new LlmRequest { Prompt = "hi" });
+
+        await Assert.ThrowsAsync<ProviderException>(async () =>
+        {
+            await foreach (var _ in stream!) { }
+        });
+    }
+
+    [Fact]
+    public void StreamAsync_AlreadyCancelledCallerThrowsBeforeReturningEnumerable()
+    {
+        using var cts = new CancellationTokenSource(); cts.Cancel();
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) });
+        Assert.ThrowsAny<OperationCanceledException>(() => provider.StreamAsync(new LlmRequest { Prompt = "hi" }, cts.Token));
+    }
+
     private sealed class TestProvider : OpenAiChatProviderBase
     {
         private readonly bool _sendsTemperature;
@@ -223,6 +243,7 @@ public sealed class OpenAiChatProviderBaseContractTests
     private sealed class ScriptedTransport : IOpenAiChatTransport
     {
         public required OpenAiChatResponse Completion { get; set; }
+        public string? StreamContent { get; init; }
         public OpenAiChatRequest? LastCompletionRequest { get; private set; }
 
         public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
@@ -232,7 +253,7 @@ public sealed class OpenAiChatProviderBaseContractTests
         }
 
         public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
-            => ValueTask.FromResult(new OpenAiChatStreamResponse(200, Stream.Null));
+            => ValueTask.FromResult(new OpenAiChatStreamResponse(200, StreamContent is null ? Stream.Null : new MemoryStream(System.Text.Encoding.UTF8.GetBytes(StreamContent))));
     }
 
     private sealed class CancellingTransport : IOpenAiChatTransport
