@@ -4,6 +4,7 @@
 
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Streaming;
 using Xunit;
@@ -246,6 +247,32 @@ data: [DONE]
         Assert.Equal(string.Empty, frames[0].Data);
     }
 
+    [Fact]
+    public async Task ReadFramesAsync_UsesAsyncReadWithoutCallingSynchronousRead()
+    {
+        await using var stream = new AsyncOnlyStream("data: async\n\n");
+        var frames = await CollectFramesAsync(new SseFramingReader(stream));
+        Assert.Single(frames);
+        Assert.Equal("async", frames[0].Data);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_PreCancelledToken_ThrowsOperationCanceledException()
+    {
+        using var cancellation = new CancellationTokenSource(); cancellation.Cancel();
+        await using var stream = new AsyncOnlyStream("data: ignored\n\n");
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(async () => await foreach (var _ in new SseFramingReader(stream).ReadFramesAsync(cancellation.Token)) { });
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_LeavesSuppliedStreamOpen()
+    {
+        var stream = new AsyncOnlyStream("data: owned\n\n");
+        await CollectFramesAsync(new SseFramingReader(stream));
+        Assert.True(stream.CanRead);
+        await stream.DisposeAsync();
+    }
+
     private static MemoryStream CreateStream(string content)
     {
         return new MemoryStream(Encoding.UTF8.GetBytes(content));
@@ -260,5 +287,11 @@ data: [DONE]
         }
 
         return frames.ToArray();
+    }
+
+    private sealed class AsyncOnlyStream : MemoryStream
+    {
+        public AsyncOnlyStream(string text) : base(Encoding.UTF8.GetBytes(text)) { }
+        public override int Read(byte[] buffer, int offset, int count) => throw new InvalidOperationException("sync read is forbidden");
     }
 }
