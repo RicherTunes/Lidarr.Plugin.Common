@@ -524,6 +524,28 @@ public sealed class OpenAiChatProviderBaseContractTests
         Assert.Same(expected, error);
     }
 
+    [Fact]
+    public async Task StreamAsync_EarlyDisposeSanitizesResponseDisposalFailure()
+    {
+        const string secret = "dispose-secret-key";
+        var transport = new DisposalFailureTransport("data: {\"choices\":[{\"delta\":{\"content\":\"one\"}}]}\n\n", new HttpRequestException($"dispose {secret}"));
+        var enumerator = new TestProvider(transport, apiKey: secret).StreamAsync(new LlmRequest { Prompt = "hi" })!.GetAsyncEnumerator();
+        Assert.True(await enumerator.MoveNextAsync());
+        var error = await Assert.ThrowsAnyAsync<LlmProviderException>(async () => await enumerator.DisposeAsync());
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamAsync_PrimaryReadFailureWinsOverResponseDisposalFailure()
+    {
+        var expected = new RateLimitException("test", "primary", TimeSpan.FromSeconds(11));
+        var transport = new DisposalFailureTransport(null, new InvalidOperationException("secondary dispose"), expected);
+        var provider = new TestProvider(transport);
+        var error = await Assert.ThrowsAsync<RateLimitException>(async () => { await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { } });
+        Assert.Same(expected, error);
+        Assert.Equal(TimeSpan.FromSeconds(11), error.RetryAfter);
+    }
+
 
     private sealed class TestProvider : OpenAiChatProviderBase
     {
@@ -618,6 +640,17 @@ public sealed class OpenAiChatProviderBaseContractTests
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.FromException<int>(exception);
         public override void Flush() { }
         public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(); public override void SetLength(long value) => throw new NotSupportedException(); public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class DisposalFailureTransport(string? content, Exception disposeError, Exception? readError = null) : IOpenAiChatTransport
+    {
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new OpenAiChatResponse(200, OkBody));
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+        {
+            Stream stream = readError is null ? new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content ?? string.Empty)) : new ThrowOnReadStream(readError);
+            return ValueTask.FromResult(new OpenAiChatStreamResponse(200, stream, dispose: () => ValueTask.FromException(disposeError)));
+        }
     }
 
     private sealed class ThrowingTransport(string secret) : IOpenAiChatTransport
