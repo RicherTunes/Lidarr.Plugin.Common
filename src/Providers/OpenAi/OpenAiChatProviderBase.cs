@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using System.Text.Encodings.Web;
 using System.Text.Json.Serialization;
@@ -97,11 +98,11 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         cancellationToken.ThrowIfCancellationRequested();
         using var scope = BeginCompletionScope();
         OnCompletionRequestStarting();
-        if (_authCircuit?.IsOpen(ProviderId, _apiKey, out var reason) == true)
-            throw new AuthenticationException(ProviderId, LlmErrorCode.AuthenticationFailed, SanitizeText("Auth circuit open: " + reason));
 
         try
         {
+            if (_authCircuit?.IsOpen(ProviderId, _apiKey, out var reason) == true)
+                throw new AuthenticationException(ProviderId, LlmErrorCode.AuthenticationFailed, SanitizeText("Auth circuit open: " + reason));
             var response = await SendAsync(BuildRequestBody(request), ResolveRequestTimeout(request), cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != (int)HttpStatusCode.OK)
             {
@@ -109,15 +110,16 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
             }
 
             var result = ParseCompletion(response.Body ?? string.Empty);
-            if (string.IsNullOrEmpty(result.Content)) throw InvalidResponse("The provider completion did not contain content.");
+            if (string.IsNullOrWhiteSpace(result.Content)) throw InvalidResponse("The provider completion did not contain content.");
             _authCircuit?.RecordSuccess(ProviderId, _apiKey);
             return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
         catch (LlmProviderException exception)
         {
-            RecordAuthFailureOnce(exception);
-            throw;
+            var safe = SanitizeException(exception);
+            RecordAuthFailureOnce(safe);
+            throw safe;
         }
         catch (Exception exception)
         {
@@ -203,23 +205,44 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         using var timeout = new ResilienceTimeout(ResolveRequestTimeout(request), cancellationToken);
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Authorization"] = $"Bearer {_apiKey}", ["Accept"] = "text/event-stream" };
         AddStreamingRequestHeaders(headers);
-        await using var response = await OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, SerializeRequestBody(BuildStreamingRequestBody(request)), headers, ResolveRequestTimeout(request)), timeout.Token, cancellationToken).ConfigureAwait(false);
-        if (response.StatusCode != (int)HttpStatusCode.OK)
-        {
-            var mapped = SanitizeException(MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null));
-            throw mapped;
-        }
+        var response = await OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, SerializeRequestBody(BuildStreamingRequestBody(request)), headers, ResolveRequestTimeout(request)), timeout.Token, cancellationToken).ConfigureAwait(false);
         var emittedMeaningfulContent = false;
-        var decoder = new OpenAiStreamDecoder();
-        await using var enumerator = decoder.DecodeAsync(response.Content, timeout.Token).GetAsyncEnumerator(timeout.Token);
-        while (await MoveNextStreamChunkAsync(enumerator, cancellationToken).ConfigureAwait(false))
+        var reachedTerminalState = false;
+        Exception? primaryError = null;
+        Exception? disposalError = null;
+        IAsyncEnumerator<LlmStreamChunk>? enumerator = null;
+        try
         {
-            var chunk = enumerator.Current;
-            var transformed = TransformStreamChunk(chunk);
-            emittedMeaningfulContent |= !string.IsNullOrEmpty(transformed.ContentDelta) || !string.IsNullOrEmpty(transformed.ReasoningDelta);
-            yield return transformed;
+            if (response.StatusCode != (int)HttpStatusCode.OK)
+            {
+                primaryError = SanitizeException(MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null));
+                reachedTerminalState = true;
+            }
+            else
+            {
+                var decoder = new OpenAiStreamDecoder();
+                enumerator = decoder.DecodeAsync(response.Content, timeout.Token).GetAsyncEnumerator(timeout.Token);
+                while (primaryError is null)
+                {
+                    var next = await ReadNextStreamChunkAsync(enumerator, cancellationToken).ConfigureAwait(false);
+                    if (next.Error is not null) { primaryError = next.Error; reachedTerminalState = true; break; }
+                    if (!next.HasChunk) { reachedTerminalState = true; break; }
+                    var transformed = next.Chunk!;
+                    emittedMeaningfulContent |= !string.IsNullOrWhiteSpace(transformed.ContentDelta) || !string.IsNullOrWhiteSpace(transformed.ReasoningDelta);
+                    yield return transformed;
+                }
+                if (primaryError is null && !emittedMeaningfulContent)
+                    primaryError = InvalidResponse("The provider stream ended without completion content.");
+            }
         }
-        if (!emittedMeaningfulContent) throw InvalidResponse("The provider stream ended without completion content.");
+        finally
+        {
+            disposalError = await DisposeStreamResourcesAsync(enumerator, response, cancellationToken).ConfigureAwait(false);
+            if (!reachedTerminalState && disposalError is not null)
+                ExceptionDispatchInfo.Capture(disposalError).Throw();
+        }
+        if (primaryError is not null) ExceptionDispatchInfo.Capture(primaryError).Throw();
+        if (disposalError is not null) ExceptionDispatchInfo.Capture(disposalError).Throw();
     }
 
     private object BuildChatBody(LlmRequest request, bool stream)
@@ -234,7 +257,9 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
 
     private void RecordAuthFailureOnce(LlmProviderException exception)
     {
-        if (exception.ErrorCode is LlmErrorCode.AuthenticationFailed or LlmErrorCode.AuthorizationFailed) _authCircuit?.RecordAuthFailure(ProviderId, _apiKey, exception);
+        if (exception.ErrorCode is not (LlmErrorCode.AuthenticationFailed or LlmErrorCode.AuthorizationFailed)) return;
+        try { _authCircuit?.RecordAuthFailure(ProviderId, _apiKey, exception); }
+        catch { /* A bookkeeping callback cannot replace the provider error. */ }
     }
 
     private ProviderException InvalidResponse(string message) => new(ProviderId, LlmErrorCode.InvalidRequest, message);
@@ -249,13 +274,33 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         catch (LlmProviderException exception) { throw SanitizeException(exception); }
         catch (Exception exception) { throw SanitizeException(LlmErrorMapper.MapException(ProviderId, exception)); }
     }
-    private async ValueTask<bool> MoveNextStreamChunkAsync(IAsyncEnumerator<LlmStreamChunk> enumerator, CancellationToken callerCancellationToken)
+    private async ValueTask<StreamReadResult> ReadNextStreamChunkAsync(IAsyncEnumerator<LlmStreamChunk> enumerator, CancellationToken callerCancellationToken)
     {
-        try { return await enumerator.MoveNextAsync().ConfigureAwait(false); }
-        catch (OperationCanceledException) when (callerCancellationToken.IsCancellationRequested) { throw; }
-        catch (LlmProviderException exception) { throw SanitizeException(exception); }
-        catch (Exception exception) { throw SanitizeException(LlmErrorMapper.MapException(ProviderId, exception)); }
+        try
+        {
+            if (!await enumerator.MoveNextAsync().ConfigureAwait(false)) return new(false, null, null);
+            return new(true, TransformStreamChunk(enumerator.Current), null);
+        }
+        catch (OperationCanceledException exception) when (callerCancellationToken.IsCancellationRequested) { return new(false, null, exception); }
+        catch (LlmProviderException exception) { return new(false, null, SanitizeException(exception)); }
+        catch (Exception exception) { return new(false, null, SanitizeException(LlmErrorMapper.MapException(ProviderId, exception))); }
     }
+    private async ValueTask<Exception?> DisposeStreamResourcesAsync(IAsyncEnumerator<LlmStreamChunk>? enumerator, OpenAiChatStreamResponse response, CancellationToken callerCancellationToken)
+    {
+        Exception? error = null;
+        try { if (enumerator is not null) await enumerator.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception exception) { error = MapStreamException(exception, callerCancellationToken); }
+        try { await response.DisposeAsync().ConfigureAwait(false); }
+        catch (Exception exception) { error ??= MapStreamException(exception, callerCancellationToken); }
+        return error;
+    }
+    private Exception MapStreamException(Exception exception, CancellationToken callerCancellationToken)
+        => exception is OperationCanceledException && callerCancellationToken.IsCancellationRequested
+            ? exception
+            : exception is LlmProviderException providerException
+                ? SanitizeException(providerException)
+                : SanitizeException(LlmErrorMapper.MapException(ProviderId, exception));
+    private readonly record struct StreamReadResult(bool HasChunk, LlmStreamChunk? Chunk, Exception? Error);
     private LlmProviderException SanitizeException(LlmProviderException exception)
     {
         if (!exception.ToString().Contains(_apiKey, StringComparison.Ordinal)) return exception;
