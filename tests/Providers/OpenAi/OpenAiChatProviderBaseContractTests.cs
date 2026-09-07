@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Net.Http;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Abstractions.Llm;
@@ -98,6 +99,27 @@ public sealed class OpenAiChatProviderBaseContractTests
         const string secret = "short-opaque-test-secret";
         var provider = new TestProvider(new ScriptedTransport { Completion = new(400, $"{{\"message\":\"failed {secret}\"}}") }, apiKey: secret);
         var exception = await Assert.ThrowsAnyAsync<LlmProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_DoesNotExposeKnownApiKeyFromTransportException()
+    {
+        const string secret = "short-opaque-test-secret";
+        var provider = new TestProvider(new ThrowingTransport(secret), apiKey: secret);
+        var health = await provider.CheckHealthAsync();
+        Assert.False(health.IsHealthy);
+        Assert.DoesNotContain(secret, health.StatusMessage!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamAsync_DoesNotExposeKnownApiKeyFromTransportException()
+    {
+        const string secret = "short-opaque-test-secret";
+        var provider = new TestProvider(new ThrowingTransport(secret), apiKey: secret);
+        var stream = provider.StreamAsync(new LlmRequest { Prompt = "hi" });
+        var exception = await Assert.ThrowsAnyAsync<LlmProviderException>(async () => { await foreach (var _ in stream!) { } });
+        Assert.Equal(LlmErrorCode.ConnectionFailed, exception.ErrorCode);
         Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
     }
 
@@ -326,6 +348,13 @@ public sealed class OpenAiChatProviderBaseContractTests
     {
         public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromCanceled<OpenAiChatResponse>(cancellationToken);
         public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromCanceled<OpenAiChatStreamResponse>(cancellationToken);
+    }
+
+    private sealed class ThrowingTransport(string secret) : IOpenAiChatTransport
+    {
+        private readonly HttpRequestException _exception = new($"transport {secret}", new InvalidOperationException($"inner {secret}"));
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromException<OpenAiChatResponse>(_exception);
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromException<OpenAiChatStreamResponse>(_exception);
     }
 
     private sealed class RecordingCircuit : IOpenAiChatAuthCircuit
