@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using Lidarr.Plugin.Common.Abstractions.Llm;
+using Lidarr.Plugin.Common.Errors;
 using Xunit;
 
 namespace Lidarr.Plugin.Common.Tests.Providers.OpenAi;
@@ -16,7 +17,7 @@ public sealed class OpenAiChatProviderBaseSurfaceContractTests
     [Fact]
     public void PublicContract_ExposesTheSharedProviderBaseAndItsInjectionSeams()
     {
-        var assembly = typeof(ILlmProvider).Assembly;
+        var assembly = typeof(LlmErrorMapper).Assembly;
         var providerBase = assembly.GetType($"{Namespace}.OpenAiChatProviderBase");
         var transport = assembly.GetType($"{Namespace}.IOpenAiChatTransport");
         var authCircuit = assembly.GetType($"{Namespace}.IOpenAiChatAuthCircuit");

@@ -40,7 +40,9 @@ public sealed class OpenAiChatProviderBaseContractTests
 
         await provider.CompleteAsync(new LlmRequest { Prompt = "hi", Temperature = 1.0f });
 
-        Assert.Contains("\"temperature\":1", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
+        Assert.Equal(
+            "{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"temperature\":1,\"max_tokens\":2000,\"stream\":false}",
+            transport.LastCompletionRequest!.JsonBody);
         Assert.Equal("provider-authorized", transport.LastCompletionRequest.Headers["Authorization"]);
         Assert.Equal("visible-hook", transport.LastCompletionRequest.Headers["X-Provider"]);
     }
