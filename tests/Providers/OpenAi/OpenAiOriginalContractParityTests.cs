@@ -30,6 +30,28 @@ public sealed class OpenAiOriginalContractParityTests
     }
 
     [Fact]
+    public async Task Temperature_SentByDefault_UsingProviderDefault()
+    {
+        var transport = new RecordingTransport();
+        var provider = new ParityProvider(transport, defaultTemperature: 0.8);
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi" });
+
+        Assert.Contains("\"temperature\":0.8", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task Temperature_RequestValueWinsOverDefault()
+    {
+        var transport = new RecordingTransport();
+        var provider = new ParityProvider(transport, defaultTemperature: 0.8);
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi", Temperature = 0.5f });
+
+        Assert.Contains("\"temperature\":0.5", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task SystemPrompt_EmittedAsFirstMessage()
     {
         var transport = new RecordingTransport();
@@ -75,12 +97,27 @@ public sealed class OpenAiOriginalContractParityTests
     }
 
     [Fact]
+    public async Task HealthProbe_DefaultBody_UsesReplyWithOkAndFiveTokens()
+    {
+        var transport = new RecordingTransport();
+        var provider = new ParityProvider(transport);
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.True(health.IsHealthy);
+        Assert.Equal("testchat", health.Provider);
+        Assert.Equal(
+            "{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK\"}],\"max_tokens\":5}",
+            transport.LastCompletionRequest!.JsonBody);
+    }
+
+    [Fact]
     public void UpdateModel_MapsThroughNormalizeModel()
     {
         var provider = new ParityProvider(new RecordingTransport());
 
         provider.UpdateModel("  ");
-        Assert.Equal("mapped:test-model", provider.ExposedCurrentModel);
+        Assert.Equal("test-model", provider.ExposedCurrentModel);
         provider.UpdateModel(" some-model ");
 
         Assert.Equal("mapped:some-model", provider.ExposedCurrentModel);
@@ -102,16 +139,22 @@ public sealed class OpenAiOriginalContractParityTests
             IOpenAiChatTransport transport,
             string apiKey = "test-key",
             IReadOnlyDictionary<string, string>? completionHeaders = null,
-            IOpenAiChatAuthCircuit? authCircuit = null)
+            IOpenAiChatAuthCircuit? authCircuit = null,
+            double defaultTemperature = 0.7)
             : base(transport, apiKey, "test-model", "testchat", "test-model", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), authCircuit)
         {
             _completionHeaders = completionHeaders;
+            _defaultTemperature = defaultTemperature;
         }
+
+        private readonly double _defaultTemperature;
+        private readonly bool _mapModels = true;
 
         public override string DisplayName => "Test Chat";
         public override LlmProviderCapabilities Capabilities => new() { Flags = LlmCapabilityFlags.TextCompletion | LlmCapabilityFlags.SystemPrompt, UsesOpenAiCompatibleApi = true };
         public string ExposedCurrentModel => CurrentModel;
         protected override Uri ChatCompletionsEndpoint => new(Endpoint);
+        protected override double DefaultTemperature => _defaultTemperature;
 
         protected override void AddCompletionRequestHeaders(IDictionary<string, string> headers)
         {
@@ -119,7 +162,7 @@ public sealed class OpenAiOriginalContractParityTests
             foreach (var (name, value) in _completionHeaders) headers[name] = value;
         }
 
-        protected override string NormalizeModel(string model) => "mapped:" + model.Trim();
+        protected override string NormalizeModel(string model) => _mapModels ? "mapped:" + model.Trim() : model;
     }
 
     private sealed class RecordingTransport : IOpenAiChatTransport
