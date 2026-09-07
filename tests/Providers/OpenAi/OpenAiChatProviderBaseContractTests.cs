@@ -549,9 +549,10 @@ public sealed class OpenAiChatProviderBaseContractTests
     [Fact]
     public async Task CompleteAsync_SuccessCallbackFailurePreservesOriginalFailurePolicy()
     {
-        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, authCircuit: new ThrowingSuccessCircuit());
+        const string secret = "success-callback-secret";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, apiKey: secret, authCircuit: new ThrowingSuccessCircuit(secret));
         var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
-        Assert.Equal("success callback failed", error.Message);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
     }
 
 
@@ -752,11 +753,11 @@ public sealed class OpenAiChatProviderBaseContractTests
         public void RecordSuccess(string providerId, string credential) { }
     }
 
-    private sealed class ThrowingSuccessCircuit : IOpenAiChatAuthCircuit
+    private sealed class ThrowingSuccessCircuit(string secret) : IOpenAiChatAuthCircuit
     {
         public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; return false; }
         public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
-        public void RecordSuccess(string providerId, string credential) => throw new AuthenticationException(providerId, "success callback failed");
+        public void RecordSuccess(string providerId, string credential) => throw new AuthenticationException(providerId, $"success callback failed {secret}");
     }
 
 }
