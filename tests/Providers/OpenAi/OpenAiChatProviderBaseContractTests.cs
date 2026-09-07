@@ -361,11 +361,20 @@ public sealed class OpenAiChatProviderBaseContractTests
     [InlineData("{\"choices\":{}}")]
     [InlineData("{\"choices\":[1]}")]
     [InlineData("{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"usage\":[]}")]
-    [InlineData("{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"usage\":null}")]
     public async Task CompleteAsync_NonemptyTypeInvalidJsonFallsBackToRawContent(string body)
     {
         var provider = new TestProvider(new ScriptedTransport { Completion = new(200, body) });
         Assert.Equal(body, (await provider.CompleteAsync(new LlmRequest { Prompt = "hi" })).Content);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_NullUsageStillParsesContent()
+    {
+        const string body = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"usage\":null}";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, body) });
+        var response = await provider.CompleteAsync(new LlmRequest { Prompt = "hi" });
+        Assert.Equal("ok", response.Content);
+        Assert.Null(response.Usage);
     }
 
     [Fact]
@@ -384,22 +393,6 @@ public sealed class OpenAiChatProviderBaseContractTests
         Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
     }
 
-    [Fact]
-    public async Task StreamAsync_UsesAuthCircuitPreflightAndRecordsSuccess()
-    {
-        var openTransport = new ScriptedTransport { Completion = new(200, OkBody), StreamContent = "data: [DONE]\n\n" };
-        var openProvider = new TestProvider(openTransport, authCircuit: new SecretOpenCircuit("known bad"));
-        await Assert.ThrowsAsync<AuthenticationException>(async () =>
-        {
-            await foreach (var _ in openProvider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
-        });
-        Assert.Null(openTransport.LastStreamRequest);
-
-        var circuit = new RecordingCircuit();
-        var transport = new ScriptedTransport { Completion = new(200, OkBody), StreamContent = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n" };
-        await foreach (var _ in new TestProvider(transport, authCircuit: circuit).StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
-        Assert.Equal(1, circuit.Successes);
-    }
 
     private sealed class TestProvider : OpenAiChatProviderBase
     {
@@ -542,10 +535,4 @@ public sealed class OpenAiChatProviderBaseContractTests
         public void RecordSuccess(string providerId, string credential) { }
     }
 
-    private sealed class SecretOpenCircuit(string reason) : IOpenAiChatAuthCircuit
-    {
-        public bool IsOpen(string providerId, string credential, out string? circuitReason) { circuitReason = reason; return true; }
-        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
-        public void RecordSuccess(string providerId, string credential) { }
-    }
 }

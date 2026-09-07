@@ -148,20 +148,33 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         try
         {
             using var document = JsonDocument.Parse(content);
-            if (!document.RootElement.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array || choices.GetArrayLength() == 0)
-                throw InvalidResponse("The provider response did not contain completion content.");
+            if (!document.RootElement.TryGetProperty("choices", out var choices) || choices.ValueKind != JsonValueKind.Array)
+                return new LlmResponse { Content = content };
+            if (choices.GetArrayLength() == 0) return new LlmResponse { Content = string.Empty };
             var choice = choices[0];
-            if (!choice.TryGetProperty("message", out var message) || !message.TryGetProperty("content", out var text) || text.ValueKind != JsonValueKind.String || string.IsNullOrEmpty(text.GetString()))
-                throw InvalidResponse("The provider completion choice did not contain content.");
+            if (choice.ValueKind != JsonValueKind.Object) return new LlmResponse { Content = content };
+            if (!choice.TryGetProperty("message", out var message) || message.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                return new LlmResponse { Content = string.Empty };
+            if (message.ValueKind != JsonValueKind.Object || !message.TryGetProperty("content", out var text))
+                return new LlmResponse { Content = content };
+            if (text.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                return new LlmResponse { Content = string.Empty };
+            if (text.ValueKind != JsonValueKind.String) return new LlmResponse { Content = content };
             LlmUsage? usage = null;
-            if (document.RootElement.TryGetProperty("usage", out var usageElement)) usage = new LlmUsage
+            JsonElement usageElement;
+            if (document.RootElement.TryGetProperty("usage", out usageElement) && usageElement.ValueKind is not (JsonValueKind.Object or JsonValueKind.Null))
+                return new LlmResponse { Content = content };
+            if (document.RootElement.TryGetProperty("usage", out usageElement) && usageElement.ValueKind == JsonValueKind.Object) usage = new LlmUsage
             {
                 InputTokens = usageElement.TryGetProperty("prompt_tokens", out var prompt) ? prompt.GetInt32() : 0,
                 OutputTokens = usageElement.TryGetProperty("completion_tokens", out var completion) ? completion.GetInt32() : 0,
             };
             return new LlmResponse { Content = text.GetString()!, FinishReason = choice.TryGetProperty("finish_reason", out var finish) ? finish.GetString() : null, Usage = usage };
         }
-        catch (JsonException) { return new LlmResponse { Content = content }; }
+        catch (Exception exception) when (exception is JsonException or InvalidOperationException or FormatException or OverflowException)
+        {
+            return new LlmResponse { Content = content };
+        }
     }
     protected virtual LlmStreamChunk TransformStreamChunk(LlmStreamChunk chunk) => chunk;
     protected virtual string NormalizeModel(string model) => model;
@@ -190,7 +203,11 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Authorization"] = $"Bearer {_apiKey}", ["Accept"] = "text/event-stream" };
         AddStreamingRequestHeaders(headers);
         await using var response = await OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, SerializeRequestBody(BuildStreamingRequestBody(request)), headers, ResolveRequestTimeout(request)), timeout.Token, cancellationToken).ConfigureAwait(false);
-        if (response.StatusCode != (int)HttpStatusCode.OK) throw SanitizeException(MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null));
+        if (response.StatusCode != (int)HttpStatusCode.OK)
+        {
+            var mapped = SanitizeException(MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null));
+            throw mapped;
+        }
         var emittedMeaningfulContent = false;
         var decoder = new OpenAiStreamDecoder();
         await using var enumerator = decoder.DecodeAsync(response.Content, timeout.Token).GetAsyncEnumerator(timeout.Token);
