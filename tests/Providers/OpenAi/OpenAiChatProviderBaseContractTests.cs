@@ -546,6 +546,13 @@ public sealed class OpenAiChatProviderBaseContractTests
         Assert.Equal(TimeSpan.FromSeconds(11), error.RetryAfter);
     }
 
+    [Fact]
+    public async Task CompleteAsync_SuccessCallbackCannotReplaceValidCompletion()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, authCircuit: new ThrowingSuccessCircuit());
+        Assert.Equal("ok", (await provider.CompleteAsync(new LlmRequest { Prompt = "hi" })).Content);
+    }
+
 
     private sealed class TestProvider : OpenAiChatProviderBase
     {
@@ -742,6 +749,13 @@ public sealed class OpenAiChatProviderBaseContractTests
         public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; return false; }
         public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) => throw new InvalidOperationException("record callback failed");
         public void RecordSuccess(string providerId, string credential) { }
+    }
+
+    private sealed class ThrowingSuccessCircuit : IOpenAiChatAuthCircuit
+    {
+        public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; return false; }
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
+        public void RecordSuccess(string providerId, string credential) => throw new AuthenticationException(providerId, "success callback failed");
     }
 
 }
