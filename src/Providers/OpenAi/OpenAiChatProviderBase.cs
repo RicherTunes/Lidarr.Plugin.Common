@@ -84,7 +84,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
-            return ProviderHealthResult.Unhealthy(exception.Message, stopwatch.Elapsed, ProviderId, "apiKey", _model);
+            return ProviderHealthResult.Unhealthy(SanitizeText(exception.Message), stopwatch.Elapsed, ProviderId, "apiKey", _model);
         }
     }
 
@@ -180,7 +180,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Authorization"] = $"Bearer {_apiKey}", ["Accept"] = "text/event-stream" };
         AddStreamingRequestHeaders(headers);
-        await using var response = await _transport.OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, JsonSerializer.Serialize(BuildStreamingRequestBody(request), WireJsonOptions), headers, ResolveRequestTimeout(request)), cancellationToken).ConfigureAwait(false);
+        await using var response = await OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, JsonSerializer.Serialize(BuildStreamingRequestBody(request), WireJsonOptions), headers, ResolveRequestTimeout(request)), cancellationToken).ConfigureAwait(false);
         if (response.StatusCode != (int)HttpStatusCode.OK) throw MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null);
         var emittedMeaningfulContent = false;
         var decoder = new OpenAiStreamDecoder();
@@ -216,6 +216,21 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         var message = LogRedactor.Redact(mapped.Message).Replace(_apiKey, LogRedactor.REDACTED, StringComparison.Ordinal);
         return new ProviderException(ProviderId, mapped.ErrorCode, message);
     }
+    private async ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+    {
+        try { return await _transport.OpenStreamAsync(request, cancellationToken).ConfigureAwait(false); }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (Exception exception) { throw SanitizeMappedException(LlmErrorMapper.MapException(ProviderId, exception)); }
+    }
+    private LlmProviderException SanitizeMappedException(LlmProviderException exception)
+    {
+        if (!exception.ToString().Contains(_apiKey, StringComparison.Ordinal)) return exception;
+        var message = SanitizeText(exception.Message);
+        return exception is NetworkException
+            ? new NetworkException(ProviderId, exception.ErrorCode, message)
+            : new ProviderException(ProviderId, exception.ErrorCode, message);
+    }
+    private string SanitizeText(string text) => LogRedactor.Redact(text).Replace(_apiKey, LogRedactor.REDACTED, StringComparison.Ordinal);
     private static string? Truncate(string? body) => string.IsNullOrEmpty(body) || body.Length <= 500 ? body : body[..500];
 
     private TimeSpan ResolveRequestTimeout(LlmRequest request)
