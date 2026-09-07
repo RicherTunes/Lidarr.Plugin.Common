@@ -11,3 +11,5 @@ Evidence is stored under `artifacts/shared-openai-chat`. The initial reflection 
 The first unpromoted stream fix was committed before its regression test and was reverted in `2b06d48`. The corrected TDD sequence is test-only `f925fd9`, genuine red `red-stream-contract.trx`, then implementation `fd858ec` and green `green-stream-contract.trx`.
 
 Provider error mapping now removes the configured API key from surfaced mapped exception text. This is an intentional credential-hygiene improvement; caller cancellation remains unwrapped.
+
+The same boundary applies to health and stream transport exceptions. Secret-bearing causes are replaced by a redacted normalized provider exception; non-sensitive mapped errors retain their original identity.
