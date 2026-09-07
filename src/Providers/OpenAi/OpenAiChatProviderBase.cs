@@ -6,6 +6,7 @@ using System.Net;
 using System.Text.Json;
 using System.Text.Encodings.Web;
 using System.Text.Json.Serialization;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Abstractions.Llm;
@@ -20,6 +21,7 @@ namespace Lidarr.Plugin.Common.Providers.OpenAi;
 public abstract class OpenAiChatProviderBase : ILlmProvider
 {
     private static readonly JsonSerializerOptions WireJsonOptions = CreateWireJsonOptions();
+    private static readonly Regex EscapedSurrogatePair = new(@"\\u(?<high>D[89ABab][0-9A-Fa-f]{2})\\u(?<low>D[C-Fc-f][0-9A-Fa-f]{2})", RegexOptions.Compiled | RegexOptions.CultureInvariant);
     private readonly IOpenAiChatTransport _transport;
     private readonly IOpenAiChatAuthCircuit? _authCircuit;
     private readonly string _apiKey;
@@ -119,7 +121,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         }
         catch (Exception exception)
         {
-            throw LlmErrorMapper.MapException(ProviderId, exception);
+            throw SanitizeException(LlmErrorMapper.MapException(ProviderId, exception));
         }
     }
 
@@ -166,6 +168,11 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
 
     protected virtual object BuildRequestBody(LlmRequest request) => BuildChatBody(request, false);
     protected virtual object BuildStreamingRequestBody(LlmRequest request) => BuildChatBody(request, true);
+    protected virtual string SerializeRequestBody(object body)
+        => EscapedSurrogatePair.Replace(JsonSerializer.Serialize(body, WireJsonOptions), static match =>
+            char.ConvertFromUtf32(char.ConvertToUtf32(
+                (char)int.Parse(match.Groups["high"].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture),
+                (char)int.Parse(match.Groups["low"].Value, NumberStyles.HexNumber, CultureInfo.InvariantCulture))));
     protected virtual void OnCompletionRequestStarting() { }
     /// <summary>Creates an optional scope lasting for the whole completion operation.</summary>
     protected virtual IDisposable? BeginCompletionScope() => null;
@@ -174,7 +181,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Authorization"] = $"Bearer {_apiKey}", ["Content-Type"] = "application/json" };
         AddCompletionRequestHeaders(headers);
-        return await _transport.SendAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, JsonSerializer.Serialize(body, WireJsonOptions), headers, timeout), cancellationToken).ConfigureAwait(false);
+        return await _transport.SendAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, SerializeRequestBody(body), headers, timeout), cancellationToken).ConfigureAwait(false);
     }
 
     private async IAsyncEnumerable<LlmStreamChunk> StreamCoreAsync(LlmRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
@@ -182,8 +189,8 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         using var timeout = new ResilienceTimeout(ResolveRequestTimeout(request), cancellationToken);
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Authorization"] = $"Bearer {_apiKey}", ["Accept"] = "text/event-stream" };
         AddStreamingRequestHeaders(headers);
-        await using var response = await OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, JsonSerializer.Serialize(BuildStreamingRequestBody(request), WireJsonOptions), headers, ResolveRequestTimeout(request)), timeout.Token, cancellationToken).ConfigureAwait(false);
-        if (response.StatusCode != (int)HttpStatusCode.OK) throw MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null);
+        await using var response = await OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, SerializeRequestBody(BuildStreamingRequestBody(request)), headers, ResolveRequestTimeout(request)), timeout.Token, cancellationToken).ConfigureAwait(false);
+        if (response.StatusCode != (int)HttpStatusCode.OK) throw SanitizeException(MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null));
         var emittedMeaningfulContent = false;
         var decoder = new OpenAiStreamDecoder();
         await using var enumerator = decoder.DecodeAsync(response.Content, timeout.Token).GetAsyncEnumerator(timeout.Token);
@@ -200,7 +207,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     private object BuildChatBody(LlmRequest request, bool stream)
     {
         var body = new Dictionary<string, object?> { ["model"] = string.IsNullOrWhiteSpace(request.Model) ? _model : NormalizeModel(request.Model), ["messages"] = string.IsNullOrEmpty(request.SystemPrompt) ? new[] { new Dictionary<string, string> { ["role"] = "user", ["content"] = request.Prompt } } : new[] { new Dictionary<string, string> { ["role"] = "system", ["content"] = request.SystemPrompt }, new Dictionary<string, string> { ["role"] = "user", ["content"] = request.Prompt } } };
-        if (SendsTemperature) body["temperature"] = (double?)request.Temperature ?? DefaultTemperature;
+        if (SendsTemperature) body["temperature"] = request.Temperature is { } temperature ? (object)temperature : DefaultTemperature;
         body["max_tokens"] = request.MaxTokens ?? 2000;
         body["stream"] = stream;
         if (SupportsJsonResponseFormat && IsJsonModeRequested(request)) body["response_format"] = new Dictionary<string, string> { ["type"] = "json_object" };
@@ -215,30 +222,33 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     private ProviderException InvalidResponse(string message) => new(ProviderId, LlmErrorCode.InvalidRequest, message);
     private LlmProviderException MapSafeHttpError(int statusCode, string? body, TimeSpan? retryAfter, Exception? inner)
     {
-        var mapped = MapHttpError(statusCode, body, retryAfter, inner);
-        if (!mapped.ToString().Contains(_apiKey, StringComparison.Ordinal)) return mapped;
-        var message = LogRedactor.Redact(mapped.Message).Replace(_apiKey, LogRedactor.REDACTED, StringComparison.Ordinal);
-        return new ProviderException(ProviderId, mapped.ErrorCode, message);
+        return SanitizeException(MapHttpError(statusCode, body, retryAfter, inner));
     }
     private async ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken, CancellationToken callerCancellationToken)
     {
         try { return await _transport.OpenStreamAsync(request, cancellationToken).ConfigureAwait(false); }
         catch (OperationCanceledException) when (callerCancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception exception) { throw SanitizeMappedException(LlmErrorMapper.MapException(ProviderId, exception)); }
+        catch (LlmProviderException exception) { throw SanitizeException(exception); }
+        catch (Exception exception) { throw SanitizeException(LlmErrorMapper.MapException(ProviderId, exception)); }
     }
     private async ValueTask<bool> MoveNextStreamChunkAsync(IAsyncEnumerator<LlmStreamChunk> enumerator, CancellationToken callerCancellationToken)
     {
         try { return await enumerator.MoveNextAsync().ConfigureAwait(false); }
         catch (OperationCanceledException) when (callerCancellationToken.IsCancellationRequested) { throw; }
-        catch (Exception exception) { throw SanitizeMappedException(LlmErrorMapper.MapException(ProviderId, exception)); }
+        catch (LlmProviderException exception) { throw SanitizeException(exception); }
+        catch (Exception exception) { throw SanitizeException(LlmErrorMapper.MapException(ProviderId, exception)); }
     }
-    private LlmProviderException SanitizeMappedException(LlmProviderException exception)
+    private LlmProviderException SanitizeException(LlmProviderException exception)
     {
         if (!exception.ToString().Contains(_apiKey, StringComparison.Ordinal)) return exception;
         var message = SanitizeText(exception.Message);
-        return exception is NetworkException
-            ? new NetworkException(ProviderId, exception.ErrorCode, message)
-            : new ProviderException(ProviderId, exception.ErrorCode, message);
+        return exception switch
+        {
+            RateLimitException => new RateLimitException(ProviderId, exception.ErrorCode, message, exception.RetryAfter),
+            AuthenticationException => new AuthenticationException(ProviderId, exception.ErrorCode, message),
+            NetworkException => new NetworkException(ProviderId, exception.ErrorCode, message),
+            _ => new ProviderException(ProviderId, exception.ErrorCode, message),
+        };
     }
     private string SanitizeText(string text) => LogRedactor.Redact(text).Replace(_apiKey, LogRedactor.REDACTED, StringComparison.Ordinal);
     private static string? Truncate(string? body) => string.IsNullOrEmpty(body) || body.Length <= 500 ? body : body[..500];
@@ -251,6 +261,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     private static JsonSerializerOptions CreateWireJsonOptions()
     {
         var options = new JsonSerializerOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+        options.Converters.Add(new OpenAiSingleConverter());
         options.Converters.Add(new OpenAiDoubleConverter());
         return options;
     }
@@ -259,6 +270,19 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     {
         public override double Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.GetDouble();
         public override void Write(Utf8JsonWriter writer, double value, JsonSerializerOptions options)
-            => writer.WriteRawValue(value.ToString("0.0###############", CultureInfo.InvariantCulture));
+            => writer.WriteRawValue(FormatNumber(value));
+    }
+
+    private sealed class OpenAiSingleConverter : JsonConverter<float>
+    {
+        public override float Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options) => reader.GetSingle();
+        public override void Write(Utf8JsonWriter writer, float value, JsonSerializerOptions options)
+            => writer.WriteRawValue(FormatNumber(value));
+    }
+
+    private static string FormatNumber<T>(T value) where T : IFormattable
+    {
+        var text = value.ToString("R", CultureInfo.InvariantCulture);
+        return text.IndexOfAny(['.', 'E', 'e']) < 0 ? text + ".0" : text;
     }
 }
