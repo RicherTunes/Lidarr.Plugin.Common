@@ -378,6 +378,14 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
     [Fact]
+    public async Task CompleteAsync_RejectsRecognizableChoiceWithMissingContent()
+    {
+        const string body = "{\"choices\":[{\"message\":{},\"finish_reason\":\"stop\"}]}";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, body) });
+        await Assert.ThrowsAsync<ProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+    }
+
+    [Fact]
     public async Task StreamAsync_RedactsKnownKeyWhilePreservingRateLimitMetadata()
     {
         const string secret = "stream-secret-key";
@@ -430,6 +438,30 @@ public sealed class OpenAiChatProviderBaseContractTests
         Assert.Equal(TimeSpan.FromSeconds(9), error.RetryAfter);
         Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
         Assert.True(transport.Disposed);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RedactsKnownKeyFromAuthCircuitReason()
+    {
+        const string secret = "circuit-secret-key";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, apiKey: secret, authCircuit: new ReasonCircuit($"rejected {secret}"));
+        var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Equal(LlmErrorCode.AuthenticationFailed, error.ErrorCode);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_RedactsMappedAuthenticationMessageAndInner()
+    {
+        const string secret = "health-secret-key";
+        var inner = new InvalidOperationException($"inner {secret}");
+        var transport = new ScriptedTransport { Completion = new(401, "bad", null, inner) };
+        var provider = new TestProvider(transport, apiKey: secret,
+            errorMapper: (_, _, _, suppliedInner) => new AuthenticationException("test", LlmErrorCode.AuthenticationFailed, $"bad {secret}", suppliedInner));
+        var health = await provider.CheckHealthAsync();
+        Assert.False(health.IsHealthy);
+        Assert.Equal(LlmErrorCode.AuthenticationFailed.ToString(), health.ErrorCode);
+        Assert.DoesNotContain(secret, health.StatusMessage!, StringComparison.Ordinal);
     }
 
 
@@ -588,6 +620,13 @@ public sealed class OpenAiChatProviderBaseContractTests
             return true;
         }
 
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
+        public void RecordSuccess(string providerId, string credential) { }
+    }
+
+    private sealed class ReasonCircuit(string reason) : IOpenAiChatAuthCircuit
+    {
+        public bool IsOpen(string providerId, string credential, out string? circuitReason) { circuitReason = reason; return true; }
         public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
         public void RecordSuccess(string providerId, string credential) { }
     }
