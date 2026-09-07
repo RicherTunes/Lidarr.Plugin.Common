@@ -84,6 +84,16 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
     [Fact]
+    public async Task StreamAsync_ShortRequestTimeoutCancelsTheWholeStreamAsRecoverableTimeout()
+    {
+        using var caller = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var provider = new TestProvider(new BlockingTransport(), completionTimeout: TimeSpan.FromSeconds(5));
+        var stream = provider.StreamAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromMilliseconds(30) }, caller.Token);
+        var exception = await Assert.ThrowsAsync<NetworkException>(async () => { await foreach (var _ in stream!) { } });
+        Assert.Equal(LlmErrorCode.Timeout, exception.ErrorCode);
+    }
+
+    [Fact]
     public async Task CheckHealthAsync_BareReturnedNonSuccessPreservesNumericHttpStatus()
     {
         var provider = new TestProvider(new ScriptedTransport { Completion = new(401, "denied") });
@@ -355,6 +365,16 @@ public sealed class OpenAiChatProviderBaseContractTests
         private readonly HttpRequestException _exception = new($"transport {secret}", new InvalidOperationException($"inner {secret}"));
         public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromException<OpenAiChatResponse>(_exception);
         public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromException<OpenAiChatStreamResponse>(_exception);
+    }
+
+    private sealed class BlockingTransport : IOpenAiChatTransport
+    {
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromResult(new OpenAiChatResponse(200, OkBody));
+        public async ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException();
+        }
     }
 
     private sealed class RecordingCircuit : IOpenAiChatAuthCircuit
