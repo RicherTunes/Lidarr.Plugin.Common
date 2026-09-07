@@ -203,6 +203,7 @@ if (-not (Test-Path -LiteralPath $commonPath)) {
 $pluginPackModule = Join-Path $commonPath 'tools/PluginPack.psm1'
 $genExpectedScript = Join-Path $commonPath 'scripts/generate-expected-contents.ps1'
 $testTraitPolicyModule = Join-Path $commonPath 'scripts/lib/test-trait-policy.psm1'
+$localCiReceiptsModule = Join-Path $commonPath 'scripts/lib/local-ci-receipts.psm1'
 if (-not (Test-Path -LiteralPath $pluginPackModule)) {
     Write-Host "PREFLIGHT FAIL: PluginPack.psm1 not found at: $pluginPackModule" -ForegroundColor Red
     exit 1
@@ -215,12 +216,34 @@ if (-not (Test-Path -LiteralPath $testTraitPolicyModule)) {
     Write-Host "PREFLIGHT FAIL: test-trait-policy.psm1 not found at: $testTraitPolicyModule" -ForegroundColor Red
     exit 1
 }
+if (-not (Test-Path -LiteralPath $localCiReceiptsModule)) {
+    Write-Host "PREFLIGHT FAIL: local-ci-receipts.psm1 not found at: $localCiReceiptsModule" -ForegroundColor Red
+    exit 1
+}
 $pluginPackModule = (Resolve-Path -LiteralPath $pluginPackModule).Path
 $genExpectedScript = (Resolve-Path -LiteralPath $genExpectedScript).Path
 $testTraitPolicyModule = (Resolve-Path -LiteralPath $testTraitPolicyModule).Path
+$localCiReceiptsModule = (Resolve-Path -LiteralPath $localCiReceiptsModule).Path
 
 Import-Module $testTraitPolicyModule -Force
+Import-Module $localCiReceiptsModule -Force
 $deterministicTestFilter = Get-LocalCiDeterministicFilter
+
+$resultsBase = if ([string]::IsNullOrWhiteSpace($env:LIDARR_LOCAL_CI_RESULTS_DIR)) {
+    Join-Path ([IO.Path]::GetFullPath('artifacts/local-ci')) ("{0}-{1}" -f ([DateTimeOffset]::UtcNow.ToString('yyyyMMddTHHmmssZ')), ([guid]::NewGuid().ToString('N').Substring(0, 8)))
+} else {
+    [IO.Path]::GetFullPath($env:LIDARR_LOCAL_CI_RESULTS_DIR)
+}
+try {
+    if (Test-Path -LiteralPath $resultsBase -PathType Leaf) { throw "results destination is a file: $resultsBase" }
+    New-Item -ItemType Directory -Path $resultsBase -Force -ErrorAction Stop | Out-Null
+    $resultsBase = (Resolve-Path -LiteralPath $resultsBase -ErrorAction Stop).Path
+}
+catch {
+    Write-Host "PREFLIGHT FAIL: Cannot create durable local CI results directory '$resultsBase': $_" -ForegroundColor Red
+    exit 1
+}
+Write-Host "  Durable TRX results: $resultsBase" -ForegroundColor DarkGray
 
 # Check .NET SDK
 Write-Host "Checking .NET SDK..."
@@ -584,19 +607,21 @@ if ($SkipTests) {
             $testOutput | ForEach-Object { Write-Host "    $_" -ForegroundColor DarkGray }
             $script:TestRunWarningCount += Get-WarningCountFromOutput -OutputLines $testOutput -SeenDiagnostics $script:WarningDiagnostics
 
-            # Parse TRX for counts
+            # Publish every real TRX before deleting the temporary runner directory.
             $trxFiles = Get-ChildItem -Path $resultsDir -Filter '*.trx' -ErrorAction SilentlyContinue
             if ($trxFiles) {
-                try {
-                    [xml]$trx = Get-Content -LiteralPath $trxFiles[0].FullName -Raw
-                    $counters = $trx.TestRun.ResultSummary.Counters
-                    $totalPassed += [int]$counters.passed
-                    $totalFailed += [int]$counters.failed
-                    $totalSkipped += [int]$counters.notExecuted
+                foreach ($trxFile in $trxFiles) {
+                    $projectName = [IO.Path]::GetFileNameWithoutExtension($testProj)
+                    $receipt = Publish-LocalCiTrxEvidence -TrxPath $trxFile.FullName -DestinationDirectory $resultsBase -ProjectName $projectName
+                    $summary = Get-LocalCiTrxSummary -TrxPath $receipt
+                    $totalPassed += $summary.Passed
+                    $totalFailed += $summary.Failed
+                    $totalSkipped += $summary.Skipped
+                    Write-Host "    Durable TRX: $receipt" -ForegroundColor DarkGray
                 }
-                catch {
-                    Write-Host "    Warning: Could not parse TRX results" -ForegroundColor Yellow
-                }
+            }
+            else {
+                throw "dotnet test did not produce a TRX receipt: $testProj"
             }
             Remove-Item -LiteralPath $resultsDir -Recurse -Force -ErrorAction SilentlyContinue
 
