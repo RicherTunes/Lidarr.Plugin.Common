@@ -326,6 +326,37 @@ public sealed class OpenAiChatProviderBaseContractTests
         Assert.ThrowsAny<OperationCanceledException>(() => provider.StreamAsync(new LlmRequest { Prompt = "hi" }, cts.Token));
     }
 
+    [Fact]
+    public async Task StreamAsync_PreservesMappedRateLimitMetadataFromOpenFailure()
+    {
+        var expected = new RateLimitException("test", "limited", TimeSpan.FromSeconds(7));
+        var provider = new TestProvider(new MappedThrowingTransport(expected));
+
+        var error = await Assert.ThrowsAsync<RateLimitException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+
+        Assert.Equal(LlmErrorCode.RateLimited, error.ErrorCode);
+        Assert.True(error.IsRetryable);
+        Assert.Equal(TimeSpan.FromSeconds(7), error.RetryAfter);
+        Assert.Same(expected, error);
+    }
+
+    [Theory]
+    [InlineData(0.2f, "0.2")]
+    [InlineData(0.33333334f, "0.33333334")]
+    public async Task CompleteAsync_PreservesLegacyFloatWirePrecision(float temperature, string wireValue)
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport);
+        await provider.CompleteAsync(new LlmRequest { Prompt = "🎵 <tag>\n\u0001", Temperature = temperature });
+
+        Assert.Contains($"\"temperature\":{wireValue},", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
+        Assert.Contains("🎵 <tag>\\n\\u0001", transport.LastCompletionRequest.JsonBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\uD83C\\uDFB5", transport.LastCompletionRequest.JsonBody, StringComparison.OrdinalIgnoreCase);
+    }
+
     private sealed class TestProvider : OpenAiChatProviderBase
     {
         private readonly bool _sendsTemperature;
@@ -389,6 +420,14 @@ public sealed class OpenAiChatProviderBaseContractTests
     {
         public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromCanceled<OpenAiChatResponse>(cancellationToken);
         public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromCanceled<OpenAiChatStreamResponse>(cancellationToken);
+    }
+
+    private sealed class MappedThrowingTransport(LlmProviderException exception) : IOpenAiChatTransport
+    {
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromException<OpenAiChatResponse>(exception);
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromException<OpenAiChatStreamResponse>(exception);
     }
 
     private sealed class ThrowingTransport(string secret) : IOpenAiChatTransport
