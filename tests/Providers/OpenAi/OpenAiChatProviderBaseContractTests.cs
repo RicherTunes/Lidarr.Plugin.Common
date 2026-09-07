@@ -346,6 +346,8 @@ public sealed class OpenAiChatProviderBaseContractTests
     [Theory]
     [InlineData(0.2f, "0.2")]
     [InlineData(0.33333334f, "0.33333334")]
+    [InlineData(1e20f, "1E+20")]
+    [InlineData(1e-20f, "1E-20")]
     public async Task CompleteAsync_PreservesLegacyFloatWirePrecision(float temperature, string wireValue)
     {
         var transport = new ScriptedTransport { Completion = new(200, OkBody) };
@@ -464,6 +466,20 @@ public sealed class OpenAiChatProviderBaseContractTests
         Assert.DoesNotContain(secret, health.StatusMessage!, StringComparison.Ordinal);
     }
 
+    [Fact]
+    public async Task StreamAsync_EarlyEnumeratorDisposalDisposesTransportResponse()
+    {
+        var transport = new ScriptedTransport
+        {
+            Completion = new(200, OkBody),
+            StreamContent = "data: {\"choices\":[{\"delta\":{\"content\":\"one\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"two\"}}]}\n\n",
+        };
+        var enumerator = new TestProvider(transport).StreamAsync(new LlmRequest { Prompt = "hi" })!.GetAsyncEnumerator();
+        Assert.True(await enumerator.MoveNextAsync());
+        await enumerator.DisposeAsync();
+        Assert.True(transport.StreamResponseDisposed);
+    }
+
 
     private sealed class TestProvider : OpenAiChatProviderBase
     {
@@ -510,6 +526,7 @@ public sealed class OpenAiChatProviderBaseContractTests
         public string? StreamContent { get; init; }
         public OpenAiChatRequest? LastCompletionRequest { get; private set; }
         public OpenAiChatRequest? LastStreamRequest { get; private set; }
+        public bool StreamResponseDisposed { get; private set; }
 
         public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
         {
@@ -520,7 +537,7 @@ public sealed class OpenAiChatProviderBaseContractTests
         public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
         {
             LastStreamRequest = request;
-            return ValueTask.FromResult(new OpenAiChatStreamResponse(200, StreamContent is null ? Stream.Null : new MemoryStream(System.Text.Encoding.UTF8.GetBytes(StreamContent))));
+            return ValueTask.FromResult(new OpenAiChatStreamResponse(200, StreamContent is null ? Stream.Null : new MemoryStream(System.Text.Encoding.UTF8.GetBytes(StreamContent)), dispose: () => { StreamResponseDisposed = true; return ValueTask.CompletedTask; }));
         }
     }
 
