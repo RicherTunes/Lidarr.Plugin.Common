@@ -94,6 +94,18 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
     [Fact]
+    public async Task StreamAsync_ReadTimeoutMapsToRecoverableTimeoutAndDisposesResponse()
+    {
+        using var caller = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var transport = new BlockingReadTransport();
+        var provider = new TestProvider(transport, completionTimeout: TimeSpan.FromSeconds(5));
+        var stream = provider.StreamAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromMilliseconds(30) }, caller.Token);
+        var exception = await Assert.ThrowsAsync<NetworkException>(async () => { await foreach (var _ in stream!) { } });
+        Assert.Equal(LlmErrorCode.Timeout, exception.ErrorCode);
+        Assert.True(transport.Disposed);
+    }
+
+    [Fact]
     public async Task CheckHealthAsync_BareReturnedNonSuccessPreservesNumericHttpStatus()
     {
         var provider = new TestProvider(new ScriptedTransport { Completion = new(401, "denied") });
@@ -375,6 +387,22 @@ public sealed class OpenAiChatProviderBaseContractTests
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
             throw new InvalidOperationException();
         }
+    }
+
+    private sealed class BlockingReadTransport : IOpenAiChatTransport
+    {
+        public bool Disposed { get; private set; }
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromResult(new OpenAiChatResponse(200, OkBody));
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new OpenAiChatStreamResponse(200, new BlockingReadStream(), dispose: () => { Disposed = true; return ValueTask.CompletedTask; }));
+    }
+
+    private sealed class BlockingReadStream : Stream
+    {
+        public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false; public override long Length => 0; public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => new(Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ContinueWith(_ => 0, cancellationToken));
+        public override void Flush() { } public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask; public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(); public override void SetLength(long value) => throw new NotSupportedException(); public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
     }
 
     private sealed class RecordingCircuit : IOpenAiChatAuthCircuit
