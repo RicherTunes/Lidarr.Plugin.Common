@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Text.Json;
+using System.Text.Encodings.Web;
 using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Abstractions.Llm;
@@ -14,6 +15,7 @@ namespace Lidarr.Plugin.Common.Providers.OpenAi;
 /// <summary>Shared template for API-key providers using the OpenAI Chat Completions wire format.</summary>
 public abstract class OpenAiChatProviderBase : ILlmProvider
 {
+    private static readonly JsonSerializerOptions WireJsonOptions = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
     private readonly IOpenAiChatTransport _transport;
     private readonly IOpenAiChatAuthCircuit? _authCircuit;
     private readonly string _apiKey;
@@ -67,9 +69,9 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         try
         {
             var response = await SendAsync(BuildHealthProbeBody(), HealthTimeout, cancellationToken).ConfigureAwait(false);
-            return response.StatusCode == (int)HttpStatusCode.OK
-                ? ProviderHealthResult.Healthy(stopwatch.Elapsed, ProviderId, "apiKey", _model)
-                : ProviderHealthResult.Unhealthy($"HTTP {response.StatusCode}", stopwatch.Elapsed, ProviderId, "apiKey", _model, response.StatusCode.ToString());
+            if (response.StatusCode == (int)HttpStatusCode.OK)
+                return ProviderHealthResult.Healthy(stopwatch.Elapsed, ProviderId, "apiKey", _model);
+            throw MapHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, null);
         }
         catch (LlmProviderException exception)
         {
@@ -160,14 +162,14 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Authorization"] = $"Bearer {_apiKey}", ["Content-Type"] = "application/json" };
         AddCompletionRequestHeaders(headers);
-        return await _transport.SendAsync(new OpenAiChatRequest(ChatCompletionsEndpoint, JsonSerializer.Serialize(body), headers, timeout), cancellationToken).ConfigureAwait(false);
+        return await _transport.SendAsync(new OpenAiChatRequest(ChatCompletionsEndpoint, JsonSerializer.Serialize(body, WireJsonOptions), headers, timeout), cancellationToken).ConfigureAwait(false);
     }
 
     private async IAsyncEnumerable<LlmStreamChunk> StreamCoreAsync(LlmRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Authorization"] = $"Bearer {_apiKey}", ["Accept"] = "text/event-stream" };
         AddStreamingRequestHeaders(headers);
-        await using var response = await _transport.OpenStreamAsync(new OpenAiChatRequest(ChatCompletionsEndpoint, JsonSerializer.Serialize(BuildStreamingRequestBody(request)), headers, request.Timeout ?? CompletionTimeout), cancellationToken).ConfigureAwait(false);
+        await using var response = await _transport.OpenStreamAsync(new OpenAiChatRequest(ChatCompletionsEndpoint, JsonSerializer.Serialize(BuildStreamingRequestBody(request), WireJsonOptions), headers, request.Timeout ?? CompletionTimeout), cancellationToken).ConfigureAwait(false);
         if (response.StatusCode != (int)HttpStatusCode.OK) throw MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null);
         var emitted = false;
         var decoder = new OpenAiStreamDecoder();
