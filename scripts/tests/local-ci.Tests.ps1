@@ -12,6 +12,7 @@
 
 BeforeAll {
     $script:LocalCiScript = Join-Path $PSScriptRoot '..' 'local-ci.ps1'
+    $script:RepoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../..')).Path
 }
 
 Describe 'PREFLIGHT: Config validation' {
@@ -71,6 +72,7 @@ Describe 'PREFLIGHT: Host path auto-detection' {
         Set-Content -Path (Join-Path $fakeCommon 'tools/PluginPack.psm1') -Value '# stub'
         Set-Content -Path (Join-Path $fakeCommon 'scripts/generate-expected-contents.ps1') -Value '# stub'
         Set-Content -Path (Join-Path $fakeCommon 'scripts/lib/test-trait-policy.psm1') -Value 'function Get-LocalCiDeterministicFilter { "State!=Quarantined" }; Export-ModuleMember -Function Get-LocalCiDeterministicFilter'
+        Copy-Item -LiteralPath (Join-Path $script:RepoRoot 'scripts/lib/local-ci-receipts.psm1') -Destination (Join-Path $fakeCommon 'scripts/lib/local-ci-receipts.psm1')
 
         try {
             $output = & pwsh -NoProfile -Command "
@@ -112,6 +114,7 @@ Describe 'Config contract: all required keys' {
         Set-Content -Path (Join-Path $fakeCommon 'tools/PluginPack.psm1') -Value '# stub'
         Set-Content -Path (Join-Path $fakeCommon 'scripts/generate-expected-contents.ps1') -Value '# stub'
         Set-Content -Path (Join-Path $fakeCommon 'scripts/lib/test-trait-policy.psm1') -Value 'function Get-LocalCiDeterministicFilter { "State!=Quarantined" }; Export-ModuleMember -Function Get-LocalCiDeterministicFilter'
+        Copy-Item -LiteralPath (Join-Path $script:RepoRoot 'scripts/lib/local-ci-receipts.psm1') -Destination (Join-Path $fakeCommon 'scripts/lib/local-ci-receipts.psm1')
 
         try {
             $output = & pwsh -NoProfile -Command "

@@ -38,6 +38,9 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed — durable local CI test receipts
+- The shared local CI runner now publishes every real test TRX, including failing runs, before cleaning its temporary test directory. Receipts default to a unique `artifacts/local-ci/<run-id>/` directory; callers may nominate a durable directory with `LIDARR_LOCAL_CI_RESULTS_DIR`. Receipt names include the project, timestamp, and GUID so repeated runs cannot overwrite earlier evidence. Destination creation, publication, and TRX parsing fail closed, while the nominated durable directory is never deleted. Test selection, warning budgets, dependencies, and pass/fail interpretation are unchanged.
+
 ### Fixed — queue snapshot consistency
 - Shared tracker DTO capture and mutation keys use one synchronized observation rather than mixing fields across attempt updates. A dedicated per-item snapshot lock coordinates mutable base fields without acquiring another item's mutation lock during persistence. Existing live-item snapshot and separate-setter contracts, public signatures, and persistence schema are unchanged.
 - Legacy retention revalidates exact object identity and current terminal/completion state before eviction, preventing an old enumerated entry from deleting a replacement, including value-equal plugin subclasses. Completion time is sampled once, preventing a nullable-value race. Existing retention thresholds and AttemptV2 retention/removal policies are preserved.

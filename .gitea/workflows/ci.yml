@@ -86,6 +86,11 @@ jobs:
       # slice (the same six classes) so the CLI surface stays compiled and tested.
       - name: Test (CLI framework lane, Category=CLI)
         run: dotnet test tests/Lidarr.Plugin.Common.Tests.csproj -c Release -p:IncludeCLIFramework=true --filter "Category=CLI&State!=Quarantined" -p:EnableSourceLink=false -m:1 -p:UseSharedCompilation=false --blame-hang-timeout 10m
+      # This contract creates real temporary .NET test projects, so it must run in
+      # the SDK-equipped build-test job rather than the lightweight lint container.
+      - name: Durable local CI TRX receipt contract
+        shell: pwsh
+        run: ./scripts/tests/Test-LocalCiTrxRetention.ps1
   template:
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -244,6 +249,9 @@ jobs:
       - name: Warning budget diagnostic accounting
         shell: pwsh
         run: ./scripts/tests/Test-WarningBudgetDiagnostics.ps1
+      - name: Durable TRX workflow wiring guard
+        shell: pwsh
+        run: ./scripts/tests/Test-LocalCiTrxWorkflowWiring.ps1
       - name: Test-project dropout guard self-test (F4)
         shell: pwsh
         run: ./scripts/tests/Test-VerifyTestProjectsGated.ps1
