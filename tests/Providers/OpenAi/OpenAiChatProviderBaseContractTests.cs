@@ -480,6 +480,50 @@ public sealed class OpenAiChatProviderBaseContractTests
         Assert.True(transport.StreamResponseDisposed);
     }
 
+    [Fact]
+    public async Task CompleteAsync_RejectsWhitespaceOnlyParsedContent()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, parseWhitespace: true);
+        await Assert.ThrowsAsync<ProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+    }
+
+    [Fact]
+    public async Task StreamAsync_RejectsWhitespaceOnlyContent()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody), StreamContent = "data: {\"choices\":[{\"delta\":{\"content\":\"   \"}}]}\n\ndata: [DONE]\n\n" });
+        await Assert.ThrowsAsync<ProviderException>(async () => { await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { } });
+    }
+
+    [Fact]
+    public async Task CompleteAsync_SanitizesDirectMappedAuthenticationBeforeCircuitRecording()
+    {
+        const string secret = "direct-auth-secret";
+        var circuit = new RecordingCircuit();
+        var provider = new TestProvider(new MappedThrowingTransport(new AuthenticationException("test", $"bad {secret}", new InvalidOperationException(secret))), apiKey: secret, authCircuit: circuit);
+        var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain(secret, circuit.LastFailure!.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_SanitizesAuthCircuitProbeFailure()
+    {
+        const string secret = "probe-callback-secret";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, apiKey: secret, authCircuit: new ThrowingProbeCircuit(secret));
+        var error = await Assert.ThrowsAnyAsync<LlmProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_AuthRecordCallbackCannotReplacePrimaryError()
+    {
+        var expected = new AuthenticationException("test", "primary safe");
+        var provider = new TestProvider(new MappedThrowingTransport(expected), authCircuit: new ThrowingRecordCircuit());
+        var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Same(expected, error);
+    }
+
 
     private sealed class TestProvider : OpenAiChatProviderBase
     {
@@ -491,7 +535,7 @@ public sealed class OpenAiChatProviderBaseContractTests
         public TestProvider(IOpenAiChatTransport transport, bool sendsTemperature = true, bool supportsJson = true,
             IReadOnlyDictionary<string, string>? completionHeaders = null,
             Func<int, string?, TimeSpan?, Exception?, LlmProviderException>? errorMapper = null,
-            IOpenAiChatAuthCircuit? authCircuit = null, bool parseEmpty = false, TimeSpan? completionTimeout = null, string apiKey = "test-key")
+            IOpenAiChatAuthCircuit? authCircuit = null, bool parseEmpty = false, bool parseWhitespace = false, TimeSpan? completionTimeout = null, string apiKey = "test-key")
             : base(transport, apiKey, "test-model", "test", "test-model", completionTimeout ?? TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), authCircuit)
         {
             _sendsTemperature = sendsTemperature;
@@ -499,9 +543,11 @@ public sealed class OpenAiChatProviderBaseContractTests
             _completionHeaders = completionHeaders;
             _errorMapper = errorMapper;
             _parseEmpty = parseEmpty;
+            _parseWhitespace = parseWhitespace;
         }
 
         private readonly bool _parseEmpty;
+        private readonly bool _parseWhitespace;
 
         public override string DisplayName => "Test";
         public override LlmProviderCapabilities Capabilities => new() { Flags = LlmCapabilityFlags.TextCompletion, UsesOpenAiCompatibleApi = true };
@@ -517,7 +563,7 @@ public sealed class OpenAiChatProviderBaseContractTests
 
         protected override LlmProviderException MapHttpError(int statusCode, string? body, TimeSpan? retryAfter, Exception? inner)
             => _errorMapper?.Invoke(statusCode, body, retryAfter, inner) ?? base.MapHttpError(statusCode, body, retryAfter, inner);
-        protected override LlmResponse ParseCompletion(string content) => _parseEmpty ? new LlmResponse { Content = string.Empty } : base.ParseCompletion(content);
+        protected override LlmResponse ParseCompletion(string content) => _parseEmpty ? new LlmResponse { Content = string.Empty } : _parseWhitespace ? new LlmResponse { Content = "   " } : base.ParseCompletion(content);
     }
 
     private sealed class ScriptedTransport : IOpenAiChatTransport
@@ -626,8 +672,9 @@ public sealed class OpenAiChatProviderBaseContractTests
     {
         public int Failures { get; private set; }
         public int Successes { get; private set; }
+        public LlmProviderException? LastFailure { get; private set; }
         public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; return false; }
-        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) => Failures++;
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { Failures++; LastFailure = error; }
         public void RecordSuccess(string providerId, string credential) => Successes++;
     }
 
@@ -647,6 +694,20 @@ public sealed class OpenAiChatProviderBaseContractTests
     {
         public bool IsOpen(string providerId, string credential, out string? circuitReason) { circuitReason = reason; return true; }
         public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
+        public void RecordSuccess(string providerId, string credential) { }
+    }
+
+    private sealed class ThrowingProbeCircuit(string secret) : IOpenAiChatAuthCircuit
+    {
+        public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; throw new InvalidOperationException($"probe {secret}"); }
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
+        public void RecordSuccess(string providerId, string credential) { }
+    }
+
+    private sealed class ThrowingRecordCircuit : IOpenAiChatAuthCircuit
+    {
+        public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; return false; }
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) => throw new InvalidOperationException("record callback failed");
         public void RecordSuccess(string providerId, string credential) { }
     }
 
