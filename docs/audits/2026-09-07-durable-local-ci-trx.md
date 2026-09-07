@@ -10,6 +10,8 @@ Gitea CI runs the real success/failure/skip receipt contract and its independent
 
 The receipt contract creates real temporary .NET test projects, so it runs in the SDK-equipped `build-test` job. The lightweight workflow-wiring guard remains in the PowerShell-only `lint` job. Test-only commit `e734142` made that placement mandatory; `artifacts/shared-openai-chat/trx-workflow-sdk-placement-red.log` records the prior incorrect lint placement.
 
+Gitea run `13284`, lint job `99767`, independently reproduced the incorrect placement: `Test-LocalCiTrxRetention.ps1:20` failed because `dotnet` was not recognized in the lint container. The preserved authoritative job log is `D:/Alex/github/.omc/state/tech-debt-retirement/ci-receipts-run13284-lint.log`; this is runtime evidence, separate from the local wiring-contract receipt.
+
 This changes evidence retention only. It does not change dependencies, deterministic filters, skip behavior, warning budgets, package gates, or test result classification.
 
 ## TDD evidence
