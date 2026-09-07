@@ -12,6 +12,7 @@ using Lidarr.Plugin.Common.Abstractions.Llm;
 using Lidarr.Plugin.Common.Errors;
 using Lidarr.Plugin.Common.Observability;
 using Lidarr.Plugin.Common.Streaming.Decoders;
+using Lidarr.Plugin.Common.Utilities;
 
 namespace Lidarr.Plugin.Common.Providers.OpenAi;
 
@@ -178,13 +179,14 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
 
     private async IAsyncEnumerable<LlmStreamChunk> StreamCoreAsync(LlmRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
+        using var timeout = new ResilienceTimeout(ResolveRequestTimeout(request), cancellationToken);
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Authorization"] = $"Bearer {_apiKey}", ["Accept"] = "text/event-stream" };
         AddStreamingRequestHeaders(headers);
-        await using var response = await OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, JsonSerializer.Serialize(BuildStreamingRequestBody(request), WireJsonOptions), headers, ResolveRequestTimeout(request)), cancellationToken).ConfigureAwait(false);
+        await using var response = await OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, JsonSerializer.Serialize(BuildStreamingRequestBody(request), WireJsonOptions), headers, ResolveRequestTimeout(request)), timeout.Token, cancellationToken).ConfigureAwait(false);
         if (response.StatusCode != (int)HttpStatusCode.OK) throw MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null);
         var emittedMeaningfulContent = false;
         var decoder = new OpenAiStreamDecoder();
-        await foreach (var chunk in decoder.DecodeAsync(response.Content, cancellationToken).ConfigureAwait(false))
+        await foreach (var chunk in decoder.DecodeAsync(response.Content, timeout.Token).ConfigureAwait(false))
         {
             var transformed = TransformStreamChunk(chunk);
             emittedMeaningfulContent |= !string.IsNullOrEmpty(transformed.ContentDelta) || !string.IsNullOrEmpty(transformed.ReasoningDelta);
@@ -216,10 +218,10 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         var message = LogRedactor.Redact(mapped.Message).Replace(_apiKey, LogRedactor.REDACTED, StringComparison.Ordinal);
         return new ProviderException(ProviderId, mapped.ErrorCode, message);
     }
-    private async ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+    private async ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken, CancellationToken callerCancellationToken)
     {
         try { return await _transport.OpenStreamAsync(request, cancellationToken).ConfigureAwait(false); }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) when (callerCancellationToken.IsCancellationRequested) { throw; }
         catch (Exception exception) { throw SanitizeMappedException(LlmErrorMapper.MapException(ProviderId, exception)); }
     }
     private LlmProviderException SanitizeMappedException(LlmProviderException exception)
