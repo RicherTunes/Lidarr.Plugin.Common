@@ -83,6 +83,24 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
     [Fact]
+    public async Task CheckHealthAsync_BareReturnedNonSuccessPreservesNumericHttpStatus()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(401, "denied") });
+        var health = await provider.CheckHealthAsync();
+        Assert.False(health.IsHealthy);
+        Assert.Equal("401", health.ErrorCode);
+        Assert.Equal("HTTP 401", health.StatusMessage);
+    }
+
+    [Fact]
+    public void TransportResponse_ExposesBufferedTransportExceptionForErrorMapping()
+    {
+        var property = typeof(OpenAiChatResponse).GetProperty("TransportException");
+        Assert.NotNull(property);
+        Assert.Equal(typeof(Exception), property!.PropertyType);
+    }
+
+    [Fact]
     public async Task CompleteAsync_PreservesUnicodeAndHtmlInTheLegacyWireBody()
     {
         var transport = new ScriptedTransport { Completion = new(200, OkBody) };
