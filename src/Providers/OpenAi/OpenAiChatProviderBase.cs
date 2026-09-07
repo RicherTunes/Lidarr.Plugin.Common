@@ -111,7 +111,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
 
             var result = ParseCompletion(response.Body ?? string.Empty);
             if (string.IsNullOrWhiteSpace(result.Content)) throw InvalidResponse("The provider completion did not contain content.");
-            _authCircuit?.RecordSuccess(ProviderId, _apiKey);
+            RecordAuthSuccess();
             return result;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
@@ -260,6 +260,11 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         if (exception.ErrorCode is not (LlmErrorCode.AuthenticationFailed or LlmErrorCode.AuthorizationFailed)) return;
         try { _authCircuit?.RecordAuthFailure(ProviderId, _apiKey, exception); }
         catch { /* A bookkeeping callback cannot replace the provider error. */ }
+    }
+    private void RecordAuthSuccess()
+    {
+        try { _authCircuit?.RecordSuccess(ProviderId, _apiKey); }
+        catch { /* A bookkeeping callback cannot replace a valid completion. */ }
     }
 
     private ProviderException InvalidResponse(string message) => new(ProviderId, LlmErrorCode.InvalidRequest, message);
