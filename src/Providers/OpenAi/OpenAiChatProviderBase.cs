@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Lidarr.Plugin.Common.Abstractions.Llm;
 using Lidarr.Plugin.Common.Errors;
+using Lidarr.Plugin.Common.Observability;
 using Lidarr.Plugin.Common.Streaming.Decoders;
 
 namespace Lidarr.Plugin.Common.Providers.OpenAi;
@@ -75,7 +76,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
                 return ProviderHealthResult.Healthy(stopwatch.Elapsed, ProviderId, "apiKey", _model);
             if (response.TransportException is null)
                 return ProviderHealthResult.Unhealthy($"HTTP {response.StatusCode}", stopwatch.Elapsed, ProviderId, "apiKey", _model, response.StatusCode.ToString());
-            throw MapHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, response.TransportException);
+            throw MapSafeHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, response.TransportException);
         }
         catch (LlmProviderException exception)
         {
@@ -101,7 +102,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
             var response = await SendAsync(BuildRequestBody(request), ResolveRequestTimeout(request), cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != (int)HttpStatusCode.OK)
             {
-                throw MapHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, response.TransportException);
+                throw MapSafeHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, response.TransportException);
             }
 
             var result = ParseCompletion(response.Body ?? string.Empty);
@@ -208,6 +209,13 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     }
 
     private ProviderException InvalidResponse(string message) => new(ProviderId, LlmErrorCode.InvalidRequest, message);
+    private LlmProviderException MapSafeHttpError(int statusCode, string? body, TimeSpan? retryAfter, Exception? inner)
+    {
+        var mapped = MapHttpError(statusCode, body, retryAfter, inner);
+        if (!mapped.ToString().Contains(_apiKey, StringComparison.Ordinal)) return mapped;
+        var message = LogRedactor.Redact(mapped.Message).Replace(_apiKey, LogRedactor.REDACTED, StringComparison.Ordinal);
+        return new ProviderException(ProviderId, mapped.ErrorCode, message);
+    }
     private static string? Truncate(string? body) => string.IsNullOrEmpty(body) || body.Length <= 500 ? body : body[..500];
 
     private TimeSpan ResolveRequestTimeout(LlmRequest request)
