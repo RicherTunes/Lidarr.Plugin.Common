@@ -98,7 +98,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         using var scope = BeginCompletionScope();
         OnCompletionRequestStarting();
         if (_authCircuit?.IsOpen(ProviderId, _apiKey, out var reason) == true)
-            throw new AuthenticationException(ProviderId, LlmErrorCode.AuthenticationFailed, "Auth circuit open: " + reason);
+            throw new AuthenticationException(ProviderId, LlmErrorCode.AuthenticationFailed, SanitizeText("Auth circuit open: " + reason));
 
         try
         {
@@ -155,8 +155,9 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
             if (choice.ValueKind != JsonValueKind.Object) return new LlmResponse { Content = content };
             if (!choice.TryGetProperty("message", out var message) || message.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
                 return new LlmResponse { Content = string.Empty };
-            if (message.ValueKind != JsonValueKind.Object || !message.TryGetProperty("content", out var text))
+            if (message.ValueKind != JsonValueKind.Object)
                 return new LlmResponse { Content = content };
+            if (!message.TryGetProperty("content", out var text)) return new LlmResponse { Content = string.Empty };
             if (text.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
                 return new LlmResponse { Content = string.Empty };
             if (text.ValueKind != JsonValueKind.String) return new LlmResponse { Content = content };
