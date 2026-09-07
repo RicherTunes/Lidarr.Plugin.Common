@@ -295,14 +295,15 @@ data: [DONE]
 
     private sealed class AsyncOnlyStream : MemoryStream
     {
-        public AsyncOnlyStream(string text) : base(Encoding.UTF8.GetBytes(text)) { }
+        private readonly byte[] _data;
+        public AsyncOnlyStream(string text) : base() { _data = Encoding.UTF8.GetBytes(text); }
         public override int Read(byte[] buffer, int offset, int count) => throw new InvalidOperationException("sync read is forbidden");
         public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var remaining = (int)(Length - Position);
+            var remaining = _data.Length - (int)Position;
             var count = Math.Min(remaining, buffer.Length);
-            if (count > 0) GetBuffer().AsSpan((int)Position, count).CopyTo(buffer.Span);
+            if (count > 0) _data.AsSpan((int)Position, count).CopyTo(buffer.Span);
             Position += count;
             return ValueTask.FromResult(count);
         }
