@@ -114,6 +114,73 @@ public sealed class OpenAiChatProviderBaseContractTests
         Assert.Null(transport.LastCompletionRequest);
     }
 
+    [Fact]
+    public async Task CompleteAsync_ParsesFinishReasonUsageAndMalformedSalvage()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, "{\"choices\":[{\"message\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4}}") };
+        var provider = new TestProvider(transport);
+        var response = await provider.CompleteAsync(new LlmRequest { Prompt = "hi" });
+        Assert.Equal("hello", response.Content); Assert.Equal("stop", response.FinishReason); Assert.Equal(7, response.Usage!.TotalTokens);
+        transport.Completion = new(200, "[{\"artist\":\"a\"");
+        Assert.Equal("[{\"artist\":\"a\"", (await provider.CompleteAsync(new LlmRequest { Prompt = "hi" })).Content);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_UsesPinnedProbeAndCustomErrorMapping()
+    {
+        var transport = new ScriptedTransport { Completion = new(503, "busy") };
+        var provider = new TestProvider(transport, errorMapper: static (_, _, _, _) => new ProviderException("test", LlmErrorCode.QuotaExceeded, "custom health"));
+        var health = await provider.CheckHealthAsync();
+        Assert.False(health.IsHealthy); Assert.Equal("QuotaExceeded", health.ErrorCode);
+        Assert.Equal("{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK\"}],\"max_tokens\":5}", transport.LastCompletionRequest!.JsonBody);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RecordsReturnedAuthenticationFailureOnceAndSuccessOnNextCall()
+    {
+        var circuit = new RecordingCircuit();
+        var transport = new ScriptedTransport { Completion = new(401, "bad") };
+        var provider = new TestProvider(transport, authCircuit: circuit);
+        await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Equal(1, circuit.Failures);
+        transport.Completion = new(200, OkBody);
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi" });
+        Assert.Equal(1, circuit.Successes);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_PreservesExplicitRetryAfterForProviderMapping()
+    {
+        TimeSpan? observed = null;
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(429, "body", TimeSpan.Zero) }, errorMapper: (_, _, retryAfter, _) => { observed = retryAfter; return new RateLimitException("test", "limited", retryAfter); });
+        await Assert.ThrowsAsync<RateLimitException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Equal(TimeSpan.Zero, observed);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_PropagatesCallerCancellation()
+    {
+        using var cts = new CancellationTokenSource(); cts.Cancel();
+        var transport = new CancellingTransport();
+        var provider = new TestProvider(transport);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }, cts.Token));
+    }
+
+    [Fact]
+    public async Task CompleteAsync_AlreadyCancelledCallerWinsOverAnOpenAuthCircuit()
+    {
+        using var cts = new CancellationTokenSource(); cts.Cancel();
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, authCircuit: new OpenCircuit());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }, cts.Token));
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RejectsAnEmptyOverrideParseResult()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, parseEmpty: true);
+        await Assert.ThrowsAsync<ProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+    }
+
     private sealed class TestProvider : OpenAiChatProviderBase
     {
         private readonly bool _sendsTemperature;
@@ -124,14 +191,17 @@ public sealed class OpenAiChatProviderBaseContractTests
         public TestProvider(IOpenAiChatTransport transport, bool sendsTemperature = true, bool supportsJson = true,
             IReadOnlyDictionary<string, string>? completionHeaders = null,
             Func<int, string?, TimeSpan?, Exception?, LlmProviderException>? errorMapper = null,
-            IOpenAiChatAuthCircuit? authCircuit = null)
+            IOpenAiChatAuthCircuit? authCircuit = null, bool parseEmpty = false)
             : base(transport, "test-key", "test-model", "test", "test-model", TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), authCircuit)
         {
             _sendsTemperature = sendsTemperature;
             _supportsJson = supportsJson;
             _completionHeaders = completionHeaders;
             _errorMapper = errorMapper;
+            _parseEmpty = parseEmpty;
         }
+
+        private readonly bool _parseEmpty;
 
         public override string DisplayName => "Test";
         public override LlmProviderCapabilities Capabilities => new() { Flags = LlmCapabilityFlags.TextCompletion, UsesOpenAiCompatibleApi = true };
@@ -147,11 +217,12 @@ public sealed class OpenAiChatProviderBaseContractTests
 
         protected override LlmProviderException MapHttpError(int statusCode, string? body, TimeSpan? retryAfter, Exception? inner)
             => _errorMapper?.Invoke(statusCode, body, retryAfter, inner) ?? base.MapHttpError(statusCode, body, retryAfter, inner);
+        protected override LlmResponse ParseCompletion(string content) => _parseEmpty ? new LlmResponse { Content = string.Empty } : base.ParseCompletion(content);
     }
 
     private sealed class ScriptedTransport : IOpenAiChatTransport
     {
-        public required OpenAiChatResponse Completion { get; init; }
+        public required OpenAiChatResponse Completion { get; set; }
         public OpenAiChatRequest? LastCompletionRequest { get; private set; }
 
         public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
@@ -162,6 +233,21 @@ public sealed class OpenAiChatProviderBaseContractTests
 
         public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
             => ValueTask.FromResult(new OpenAiChatStreamResponse(200, Stream.Null));
+    }
+
+    private sealed class CancellingTransport : IOpenAiChatTransport
+    {
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromCanceled<OpenAiChatResponse>(cancellationToken);
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromCanceled<OpenAiChatStreamResponse>(cancellationToken);
+    }
+
+    private sealed class RecordingCircuit : IOpenAiChatAuthCircuit
+    {
+        public int Failures { get; private set; }
+        public int Successes { get; private set; }
+        public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; return false; }
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) => Failures++;
+        public void RecordSuccess(string providerId, string credential) => Successes++;
     }
 
     private sealed class OpenCircuit : IOpenAiChatAuthCircuit
