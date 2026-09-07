@@ -297,5 +297,14 @@ data: [DONE]
     {
         public AsyncOnlyStream(string text) : base(Encoding.UTF8.GetBytes(text)) { }
         public override int Read(byte[] buffer, int offset, int count) => throw new InvalidOperationException("sync read is forbidden");
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var remaining = (int)(Length - Position);
+            var count = Math.Min(remaining, buffer.Length);
+            if (count > 0) GetBuffer().AsSpan((int)Position, count).CopyTo(buffer.Span);
+            Position += count;
+            return ValueTask.FromResult(count);
+        }
     }
 }
