@@ -35,12 +35,13 @@ fixture, so it is not represented as an original-test equivalent.
 ## Receipts
 
 `artifacts/shared-openai-chat/green-original-contract-parity-only.trx` records
-the nine added parity cases passing (9 passed, 0 failed, 0 skipped) at Common
-source head `a1eb737` with parity-test commits `068bcfe`, `ceded97`, and
-`f368f24` present. The broader combined run is intentionally recorded
-separately as `red-existing-openai-contract-regressions.trx`: it found two
-pre-existing-fixture source regressions that the Common source owner must fix,
-and does not invalidate the nine parity cases, all of which passed in that run.
+the nine added parity cases passing (9 passed, 0 failed, 0 skipped). The final
+combined receipt, `green-openai-original-parity-and-contracts.trx`, records
+the nine parity cases plus the existing provider and surface contracts (56
+passed, 0 failed, 0 skipped) after source fix `85ed570`. The earlier broader
+run is retained separately as `red-existing-openai-contract-regressions.trx`:
+it found the two source regressions fixed by `85ed570`, while all nine parity
+cases already passed in that run.
 
 The reflection surface receipt is recorded separately because it must execute
 against untouched Common `gitea/main` rather than this extracted candidate.
