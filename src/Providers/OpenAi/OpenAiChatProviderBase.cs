@@ -87,6 +87,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     {
         if (request is null) throw new ArgumentNullException(nameof(request));
         cancellationToken.ThrowIfCancellationRequested();
+        using var scope = BeginCompletionScope();
         OnCompletionRequestStarting();
         if (_authCircuit?.IsOpen(ProviderId, _apiKey, out var reason) == true)
             throw new AuthenticationException(ProviderId, LlmErrorCode.AuthenticationFailed, "Auth circuit open: " + reason);
@@ -159,6 +160,8 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     protected virtual object BuildRequestBody(LlmRequest request) => BuildChatBody(request, false);
     protected virtual object BuildStreamingRequestBody(LlmRequest request) => BuildChatBody(request, true);
     protected virtual void OnCompletionRequestStarting() { }
+    /// <summary>Creates an optional scope lasting for the whole completion operation.</summary>
+    protected virtual IDisposable? BeginCompletionScope() => null;
 
     private async Task<OpenAiChatResponse> SendAsync(object body, TimeSpan timeout, CancellationToken cancellationToken)
     {
