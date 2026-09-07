@@ -120,7 +120,6 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     public virtual IAsyncEnumerable<LlmStreamChunk>? StreamAsync(LlmRequest request, CancellationToken cancellationToken = default)
     {
         if (request is null) throw new ArgumentNullException(nameof(request));
-        cancellationToken.ThrowIfCancellationRequested();
         return StreamCoreAsync(request, cancellationToken);
     }
 
@@ -177,15 +176,10 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         AddStreamingRequestHeaders(headers);
         await using var response = await _transport.OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, JsonSerializer.Serialize(BuildStreamingRequestBody(request), WireJsonOptions), headers, request.Timeout ?? CompletionTimeout), cancellationToken).ConfigureAwait(false);
         if (response.StatusCode != (int)HttpStatusCode.OK) throw MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null);
-        var emittedMeaningfulContent = false;
+        var emitted = false;
         var decoder = new OpenAiStreamDecoder();
-        await foreach (var chunk in decoder.DecodeAsync(response.Content, cancellationToken).ConfigureAwait(false))
-        {
-            var transformed = TransformStreamChunk(chunk);
-            emittedMeaningfulContent |= !string.IsNullOrEmpty(transformed.ContentDelta) || !string.IsNullOrEmpty(transformed.ReasoningDelta);
-            yield return transformed;
-        }
-        if (!emittedMeaningfulContent) throw InvalidResponse("The provider stream ended without completion content.");
+        await foreach (var chunk in decoder.DecodeAsync(response.Content, cancellationToken).ConfigureAwait(false)) { emitted = true; yield return TransformStreamChunk(chunk); }
+        if (!emitted) throw InvalidResponse("The provider stream ended without events.");
     }
 
     private object BuildChatBody(LlmRequest request, bool stream)
