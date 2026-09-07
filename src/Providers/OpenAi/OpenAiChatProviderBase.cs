@@ -73,7 +73,9 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
             var response = await SendAsync(BuildHealthProbeBody(), HealthTimeout, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode == (int)HttpStatusCode.OK)
                 return ProviderHealthResult.Healthy(stopwatch.Elapsed, ProviderId, "apiKey", _model);
-            throw MapHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, null);
+            if (response.TransportException is null)
+                return ProviderHealthResult.Unhealthy($"HTTP {response.StatusCode}", stopwatch.Elapsed, ProviderId, "apiKey", _model, response.StatusCode.ToString());
+            throw MapHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, response.TransportException);
         }
         catch (LlmProviderException exception)
         {
@@ -99,7 +101,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
             var response = await SendAsync(BuildRequestBody(request), ResolveRequestTimeout(request), cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != (int)HttpStatusCode.OK)
             {
-                throw MapHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, null);
+                throw MapHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, response.TransportException);
             }
 
             var result = ParseCompletion(response.Body ?? string.Empty);

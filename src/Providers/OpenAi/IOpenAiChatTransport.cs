@@ -23,7 +23,7 @@ public sealed record OpenAiChatRequest(
     TimeSpan Timeout);
 
 /// <summary>Buffered response returned by an OpenAI Chat Completions transport.</summary>
-public sealed record OpenAiChatResponse(int StatusCode, string? Body, TimeSpan? RetryAfter = null);
+public sealed record OpenAiChatResponse(int StatusCode, string? Body, TimeSpan? RetryAfter = null, Exception? TransportException = null);
 
 /// <summary>Streaming response whose owner is disposed after decoding completes or is cancelled.</summary>
 public sealed class OpenAiChatStreamResponse : IAsyncDisposable
