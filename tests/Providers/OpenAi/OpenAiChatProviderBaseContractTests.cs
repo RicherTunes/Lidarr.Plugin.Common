@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Threading;
@@ -131,6 +132,7 @@ public sealed class OpenAiChatProviderBaseContractTests
     {
         var transport = new BlockingReadTransport();
         var provider = new OwnerTimeoutProvider(transport, TimeSpan.FromMilliseconds(30));
+        var stopwatch = Stopwatch.StartNew();
 
         var error = await Assert.ThrowsAsync<NetworkException>(async () =>
         {
@@ -138,6 +140,7 @@ public sealed class OpenAiChatProviderBaseContractTests
         });
 
         Assert.Equal(LlmErrorCode.Timeout, error.ErrorCode);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"owner timeout took {stopwatch.Elapsed}");
         Assert.Equal(1, provider.ResolveCount);
         Assert.True(transport.Disposed);
     }
