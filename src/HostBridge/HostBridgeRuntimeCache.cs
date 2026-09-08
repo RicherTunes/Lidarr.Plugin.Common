@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Concurrent;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -56,8 +57,11 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
     where TSettings : class
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _disposalOwnershipSync = new();
+    private readonly HashSet<Task> _dispatchedDisposals = new();
     private TRuntime? _cachedRuntime;
     private string? _cachedKey;
+    private TaskCompletionSource? _activeReset;
 
     private readonly ConcurrentQueue<(DateTime ParkedAt, TRuntime Runtime)> _graveyard = new();
 
@@ -90,104 +94,197 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
     {
         if (settings is null) throw new ArgumentNullException(nameof(settings));
 
-        // Sweep ripe graveyard entries outside the gate so a slow Dispose doesn't block
-        // fresh-credential lookups.
-        SweepGraveyard();
-
-        var key = ComputeAuthKey(settings);
-
-        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
-        try
+        while (true)
         {
-            if (_cachedRuntime is not null && string.Equals(key, _cachedKey, StringComparison.Ordinal))
+            // Sweep ripe graveyard entries outside the gate so a slow Dispose doesn't block
+            // fresh-credential lookups.
+            SweepGraveyard();
+
+            var key = ComputeAuthKey(settings);
+            Task? resetToAwait = null;
+
+            await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
             {
-                return _cachedRuntime;
+                if (_activeReset is not null)
+                {
+                    resetToAwait = _activeReset.Task;
+                }
+                else
+                {
+                    if (_cachedRuntime is not null && string.Equals(key, _cachedKey, StringComparison.Ordinal))
+                    {
+                        return _cachedRuntime;
+                    }
+
+                    // Park the prior runtime in the graveyard rather than disposing eagerly.
+                    if (_cachedRuntime is not null)
+                    {
+                        EnqueueWithBound(_cachedRuntime);
+                        _cachedRuntime = null;
+                        _cachedKey = null;
+                    }
+
+                    var built = await CreateAsync(settings, cancellationToken).ConfigureAwait(false);
+                    if (built is null)
+                    {
+                        return null;
+                    }
+
+                    _cachedRuntime = built;
+                    _cachedKey = key;
+                    return built;
+                }
+            }
+            finally
+            {
+                _gate.Release();
             }
 
-            // Park the prior runtime in the graveyard rather than disposing eagerly.
-            if (_cachedRuntime is not null)
-            {
-                EnqueueWithBound(_cachedRuntime);
-                _cachedRuntime = null;
-                _cachedKey = null;
-            }
-
-            var built = await CreateAsync(settings, cancellationToken).ConfigureAwait(false);
-            if (built is null)
-            {
-                return null;
-            }
-
-            _cachedRuntime = built;
-            _cachedKey = key;
-            return built;
-        }
-        finally
-        {
-            _gate.Release();
+            await resetToAwait.WaitAsync(cancellationToken).ConfigureAwait(false);
         }
     }
 
     /// <summary>
-    /// Test-only reset: dispose the current runtime AND drain the graveyard. Drops both
-    /// the cache slot and any parked runtimes so the next test starts clean.
+    /// Test-only reset: dispose the current runtime, drain the graveyard, and await any
+    /// runtime disposal already dispatched by overflow or linger sweeping. Lookups that
+    /// overlap an active reset wait for that reset generation before accessing the cache,
+    /// so the next test starts from a clean runtime boundary.
     /// </summary>
     public async Task ResetAsync()
     {
+        Task? resetToAwait = null;
+        TaskCompletionSource? resetGeneration = null;
+        TRuntime? current = null;
+        var parkedRuntimes = new List<TRuntime>();
+        Task[] dispatchedDisposals = Array.Empty<Task>();
+
         await _gate.WaitAsync().ConfigureAwait(false);
         try
         {
-            if (_cachedRuntime is not null)
+            if (_activeReset is not null)
             {
-                try { await _cachedRuntime.DisposeAsync().ConfigureAwait(false); }
-                catch { /* best-effort */ }
+                resetToAwait = _activeReset.Task;
+            }
+            else
+            {
+                resetGeneration = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _activeReset = resetGeneration;
+                current = _cachedRuntime;
                 _cachedRuntime = null;
                 _cachedKey = null;
-            }
 
-            while (_graveyard.TryDequeue(out var parked))
-            {
-                try { await parked.Runtime.DisposeAsync().ConfigureAwait(false); }
-                catch { /* best-effort */ }
+                lock (_disposalOwnershipSync)
+                {
+                    while (_graveyard.TryDequeue(out var parked))
+                    {
+                        parkedRuntimes.Add(parked.Runtime);
+                    }
+                    dispatchedDisposals = new Task[_dispatchedDisposals.Count];
+                    _dispatchedDisposals.CopyTo(dispatchedDisposals);
+                }
             }
         }
         finally
         {
             _gate.Release();
+        }
+
+        if (resetToAwait is not null)
+        {
+            await resetToAwait.ConfigureAwait(false);
+            return;
+        }
+
+        try
+        {
+            if (current is not null)
+            {
+                await DisposeBestEffortAsync(current).ConfigureAwait(false);
+            }
+            foreach (var parked in parkedRuntimes)
+            {
+                await DisposeBestEffortAsync(parked).ConfigureAwait(false);
+            }
+            await Task.WhenAll(dispatchedDisposals).ConfigureAwait(false);
+        }
+        finally
+        {
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (ReferenceEquals(_activeReset, resetGeneration))
+                {
+                    _activeReset = null;
+                }
+            }
+            finally
+            {
+                _gate.Release();
+            }
+            resetGeneration!.TrySetResult();
         }
     }
 
     private void EnqueueWithBound(TRuntime runtime)
     {
-        while (_graveyard.Count >= GraveyardMaxSize && _graveyard.TryDequeue(out var oldest))
+        lock (_disposalOwnershipSync)
         {
-            FireAndForgetDispose(oldest.Runtime);
+            while (_graveyard.Count >= GraveyardMaxSize && _graveyard.TryDequeue(out var oldest))
+            {
+                FireAndForgetDispose(oldest.Runtime);
+            }
+            _graveyard.Enqueue((DateTime.UtcNow, runtime));
         }
-        _graveyard.Enqueue((DateTime.UtcNow, runtime));
     }
 
     private void SweepGraveyard()
     {
         var lingerSeconds = GraveyardLingerSeconds;
         var now = DateTime.UtcNow;
-        while (_graveyard.TryPeek(out var parked))
+        lock (_disposalOwnershipSync)
         {
-            if ((now - parked.ParkedAt).TotalSeconds < lingerSeconds)
+            while (_graveyard.TryPeek(out var parked))
             {
-                return;
+                if ((now - parked.ParkedAt).TotalSeconds < lingerSeconds)
+                {
+                    return;
+                }
+                if (!_graveyard.TryDequeue(out var head))
+                {
+                    return;
+                }
+                FireAndForgetDispose(head.Runtime);
             }
-            if (!_graveyard.TryDequeue(out var head))
-            {
-                return;
-            }
-            FireAndForgetDispose(head.Runtime);
         }
     }
 
-    private static void FireAndForgetDispose(TRuntime runtime)
-        => _ = Task.Run(async () =>
+    private void FireAndForgetDispose(TRuntime runtime)
+    {
+        var disposalTask = Task.Run(() => DisposeBestEffortAsync(runtime));
+        _dispatchedDisposals.Add(disposalTask);
+        _ = disposalTask.ContinueWith(
+            completedTask =>
+            {
+                lock (_disposalOwnershipSync)
+                {
+                    _dispatchedDisposals.Remove(completedTask);
+                }
+            },
+            CancellationToken.None,
+            TaskContinuationOptions.ExecuteSynchronously,
+            TaskScheduler.Default);
+    }
+
+    private static async Task DisposeBestEffortAsync(TRuntime runtime)
+    {
+        try
         {
-            try { await runtime.DisposeAsync().ConfigureAwait(false); }
-            catch { /* best-effort */ }
-        });
+            await runtime.DisposeAsync().ConfigureAwait(false);
+        }
+        catch
+        {
+            // best-effort
+        }
+    }
 }
