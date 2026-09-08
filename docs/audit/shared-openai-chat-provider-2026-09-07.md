@@ -2,7 +2,7 @@
 
 The Common provider base owns the OpenAI Chat Completions wire mechanics while adapters retain provider endpoint, model normalization, headers, error mapping, parser extensions, and host transport behavior.
 
-The serialized body keeps the Brainarr field order: model, messages, temperature when enabled, max_tokens, stream, and response_format when enabled. The serializer uses relaxed escaping to preserve ordinary Unicode and HTML-sensitive prompt text on the wire.
+Wire compatibility is byte-exact EXCEPT float temperatures: legacy Newtonsoft widened request float temperatures to double before serialization (0.2f emitted as 0.20000000298023224); the shared base keeps the float and emits the shortest-round-trip form (0.2). This is a deliberate, semantically equivalent normalization. The serialized body keeps the Brainarr field order: model, messages, temperature when enabled, max_tokens, stream, and response_format when enabled. The serializer uses relaxed escaping to preserve ordinary Unicode and HTML-sensitive prompt text on the wire.
 
 The base deliberately changes empty, whitespace-only, choice-less, and recognizably structured responses with missing content into `InvalidRequest` provider errors. Malformed or type-invalid non-empty responses remain raw content so existing salvage parsers can handle truncated payloads; `usage: null` remains valid while an incompatible usage shape falls back.
 

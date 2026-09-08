@@ -86,6 +86,15 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         {
             return ProviderHealthResult.Unhealthy(exception.Message, stopwatch.Elapsed, ProviderId, "apiKey", _model, exception.ErrorCode.ToString());
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            // The request/transport deadline fired (caller cancellation still propagates as a
+            // raw cancellation): surface an unhealthy result instead of leaking a raw
+            // TaskCanceled/OperationCanceled exception to health callers. The original provider
+            // normalized timeouts in its SendAsync before the health catch filter ran; this
+            // extraction moved that normalization out of the health path, so it is restored here.
+            return ProviderHealthResult.Unhealthy("Request timed out.", stopwatch.Elapsed, ProviderId, "apiKey", _model, LlmErrorCode.Timeout.ToString());
+        }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             return ProviderHealthResult.Unhealthy(SanitizeText(exception.Message), stopwatch.Elapsed, ProviderId, "apiKey", _model);

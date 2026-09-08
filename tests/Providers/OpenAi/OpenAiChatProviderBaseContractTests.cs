@@ -348,7 +348,11 @@ public sealed class OpenAiChatProviderBaseContractTests
     [InlineData(0.33333334f, "0.33333334")]
     [InlineData(1e20f, "1E+20")]
     [InlineData(1e-20f, "1E-20")]
-    public async Task CompleteAsync_PreservesLegacyFloatWirePrecision(float temperature, string wireValue)
+    // NOT legacy byte-for-byte: legacy Newtonsoft widened float temperatures to double (0.2f
+    // serialized as 0.20000000298023224). The shared base keeps the float and emits the
+    // shortest-round-trip form — a deliberate, semantically equivalent normalization documented
+    // in the audit and CHANGELOG. This test pins the NEW contract.
+    public async Task CompleteAsync_WritesShortestRoundTripFloatTemperature(float temperature, string wireValue)
     {
         var transport = new ScriptedTransport { Completion = new(200, OkBody) };
         var provider = new TestProvider(transport);
