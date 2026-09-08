@@ -102,7 +102,8 @@ public sealed class HttpResponseHelpersRetryAfterContractTests
     [Fact]
     public void Should_ExposeInternalClockAwareOverloadWithExactSignature()
     {
-        var method = Assert.IsType<MethodInfo>(FindClockAwareOverload());
+        var method = FindClockAwareOverload();
+        Assert.NotNull(method);
         Assert.True(method.IsAssembly);
         Assert.Equal(typeof(TimeSpan?), method.ReturnType);
     }
