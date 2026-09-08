@@ -38,6 +38,8 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+- **Effective SSE bounds.** Bounded `SseFramingReader` instances now stop oversized physical lines before retaining them, count cumulative `data:` payloads in bytes emitted by the configured encoding, and independently cap retained UTF-16 code units. Inserted multiline separators count toward both event limits, ignored metadata is physically bounded, diagnostics name their unit, and `maxEventSize: 0` remains the unlimited opt-out.
+
 ### Added
 - **Per-invocation OpenAI completion timeout ownership hook.** Derived provider shells can resolve a positive owner timeout for each request while Common retains the canonical rule that only a shorter positive `LlmRequest.Timeout` may narrow it. Streaming resolves the effective value once for both its timer and transport descriptor; health probes keep their separate health timeout.
 - Float request temperatures serialize in shortest-round-trip form (0.2f emits 0.2, not the legacy widened 0.20000000298023224) - semantically equivalent to the previous wire; the one intentional numeric deviation from byte-exact legacy parity.

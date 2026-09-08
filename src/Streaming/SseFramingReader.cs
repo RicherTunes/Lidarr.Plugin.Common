@@ -9,6 +9,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
+using System.Threading.Tasks;
 
 namespace Lidarr.Plugin.Common.Streaming;
 
@@ -62,13 +63,16 @@ public sealed class SseFramingReader
         [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
         using var reader = new StreamReader(_stream, _encoding, detectEncodingFromByteOrderMarks: false, _bufferSize, leaveOpen: true);
-        var currentFrame = new SseFrameBuilder(_maxEventSize);
+        var currentFrame = new SseFrameBuilder(_encoding, _maxEventSize);
+        var boundedReader = _maxEventSize > 0 ? new BoundedAsyncLineReader(reader, _encoding, _maxEventSize) : null;
         var hasData = false;
 
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var line = await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
+            var line = boundedReader == null
+                ? await reader.ReadLineAsync(cancellationToken).ConfigureAwait(false)
+                : await boundedReader.ReadLineAsync(cancellationToken).ConfigureAwait(false);
             if (line == null)
             {
                 break;
@@ -80,7 +84,7 @@ public sealed class SseFramingReader
                 if (hasData)
                 {
                     yield return currentFrame.Build();
-                    currentFrame = new SseFrameBuilder(_maxEventSize);
+                    currentFrame = new SseFrameBuilder(_encoding, _maxEventSize);
                     hasData = false;
                 }
 
@@ -154,16 +158,100 @@ public sealed class SseFramingReader
     /// <summary>
     /// Helper class to build SSE frames with multiple data fields.
     /// </summary>
+    private sealed class BoundedAsyncLineReader
+    {
+        private static readonly string[] RecognizedPrefixes = ["data", "data:", "data: ", "id", "id:", "id: ", "event", "event:", "event: ", "retry", "retry:", "retry: ", ":"];
+        private readonly StreamReader _reader;
+        private readonly Encoding _encoding;
+        private readonly long _maxBytes;
+        private readonly long _maxCharacters;
+        private readonly int _maxEventSize;
+        private readonly char[] _characterBuffer = new char[1];
+        private readonly byte[] _byteBuffer = new byte[32];
+        private char? _pending;
+
+        public BoundedAsyncLineReader(StreamReader reader, Encoding encoding, int maximum)
+        {
+            _reader = reader;
+            _encoding = encoding;
+            _maxEventSize = maximum;
+            long prefixBytes = 0;
+            var prefixCharacters = 0;
+            foreach (var prefix in RecognizedPrefixes)
+            {
+                prefixBytes = Math.Max(prefixBytes, encoding.GetByteCount(prefix));
+                prefixCharacters = Math.Max(prefixCharacters, prefix.Length);
+            }
+
+            _maxBytes = (long)maximum + prefixBytes;
+            _maxCharacters = (long)maximum + prefixCharacters;
+        }
+
+        public async ValueTask<string?> ReadLineAsync(CancellationToken cancellationToken)
+        {
+            var value = new StringBuilder();
+            var encoder = _encoding.GetEncoder();
+            long bytes = 0;
+            while (true)
+            {
+                var next = _pending;
+                _pending = null;
+                if (next == null)
+                {
+                    var read = await _reader.ReadAsync(_characterBuffer.AsMemory(), cancellationToken).ConfigureAwait(false);
+                    if (read == 0)
+                    {
+                        FlushEncoder(encoder, _byteBuffer, ref bytes, _maxBytes, _maxEventSize);
+                        return value.Length == 0 ? null : value.ToString();
+                    }
+
+                    next = _characterBuffer[0];
+                }
+
+                if (next == '\n')
+                {
+                    FlushEncoder(encoder, _byteBuffer, ref bytes, _maxBytes, _maxEventSize);
+                    return value.ToString();
+                }
+
+                if (next == '\r')
+                {
+                    FlushEncoder(encoder, _byteBuffer, ref bytes, _maxBytes, _maxEventSize);
+                    if (await _reader.ReadAsync(_characterBuffer.AsMemory(), cancellationToken).ConfigureAwait(false) != 0 && _characterBuffer[0] != '\n')
+                    {
+                        _pending = _characterBuffer[0];
+                    }
+
+                    return value.ToString();
+                }
+
+                if ((long)value.Length + 1 > _maxCharacters)
+                {
+                    throw new StreamFrameTooLargeException(_maxEventSize, (long)value.Length + 1, StreamFrameSizeUnit.Utf16CodeUnits, _maxCharacters);
+                }
+
+                _characterBuffer[0] = next.Value;
+                Encode(encoder, _characterBuffer, 1, _byteBuffer, false, ref bytes, _maxBytes, _maxEventSize);
+                value.Append(next.Value);
+            }
+        }
+    }
+
     private sealed class SseFrameBuilder
     {
         private readonly StringBuilder _data = new();
         private readonly int _maxEventSize;
         private bool _hasData;
-        private int _currentSize;
+        private readonly Encoder? _encoder;
+        private readonly char[] _characterBuffer = new char[32];
+        private readonly byte[] _byteBuffer = new byte[32];
+        private long _encodedByteCount;
+        private long _retainedUtf16Count;
 
-        public SseFrameBuilder(int maxEventSize = 0)
+        public SseFrameBuilder(Encoding encoding, int maxEventSize = 0)
         {
             _maxEventSize = maxEventSize;
+            _encoder = maxEventSize > 0 ? encoding.GetEncoder() : null;
         }
 
         public string? EventType { get; set; }
@@ -172,11 +260,18 @@ public sealed class SseFramingReader
 
         public void AppendData(string value)
         {
-            var additionalSize = value.Length + (_hasData ? 1 : 0);
+            var additionalSize = (long)value.Length + (_hasData ? 1 : 0);
 
-            if (_maxEventSize > 0 && _currentSize + additionalSize > _maxEventSize)
+            if (_maxEventSize > 0 && additionalSize > _maxEventSize - _retainedUtf16Count)
             {
-                throw new StreamFrameTooLargeException(_maxEventSize, _currentSize + additionalSize);
+                throw new StreamFrameTooLargeException(_maxEventSize, _retainedUtf16Count + additionalSize, StreamFrameSizeUnit.Utf16CodeUnits);
+            }
+
+            var nextBytes = _encodedByteCount;
+            if (_maxEventSize > 0)
+            {
+                if (_hasData) Encode(_encoder!, "\n", _characterBuffer, _byteBuffer, false, ref nextBytes, _maxEventSize, _maxEventSize);
+                Encode(_encoder!, value, _characterBuffer, _byteBuffer, false, ref nextBytes, _maxEventSize, _maxEventSize);
             }
 
             if (_hasData)
@@ -186,11 +281,13 @@ public sealed class SseFramingReader
 
             _data.Append(value);
             _hasData = true;
-            _currentSize += additionalSize;
+            _retainedUtf16Count += additionalSize;
+            _encodedByteCount = nextBytes;
         }
 
         public SseFrame Build()
         {
+            if (_maxEventSize > 0) FlushEncoder(_encoder!, _byteBuffer, ref _encodedByteCount, _maxEventSize, _maxEventSize);
             return new SseFrame
             {
                 Data = _data.ToString(),
@@ -199,6 +296,45 @@ public sealed class SseFramingReader
                 RetryMilliseconds = RetryMilliseconds,
             };
         }
+    }
+
+    private static void FlushEncoder(Encoder encoder, byte[] output, ref long count, long maximum, int reportedMaximum) => Encode(encoder, Array.Empty<char>(), 0, output, true, ref count, maximum, reportedMaximum);
+
+    private static void Encode(Encoder encoder, string input, char[] buffer, byte[] output, bool flush, ref long count, long maximum, int reportedMaximum)
+    {
+        var offset = 0;
+        while (offset < input.Length)
+        {
+            var length = Math.Min(buffer.Length, input.Length - offset);
+            input.CopyTo(offset, buffer, 0, length);
+            Encode(encoder, buffer, length, output, flush && offset + length == input.Length, ref count, maximum, reportedMaximum);
+            offset += length;
+        }
+
+        if (input.Length == 0 && flush) Encode(encoder, Array.Empty<char>(), 0, output, true, ref count, maximum, reportedMaximum);
+    }
+
+    private static void Encode(Encoder encoder, char[] input, int inputLength, byte[] output, bool flush, ref long count, long maximum, int reportedMaximum)
+    {
+        var inputOffset = 0;
+        do
+        {
+            encoder.Convert(input, inputOffset, inputLength - inputOffset, output, 0, output.Length, flush, out var charsUsed, out var bytesUsed, out var completed);
+            if (bytesUsed > maximum - count)
+            {
+                throw new StreamFrameTooLargeException(reportedMaximum, count + bytesUsed, StreamFrameSizeUnit.EncodedBytes, maximum);
+            }
+
+            count += bytesUsed;
+            inputOffset += charsUsed;
+            if (!completed && charsUsed == 0 && bytesUsed == 0)
+            {
+                throw new InvalidDataException("The configured encoding made no progress while measuring SSE data.");
+            }
+
+            if (completed) break;
+        }
+        while (true);
     }
 }
 
