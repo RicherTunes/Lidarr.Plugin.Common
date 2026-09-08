@@ -2,6 +2,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Net.Http.Headers;
 using System.Reflection;
 using Lidarr.Plugin.Common.Services.Http;
 using Xunit;
@@ -41,6 +42,7 @@ public sealed class HttpResponseHelpersRetryAfterContractTests
         var headers = new[]
         {
             new KeyValuePair<string, string>("X-Retry-After", "99"),
+            new KeyValuePair<string, string>("Retry-After", null!),
             new KeyValuePair<string, string>("Retry-After", string.Empty),
             new KeyValuePair<string, string>("retry-after", "   "),
             new KeyValuePair<string, string>("RETRY-AFTER", "+12")
@@ -56,6 +58,16 @@ public sealed class HttpResponseHelpersRetryAfterContractTests
             new KeyValuePair<string, string>("Retry-After", "not a retry value"));
 
         Assert.Null(HttpResponseHelpers.ParseRetryAfter(headers));
+        Assert.Equal(1, headers.MoveNextCalls);
+    }
+
+    [Fact]
+    public void Should_StopAfterFirstValidIntegerWithoutConsumingLaterEntry()
+    {
+        var headers = new ThrowAfterEntriesEnumerable(
+            new KeyValuePair<string, string>("Retry-After", "12"));
+
+        Assert.Equal(TimeSpan.FromSeconds(12), HttpResponseHelpers.ParseRetryAfter(headers));
         Assert.Equal(1, headers.MoveNextCalls);
     }
 
@@ -90,7 +102,9 @@ public sealed class HttpResponseHelpersRetryAfterContractTests
     [Fact]
     public void Should_ExposeInternalClockAwareOverloadWithExactSignature()
     {
-        Assert.NotNull(FindClockAwareOverload());
+        var method = Assert.IsType<MethodInfo>(FindClockAwareOverload());
+        Assert.True(method.IsAssembly);
+        Assert.Equal(typeof(TimeSpan?), method.ReturnType);
     }
 
     [Fact]
@@ -115,8 +129,23 @@ public sealed class HttpResponseHelpersRetryAfterContractTests
         Assert.Null(InvokeClockAware(Header(""), clock));
         Assert.Equal(TimeSpan.FromSeconds(12), InvokeClockAware(Header("12"), clock));
         Assert.Null(InvokeClockAware(Header("not a retry value"), clock));
-        Assert.Null(InvokeClockAware(new ThrowingEnumerable(), clock));
+        Assert.Null(InvokeClockAware(new ThrowOnGetEnumeratorEnumerable(), clock));
+        Assert.Null(InvokeClockAware(new ThrowOnMoveNextEnumerable(), clock));
+        Assert.Null(InvokeClockAware(new ThrowOnCurrentEnumerable(), clock));
         Assert.Equal(0, clock.Reads);
+    }
+
+    [Fact]
+    public void Should_StopAfterFirstValidDateWithoutConsumingLaterEntry()
+    {
+        var clock = new RecordingTimeProvider(FixedNow);
+        var date = FixedNow.AddSeconds(37).ToString("R", CultureInfo.InvariantCulture);
+        var headers = new ThrowAfterEntriesEnumerable(
+            new KeyValuePair<string, string>("Retry-After", date));
+
+        Assert.Equal(TimeSpan.FromSeconds(37), InvokeClockAware(headers, clock));
+        Assert.Equal(1, clock.Reads);
+        Assert.Equal(1, headers.MoveNextCalls);
     }
 
     [Fact]
@@ -149,6 +178,7 @@ public sealed class HttpResponseHelpersRetryAfterContractTests
 
         Assert.Equal(TimeSpan.Zero, InvokeClockAware(Header(date), clock));
         Assert.Null(InvokeClockAware(null, clock));
+        Assert.Equal(TimeSpan.Zero, RateLimitHeaderUtilities.ResolveRetryAfter((RetryConditionHeaderValue?)null));
         Assert.Equal(1, clock.Reads);
     }
 
@@ -202,10 +232,46 @@ public sealed class HttpResponseHelpersRetryAfterContractTests
         }
     }
 
-    private sealed class ThrowingEnumerable : IEnumerable<KeyValuePair<string, string>>
+    private sealed class ThrowOnGetEnumeratorEnumerable : IEnumerable<KeyValuePair<string, string>>
     {
         public IEnumerator<KeyValuePair<string, string>> GetEnumerator() => throw new InvalidOperationException("enumeration failed");
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+    }
+
+    private sealed class ThrowOnMoveNextEnumerable : IEnumerable<KeyValuePair<string, string>>
+    {
+        public IEnumerator<KeyValuePair<string, string>> GetEnumerator() => new Enumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        private sealed class Enumerator : IEnumerator<KeyValuePair<string, string>>
+        {
+            public KeyValuePair<string, string> Current => throw new InvalidOperationException("Current must not be read");
+            object IEnumerator.Current => Current;
+            public bool MoveNext() => throw new InvalidOperationException("MoveNext failed");
+            public void Reset() => throw new NotSupportedException();
+            public void Dispose() { }
+        }
+    }
+
+    private sealed class ThrowOnCurrentEnumerable : IEnumerable<KeyValuePair<string, string>>
+    {
+        public IEnumerator<KeyValuePair<string, string>> GetEnumerator() => new Enumerator();
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+        private sealed class Enumerator : IEnumerator<KeyValuePair<string, string>>
+        {
+            private bool _moved;
+            public KeyValuePair<string, string> Current => throw new InvalidOperationException("Current failed");
+            object IEnumerator.Current => Current;
+            public bool MoveNext()
+            {
+                if (_moved) return false;
+                _moved = true;
+                return true;
+            }
+            public void Reset() => throw new NotSupportedException();
+            public void Dispose() { }
+        }
     }
 
     private sealed class ThrowAfterEntriesEnumerable : IEnumerable<KeyValuePair<string, string>>
