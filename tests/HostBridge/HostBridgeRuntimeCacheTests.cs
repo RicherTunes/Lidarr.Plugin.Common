@@ -17,6 +17,65 @@ namespace Lidarr.Plugin.Common.Tests.HostBridge;
 /// </summary>
 public class HostBridgeRuntimeCacheTests : IDisposable
 {
+    private sealed class ControlledRuntime : IAsyncDisposable
+    {
+        private readonly bool _blocks;
+        private readonly bool _throws;
+        private int _disposeCalls;
+
+        public ControlledRuntime(bool blocks, bool throws)
+        {
+            _blocks = blocks;
+            _throws = throws;
+        }
+
+        public int DisposeCalls => Volatile.Read(ref _disposeCalls);
+        public TaskCompletionSource DisposeStarted { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ReleaseDispose { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource DisposeFinished { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async ValueTask DisposeAsync()
+        {
+            Interlocked.Increment(ref _disposeCalls);
+            DisposeStarted.TrySetResult();
+            try
+            {
+                if (_blocks)
+                {
+                    await ReleaseDispose.Task.ConfigureAwait(false);
+                }
+                if (_throws)
+                {
+                    throw new InvalidOperationException("Controlled disposal failure");
+                }
+            }
+            finally
+            {
+                DisposeFinished.TrySetResult();
+            }
+        }
+    }
+
+    private sealed record ControlledSettings(string AuthKey, bool BlocksDispose = false, bool ThrowsOnDispose = false);
+
+    private sealed class ControlledCache : HostBridgeRuntimeCache<ControlledRuntime, ControlledSettings>
+    {
+        public System.Collections.Generic.Dictionary<string, ControlledRuntime> Runtimes { get; } = new();
+        public int CreateCount { get; private set; }
+
+        protected override int GraveyardMaxSize => 1;
+        protected override int GraveyardLingerSeconds => int.MaxValue;
+        protected override string ComputeAuthKey(ControlledSettings settings) => settings.AuthKey;
+
+        protected override Task<ControlledRuntime?> CreateAsync(ControlledSettings settings, CancellationToken cancellationToken)
+        {
+            CreateCount++;
+            var runtime = new ControlledRuntime(settings.BlocksDispose, settings.ThrowsOnDispose);
+            Runtimes.Add(settings.AuthKey, runtime);
+            return Task.FromResult<ControlledRuntime?>(runtime);
+        }
+    }
+
     private sealed class FakeRuntime : IAsyncDisposable
     {
         public string AuthFingerprint { get; }
@@ -109,6 +168,229 @@ public class HostBridgeRuntimeCacheTests : IDisposable
         Assert.NotSame(alice1, alice2);
         Assert.True(alice1!.Disposed);
         Assert.False(alice2!.Disposed);
+    }
+
+    [Fact]
+    public async Task ResetAsync_WaitsForPreviouslyDispatchedOverflowDisposal()
+    {
+        var cache = new ControlledCache();
+        Task? resetTask = null;
+        ControlledRuntime? runtimeA = null;
+        ControlledRuntime? runtimeB = null;
+        ControlledRuntime? runtimeC = null;
+
+        try
+        {
+            runtimeA = await cache.GetAsync(new ControlledSettings("A", BlocksDispose: true));
+            await cache.GetAsync(new ControlledSettings("B"));
+            await cache.GetAsync(new ControlledSettings("C"));
+            runtimeB = cache.Runtimes["B"];
+            runtimeC = cache.Runtimes["C"];
+
+            await runtimeA!.DisposeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(1, runtimeA.DisposeCalls);
+            Assert.False(runtimeA.DisposeFinished.Task.IsCompleted);
+
+            resetTask = cache.ResetAsync();
+
+            Assert.False(resetTask.IsCompleted, "Reset must retain ownership of an overflow disposal already dispatched in the background.");
+
+            runtimeA.ReleaseDispose.TrySetResult();
+            await runtimeA.DisposeFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await resetTask.WaitAsync(TimeSpan.FromSeconds(10));
+            await runtimeB!.DisposeFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await runtimeC!.DisposeFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(1, runtimeA.DisposeCalls);
+            Assert.Equal(1, runtimeB.DisposeCalls);
+            Assert.Equal(1, runtimeC.DisposeCalls);
+        }
+        finally
+        {
+            runtimeA?.ReleaseDispose.TrySetResult();
+            try
+            {
+                if (resetTask is not null)
+                {
+                    await resetTask.WaitAsync(TimeSpan.FromSeconds(10));
+                }
+                else
+                {
+                    await cache.ResetAsync().WaitAsync(TimeSpan.FromSeconds(10));
+                }
+            }
+            finally
+            {
+                if (runtimeA is not null && runtimeA.DisposeStarted.Task.IsCompleted)
+                {
+                    await runtimeA.DisposeFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                }
+            }
+        }
+    }
+
+    [Fact]
+    public async Task GetAsync_OverlappingReset_WaitsForResetGeneration()
+    {
+        var (cache, runtimeA) = await CreateBlockedOverflowAsync();
+        Task? resetTask = null;
+        Task<ControlledRuntime?>? getTask = null;
+
+        try
+        {
+            resetTask = cache.ResetAsync();
+            getTask = cache.GetAsync(new ControlledSettings("D"));
+
+            Assert.False(getTask.IsCompleted, "A lookup overlapping reset must not repopulate the cache before that reset generation finishes.");
+            Assert.Equal(3, cache.CreateCount);
+
+            runtimeA.ReleaseDispose.TrySetResult();
+            await resetTask.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.NotNull(await getTask.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal(4, cache.CreateCount);
+        }
+        finally
+        {
+            runtimeA.ReleaseDispose.TrySetResult();
+            await AwaitCleanupAsync(cache, runtimeA, resetTask, getTask);
+        }
+    }
+
+    [Fact]
+    public async Task GetAsync_CancelledResetWaiter_DoesNotCancelSharedReset()
+    {
+        var (cache, runtimeA) = await CreateBlockedOverflowAsync();
+        Task? resetTask = null;
+        Task<ControlledRuntime?>? getTask = null;
+        using var cancellation = new CancellationTokenSource();
+
+        try
+        {
+            resetTask = cache.ResetAsync();
+            getTask = cache.GetAsync(new ControlledSettings("D"), cancellation.Token);
+            cancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await getTask.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.False(resetTask.IsCompleted, "Cancelling one lookup waiter must not cancel the shared reset generation.");
+
+            runtimeA.ReleaseDispose.TrySetResult();
+            await resetTask.WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            runtimeA.ReleaseDispose.TrySetResult();
+            await AwaitCleanupAsync(cache, runtimeA, resetTask, getTask);
+        }
+    }
+
+    [Fact]
+    public async Task ResetAsync_OverlappingReset_CoalescesGenerationAndDisposesOnce()
+    {
+        var (cache, runtimeA) = await CreateBlockedOverflowAsync();
+        var runtimeB = cache.Runtimes["B"];
+        var runtimeC = cache.Runtimes["C"];
+        Task? firstReset = null;
+        Task? secondReset = null;
+
+        try
+        {
+            firstReset = cache.ResetAsync();
+            secondReset = cache.ResetAsync();
+
+            Assert.False(secondReset.IsCompleted, "An overlapping reset must wait for the active reset generation.");
+
+            runtimeA.ReleaseDispose.TrySetResult();
+            await Task.WhenAll(firstReset, secondReset).WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.Equal(1, runtimeA.DisposeCalls);
+            Assert.Equal(1, runtimeB.DisposeCalls);
+            Assert.Equal(1, runtimeC.DisposeCalls);
+        }
+        finally
+        {
+            runtimeA.ReleaseDispose.TrySetResult();
+            await AwaitCleanupAsync(cache, runtimeA, firstReset, secondReset);
+        }
+    }
+
+    [Fact]
+    public async Task ResetAsync_SynchronousAndThrowingDisposers_ContinueDrainAndReleaseGeneration()
+    {
+        var cache = new ControlledCache();
+        await cache.GetAsync(new ControlledSettings("A"));
+        await cache.GetAsync(new ControlledSettings("B", ThrowsOnDispose: true));
+        await cache.GetAsync(new ControlledSettings("C"));
+        var runtimeA = cache.Runtimes["A"];
+        var runtimeB = cache.Runtimes["B"];
+        var runtimeC = cache.Runtimes["C"];
+
+        await cache.ResetAsync().WaitAsync(TimeSpan.FromSeconds(10));
+
+        await runtimeA.DisposeFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await runtimeB.DisposeFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await runtimeC.DisposeFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(1, runtimeA.DisposeCalls);
+        Assert.Equal(1, runtimeB.DisposeCalls);
+        Assert.Equal(1, runtimeC.DisposeCalls);
+
+        Assert.NotNull(await cache.GetAsync(new ControlledSettings("D")));
+        await cache.ResetAsync().WaitAsync(TimeSpan.FromSeconds(10));
+    }
+
+    private static async Task<(ControlledCache Cache, ControlledRuntime RuntimeA)> CreateBlockedOverflowAsync()
+    {
+        var cache = new ControlledCache();
+        ControlledRuntime? runtimeA = null;
+        try
+        {
+            runtimeA = await cache.GetAsync(new ControlledSettings("A", BlocksDispose: true));
+            await cache.GetAsync(new ControlledSettings("B"));
+            await cache.GetAsync(new ControlledSettings("C"));
+            await runtimeA!.DisposeStarted.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(runtimeA.DisposeFinished.Task.IsCompleted);
+            return (cache, runtimeA);
+        }
+        catch
+        {
+            runtimeA?.ReleaseDispose.TrySetResult();
+            await cache.ResetAsync().WaitAsync(TimeSpan.FromSeconds(10));
+            if (runtimeA is not null && runtimeA.DisposeStarted.Task.IsCompleted)
+            {
+                await runtimeA.DisposeFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+            throw;
+        }
+    }
+
+    private static async Task AwaitCleanupAsync(ControlledCache cache, ControlledRuntime runtimeA, params Task?[] tasks)
+    {
+        runtimeA.ReleaseDispose.TrySetResult();
+        try
+        {
+            foreach (var task in tasks)
+            {
+                if (task is not null)
+                {
+                    try
+                    {
+                        await task.WaitAsync(TimeSpan.FromSeconds(10));
+                    }
+                    catch
+                    {
+                        // Cleanup must continue after a failed or cancelled task.
+                    }
+                }
+            }
+            await cache.ResetAsync().WaitAsync(TimeSpan.FromSeconds(10));
+        }
+        finally
+        {
+            if (runtimeA.DisposeStarted.Task.IsCompleted)
+            {
+                await runtimeA.DisposeFinished.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            }
+        }
     }
 
     [Fact]
