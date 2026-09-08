@@ -470,6 +470,15 @@ data: [DONE]
         Assert.Equal(7, error.ActualSize);
     }
 
+    [Fact]
+    public async Task ReadFramesAsync_StatefulEncoderPreservesStateAcrossEventScratchChunks()
+    {
+        var payload = new string('a', 40);
+        await using var stream = new SentinelAsyncOnlyStream($"data: {payload}\n\n", Encoding.ASCII, returnEof: true);
+        var reader = new SseFramingReader(stream, new FlushSuffixEncoding(), bufferSize: 8, maxEventSize: 81);
+        Assert.Equal(payload, Assert.Single(await CollectFramesAsync(reader)).Data);
+    }
+
     [Theory]
     [InlineData("\n")]
     [InlineData("\r")]
@@ -549,6 +558,19 @@ data: [DONE]
         Assert.Equal("🎵", Assert.Single(await CollectFramesAsync(reader)).Data);
     }
 
+    [Theory]
+    [InlineData(10)]
+    [InlineData(13)]
+    [InlineData(-1)]
+    public async Task ReadFramesAsync_UnpairedHighSurrogate_FlushesAtPhysicalBoundary(int terminator)
+    {
+        var bytes = new List<byte>(Encoding.ASCII.GetBytes("data: ")) { 0xff };
+        if (terminator >= 0) bytes.Add((byte)terminator);
+        await using var stream = new SentinelAsyncOnlyStream(bytes.ToArray(), returnEof: true);
+        var reader = new SseFramingReader(stream, new UnpairedSurrogateEncoding(), bufferSize: 8, maxEventSize: 3);
+        Assert.Equal("\ud800", Assert.Single(await CollectFramesAsync(reader)).Data);
+    }
+
     [Fact]
     public async Task ReadFramesAsync_CancellationDuringSplitUtf8Sequence_RemainsCallerCancellation()
     {
@@ -586,6 +608,16 @@ data: [DONE]
         await using var stream = new SentinelAsyncOnlyStream("data: unlimited\n\n", Encoding.ASCII, returnEof: true);
         var reader = new SseFramingReader(stream, new ThrowingEncoderEncoding(), bufferSize: 8, maxEventSize: 0);
         Assert.Equal("unlimited", Assert.Single(await CollectFramesAsync(reader)).Data);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(32)]
+    public async Task ReadFramesAsync_PreservesExistingBomHandling(int maximum)
+    {
+        await using var stream = new AsyncOnlyStream("\uFEFFdata: hidden-by-bom\n\n");
+        var reader = new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: maximum);
+        Assert.Equal("hidden-by-bom", Assert.Single(await CollectFramesAsync(reader)).Data);
     }
 
     private static MemoryStream CreateStream(string content)
@@ -659,6 +691,12 @@ data: [DONE]
             _returnEof = returnEof;
         }
 
+        public SentinelAsyncOnlyStream(byte[] data, bool returnEof = false)
+        {
+            _data = data;
+            _returnEof = returnEof;
+        }
+
         public bool SentinelReadAttempted { get; private set; }
         public override bool CanRead => true;
         public override bool CanSeek => false;
@@ -703,6 +741,33 @@ data: [DONE]
         public override Decoder GetDecoder() => Encoding.ASCII.GetDecoder();
     }
 
+    private sealed class UnpairedSurrogateEncoding : Encoding
+    {
+        public override int GetByteCount(char[] chars, int index, int count) => Encoding.UTF8.GetByteCount(chars, index, count);
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex) => Encoding.UTF8.GetBytes(chars, charIndex, charCount, bytes, byteIndex);
+        public override int GetCharCount(byte[] bytes, int index, int count) => count;
+        public override int GetChars(byte[] bytes, int byteIndex, int byteCount, char[] chars, int charIndex)
+        {
+            for (var i = 0; i < byteCount; i++) chars[charIndex + i] = bytes[byteIndex + i] == 0xff ? '\ud800' : (char)bytes[byteIndex + i];
+            return byteCount;
+        }
+
+        public override int GetMaxByteCount(int charCount) => Encoding.UTF8.GetMaxByteCount(charCount);
+        public override int GetMaxCharCount(int byteCount) => byteCount;
+        public override Decoder GetDecoder() => new UnpairedSurrogateDecoder();
+        public override Encoder GetEncoder() => Encoding.UTF8.GetEncoder();
+    }
+
+    private sealed class UnpairedSurrogateDecoder : Decoder
+    {
+        public override int GetCharCount(byte[] bytes, int index, int count) => count;
+        public override int GetChars(byte[] bytes, int byteIndex, int byteCount, char[] chars, int charIndex)
+        {
+            for (var i = 0; i < byteCount; i++) chars[charIndex + i] = bytes[byteIndex + i] == 0xff ? '\ud800' : (char)bytes[byteIndex + i];
+            return byteCount;
+        }
+    }
+
     private sealed class ZeroOutputEncoding : DelegatingAsciiEncoding
     {
         public override int GetByteCount(char[] chars, int index, int count) => 0;
@@ -725,7 +790,7 @@ data: [DONE]
 
     private sealed class FlushSuffixEncoding : DelegatingAsciiEncoding
     {
-        public override int GetByteCount(char[] chars, int index, int count) => (count * 2) + 1;
+        public override int GetByteCount(char[] chars, int index, int count) => count == 0 ? 0 : (count * 2) + 1;
         public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex)
         {
             for (var i = 0; i < charCount; i++)
@@ -734,6 +799,7 @@ data: [DONE]
                 bytes[byteIndex + (i * 2) + 1] = 0;
             }
 
+            if (charCount == 0) return 0;
             bytes[byteIndex + (charCount * 2)] = 0x7e;
             return (charCount * 2) + 1;
         }
@@ -745,6 +811,7 @@ data: [DONE]
     private sealed class FlushSuffixEncoder : Encoder
     {
         private bool _hasInput;
+        private int _remainingForCharacter;
         public override int GetByteCount(char[] chars, int index, int count, bool flush) => (count * 2) + (flush && (_hasInput || count > 0) ? 1 : 0);
         public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, bool flush)
         {
@@ -766,9 +833,29 @@ data: [DONE]
 
         public override void Convert(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, int byteCount, bool flush, out int charsUsed, out int bytesUsed, out bool completed)
         {
-            bytesUsed = GetBytes(chars, charIndex, charCount, bytes, byteIndex, flush);
-            charsUsed = charCount;
-            completed = true;
+            charsUsed = 0;
+            bytesUsed = 0;
+            while (charsUsed < charCount && bytesUsed < byteCount)
+            {
+                if (_remainingForCharacter == 0) _remainingForCharacter = 2;
+                var emitted = Math.Min(_remainingForCharacter, byteCount - bytesUsed);
+                Array.Fill(bytes, (byte)'x', byteIndex + bytesUsed, emitted);
+                bytesUsed += emitted;
+                _remainingForCharacter -= emitted;
+                if (_remainingForCharacter == 0)
+                {
+                    charsUsed++;
+                    _hasInput = true;
+                }
+            }
+
+            if (flush && charsUsed == charCount && _remainingForCharacter == 0 && _hasInput && bytesUsed < byteCount)
+            {
+                bytes[byteIndex + bytesUsed++] = 0x7e;
+                _hasInput = false;
+            }
+
+            completed = charsUsed == charCount && _remainingForCharacter == 0 && (!flush || !_hasInput);
         }
     }
 
@@ -780,6 +867,11 @@ data: [DONE]
     private sealed class FortyByteEncoding : DelegatingAsciiEncoding
     {
         public override int GetByteCount(char[] chars, int index, int count) => count * 40;
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex)
+        {
+            Array.Fill(bytes, (byte)'x', byteIndex, charCount * 40);
+            return charCount * 40;
+        }
         public override int GetMaxByteCount(int charCount) => charCount * 40;
         public override Encoder GetEncoder() => new FortyByteEncoder();
     }
@@ -804,19 +896,30 @@ data: [DONE]
     {
         public override int GetByteCount(char[] chars, int index, int count)
         {
-            var value = new string(chars, index, count);
-            var expensive = value.StartsWith("id: ", StringComparison.Ordinal) ? Math.Min(4, count) : 0;
+            var expensive = 0;
+            for (var i = index; i < index + count; i++) if (chars[i] is 'i' or 'd') expensive++;
             return (expensive * 20) + (count - expensive);
         }
 
         public override int GetMaxByteCount(int charCount) => charCount * 20;
-        public override Encoder GetEncoder() => new SkewedPrefixEncoder();
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex)
+        {
+            var written = 0;
+            for (var i = charIndex; i < charIndex + charCount; i++)
+            {
+                var count = chars[i] is 'i' or 'd' ? 20 : 1;
+                Array.Fill(bytes, (byte)chars[i], byteIndex + written, count);
+                written += count;
+            }
+
+            return written;
+        }
+
+        public override Encoder GetEncoder() => new ExpensiveCharacterEncoder();
     }
 
-    private sealed class SkewedPrefixEncoder : Encoder
+    private sealed class ExpensiveCharacterEncoder : Encoder
     {
-        private const string ExpensivePrefix = "id: ";
-        private int _position;
         private int _remaining;
         public override int GetByteCount(char[] chars, int index, int count, bool flush) => count * 20;
         public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, bool flush) => throw new NotSupportedException();
@@ -832,15 +935,13 @@ data: [DONE]
 
             if (_remaining == 0)
             {
-                var expensive = _position < ExpensivePrefix.Length && chars[charIndex] == ExpensivePrefix[_position];
-                _remaining = expensive ? 20 : 1;
+                _remaining = chars[charIndex] is 'i' or 'd' ? 20 : 1;
             }
 
             bytesUsed = Math.Min(_remaining, byteCount);
             Array.Fill(bytes, (byte)'x', byteIndex, bytesUsed);
             _remaining -= bytesUsed;
             charsUsed = _remaining == 0 ? 1 : 0;
-            if (charsUsed == 1) _position++;
             completed = charsUsed == charCount;
         }
     }

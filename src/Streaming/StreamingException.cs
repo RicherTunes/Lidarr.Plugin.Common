@@ -64,12 +64,12 @@ public class StreamingException : Exception
 }
 
 /// <summary>
-/// Exception thrown when an SSE event exceeds the maximum allowed size.
+/// Exception thrown when an SSE event or physical line exceeds a configured size bound.
 /// </summary>
 public sealed class StreamFrameTooLargeException : StreamingException
 {
     /// <summary>
-    /// Gets the maximum allowed event size in bytes.
+    /// Gets the configured maximum event size. Interpret the value using <see cref="SizeUnit"/>.
     /// </summary>
     public int MaxEventSize { get; }
 
