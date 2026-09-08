@@ -87,6 +87,15 @@ namespace Lidarr.Plugin.Common.Tests.Hygiene
             Assert.DoesNotContain("header.Delta.Value", source);
         }
 
+        [Fact]
+        public void Sse_framing_reader_has_no_synchronous_end_of_stream_probe()
+        {
+            var source = File.ReadAllText(Path.Combine(FindRepoRoot(), "src", "Streaming", "SseFramingReader.cs"));
+
+            Assert.DoesNotContain("EndOfStream", source, StringComparison.Ordinal);
+            Assert.Contains("ReadLineAsync(cancellationToken)", source, StringComparison.Ordinal);
+        }
+
         [Theory]
         [InlineData("Services/Http/RateLimitTelemetryHandler.cs")]
         [InlineData("Base/BaseStreamingDownloadClient.cs")]

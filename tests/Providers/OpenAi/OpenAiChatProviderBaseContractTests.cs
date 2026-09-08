@@ -1,0 +1,767 @@
+using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using Lidarr.Plugin.Common.Abstractions.Llm;
+using Lidarr.Plugin.Common.Errors;
+using Lidarr.Plugin.Common.Providers.OpenAi;
+using Xunit;
+
+namespace Lidarr.Plugin.Common.Tests.Providers.OpenAi;
+
+public sealed class OpenAiChatProviderBaseContractTests
+{
+    private const string Endpoint = "https://chat.example.test/v1/chat/completions";
+    private const string OkBody = "{\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}";
+
+    [Fact]
+    public async Task CompleteAsync_SendsThePinnedDefaultWireBody()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport);
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi" });
+
+        Assert.Equal(
+            "{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"temperature\":0.7,\"max_tokens\":2000,\"stream\":false}",
+            transport.LastCompletionRequest!.JsonBody);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_UsesRequestTemperatureAndProviderHeaderPrecedence()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport, completionHeaders: new Dictionary<string, string>
+        {
+            ["Authorization"] = "provider-authorized",
+            ["X-Provider"] = "visible-hook",
+        });
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi", Temperature = 1.0f });
+
+        Assert.Equal(
+            "{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\",\"content\":\"hi\"}],\"temperature\":1.0,\"max_tokens\":2000,\"stream\":false}",
+            transport.LastCompletionRequest!.JsonBody);
+        Assert.Equal("provider-authorized", transport.LastCompletionRequest.Headers["Authorization"]);
+        Assert.Equal("visible-hook", transport.LastCompletionRequest.Headers["X-Provider"]);
+    }
+
+    [Theory]
+    [InlineData(0.0f, "0.0")]
+    [InlineData(1.0f, "1.0")]
+    public async Task CompleteAsync_PreservesIntegralTemperatureDecimalNotation(float temperature, string wireValue)
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport);
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi", Temperature = temperature });
+
+        Assert.Contains($"\"temperature\":{wireValue}", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData(10, 5)]
+    [InlineData(2, 2)]
+    [InlineData(0, 5)]
+    [InlineData(-1, 5)]
+    public async Task CompleteAsync_RequestTimeoutCannotExtendOrDisableProviderTimeout(int requestSeconds, int expectedSeconds)
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport, completionTimeout: TimeSpan.FromSeconds(5));
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromSeconds(requestSeconds) });
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), transport.LastCompletionRequest!.Timeout);
+    }
+
+    [Fact]
+    public async Task StreamAsync_RequestTimeoutCannotExtendProviderTimeout()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody), StreamContent = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n" };
+        var provider = new TestProvider(transport, completionTimeout: TimeSpan.FromSeconds(5));
+        await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromSeconds(10) })!) { }
+        Assert.Equal(TimeSpan.FromSeconds(5), transport.LastStreamRequest!.Timeout);
+    }
+
+    [Fact]
+    public async Task StreamAsync_ShortRequestTimeoutCancelsTheWholeStreamAsRecoverableTimeout()
+    {
+        using var caller = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var provider = new TestProvider(new BlockingTransport(), completionTimeout: TimeSpan.FromSeconds(5));
+        var stream = provider.StreamAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromMilliseconds(30) }, caller.Token);
+        var exception = await Assert.ThrowsAsync<NetworkException>(async () => { await foreach (var _ in stream!) { } });
+        Assert.Equal(LlmErrorCode.Timeout, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task StreamAsync_ReadTimeoutMapsToRecoverableTimeoutAndDisposesResponse()
+    {
+        using var caller = new CancellationTokenSource(TimeSpan.FromSeconds(1));
+        var transport = new BlockingReadTransport();
+        var provider = new TestProvider(transport, completionTimeout: TimeSpan.FromSeconds(5));
+        var stream = provider.StreamAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromMilliseconds(30) }, caller.Token);
+        var exception = await Assert.ThrowsAsync<NetworkException>(async () => { await foreach (var _ in stream!) { } });
+        Assert.Equal(LlmErrorCode.Timeout, exception.ErrorCode);
+        Assert.True(transport.Disposed);
+    }
+
+    [Fact]
+    public async Task StreamAsync_CallerCancellationDuringBlockedReadPropagatesAndDisposesResponse()
+    {
+        using var caller = new CancellationTokenSource();
+        var transport = new BlockingReadTransport();
+        var provider = new TestProvider(transport, completionTimeout: TimeSpan.FromSeconds(5));
+        var stream = provider.StreamAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromSeconds(5) }, caller.Token);
+
+        var enumeration = Assert.ThrowsAnyAsync<OperationCanceledException>(async () =>
+        {
+            await foreach (var _ in stream!) { }
+        });
+        await transport.ReadStarted.WaitAsync(TimeSpan.FromSeconds(1));
+        caller.Cancel();
+
+        await enumeration;
+        Assert.True(transport.Disposed);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_BareReturnedNonSuccessPreservesNumericHttpStatus()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(401, "denied") });
+        var health = await provider.CheckHealthAsync();
+        Assert.False(health.IsHealthy);
+        Assert.Equal("401", health.ErrorCode);
+        Assert.Equal("HTTP 401", health.StatusMessage);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_DoesNotExposeTheKnownApiKeyInMappedErrorText()
+    {
+        const string secret = "short-opaque-test-secret";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(400, $"{{\"message\":\"failed {secret}\"}}") }, apiKey: secret);
+        var exception = await Assert.ThrowsAnyAsync<LlmProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_DoesNotExposeKnownApiKeyFromTransportException()
+    {
+        const string secret = "short-opaque-test-secret";
+        var provider = new TestProvider(new ThrowingTransport(secret), apiKey: secret);
+        var health = await provider.CheckHealthAsync();
+        Assert.False(health.IsHealthy);
+        Assert.DoesNotContain(secret, health.StatusMessage!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamAsync_DoesNotExposeKnownApiKeyFromTransportException()
+    {
+        const string secret = "short-opaque-test-secret";
+        var provider = new TestProvider(new ThrowingTransport(secret), apiKey: secret);
+        var stream = provider.StreamAsync(new LlmRequest { Prompt = "hi" });
+        var exception = await Assert.ThrowsAnyAsync<LlmProviderException>(async () => { await foreach (var _ in stream!) { } });
+        Assert.Equal(LlmErrorCode.ConnectionFailed, exception.ErrorCode);
+        Assert.DoesNotContain(secret, exception.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public void TransportResponse_ExposesBufferedTransportExceptionForErrorMapping()
+    {
+        var property = typeof(OpenAiChatResponse).GetProperty("TransportException");
+        Assert.NotNull(property);
+        Assert.Equal(typeof(Exception), property!.PropertyType);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_PreservesUnicodeAndHtmlInTheLegacyWireBody()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport);
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "<tag> café" });
+
+        Assert.Contains("<tag> café", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\u003C", transport.LastCompletionRequest.JsonBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_OmitsTemperatureAndResponseFormatWhenHooksDisableThem()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport, sendsTemperature: false, supportsJson: false);
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi", Temperature = 0.0f, JsonMode = true });
+
+        Assert.DoesNotContain("temperature", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("response_format", transport.LastCompletionRequest.JsonBody, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RejectsAnEmptyResponseInsteadOfReturningAQuietEmptySuccess()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, string.Empty) });
+
+        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+
+        Assert.Equal(LlmErrorCode.InvalidRequest, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RejectsAChoiceLessJsonResponseInsteadOfReturningAQuietEmptySuccess()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, "{\"choices\":[]}") });
+
+        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+
+        Assert.Equal(LlmErrorCode.InvalidRequest, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_UsesTheProviderErrorMapperBeforeTheDefaultMapper()
+    {
+        var provider = new TestProvider(
+            new ScriptedTransport { Completion = new(429, "{\"error\":{\"code\":\"1113\"}}") },
+            errorMapper: static (_, _, _, _) => new ProviderException("test", LlmErrorCode.QuotaExceeded, "custom mapper"));
+
+        var exception = await Assert.ThrowsAsync<ProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+
+        Assert.Equal(LlmErrorCode.QuotaExceeded, exception.ErrorCode);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ShortCircuitsAnOpenAuthCircuitBeforeTransport()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport, authCircuit: new OpenCircuit());
+
+        await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+
+        Assert.Null(transport.LastCompletionRequest);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_ParsesFinishReasonUsageAndMalformedSalvage()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, "{\"choices\":[{\"message\":{\"content\":\"hello\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":3,\"completion_tokens\":4}}") };
+        var provider = new TestProvider(transport);
+        var response = await provider.CompleteAsync(new LlmRequest { Prompt = "hi" });
+        Assert.Equal("hello", response.Content); Assert.Equal("stop", response.FinishReason); Assert.Equal(7, response.Usage!.TotalTokens);
+        transport.Completion = new(200, "[{\"artist\":\"a\"");
+        Assert.Equal("[{\"artist\":\"a\"", (await provider.CompleteAsync(new LlmRequest { Prompt = "hi" })).Content);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_UsesPinnedProbeAndCustomErrorMapping()
+    {
+        var transport = new ScriptedTransport { Completion = new(503, "busy") };
+        var provider = new TestProvider(transport, errorMapper: static (_, _, _, _) => new ProviderException("test", LlmErrorCode.QuotaExceeded, "custom health"));
+        var health = await provider.CheckHealthAsync();
+        Assert.False(health.IsHealthy); Assert.Equal("503", health.ErrorCode);
+        Assert.Equal("{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK\"}],\"max_tokens\":5}", transport.LastCompletionRequest!.JsonBody);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RecordsReturnedAuthenticationFailureOnceAndSuccessOnNextCall()
+    {
+        var circuit = new RecordingCircuit();
+        var transport = new ScriptedTransport { Completion = new(401, "bad") };
+        var provider = new TestProvider(transport, authCircuit: circuit);
+        await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Equal(1, circuit.Failures);
+        transport.Completion = new(200, OkBody);
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi" });
+        Assert.Equal(1, circuit.Successes);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_PreservesExplicitRetryAfterForProviderMapping()
+    {
+        TimeSpan? observed = null;
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(429, "body", TimeSpan.Zero) }, errorMapper: (_, _, retryAfter, _) => { observed = retryAfter; return new RateLimitException("test", "limited", retryAfter); });
+        await Assert.ThrowsAsync<RateLimitException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Equal(TimeSpan.Zero, observed);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_PropagatesCallerCancellation()
+    {
+        using var cts = new CancellationTokenSource(); cts.Cancel();
+        var transport = new CancellingTransport();
+        var provider = new TestProvider(transport);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }, cts.Token));
+    }
+
+    [Fact]
+    public async Task CompleteAsync_AlreadyCancelledCallerWinsOverAnOpenAuthCircuit()
+    {
+        using var cts = new CancellationTokenSource(); cts.Cancel();
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, authCircuit: new OpenCircuit());
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }, cts.Token));
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RejectsAnEmptyOverrideParseResult()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, parseEmpty: true);
+        await Assert.ThrowsAsync<ProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+    }
+
+    [Fact]
+    public async Task StreamAsync_RejectsDoneOnlyStreamWithoutMeaningfulContent()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody), StreamContent = "data: [DONE]\n\n" });
+        var stream = provider.StreamAsync(new LlmRequest { Prompt = "hi" });
+
+        await Assert.ThrowsAsync<ProviderException>(async () =>
+        {
+            await foreach (var _ in stream!) { }
+        });
+    }
+
+    [Fact]
+    public void StreamAsync_AlreadyCancelledCallerThrowsBeforeReturningEnumerable()
+    {
+        using var cts = new CancellationTokenSource(); cts.Cancel();
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) });
+        Assert.ThrowsAny<OperationCanceledException>(() => provider.StreamAsync(new LlmRequest { Prompt = "hi" }, cts.Token));
+    }
+
+    [Fact]
+    public async Task StreamAsync_PreservesMappedRateLimitMetadataFromOpenFailure()
+    {
+        var expected = new RateLimitException("test", "limited", TimeSpan.FromSeconds(7));
+        var provider = new TestProvider(new MappedThrowingTransport(expected));
+
+        var error = await Assert.ThrowsAsync<RateLimitException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+
+        Assert.Equal(LlmErrorCode.RateLimited, error.ErrorCode);
+        Assert.True(error.IsRetryable);
+        Assert.Equal(TimeSpan.FromSeconds(7), error.RetryAfter);
+        Assert.Same(expected, error);
+    }
+
+    [Theory]
+    [InlineData(0.2f, "0.2")]
+    [InlineData(0.33333334f, "0.33333334")]
+    [InlineData(1e20f, "1E+20")]
+    [InlineData(1e-20f, "1E-20")]
+    // NOT legacy byte-for-byte: legacy Newtonsoft widened float temperatures to double (0.2f
+    // serialized as 0.20000000298023224). The shared base keeps the float and emits the
+    // shortest-round-trip form — a deliberate, semantically equivalent normalization documented
+    // in the audit and CHANGELOG. This test pins the NEW contract.
+    public async Task CompleteAsync_WritesShortestRoundTripFloatTemperature(float temperature, string wireValue)
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new TestProvider(transport);
+        await provider.CompleteAsync(new LlmRequest { Prompt = "🎵 <tag>\n\u0001", Temperature = temperature });
+
+        Assert.Contains($"\"temperature\":{wireValue},", transport.LastCompletionRequest!.JsonBody, StringComparison.Ordinal);
+        Assert.Contains("🎵 <tag>\\n\\u0001", transport.LastCompletionRequest.JsonBody, StringComparison.Ordinal);
+        Assert.DoesNotContain("\\uD83C\\uDFB5", transport.LastCompletionRequest.JsonBody, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Theory]
+    [InlineData("{\"choices\":{}}")]
+    [InlineData("{\"choices\":[1]}")]
+    [InlineData("{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"usage\":[]}")]
+    public async Task CompleteAsync_NonemptyTypeInvalidJsonFallsBackToRawContent(string body)
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, body) });
+        Assert.Equal(body, (await provider.CompleteAsync(new LlmRequest { Prompt = "hi" })).Content);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_NullUsageStillParsesContent()
+    {
+        const string body = "{\"choices\":[{\"message\":{\"content\":\"ok\"}}],\"usage\":null}";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, body) });
+        var response = await provider.CompleteAsync(new LlmRequest { Prompt = "hi" });
+        Assert.Equal("ok", response.Content);
+        Assert.Null(response.Usage);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RejectsRecognizableChoiceWithMissingContent()
+    {
+        const string body = "{\"choices\":[{\"message\":{},\"finish_reason\":\"stop\"}]}";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, body) });
+        await Assert.ThrowsAsync<ProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+    }
+
+    [Fact]
+    public async Task StreamAsync_RedactsKnownKeyWhilePreservingRateLimitMetadata()
+    {
+        const string secret = "stream-secret-key";
+        var provider = new TestProvider(
+            new MappedThrowingTransport(new RateLimitException("test", $"limited {secret}", TimeSpan.FromSeconds(7))),
+            apiKey: secret);
+        var error = await Assert.ThrowsAsync<RateLimitException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+        Assert.Equal(TimeSpan.FromSeconds(7), error.RetryAfter);
+        Assert.True(error.IsRetryable);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RedactsKnownKeyFromGenericTransportFailureAndInner()
+    {
+        const string secret = "completion-secret-key";
+        var provider = new TestProvider(new ThrowingTransport(secret), apiKey: secret);
+        var error = await Assert.ThrowsAnyAsync<LlmProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Equal(LlmErrorCode.ConnectionFailed, error.ErrorCode);
+        Assert.True(error.IsRetryable);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_SafeMappedExceptionRetainsOriginalIdentityAndInner()
+    {
+        var inner = new InvalidOperationException("safe inner");
+        var expected = new AuthenticationException("test", LlmErrorCode.AuthorizationFailed, "safe", inner);
+        var provider = new TestProvider(new MappedThrowingTransport(expected));
+        var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Same(expected, error);
+        Assert.Same(inner, error.InnerException);
+    }
+
+    [Fact]
+    public async Task StreamAsync_RedactsKnownKeyFromMappedReadFailureAndDisposesResponse()
+    {
+        const string secret = "read-secret-key";
+        var expected = new RateLimitException("test", $"limited {secret}", TimeSpan.FromSeconds(9));
+        var transport = new ReadFailureTransport(expected);
+        var provider = new TestProvider(transport, apiKey: secret);
+        var error = await Assert.ThrowsAsync<RateLimitException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+        Assert.Equal(TimeSpan.FromSeconds(9), error.RetryAfter);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        Assert.True(transport.Disposed);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RedactsKnownKeyFromAuthCircuitReason()
+    {
+        const string secret = "circuit-secret-key";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, apiKey: secret, authCircuit: new ReasonCircuit($"rejected {secret}"));
+        var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Equal(LlmErrorCode.AuthenticationFailed, error.ErrorCode);
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_RedactsMappedAuthenticationMessageAndInner()
+    {
+        const string secret = "health-secret-key";
+        var inner = new InvalidOperationException($"inner {secret}");
+        var transport = new ScriptedTransport { Completion = new(401, "bad", null, inner) };
+        var provider = new TestProvider(transport, apiKey: secret,
+            errorMapper: (_, _, _, suppliedInner) => new AuthenticationException("test", LlmErrorCode.AuthenticationFailed, $"bad {secret}", suppliedInner));
+        var health = await provider.CheckHealthAsync();
+        Assert.False(health.IsHealthy);
+        Assert.Equal(LlmErrorCode.AuthenticationFailed.ToString(), health.ErrorCode);
+        Assert.DoesNotContain(secret, health.StatusMessage!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamAsync_EarlyEnumeratorDisposalDisposesTransportResponse()
+    {
+        var transport = new ScriptedTransport
+        {
+            Completion = new(200, OkBody),
+            StreamContent = "data: {\"choices\":[{\"delta\":{\"content\":\"one\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"two\"}}]}\n\n",
+        };
+        var enumerator = new TestProvider(transport).StreamAsync(new LlmRequest { Prompt = "hi" })!.GetAsyncEnumerator();
+        Assert.True(await enumerator.MoveNextAsync());
+        await enumerator.DisposeAsync();
+        Assert.True(transport.StreamResponseDisposed);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_RejectsWhitespaceOnlyParsedContent()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, parseWhitespace: true);
+        await Assert.ThrowsAsync<ProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+    }
+
+    [Fact]
+    public async Task StreamAsync_RejectsWhitespaceOnlyContent()
+    {
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody), StreamContent = "data: {\"choices\":[{\"delta\":{\"content\":\"   \"}}]}\n\ndata: [DONE]\n\n" });
+        await Assert.ThrowsAsync<ProviderException>(async () => { await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { } });
+    }
+
+    [Fact]
+    public async Task CompleteAsync_SanitizesDirectMappedAuthenticationBeforeCircuitRecording()
+    {
+        const string secret = "direct-auth-secret";
+        var circuit = new RecordingCircuit();
+        var provider = new TestProvider(new MappedThrowingTransport(new AuthenticationException("test", $"bad {secret}", new InvalidOperationException(secret))), apiKey: secret, authCircuit: circuit);
+        var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+        Assert.Null(error.InnerException);
+        Assert.DoesNotContain(secret, circuit.LastFailure!.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_SanitizesAuthCircuitProbeFailure()
+    {
+        const string secret = "probe-callback-secret";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, apiKey: secret, authCircuit: new ThrowingProbeCircuit(secret));
+        var error = await Assert.ThrowsAnyAsync<LlmProviderException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_AuthRecordCallbackCannotReplacePrimaryError()
+    {
+        var expected = new AuthenticationException("test", "primary safe");
+        var provider = new TestProvider(new MappedThrowingTransport(expected), authCircuit: new ThrowingRecordCircuit());
+        var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.Same(expected, error);
+    }
+
+    [Fact]
+    public async Task StreamAsync_EarlyDisposeSanitizesResponseDisposalFailure()
+    {
+        const string secret = "dispose-secret-key";
+        var transport = new DisposalFailureTransport("data: {\"choices\":[{\"delta\":{\"content\":\"one\"}}]}\n\n", new HttpRequestException($"dispose {secret}"));
+        var enumerator = new TestProvider(transport, apiKey: secret).StreamAsync(new LlmRequest { Prompt = "hi" })!.GetAsyncEnumerator();
+        Assert.True(await enumerator.MoveNextAsync());
+        var error = await Assert.ThrowsAnyAsync<LlmProviderException>(async () => await enumerator.DisposeAsync());
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task StreamAsync_PrimaryReadFailureWinsOverResponseDisposalFailure()
+    {
+        var expected = new RateLimitException("test", "primary", TimeSpan.FromSeconds(11));
+        var transport = new DisposalFailureTransport(null, new InvalidOperationException("secondary dispose"), expected);
+        var provider = new TestProvider(transport);
+        var error = await Assert.ThrowsAsync<RateLimitException>(async () => { await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { } });
+        Assert.Same(expected, error);
+        Assert.Equal(TimeSpan.FromSeconds(11), error.RetryAfter);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_SuccessCallbackFailurePreservesOriginalFailurePolicy()
+    {
+        const string secret = "success-callback-secret";
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(200, OkBody) }, apiKey: secret, authCircuit: new ThrowingSuccessCircuit(secret));
+        var error = await Assert.ThrowsAsync<AuthenticationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+        Assert.DoesNotContain(secret, error.ToString(), StringComparison.Ordinal);
+    }
+
+
+    private sealed class TestProvider : OpenAiChatProviderBase
+    {
+        private readonly bool _sendsTemperature;
+        private readonly bool _supportsJson;
+        private readonly IReadOnlyDictionary<string, string>? _completionHeaders;
+        private readonly Func<int, string?, TimeSpan?, Exception?, LlmProviderException>? _errorMapper;
+
+        public TestProvider(IOpenAiChatTransport transport, bool sendsTemperature = true, bool supportsJson = true,
+            IReadOnlyDictionary<string, string>? completionHeaders = null,
+            Func<int, string?, TimeSpan?, Exception?, LlmProviderException>? errorMapper = null,
+            IOpenAiChatAuthCircuit? authCircuit = null, bool parseEmpty = false, bool parseWhitespace = false, TimeSpan? completionTimeout = null, string apiKey = "test-key")
+            : base(transport, apiKey, "test-model", "test", "test-model", completionTimeout ?? TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(2), authCircuit)
+        {
+            _sendsTemperature = sendsTemperature;
+            _supportsJson = supportsJson;
+            _completionHeaders = completionHeaders;
+            _errorMapper = errorMapper;
+            _parseEmpty = parseEmpty;
+            _parseWhitespace = parseWhitespace;
+        }
+
+        private readonly bool _parseEmpty;
+        private readonly bool _parseWhitespace;
+
+        public override string DisplayName => "Test";
+        public override LlmProviderCapabilities Capabilities => new() { Flags = LlmCapabilityFlags.TextCompletion, UsesOpenAiCompatibleApi = true };
+        protected override Uri ChatCompletionsEndpoint => new(Endpoint);
+        protected override bool SendsTemperature => _sendsTemperature;
+        protected override bool SupportsJsonResponseFormat => _supportsJson;
+
+        protected override void AddCompletionRequestHeaders(IDictionary<string, string> headers)
+        {
+            if (_completionHeaders is null) return;
+            foreach (var (name, value) in _completionHeaders) headers[name] = value;
+        }
+
+        protected override LlmProviderException MapHttpError(int statusCode, string? body, TimeSpan? retryAfter, Exception? inner)
+            => _errorMapper?.Invoke(statusCode, body, retryAfter, inner) ?? base.MapHttpError(statusCode, body, retryAfter, inner);
+        protected override LlmResponse ParseCompletion(string content) => _parseEmpty ? new LlmResponse { Content = string.Empty } : _parseWhitespace ? new LlmResponse { Content = "   " } : base.ParseCompletion(content);
+    }
+
+    private sealed class ScriptedTransport : IOpenAiChatTransport
+    {
+        public required OpenAiChatResponse Completion { get; set; }
+        public string? StreamContent { get; init; }
+        public OpenAiChatRequest? LastCompletionRequest { get; private set; }
+        public OpenAiChatRequest? LastStreamRequest { get; private set; }
+        public bool StreamResponseDisposed { get; private set; }
+
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+        {
+            LastCompletionRequest = request;
+            return ValueTask.FromResult(Completion);
+        }
+
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+        {
+            LastStreamRequest = request;
+            return ValueTask.FromResult(new OpenAiChatStreamResponse(200, StreamContent is null ? Stream.Null : new MemoryStream(System.Text.Encoding.UTF8.GetBytes(StreamContent)), dispose: () => { StreamResponseDisposed = true; return ValueTask.CompletedTask; }));
+        }
+    }
+
+    private sealed class CancellingTransport : IOpenAiChatTransport
+    {
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromCanceled<OpenAiChatResponse>(cancellationToken);
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromCanceled<OpenAiChatStreamResponse>(cancellationToken);
+    }
+
+    private sealed class MappedThrowingTransport(LlmProviderException exception) : IOpenAiChatTransport
+    {
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromException<OpenAiChatResponse>(exception);
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromException<OpenAiChatStreamResponse>(exception);
+    }
+
+    private sealed class ReadFailureTransport(LlmProviderException exception) : IOpenAiChatTransport
+    {
+        public bool Disposed { get; private set; }
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new OpenAiChatResponse(200, OkBody));
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new OpenAiChatStreamResponse(200, new ThrowOnReadStream(exception), dispose: () => { Disposed = true; return ValueTask.CompletedTask; }));
+    }
+
+    private sealed class ThrowOnReadStream(Exception exception) : Stream
+    {
+        public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false; public override long Length => 0; public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => throw exception;
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) => Task.FromException<int>(exception);
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) => ValueTask.FromException<int>(exception);
+        public override void Flush() { }
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(); public override void SetLength(long value) => throw new NotSupportedException(); public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class DisposalFailureTransport(string? content, Exception disposeError, Exception? readError = null) : IOpenAiChatTransport
+    {
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new OpenAiChatResponse(200, OkBody));
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+        {
+            Stream stream = readError is null ? new MemoryStream(System.Text.Encoding.UTF8.GetBytes(content ?? string.Empty)) : new ThrowOnReadStream(readError);
+            return ValueTask.FromResult(new OpenAiChatStreamResponse(200, stream, dispose: () => ValueTask.FromException(disposeError)));
+        }
+    }
+
+    private sealed class ThrowingTransport(string secret) : IOpenAiChatTransport
+    {
+        private readonly HttpRequestException _exception = new($"transport {secret}", new InvalidOperationException($"inner {secret}"));
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromException<OpenAiChatResponse>(_exception);
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromException<OpenAiChatStreamResponse>(_exception);
+    }
+
+    private sealed class BlockingTransport : IOpenAiChatTransport
+    {
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromResult(new OpenAiChatResponse(200, OkBody));
+        public async ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            throw new InvalidOperationException();
+        }
+    }
+
+    private sealed class BlockingReadTransport : IOpenAiChatTransport
+    {
+        private readonly TaskCompletionSource<bool> _readStarted = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool Disposed { get; private set; }
+        public Task ReadStarted => _readStarted.Task;
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken) => ValueTask.FromResult(new OpenAiChatResponse(200, OkBody));
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new OpenAiChatStreamResponse(200, new BlockingReadStream(_readStarted), dispose: () => { Disposed = true; return ValueTask.CompletedTask; }));
+    }
+
+    private sealed class BlockingReadStream : Stream
+    {
+        private readonly TaskCompletionSource<bool> _readStarted;
+        public BlockingReadStream(TaskCompletionSource<bool> readStarted) => _readStarted = readStarted;
+        public override bool CanRead => true; public override bool CanSeek => false; public override bool CanWrite => false; public override long Length => 0; public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken)
+        {
+            _readStarted.TrySetResult(true);
+            return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ContinueWith(_ => 0, cancellationToken);
+        }
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            _readStarted.TrySetResult(true);
+            return new(Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken).ContinueWith(_ => 0, cancellationToken));
+        }
+        public override void Flush() { }
+        public override Task FlushAsync(CancellationToken cancellationToken) => Task.CompletedTask; public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException(); public override void SetLength(long value) => throw new NotSupportedException(); public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+    }
+
+    private sealed class RecordingCircuit : IOpenAiChatAuthCircuit
+    {
+        public int Failures { get; private set; }
+        public int Successes { get; private set; }
+        public LlmProviderException? LastFailure { get; private set; }
+        public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; return false; }
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { Failures++; LastFailure = error; }
+        public void RecordSuccess(string providerId, string credential) => Successes++;
+    }
+
+    private sealed class OpenCircuit : IOpenAiChatAuthCircuit
+    {
+        public bool IsOpen(string providerId, string credential, out string? reason)
+        {
+            reason = "known bad credential";
+            return true;
+        }
+
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
+        public void RecordSuccess(string providerId, string credential) { }
+    }
+
+    private sealed class ReasonCircuit(string reason) : IOpenAiChatAuthCircuit
+    {
+        public bool IsOpen(string providerId, string credential, out string? circuitReason) { circuitReason = reason; return true; }
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
+        public void RecordSuccess(string providerId, string credential) { }
+    }
+
+    private sealed class ThrowingProbeCircuit(string secret) : IOpenAiChatAuthCircuit
+    {
+        public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; throw new InvalidOperationException($"probe {secret}"); }
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
+        public void RecordSuccess(string providerId, string credential) { }
+    }
+
+    private sealed class ThrowingRecordCircuit : IOpenAiChatAuthCircuit
+    {
+        public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; return false; }
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) => throw new InvalidOperationException("record callback failed");
+        public void RecordSuccess(string providerId, string credential) { }
+    }
+
+    private sealed class ThrowingSuccessCircuit(string secret) : IOpenAiChatAuthCircuit
+    {
+        public bool IsOpen(string providerId, string credential, out string? reason) { reason = null; return false; }
+        public void RecordAuthFailure(string providerId, string credential, LlmProviderException error) { }
+        public void RecordSuccess(string providerId, string credential) => throw new AuthenticationException(providerId, $"success callback failed {secret}");
+    }
+
+}

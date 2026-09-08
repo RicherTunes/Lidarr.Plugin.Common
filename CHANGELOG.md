@@ -38,6 +38,17 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Added
+- Float request temperatures serialize in shortest-round-trip form (0.2f emits 0.2, not the legacy widened 0.20000000298023224) - semantically equivalent to the previous wire; the one intentional numeric deviation from byte-exact legacy parity.
+- **OpenAI Chat Completions provider base.** `OpenAiChatProviderBase` centralizes ordered request shaping, API-key headers, provider error hooks, health probes, auth-circuit callbacks, response parsing, and SSE decoding behind a transport-neutral seam for host-specific adapters.
+
+### Changed
+- Empty or whitespace-only completion bodies, choice-less responses, missing completion content, and streams with no meaningful content are provider errors instead of quiet empty successes. Malformed and type-invalid non-empty completion payloads still surface their raw content for caller salvage.
+
+### Fixed
+- **SSE cancellation and async-stream ownership.** `SseFramingReader` no longer probes `StreamReader.EndOfStream`, which could perform a synchronous read and silently stop on cancellation. It now awaits cancellation-aware line reads, preserves normal EOF handling for unterminated frames, and leaves the caller-owned stream open.
+- **OpenAI provider error boundaries preserve semantics without leaking configured credentials.** Direct or mapped provider failures retain subtype, retry metadata, and safe identity; unsafe inners are removed. Auth callback, stream-open, stream-read, and disposal errors are sanitized, caller cancellation remains unwrapped, and cleanup cannot replace a primary read failure.
+
 ### Fixed — durable local CI test receipts
 - The shared local CI runner now publishes every real test TRX, including failing runs, before cleaning its temporary test directory. Receipts default to a unique `artifacts/local-ci/<run-id>/` directory; callers may nominate a durable directory with `LIDARR_LOCAL_CI_RESULTS_DIR`. Receipt names include the project, timestamp, and GUID so repeated runs cannot overwrite earlier evidence. Destination creation, publication, and TRX parsing fail closed, while the nominated durable directory is never deleted. Test selection, warning budgets, dependencies, and pass/fail interpretation are unchanged.
 
