@@ -78,16 +78,39 @@ public sealed class StreamFrameTooLargeException : StreamingException
     /// </summary>
     public int ActualSize { get; }
 
+    /// <summary>Gets the unit used by <see cref="ActualSize"/>.</summary>
+    public StreamFrameSizeUnit SizeUnit { get; }
+
     /// <summary>
     /// Initializes a new instance of the <see cref="StreamFrameTooLargeException"/> class.
     /// </summary>
     public StreamFrameTooLargeException(int maxEventSize, int actualSize)
-        : base($"SSE event exceeds maximum allowed size of {maxEventSize:N0} bytes (received ~{actualSize:N0} bytes). " +
-               "Configure a larger maxEventSize if this is expected.")
+        : this(maxEventSize, actualSize, StreamFrameSizeUnit.EncodedBytes)
+    {
+    }
+
+    internal StreamFrameTooLargeException(int maxEventSize, long actualSize, StreamFrameSizeUnit sizeUnit)
+        : base(CreateMessage(maxEventSize, actualSize, sizeUnit))
     {
         MaxEventSize = maxEventSize;
-        ActualSize = actualSize;
+        ActualSize = actualSize > int.MaxValue ? int.MaxValue : (int)actualSize;
+        SizeUnit = sizeUnit;
     }
+
+    private static string CreateMessage(int maximum, long actual, StreamFrameSizeUnit unit)
+    {
+        var unitText = unit == StreamFrameSizeUnit.EncodedBytes ? "encoded bytes" : "retained UTF-16 code units";
+        return $"SSE frame exceeds maximum allowed size of {maximum:N0} {unitText} (received {actual:N0} {unitText}). Configure a larger maxEventSize if this is expected.";
+    }
+}
+
+/// <summary>Identifies the unit reported by an SSE frame-size exception.</summary>
+public enum StreamFrameSizeUnit
+{
+    /// <summary>Bytes emitted by the configured encoding.</summary>
+    EncodedBytes,
+    /// <summary>UTF-16 code units retained in memory.</summary>
+    Utf16CodeUnits,
 }
 
 /// <summary>

@@ -380,6 +380,46 @@ data: [DONE]
     }
 
     [Fact]
+    public async Task ReadFramesAsync_PhysicalLineAtExactPrefixAllowance_Completes()
+    {
+        // UTF-8: maxEventSize 8 plus the longest recognized prefix ("event: ", 7) is 15 bytes.
+        await using var stream = new AsyncOnlyStream(": 0123456789012\n\ndata: x\n\n");
+        var reader = new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 8);
+        Assert.Equal("x", Assert.Single(await CollectFramesAsync(reader)).Data);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_Utf16RetentionFailure_NamesDiagnosticUnit()
+    {
+        await using var stream = new AsyncOnlyStream("data: ab\ndata: cd\ndata: ef\ndata:\n\n");
+        var reader = new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 8);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(reader));
+        Assert.Equal(StreamFrameSizeUnit.Utf16CodeUnits, error.SizeUnit);
+        Assert.Equal(8, error.MaxEventSize);
+        Assert.Equal(9, error.ActualSize);
+        Assert.Contains("retained UTF-16 code units", error.Message, StringComparison.Ordinal);
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    [InlineData("\r")]
+    public async Task ReadFramesAsync_BoundedMode_PreservesLineTerminators(string terminator)
+    {
+        await using var stream = new AsyncOnlyStream($"data: first{terminator}data: second{terminator}{terminator}");
+        var reader = new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 12);
+        Assert.Equal("first\nsecond", Assert.Single(await CollectFramesAsync(reader)).Data);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_BoundedMode_CrPushesBackNextLineCharacter()
+    {
+        await using var stream = new AsyncOnlyStream("data: first\rdata: second\r\r");
+        var reader = new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 12);
+        Assert.Equal("first\nsecond", Assert.Single(await CollectFramesAsync(reader)).Data);
+    }
+
+    [Fact]
     public async Task ReadFramesAsync_UnlimitedMode_AllowsFiniteLargeLine()
     {
         var payload = new string('x', 64 * 1024);
