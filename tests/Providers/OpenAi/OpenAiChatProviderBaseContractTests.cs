@@ -127,6 +127,36 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
     [Fact]
+    public async Task StreamAsync_ShortDerivedOwnerTimeoutCancelsBlockedReadAndDisposesResponse()
+    {
+        var transport = new BlockingReadTransport();
+        var provider = new OwnerTimeoutProvider(transport, TimeSpan.FromMilliseconds(30));
+
+        var error = await Assert.ThrowsAsync<NetworkException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+
+        Assert.Equal(LlmErrorCode.Timeout, error.ErrorCode);
+        Assert.Equal(1, provider.ResolveCount);
+        Assert.True(transport.Disposed);
+    }
+
+    [Fact]
+    public async Task StreamAsync_InvalidDerivedOwnerTimeoutFailsBeforeDispatch()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new OwnerTimeoutProvider(transport, TimeSpan.Zero);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+
+        Assert.Null(transport.LastStreamRequest);
+    }
+
+    [Fact]
     public async Task CompleteAsync_DerivedOwnerTimeoutIsResolvedForEveryInvocation()
     {
         var transport = new ScriptedTransport { Completion = new(200, OkBody) };
