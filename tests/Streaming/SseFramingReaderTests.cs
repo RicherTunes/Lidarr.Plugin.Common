@@ -420,6 +420,71 @@ data: [DONE]
     }
 
     [Fact]
+    public async Task ReadFramesAsync_ZeroOutputEncoding_BoundsPhysicalLineByRetainedCharacters()
+    {
+        await using var stream = new SentinelAsyncOnlyStream("unknown012345678", Encoding.ASCII);
+        var reader = new SseFramingReader(stream, new ZeroOutputEncoding(), bufferSize: 8, maxEventSize: 8);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(reader));
+        Assert.Equal(StreamFrameSizeUnit.Utf16CodeUnits, error.SizeUnit);
+        Assert.False(stream.SentinelReadAttempted);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_ZeroOutputEncoding_BoundsAccumulatedEventDataBeforeSentinel()
+    {
+        await using var stream = new SentinelAsyncOnlyStream("data: a\ndata: a\ndata: a\ndata: a\ndata: a", Encoding.ASCII);
+        var reader = new SseFramingReader(stream, new ZeroOutputEncoding(), bufferSize: 8, maxEventSize: 8);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(reader));
+        Assert.Equal(StreamFrameSizeUnit.Utf16CodeUnits, error.SizeUnit);
+        Assert.Equal(9, error.ActualSize);
+        Assert.False(stream.SentinelReadAttempted);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_StatefulEncoderFlushBytesCountAtEventBoundary()
+    {
+        await using var exactStream = new SentinelAsyncOnlyStream("data: a\n\n", Encoding.ASCII, returnEof: true);
+        var exact = new SseFramingReader(exactStream, new FlushSuffixEncoding(), bufferSize: 8, maxEventSize: 2);
+        Assert.Equal("a", Assert.Single(await CollectFramesAsync(exact)).Data);
+
+        await using var oversizedStream = new SentinelAsyncOnlyStream("data: a\n\n", Encoding.ASCII, returnEof: true);
+        var oversized = new SseFramingReader(oversizedStream, new FlushSuffixEncoding(), bufferSize: 8, maxEventSize: 1);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(oversized));
+        Assert.Equal(StreamFrameSizeUnit.EncodedBytes, error.SizeUnit);
+        Assert.Equal(2, error.ActualSize);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_NoProgressEncoder_FailsDeterministically()
+    {
+        await using var stream = new SentinelAsyncOnlyStream("data: x\n\n", Encoding.ASCII, returnEof: true);
+        var reader = new SseFramingReader(stream, new NoProgressEncoding(), bufferSize: 8, maxEventSize: 8);
+        var error = await Assert.ThrowsAsync<InvalidDataException>(() => CollectFramesAsync(reader));
+        Assert.Contains("made no progress", error.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_CancellationDuringCrLookahead_RemainsCallerCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        await using var stream = new BlockingAsyncOnlyStream("data: partial\r");
+        var task = CollectFramesAsync(new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 32), cancellation.Token);
+        await stream.PendingRead.WaitAsync(TimeSpan.FromSeconds(1));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_BoundFailure_LeavesCallerStreamOpen()
+    {
+        var stream = new AsyncOnlyStream("data: oversized\n\n");
+        var reader = new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 2);
+        await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(reader));
+        Assert.True(stream.CanRead);
+        await stream.DisposeAsync();
+    }
+
+    [Fact]
     public async Task ReadFramesAsync_UnlimitedMode_AllowsFiniteLargeLine()
     {
         var payload = new string('x', 64 * 1024);
@@ -491,7 +556,13 @@ data: [DONE]
         private readonly byte[] _data;
         private int _position;
 
-        public SentinelAsyncOnlyStream(string text, Encoding encoding) => _data = encoding.GetBytes(text);
+        private readonly bool _returnEof;
+
+        public SentinelAsyncOnlyStream(string text, Encoding encoding, bool returnEof = false)
+        {
+            _data = encoding.GetBytes(text);
+            _returnEof = returnEof;
+        }
 
         public bool SentinelReadAttempted { get; private set; }
         public override bool CanRead => true;
@@ -510,6 +581,11 @@ data: [DONE]
             cancellationToken.ThrowIfCancellationRequested();
             if (_position >= _data.Length)
             {
+                if (_returnEof)
+                {
+                    return ValueTask.FromResult(0);
+                }
+
                 SentinelReadAttempted = true;
                 throw new SentinelReadException();
             }
@@ -520,6 +596,72 @@ data: [DONE]
     }
 
     private sealed class SentinelReadException : Exception;
+
+    private class DelegatingAsciiEncoding : Encoding
+    {
+        public override int GetByteCount(char[] chars, int index, int count) => Encoding.ASCII.GetByteCount(chars, index, count);
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex) => Encoding.ASCII.GetBytes(chars, charIndex, charCount, bytes, byteIndex);
+        public override int GetCharCount(byte[] bytes, int index, int count) => Encoding.ASCII.GetCharCount(bytes, index, count);
+        public override int GetChars(byte[] bytes, int byteIndex, int byteCount, char[] chars, int charIndex) => Encoding.ASCII.GetChars(bytes, byteIndex, byteCount, chars, charIndex);
+        public override int GetMaxByteCount(int charCount) => Encoding.ASCII.GetMaxByteCount(charCount);
+        public override int GetMaxCharCount(int byteCount) => Encoding.ASCII.GetMaxCharCount(byteCount);
+        public override Decoder GetDecoder() => Encoding.ASCII.GetDecoder();
+    }
+
+    private sealed class ZeroOutputEncoding : DelegatingAsciiEncoding
+    {
+        public override int GetByteCount(char[] chars, int index, int count) => 0;
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex) => 0;
+        public override int GetMaxByteCount(int charCount) => 0;
+        public override Encoder GetEncoder() => new ZeroOutputEncoder();
+    }
+
+    private sealed class ZeroOutputEncoder : Encoder
+    {
+        public override int GetByteCount(char[] chars, int index, int count, bool flush) => 0;
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, bool flush) => 0;
+    }
+
+    private sealed class FlushSuffixEncoding : DelegatingAsciiEncoding
+    {
+        public override Encoder GetEncoder() => new FlushSuffixEncoder();
+    }
+
+    private sealed class FlushSuffixEncoder : Encoder
+    {
+        private bool _hasInput;
+        public override int GetByteCount(char[] chars, int index, int count, bool flush) => count + (flush && (_hasInput || count > 0) ? 1 : 0);
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, bool flush)
+        {
+            for (var i = 0; i < charCount; i++) bytes[byteIndex + i] = (byte)chars[charIndex + i];
+            _hasInput |= charCount > 0;
+            var written = charCount;
+            if (flush && _hasInput)
+            {
+                bytes[byteIndex + written++] = 0x7e;
+                _hasInput = false;
+            }
+
+            return written;
+        }
+    }
+
+    private sealed class NoProgressEncoding : DelegatingAsciiEncoding
+    {
+        public override Encoder GetEncoder() => new NoProgressEncoder();
+    }
+
+    private sealed class NoProgressEncoder : Encoder
+    {
+        public override int GetByteCount(char[] chars, int index, int count, bool flush) => 0;
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, bool flush) => 0;
+        public override void Convert(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, int byteCount, bool flush, out int charsUsed, out int bytesUsed, out bool completed)
+        {
+            charsUsed = 0;
+            bytesUsed = 0;
+            completed = false;
+        }
+    }
 
     private sealed class BlockingAsyncOnlyStream : Stream
     {
