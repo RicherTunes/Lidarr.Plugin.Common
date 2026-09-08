@@ -59,6 +59,9 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     protected abstract Uri ChatCompletionsEndpoint { get; }
     protected TimeSpan CompletionTimeout { get; }
     protected TimeSpan HealthTimeout { get; }
+    /// <summary>Resolves the owner-level completion timeout for the current invocation.</summary>
+    /// <remarks>Overrides must return a positive value. Request-specific shortening remains Common-owned.</remarks>
+    protected virtual TimeSpan ResolveCompletionTimeout() => CompletionTimeout;
     protected string CurrentModel => _model;
     protected virtual double DefaultTemperature => 0.7;
     protected virtual bool SendsTemperature => true;
@@ -115,9 +118,10 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         if (circuitOpen)
             throw new AuthenticationException(ProviderId, LlmErrorCode.AuthenticationFailed, SanitizeText("Auth circuit open: " + reason));
 
+        var requestTimeout = ResolveRequestTimeout(request);
         try
         {
-            var response = await SendAsync(BuildRequestBody(request), ResolveRequestTimeout(request), cancellationToken).ConfigureAwait(false);
+            var response = await SendAsync(BuildRequestBody(request), requestTimeout, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != (int)HttpStatusCode.OK)
             {
                 throw MapSafeHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, response.TransportException);
@@ -216,10 +220,11 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
 
     private async IAsyncEnumerable<LlmStreamChunk> StreamCoreAsync(LlmRequest request, [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
     {
-        using var timeout = new ResilienceTimeout(ResolveRequestTimeout(request), cancellationToken);
+        var requestTimeout = ResolveRequestTimeout(request);
+        using var timeout = new ResilienceTimeout(requestTimeout, cancellationToken);
         var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase) { ["Authorization"] = $"Bearer {_apiKey}", ["Accept"] = "text/event-stream" };
         AddStreamingRequestHeaders(headers);
-        var response = await OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, SerializeRequestBody(BuildStreamingRequestBody(request)), headers, ResolveRequestTimeout(request)), timeout.Token, cancellationToken).ConfigureAwait(false);
+        var response = await OpenStreamAsync(new OpenAiChatRequest(ProviderId, ChatCompletionsEndpoint, SerializeRequestBody(BuildStreamingRequestBody(request)), headers, requestTimeout), timeout.Token, cancellationToken).ConfigureAwait(false);
         var emittedMeaningfulContent = false;
         var reachedTerminalState = false;
         Exception? primaryError = null;
@@ -331,9 +336,17 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     private static string? Truncate(string? body) => string.IsNullOrEmpty(body) || body.Length <= 500 ? body : body[..500];
 
     private TimeSpan ResolveRequestTimeout(LlmRequest request)
-        => request.Timeout is { } requested && requested > TimeSpan.Zero && requested < CompletionTimeout
+    {
+        var completionTimeout = ResolveCompletionTimeout();
+        if (completionTimeout <= TimeSpan.Zero)
+        {
+            throw new InvalidOperationException($"{nameof(ResolveCompletionTimeout)} must return a positive timeout.");
+        }
+
+        return request.Timeout is { } requested && requested > TimeSpan.Zero && requested < completionTimeout
             ? requested
-            : CompletionTimeout;
+            : completionTimeout;
+    }
 
     private static JsonSerializerOptions CreateWireJsonOptions()
     {

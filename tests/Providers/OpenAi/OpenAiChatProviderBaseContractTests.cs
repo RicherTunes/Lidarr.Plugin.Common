@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Net.Http;
 using System.Threading;
@@ -81,6 +82,116 @@ public sealed class OpenAiChatProviderBaseContractTests
         var provider = new TestProvider(transport, completionTimeout: TimeSpan.FromSeconds(5));
         await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromSeconds(10) })!) { }
         Assert.Equal(TimeSpan.FromSeconds(5), transport.LastStreamRequest!.Timeout);
+    }
+
+    [Theory]
+    [InlineData(0, 120)]
+    [InlineData(-1, 120)]
+    [InlineData(10, 10)]
+    [InlineData(120, 120)]
+    [InlineData(240, 120)]
+    public async Task CompleteAsync_DerivedOwnerTimeoutRetainsCommonRequestClamp(int requestSeconds, int expectedSeconds)
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new OwnerTimeoutProvider(transport, TimeSpan.FromSeconds(120));
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromSeconds(requestSeconds) });
+
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), transport.LastCompletionRequest!.Timeout);
+        Assert.Equal(1, provider.ResolveCount);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_DerivedOwnerTimeoutAppliesWhenRequestTimeoutIsUnset()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new OwnerTimeoutProvider(transport, TimeSpan.FromSeconds(120));
+
+        await provider.CompleteAsync(new LlmRequest { Prompt = "hi" });
+
+        Assert.Equal(TimeSpan.FromSeconds(120), transport.LastCompletionRequest!.Timeout);
+        Assert.Equal(1, provider.ResolveCount);
+    }
+
+    [Theory]
+    [InlineData(10, 10)]
+    [InlineData(240, 120)]
+    public async Task StreamAsync_DerivedOwnerTimeoutIsResolvedOnceAndSharedWithTransport(int requestSeconds, int expectedSeconds)
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody), StreamContent = "data: {\"choices\":[{\"delta\":{\"content\":\"ok\"}}]}\n\ndata: [DONE]\n\n" };
+        var provider = new OwnerTimeoutProvider(transport, TimeSpan.FromSeconds(120));
+
+        await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi", Timeout = TimeSpan.FromSeconds(requestSeconds) })!) { }
+
+        Assert.Equal(TimeSpan.FromSeconds(expectedSeconds), transport.LastStreamRequest!.Timeout);
+        Assert.Equal(1, provider.ResolveCount);
+    }
+
+    [Fact]
+    public async Task StreamAsync_ShortDerivedOwnerTimeoutCancelsBlockedReadAndDisposesResponse()
+    {
+        var transport = new BlockingReadTransport();
+        var provider = new OwnerTimeoutProvider(transport, TimeSpan.FromMilliseconds(30));
+        var stopwatch = Stopwatch.StartNew();
+
+        var error = await Assert.ThrowsAsync<NetworkException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+
+        Assert.Equal(LlmErrorCode.Timeout, error.ErrorCode);
+        Assert.True(stopwatch.Elapsed < TimeSpan.FromSeconds(1), $"owner timeout took {stopwatch.Elapsed}");
+        Assert.Equal(1, provider.ResolveCount);
+        Assert.True(transport.Disposed);
+    }
+
+    [Fact]
+    public async Task StreamAsync_InvalidDerivedOwnerTimeoutFailsBeforeDispatch()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new OwnerTimeoutProvider(transport, TimeSpan.Zero);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+
+        Assert.Null(transport.LastStreamRequest);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_DerivedOwnerTimeoutIsResolvedForEveryInvocation()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new OwnerTimeoutProvider(transport, TimeSpan.FromSeconds(120));
+        await provider.CompleteAsync(new LlmRequest { Prompt = "first" });
+
+        provider.OwnerTimeout = TimeSpan.FromSeconds(90);
+        await provider.CompleteAsync(new LlmRequest { Prompt = "second" });
+
+        Assert.Equal(TimeSpan.FromSeconds(90), transport.LastCompletionRequest!.Timeout);
+        Assert.Equal(2, provider.ResolveCount);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_DoesNotResolveCompletionTimeout()
+    {
+        var provider = new OwnerTimeoutProvider(new ScriptedTransport { Completion = new(200, OkBody) }, TimeSpan.FromSeconds(120));
+
+        await provider.CheckHealthAsync();
+
+        Assert.Equal(0, provider.ResolveCount);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_InvalidDerivedOwnerTimeoutFailsBeforeDispatch()
+    {
+        var transport = new ScriptedTransport { Completion = new(200, OkBody) };
+        var provider = new OwnerTimeoutProvider(transport, TimeSpan.Zero);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+
+        Assert.Null(transport.LastCompletionRequest);
     }
 
     [Fact]
@@ -560,7 +671,7 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
 
-    private sealed class TestProvider : OpenAiChatProviderBase
+    private class TestProvider : OpenAiChatProviderBase
     {
         private readonly bool _sendsTemperature;
         private readonly bool _supportsJson;
@@ -599,6 +710,24 @@ public sealed class OpenAiChatProviderBaseContractTests
         protected override LlmProviderException MapHttpError(int statusCode, string? body, TimeSpan? retryAfter, Exception? inner)
             => _errorMapper?.Invoke(statusCode, body, retryAfter, inner) ?? base.MapHttpError(statusCode, body, retryAfter, inner);
         protected override LlmResponse ParseCompletion(string content) => _parseEmpty ? new LlmResponse { Content = string.Empty } : _parseWhitespace ? new LlmResponse { Content = "   " } : base.ParseCompletion(content);
+    }
+
+    private sealed class OwnerTimeoutProvider : TestProvider
+    {
+        public OwnerTimeoutProvider(IOpenAiChatTransport transport, TimeSpan ownerTimeout)
+            : base(transport)
+        {
+            OwnerTimeout = ownerTimeout;
+        }
+
+        public TimeSpan OwnerTimeout { get; set; }
+        public int ResolveCount { get; private set; }
+
+        protected override TimeSpan ResolveCompletionTimeout()
+        {
+            ResolveCount++;
+            return OwnerTimeout;
+        }
     }
 
     private sealed class ScriptedTransport : IOpenAiChatTransport

@@ -40,6 +40,7 @@ public sealed class OpenAiChatProviderBaseSurfaceContractTests
             "TransformStreamChunk",
             "NormalizeModel",
             "UpdateModel",
+            "ResolveCompletionTimeout",
         };
 
         var methods = providerBase.GetMethods(
