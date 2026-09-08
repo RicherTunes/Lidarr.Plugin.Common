@@ -3,6 +3,7 @@
 // </copyright>
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
 using System.Threading;
@@ -298,6 +299,95 @@ data: [DONE]
         await stream.DisposeAsync();
     }
 
+    [Theory]
+    [InlineData("\u0800", 3, 2)]
+    [InlineData("🎵", 4, 3)]
+    public async Task ReadFramesAsync_Utf8Payload_UsesEncodedByteCount(string payload, int exactLimit, int rejectedLimit)
+    {
+        await using var exactStream = new AsyncOnlyStream($"data: {payload}\n\n");
+        var exact = new SseFramingReader(exactStream, Encoding.UTF8, bufferSize: 8, maxEventSize: exactLimit);
+        Assert.Equal(payload, Assert.Single(await CollectFramesAsync(exact)).Data);
+
+        await using var oversizedStream = new AsyncOnlyStream($"data: {payload}\n\n");
+        var oversized = new SseFramingReader(oversizedStream, Encoding.UTF8, bufferSize: 8, maxEventSize: rejectedLimit);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(oversized));
+        Assert.Equal(rejectedLimit, error.MaxEventSize);
+        Assert.Equal(exactLimit, error.ActualSize);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_MultilineData_CountsEncodedInsertedNewline()
+    {
+        const string content = "data: é\ndata: 🎵\n\n";
+        await using var exactStream = new AsyncOnlyStream(content);
+        var exact = new SseFramingReader(exactStream, Encoding.UTF8, bufferSize: 8, maxEventSize: 7);
+        Assert.Equal("é\n🎵", Assert.Single(await CollectFramesAsync(exact)).Data);
+
+        await using var oversizedStream = new AsyncOnlyStream(content);
+        var oversized = new SseFramingReader(oversizedStream, Encoding.UTF8, bufferSize: 8, maxEventSize: 6);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(oversized));
+        Assert.Equal(7, error.ActualSize);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_UsesSelectedEncodingForDataAndInsertedNewline()
+    {
+        const string content = "data: é\ndata: é\n\n";
+        await using var exactStream = new EncodedAsyncOnlyStream(content, Encoding.Unicode);
+        var exact = new SseFramingReader(exactStream, Encoding.Unicode, bufferSize: 8, maxEventSize: 6);
+        Assert.Equal("é\né", Assert.Single(await CollectFramesAsync(exact)).Data);
+
+        await using var oversizedStream = new EncodedAsyncOnlyStream(content, Encoding.Unicode);
+        var oversized = new SseFramingReader(oversizedStream, Encoding.Unicode, bufferSize: 8, maxEventSize: 5);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(oversized));
+        Assert.Equal(6, error.ActualSize);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_MultilineData_CountsRetainedUtf16IncludingInsertedNewlines()
+    {
+        await using var exactStream = new AsyncOnlyStream("data: ab\ndata: cd\ndata: ef\n\n");
+        var exact = new SseFramingReader(exactStream, Encoding.UTF8, bufferSize: 8, maxEventSize: 8);
+        Assert.Equal("ab\ncd\nef", Assert.Single(await CollectFramesAsync(exact)).Data);
+
+        await using var oversizedStream = new AsyncOnlyStream("data: ab\ndata: cd\ndata: ef\ndata:\n\n");
+        var oversized = new SseFramingReader(oversizedStream, Encoding.UTF8, bufferSize: 8, maxEventSize: 8);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(oversized));
+        Assert.Equal(8, error.MaxEventSize);
+        Assert.Equal(9, error.ActualSize);
+    }
+
+    public static TheoryData<string> HostilePhysicalLines => new()
+    {
+        "data: 0123456789",
+        "id: 012345678901",
+        "event: 0123456789",
+        "retry: 012345678",
+        ": 01234567890123",
+        "fieldonly0123456",
+        "unknown: 0123456",
+    };
+
+    [Theory]
+    [MemberData(nameof(HostilePhysicalLines))]
+    public async Task ReadFramesAsync_BoundedPhysicalLine_StopsBeforePostLimitSentinel(string content)
+    {
+        await using var stream = new SentinelAsyncOnlyStream(content, Encoding.UTF8);
+        var reader = new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 8);
+
+        await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(reader));
+        Assert.False(stream.SentinelReadAttempted);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_UnlimitedMode_AllowsFiniteLargeLine()
+    {
+        var payload = new string('x', 64 * 1024);
+        await using var stream = new AsyncOnlyStream($"data: {payload}\n\n");
+        var reader = new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 0);
+        Assert.Equal(payload, Assert.Single(await CollectFramesAsync(reader)).Data);
+    }
+
     private static MemoryStream CreateStream(string content)
     {
         return new MemoryStream(Encoding.UTF8.GetBytes(content));
@@ -332,6 +422,64 @@ data: [DONE]
             return ValueTask.FromResult(count);
         }
     }
+
+    private sealed class EncodedAsyncOnlyStream : MemoryStream
+    {
+        private readonly byte[] _data;
+
+        public EncodedAsyncOnlyStream(string text, Encoding encoding) => _data = encoding.GetBytes(text);
+
+        public override int Read(byte[] buffer, int offset, int count) => throw new InvalidOperationException("sync read is forbidden");
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var remaining = _data.Length - (int)Position;
+            var count = Math.Min(remaining, buffer.Length);
+            if (count > 0)
+            {
+                _data.AsSpan((int)Position, count).CopyTo(buffer.Span);
+            }
+
+            Position += count;
+            return ValueTask.FromResult(count);
+        }
+    }
+
+    private sealed class SentinelAsyncOnlyStream : Stream
+    {
+        private readonly byte[] _data;
+        private int _position;
+
+        public SentinelAsyncOnlyStream(string text, Encoding encoding) => _data = encoding.GetBytes(text);
+
+        public bool SentinelReadAttempted { get; private set; }
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => _data.Length;
+        public override long Position { get => _position; set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (_position >= _data.Length)
+            {
+                SentinelReadAttempted = true;
+                throw new SentinelReadException();
+            }
+
+            buffer.Span[0] = _data[_position++];
+            return ValueTask.FromResult(1);
+        }
+    }
+
+    private sealed class SentinelReadException : Exception;
 
     private sealed class BlockingAsyncOnlyStream : Stream
     {
