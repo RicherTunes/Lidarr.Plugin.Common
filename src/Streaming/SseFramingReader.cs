@@ -322,7 +322,7 @@ public sealed class SseFramingReader
             encoder.Convert(input, inputOffset, inputLength - inputOffset, output, 0, output.Length, flush, out var charsUsed, out var bytesUsed, out var completed);
             if (bytesUsed > maximum - count)
             {
-                throw new StreamFrameTooLargeException(reportedMaximum, count + bytesUsed, StreamFrameSizeUnit.EncodedBytes);
+                throw new StreamFrameTooLargeException(reportedMaximum, count + bytesUsed, StreamFrameSizeUnit.EncodedBytes, maximum);
             }
 
             count += bytesUsed;

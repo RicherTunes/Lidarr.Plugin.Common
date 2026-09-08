@@ -74,7 +74,8 @@ public sealed class StreamFrameTooLargeException : StreamingException
     public int MaxEventSize { get; }
 
     /// <summary>
-    /// Gets the actual event size in bytes (approximate).
+    /// Gets the measured size in <see cref="SizeUnit"/>. Values larger than
+    /// <see cref="int.MaxValue"/> are saturated to preserve the existing property type.
     /// </summary>
     public int ActualSize { get; }
 

@@ -444,14 +444,44 @@ data: [DONE]
     public async Task ReadFramesAsync_StatefulEncoderFlushBytesCountAtEventBoundary()
     {
         await using var exactStream = new SentinelAsyncOnlyStream("data: a\n\n", Encoding.ASCII, returnEof: true);
-        var exact = new SseFramingReader(exactStream, new FlushSuffixEncoding(), bufferSize: 8, maxEventSize: 2);
+        var exact = new SseFramingReader(exactStream, new FlushSuffixEncoding(), bufferSize: 8, maxEventSize: 3);
         Assert.Equal("a", Assert.Single(await CollectFramesAsync(exact)).Data);
 
         await using var oversizedStream = new SentinelAsyncOnlyStream("data: a\n\n", Encoding.ASCII, returnEof: true);
-        var oversized = new SseFramingReader(oversizedStream, new FlushSuffixEncoding(), bufferSize: 8, maxEventSize: 1);
+        var oversized = new SseFramingReader(oversizedStream, new FlushSuffixEncoding(), bufferSize: 8, maxEventSize: 2);
         var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(oversized));
         Assert.Equal(StreamFrameSizeUnit.EncodedBytes, error.SizeUnit);
-        Assert.Equal(2, error.ActualSize);
+        Assert.Equal(3, error.ActualSize);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_StatefulEncoderCountsMultilineNewlineAndResetsBetweenEvents()
+    {
+        const string content = "data: a\ndata: b\n\ndata: a\ndata: b\n\n";
+        await using var exactStream = new SentinelAsyncOnlyStream(content, Encoding.ASCII, returnEof: true);
+        var exact = new SseFramingReader(exactStream, new FlushSuffixEncoding(), bufferSize: 8, maxEventSize: 7);
+        var frames = await CollectFramesAsync(exact);
+        Assert.Equal(2, frames.Length);
+        Assert.All(frames, frame => Assert.Equal("a\nb", frame.Data));
+
+        await using var oversizedStream = new SentinelAsyncOnlyStream(content, Encoding.ASCII, returnEof: true);
+        var oversized = new SseFramingReader(oversizedStream, new FlushSuffixEncoding(), bufferSize: 8, maxEventSize: 6);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(oversized));
+        Assert.Equal(7, error.ActualSize);
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r")]
+    [InlineData("")]
+    public async Task ReadFramesAsync_StatefulPhysicalLineFlush_ReportsEffectiveAllowance(string terminator)
+    {
+        await using var stream = new SentinelAsyncOnlyStream($"12345678{terminator}", Encoding.ASCII, returnEof: true);
+        var reader = new SseFramingReader(stream, new FlushSuffixEncoding(), bufferSize: 8, maxEventSize: 1);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(reader));
+        Assert.Equal(1, error.MaxEventSize);
+        Assert.Equal(17, error.ActualSize);
+        Assert.Contains("16 encoded bytes", error.Message, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -464,11 +494,68 @@ data: [DONE]
     }
 
     [Fact]
+    public async Task ReadFramesAsync_EncoderDrainsMoreThanScratchCapacityForOneCharacter()
+    {
+        await using var exactStream = new SentinelAsyncOnlyStream("data: x\n\n", Encoding.ASCII, returnEof: true);
+        var exact = new SseFramingReader(exactStream, new FortyByteEncoding(), bufferSize: 8, maxEventSize: 40);
+        Assert.Equal("x", Assert.Single(await CollectFramesAsync(exact)).Data);
+
+        await using var oversizedStream = new SentinelAsyncOnlyStream("data: x\n\n", Encoding.ASCII, returnEof: true);
+        var oversized = new SseFramingReader(oversizedStream, new FortyByteEncoding(), bufferSize: 8, maxEventSize: 39);
+        var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(oversized));
+        Assert.Equal(40, error.ActualSize);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_PhysicalAllowanceUsesLargestEncodedPrefix()
+    {
+        await using var stream = new SentinelAsyncOnlyStream("id: 12345678\n", Encoding.ASCII, returnEof: true);
+        var reader = new SseFramingReader(stream, new SkewedPrefixEncoding(), bufferSize: 8, maxEventSize: 8);
+        Assert.Empty(await CollectFramesAsync(reader));
+    }
+
+    [Fact]
+    public void StreamFrameTooLargeException_LegacyConstructorAndSaturationRemainCompatible()
+    {
+        var legacy = new StreamFrameTooLargeException(8, 9);
+        Assert.Equal(StreamFrameSizeUnit.EncodedBytes, legacy.SizeUnit);
+        Assert.Equal(9, legacy.ActualSize);
+
+        var saturated = new StreamFrameTooLargeException(8, (long)int.MaxValue + 42, StreamFrameSizeUnit.Utf16CodeUnits);
+        Assert.Equal(int.MaxValue, saturated.ActualSize);
+        Assert.Contains(((long)int.MaxValue + 42).ToString("N0"), saturated.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
     public async Task ReadFramesAsync_CancellationDuringCrLookahead_RemainsCallerCancellation()
     {
         using var cancellation = new CancellationTokenSource();
         await using var stream = new BlockingAsyncOnlyStream("data: partial\r");
         var task = CollectFramesAsync(new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 32), cancellation.Token);
+        await stream.PendingRead.WaitAsync(TimeSpan.FromSeconds(1));
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
+    }
+
+    [Theory]
+    [InlineData("\n")]
+    [InlineData("\r\n")]
+    [InlineData("\r")]
+    [InlineData("")]
+    public async Task ReadFramesAsync_SplitUtf8SurrogatePair_FinalizesAtEveryBoundary(string terminator)
+    {
+        await using var stream = new SentinelAsyncOnlyStream($"data: 🎵{terminator}", Encoding.UTF8, returnEof: true);
+        var reader = new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 4);
+        Assert.Equal("🎵", Assert.Single(await CollectFramesAsync(reader)).Data);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_CancellationDuringSplitUtf8Sequence_RemainsCallerCancellation()
+    {
+        using var cancellation = new CancellationTokenSource();
+        var complete = Encoding.UTF8.GetBytes("data: 🎵\n\n");
+        await using var stream = new PrefixThenBlockingStream(complete[..^3]);
+        var task = CollectFramesAsync(new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 8), cancellation.Token);
         await stream.PendingRead.WaitAsync(TimeSpan.FromSeconds(1));
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => task);
@@ -638,18 +725,36 @@ data: [DONE]
 
     private sealed class FlushSuffixEncoding : DelegatingAsciiEncoding
     {
+        public override int GetByteCount(char[] chars, int index, int count) => (count * 2) + 1;
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex)
+        {
+            for (var i = 0; i < charCount; i++)
+            {
+                bytes[byteIndex + (i * 2)] = (byte)chars[charIndex + i];
+                bytes[byteIndex + (i * 2) + 1] = 0;
+            }
+
+            bytes[byteIndex + (charCount * 2)] = 0x7e;
+            return (charCount * 2) + 1;
+        }
+
+        public override int GetMaxByteCount(int charCount) => (charCount * 2) + 1;
         public override Encoder GetEncoder() => new FlushSuffixEncoder();
     }
 
     private sealed class FlushSuffixEncoder : Encoder
     {
         private bool _hasInput;
-        public override int GetByteCount(char[] chars, int index, int count, bool flush) => count + (flush && (_hasInput || count > 0) ? 1 : 0);
+        public override int GetByteCount(char[] chars, int index, int count, bool flush) => (count * 2) + (flush && (_hasInput || count > 0) ? 1 : 0);
         public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, bool flush)
         {
-            for (var i = 0; i < charCount; i++) bytes[byteIndex + i] = (byte)chars[charIndex + i];
+            for (var i = 0; i < charCount; i++)
+            {
+                bytes[byteIndex + (i * 2)] = (byte)chars[charIndex + i];
+                bytes[byteIndex + (i * 2) + 1] = 0;
+            }
             _hasInput |= charCount > 0;
-            var written = charCount;
+            var written = charCount * 2;
             if (flush && _hasInput)
             {
                 bytes[byteIndex + written++] = 0x7e;
@@ -670,6 +775,74 @@ data: [DONE]
     private sealed class NoProgressEncoding : DelegatingAsciiEncoding
     {
         public override Encoder GetEncoder() => new NoProgressEncoder();
+    }
+
+    private sealed class FortyByteEncoding : DelegatingAsciiEncoding
+    {
+        public override int GetByteCount(char[] chars, int index, int count) => count * 40;
+        public override int GetMaxByteCount(int charCount) => charCount * 40;
+        public override Encoder GetEncoder() => new FortyByteEncoder();
+    }
+
+    private sealed class FortyByteEncoder : Encoder
+    {
+        private int _remaining;
+        public override int GetByteCount(char[] chars, int index, int count, bool flush) => count * 40;
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, bool flush) => throw new NotSupportedException();
+        public override void Convert(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, int byteCount, bool flush, out int charsUsed, out int bytesUsed, out bool completed)
+        {
+            if (_remaining == 0 && charCount > 0) _remaining = 40;
+            bytesUsed = Math.Min(_remaining, byteCount);
+            Array.Fill(bytes, (byte)'x', byteIndex, bytesUsed);
+            _remaining -= bytesUsed;
+            charsUsed = _remaining == 0 && charCount > 0 ? 1 : 0;
+            completed = _remaining == 0 && charsUsed == charCount;
+        }
+    }
+
+    private sealed class SkewedPrefixEncoding : DelegatingAsciiEncoding
+    {
+        public override int GetByteCount(char[] chars, int index, int count)
+        {
+            var value = new string(chars, index, count);
+            var expensive = value.StartsWith("id: ", StringComparison.Ordinal) ? Math.Min(4, count) : 0;
+            return (expensive * 20) + (count - expensive);
+        }
+
+        public override int GetMaxByteCount(int charCount) => charCount * 20;
+        public override Encoder GetEncoder() => new SkewedPrefixEncoder();
+    }
+
+    private sealed class SkewedPrefixEncoder : Encoder
+    {
+        private const string ExpensivePrefix = "id: ";
+        private int _position;
+        private int _remaining;
+        public override int GetByteCount(char[] chars, int index, int count, bool flush) => count * 20;
+        public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, bool flush) => throw new NotSupportedException();
+        public override void Convert(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, int byteCount, bool flush, out int charsUsed, out int bytesUsed, out bool completed)
+        {
+            if (charCount == 0)
+            {
+                charsUsed = 0;
+                bytesUsed = 0;
+                completed = true;
+                return;
+            }
+
+            if (_remaining == 0)
+            {
+                var expensive = _position < ExpensivePrefix.Length && chars[charIndex] == ExpensivePrefix[_position];
+                _remaining = expensive ? 20 : 1;
+            }
+
+            bytesUsed = Math.Min(_remaining, byteCount);
+            Array.Fill(bytes, (byte)'x', byteIndex, bytesUsed);
+            _remaining -= bytesUsed;
+            charsUsed = _remaining == 0 ? 1 : 0;
+            if (charsUsed == 1) _position++;
+            completed = charsUsed == charCount;
+        }
     }
 
     private sealed class ThrowingEncoderEncoding : DelegatingAsciiEncoding
@@ -722,6 +895,43 @@ data: [DONE]
                 _data.AsSpan(_position, count).CopyTo(buffer.Span);
                 _position += count;
                 return ValueTask.FromResult(count);
+            }
+
+            _pendingRead.TrySetResult(true);
+            return WaitForCancellationAsync(cancellationToken);
+        }
+
+        private static async ValueTask<int> WaitForCancellationAsync(CancellationToken cancellationToken)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+    }
+
+    private sealed class PrefixThenBlockingStream : Stream
+    {
+        private readonly byte[] _prefix;
+        private readonly TaskCompletionSource<bool> _pendingRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _position;
+
+        public PrefixThenBlockingStream(byte[] prefix) => _prefix = prefix;
+        public Task PendingRead => _pendingRead.Task;
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => _prefix.Length;
+        public override long Position { get => _position; set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) => throw new InvalidOperationException("sync read is forbidden");
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
+        {
+            if (_position < _prefix.Length)
+            {
+                buffer.Span[0] = _prefix[_position++];
+                return ValueTask.FromResult(1);
             }
 
             _pendingRead.TrySetResult(true);
