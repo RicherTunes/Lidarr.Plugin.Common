@@ -34,7 +34,14 @@ namespace Lidarr.Plugin.Common.Services.Http
         /// either an integer delta or an HTTP-date.
         /// </returns>
         public static TimeSpan? ParseRetryAfter(IEnumerable<KeyValuePair<string, string>>? headers)
+            => ParseRetryAfter(headers, TimeProvider.System);
+
+        internal static TimeSpan? ParseRetryAfter(
+            IEnumerable<KeyValuePair<string, string>>? headers,
+            TimeProvider timeProvider)
         {
+            ArgumentNullException.ThrowIfNull(timeProvider);
+
             try
             {
                 if (headers == null) return null;
@@ -48,7 +55,7 @@ namespace Lidarr.Plugin.Common.Services.Http
                     if (string.IsNullOrEmpty(raw)) continue;
 
                     // Numeric delta (seconds) — most common wire format (e.g. "120").
-                    if (int.TryParse(raw, out var seconds))
+                    if (int.TryParse(raw, NumberStyles.Integer, CultureInfo.InvariantCulture, out var seconds))
                     {
                         return TimeSpan.FromSeconds(Math.Max(0, seconds));
                     }
@@ -63,7 +70,7 @@ namespace Lidarr.Plugin.Common.Services.Http
                             DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal,
                             out var when))
                     {
-                        var delta = when - DateTimeOffset.UtcNow;
+                        var delta = when - timeProvider.GetUtcNow();
                         return delta > TimeSpan.Zero ? delta : TimeSpan.Zero;
                     }
 
