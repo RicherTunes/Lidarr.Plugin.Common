@@ -321,7 +321,7 @@ public class SseFramingContractTests
         // Bounded mode now rejects while retaining the physical line. UTF-8 allows the
         // configured 100-byte payload plus the longest recognized 7-byte prefix.
         Assert.Equal(108, ex.ActualSize);
-        Assert.Equal(StreamFrameSizeUnit.EncodedBytes, ex.SizeUnit);
+        Assert.Equal(StreamFrameSizeUnit.Utf16CodeUnits, ex.SizeUnit);
         Assert.Contains("exceeds maximum", ex.Message);
     }
 
