@@ -90,14 +90,19 @@ public sealed class StreamFrameTooLargeException : StreamingException
     }
 
     internal StreamFrameTooLargeException(int maxEventSize, long actualSize, StreamFrameSizeUnit sizeUnit)
-        : base(CreateMessage(maxEventSize, actualSize, sizeUnit))
+        : this(maxEventSize, actualSize, sizeUnit, maxEventSize)
+    {
+    }
+
+    internal StreamFrameTooLargeException(int maxEventSize, long actualSize, StreamFrameSizeUnit sizeUnit, long effectiveLimit)
+        : base(CreateMessage(effectiveLimit, actualSize, sizeUnit))
     {
         MaxEventSize = maxEventSize;
         ActualSize = actualSize > int.MaxValue ? int.MaxValue : (int)actualSize;
         SizeUnit = sizeUnit;
     }
 
-    private static string CreateMessage(int maximum, long actual, StreamFrameSizeUnit unit)
+    private static string CreateMessage(long maximum, long actual, StreamFrameSizeUnit unit)
     {
         var unitText = unit == StreamFrameSizeUnit.EncodedBytes ? "encoded bytes" : "retained UTF-16 code units";
         return $"SSE frame exceeds maximum allowed size of {maximum:N0} {unitText} (received {actual:N0} {unitText}). Configure a larger maxEventSize if this is expected.";

@@ -432,7 +432,7 @@ data: [DONE]
     [Fact]
     public async Task ReadFramesAsync_ZeroOutputEncoding_BoundsAccumulatedEventDataBeforeSentinel()
     {
-        await using var stream = new SentinelAsyncOnlyStream("data: a\ndata: a\ndata: a\ndata: a\ndata: a", Encoding.ASCII);
+        await using var stream = new SentinelAsyncOnlyStream("data: a\ndata: a\ndata: a\ndata: a\ndata: a\n", Encoding.ASCII);
         var reader = new SseFramingReader(stream, new ZeroOutputEncoding(), bufferSize: 8, maxEventSize: 8);
         var error = await Assert.ThrowsAsync<StreamFrameTooLargeException>(() => CollectFramesAsync(reader));
         Assert.Equal(StreamFrameSizeUnit.Utf16CodeUnits, error.SizeUnit);
@@ -491,6 +491,14 @@ data: [DONE]
         await using var stream = new AsyncOnlyStream($"data: {payload}\n\n");
         var reader = new SseFramingReader(stream, Encoding.UTF8, bufferSize: 8, maxEventSize: 0);
         Assert.Equal(payload, Assert.Single(await CollectFramesAsync(reader)).Data);
+    }
+
+    [Fact]
+    public async Task ReadFramesAsync_UnlimitedMode_DoesNotConstructEncoder()
+    {
+        await using var stream = new SentinelAsyncOnlyStream("data: unlimited\n\n", Encoding.ASCII, returnEof: true);
+        var reader = new SseFramingReader(stream, new ThrowingEncoderEncoding(), bufferSize: 8, maxEventSize: 0);
+        Assert.Equal("unlimited", Assert.Single(await CollectFramesAsync(reader)).Data);
     }
 
     private static MemoryStream CreateStream(string content)
@@ -620,6 +628,12 @@ data: [DONE]
     {
         public override int GetByteCount(char[] chars, int index, int count, bool flush) => 0;
         public override int GetBytes(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, bool flush) => 0;
+        public override void Convert(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, int byteCount, bool flush, out int charsUsed, out int bytesUsed, out bool completed)
+        {
+            charsUsed = charCount;
+            bytesUsed = 0;
+            completed = true;
+        }
     }
 
     private sealed class FlushSuffixEncoding : DelegatingAsciiEncoding
@@ -644,11 +658,23 @@ data: [DONE]
 
             return written;
         }
+
+        public override void Convert(char[] chars, int charIndex, int charCount, byte[] bytes, int byteIndex, int byteCount, bool flush, out int charsUsed, out int bytesUsed, out bool completed)
+        {
+            bytesUsed = GetBytes(chars, charIndex, charCount, bytes, byteIndex, flush);
+            charsUsed = charCount;
+            completed = true;
+        }
     }
 
     private sealed class NoProgressEncoding : DelegatingAsciiEncoding
     {
         public override Encoder GetEncoder() => new NoProgressEncoder();
+    }
+
+    private sealed class ThrowingEncoderEncoding : DelegatingAsciiEncoding
+    {
+        public override Encoder GetEncoder() => throw new InvalidOperationException("Unlimited mode must not construct an encoder.");
     }
 
     private sealed class NoProgressEncoder : Encoder
