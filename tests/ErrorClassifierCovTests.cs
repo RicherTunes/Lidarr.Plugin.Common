@@ -647,7 +647,7 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public void MapHttpError_429_WithHundredsOfRetryAfterDigits_ReturnsRateLimitWithoutHint()
         {
-            var responseBody = $"retry_after: {new string('9', 256)}";
+            var responseBody = $"retry_after: {new string('9', 400)}";
 
             var result = LlmErrorMapper.MapHttpError("test-provider", 429, responseBody);
 
