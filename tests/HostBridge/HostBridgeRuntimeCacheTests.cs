@@ -104,6 +104,14 @@ public class HostBridgeRuntimeCacheTests : IDisposable
             }
         }
 
+        public void ReleaseAllBRuntimes()
+        {
+            foreach (ControlledRuntime runtime in this.BRuntimes)
+            {
+                runtime.ReleaseDispose.TrySetResult();
+            }
+        }
+
         protected override Task<ControlledRuntime?> CreateAsync(ControlledSettings settings, CancellationToken cancellationToken)
         {
             Interlocked.Increment(ref this.createCount);
@@ -574,38 +582,64 @@ public class HostBridgeRuntimeCacheTests : IDisposable
     }
 
     [Fact]
-    public async Task GetAsync_PendingSameAndDifferentKeysRemainSerialized()
+    public async Task GetAsync_PendingSameKeyFollowerReusesPublishedRuntime()
     {
         var cache = new BlockedCreationCache();
         Task<ControlledRuntime?>? owner = null;
         Task<ControlledRuntime?>? sameKey = null;
-        Task<ControlledRuntime?>? differentKey = null;
 
         try
         {
             owner = cache.GetAsync(new ControlledSettings("B"));
             await cache.FirstBCreated.Task.WaitAsync(TimeSpan.FromSeconds(10));
             sameKey = cache.GetAsync(new ControlledSettings("B"));
-            differentKey = cache.GetAsync(new ControlledSettings("C"));
 
             Assert.Equal(1, cache.CreateCount);
             Assert.False(sameKey!.IsCompleted);
-            Assert.False(differentKey!.IsCompleted);
 
             cache.ReleaseFirstB.TrySetResult();
             ControlledRuntime? first = await owner!.WaitAsync(TimeSpan.FromSeconds(10));
             ControlledRuntime? same = await sameKey.WaitAsync(TimeSpan.FromSeconds(10));
-            ControlledRuntime? different = await differentKey.WaitAsync(TimeSpan.FromSeconds(10));
 
             Assert.NotNull(first);
             Assert.Same(first, same);
+            Assert.Equal(1, cache.CreateCount);
+        }
+        finally
+        {
+            cache.ReleaseFirstB.TrySetResult();
+            await AwaitCleanupAsync(cache, null, owner, sameKey);
+        }
+    }
+
+    [Fact]
+    public async Task GetAsync_PendingDifferentKeyWaitsForExistingCreation()
+    {
+        var cache = new BlockedCreationCache();
+        Task<ControlledRuntime?>? owner = null;
+        Task<ControlledRuntime?>? differentKey = null;
+
+        try
+        {
+            owner = cache.GetAsync(new ControlledSettings("B"));
+            await cache.FirstBCreated.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            differentKey = cache.GetAsync(new ControlledSettings("C"));
+
+            Assert.Equal(1, cache.CreateCount);
+            Assert.False(differentKey!.IsCompleted);
+
+            cache.ReleaseFirstB.TrySetResult();
+            ControlledRuntime? first = await owner!.WaitAsync(TimeSpan.FromSeconds(10));
+            ControlledRuntime? different = await differentKey.WaitAsync(TimeSpan.FromSeconds(10));
+
+            Assert.NotNull(first);
             Assert.NotNull(different);
             Assert.Equal(2, cache.CreateCount);
         }
         finally
         {
             cache.ReleaseFirstB.TrySetResult();
-            await AwaitCleanupAsync(cache, null, owner, sameKey, differentKey);
+            await AwaitCleanupAsync(cache, null, owner, differentKey);
         }
     }
 
@@ -836,6 +870,10 @@ public class HostBridgeRuntimeCacheTests : IDisposable
                         // Cleanup must continue after a failed or cancelled task.
                     }
                 }
+            }
+            if (cache is BlockedCreationCache blockedCreationCache)
+            {
+                blockedCreationCache.ReleaseAllBRuntimes();
             }
             await cache.ResetAsync().WaitAsync(TimeSpan.FromSeconds(10));
         }
