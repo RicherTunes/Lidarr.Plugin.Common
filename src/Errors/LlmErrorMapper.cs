@@ -1,5 +1,4 @@
 using System;
-using System.Globalization;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.RegularExpressions;
@@ -57,14 +56,37 @@ public static class LlmErrorMapper
         TimeSpan? retryAfter,
         Exception? inner)
     {
-        // 429: prefer explicit retry-after (typically from header), fall back to body parse.
-        var resolvedRetryAfter = retryAfter ?? ParseRetryAfter(responseBody);
+        return MapHttpErrorWithBody(providerId, statusCode, responseBody, responseBody, retryAfter, inner);
+    }
+
+    /// <summary>
+    /// Maps an HTTP error while keeping the complete body available to the semantic mapper and
+    /// allowing callers to supply a separately bounded body for exception display.
+    /// </summary>
+    /// <param name="providerId">The provider that returned this error.</param>
+    /// <param name="statusCode">HTTP status code.</param>
+    /// <param name="responseBody">Complete response body used for retry hints and error details.</param>
+    /// <param name="displayBody">Bounded body used for exception messages.</param>
+    /// <param name="retryAfter">Explicit retry-after hint, typically from the response header.</param>
+    /// <param name="inner">Optional inner exception.</param>
+    /// <returns>An appropriate <see cref="LlmProviderException"/> subclass.</returns>
+    public static LlmProviderException MapHttpErrorWithBody(
+        string providerId,
+        int statusCode,
+        string? responseBody,
+        string? displayBody,
+        TimeSpan? retryAfter,
+        Exception? inner)
+    {
+        var resolvedRetryAfter = statusCode == 429
+            ? retryAfter ?? RetryBodyHintResolver.Resolve(responseBody)
+            : null;
         return statusCode switch
         {
             401 => new AuthenticationException(providerId, "Invalid API key or credentials", inner),
             403 => new AuthenticationException(providerId, LlmErrorCode.AuthorizationFailed, "Access denied - check API key permissions", inner),
             429 => new RateLimitException(providerId, "Rate limit exceeded", resolvedRetryAfter),
-            400 => new ProviderException(providerId, LlmErrorCode.InvalidRequest, ParseErrorMessage(responseBody) ?? "Invalid request", inner),
+            400 => new ProviderException(providerId, LlmErrorCode.InvalidRequest, ParseErrorMessage(displayBody) ?? "Invalid request", inner),
             404 => new ProviderException(providerId, LlmErrorCode.ModelNotFound, "Model or endpoint not found", inner),
             500 => new ProviderException(providerId, LlmErrorCode.ProviderUnavailable, "Internal server error", inner),
             502 => new ProviderException(providerId, LlmErrorCode.ProviderUnavailable, "Bad gateway", inner),
@@ -139,38 +161,6 @@ public static class LlmErrorMapper
                 => new NetworkException(providerId, LlmErrorCode.Timeout, "Operation was cancelled", oce),
             _ => new ProviderException(providerId, LlmErrorCode.Unknown, $"Unexpected error: {ex.Message}", ex)
         };
-    }
-
-    /// <summary>
-    /// Parses the retry-after value from a response body or headers.
-    /// Returns null if not found or unparseable.
-    /// </summary>
-    private static TimeSpan? ParseRetryAfter(string? responseBody)
-    {
-        if (string.IsNullOrEmpty(responseBody))
-            return null;
-
-        // Try to find retry_after or retry-after in JSON response
-        // Simple regex approach - providers can override with more sophisticated parsing
-        var match = Regex.Match(
-            responseBody,
-            @"[""']?retry[-_]?after[""']?\s*[:=]\s*(\d+(?:\.\d+)?)",
-            RegexOptions.IgnoreCase);
-
-        if (match.Success
-            && double.TryParse(
-                match.Groups[1].Value,
-                NumberStyles.Float,
-                CultureInfo.InvariantCulture,
-                out var seconds)
-            && double.IsFinite(seconds)
-            && seconds >= 0
-            && seconds <= TimeSpan.MaxValue.TotalSeconds)
-        {
-            return TimeSpan.FromSeconds(seconds);
-        }
-
-        return null;
     }
 
     /// <summary>
