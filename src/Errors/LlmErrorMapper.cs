@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Net.Http;
 using System.Net.Http.Headers;
 using System.Text.RegularExpressions;
@@ -156,7 +157,15 @@ public static class LlmErrorMapper
             @"[""']?retry[-_]?after[""']?\s*[:=]\s*(\d+(?:\.\d+)?)",
             RegexOptions.IgnoreCase);
 
-        if (match.Success && double.TryParse(match.Groups[1].Value, out var seconds))
+        if (match.Success
+            && double.TryParse(
+                match.Groups[1].Value,
+                NumberStyles.Float,
+                CultureInfo.InvariantCulture,
+                out var seconds)
+            && double.IsFinite(seconds)
+            && seconds >= 0
+            && seconds <= TimeSpan.MaxValue.TotalSeconds)
         {
             return TimeSpan.FromSeconds(seconds);
         }
