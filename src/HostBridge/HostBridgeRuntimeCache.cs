@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
+using System.Runtime.ExceptionServices;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -15,8 +16,9 @@ namespace Lidarr.Plugin.Common.HostBridge;
 ///
 /// <para>What the cache provides:</para>
 /// <list type="bullet">
-///   <item><b>Gated initialization</b> — a <see cref="SemaphoreSlim"/> ensures concurrent
-///         <c>GetAsync</c> callers see one runtime, not N parallel constructions.</item>
+///   <item><b>Reserved initialization</b> — a <see cref="SemaphoreSlim"/> serializes
+///         admission while one creation reservation runs outside the gate, so concurrent
+///         <c>GetAsync</c> callers see one runtime without holding the gate across factory work.</item>
 ///   <item><b>Auth-key invalidation</b> — subclass returns an opaque key string from auth
 ///         settings; when the key changes, a new runtime is built.</item>
 ///   <item><b>Deferred-disposal graveyard</b> — previous runtime is parked for
@@ -62,8 +64,22 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
     private TRuntime? _cachedRuntime;
     private string? _cachedKey;
     private TaskCompletionSource? _activeReset;
+    private PendingCreation? _pendingCreation;
 
     private readonly ConcurrentQueue<(DateTime ParkedAt, TRuntime Runtime)> _graveyard = new();
+
+    private sealed class CreationOutcome
+    {
+        public TRuntime? Runtime { get; init; }
+        public ExceptionDispatchInfo? Failure { get; init; }
+    }
+
+    private sealed class PendingCreation(string key)
+    {
+        public string Key { get; } = key;
+        public TaskCompletionSource<CreationOutcome> Settled { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource? ResetGeneration { get; set; }
+    }
 
     /// <summary>Linger window before a retired runtime is disposed. Default 60s.</summary>
     protected virtual int GraveyardLingerSeconds => 60;
@@ -88,6 +104,7 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
     /// <summary>
     /// Return a runtime for the given settings — cached if auth fields haven't changed,
     /// freshly constructed (with the prior runtime parked for deferred disposal) otherwise.
+    /// Factory invocation and awaiting occur outside the cache gate.
     /// Returns null if <see cref="CreateAsync"/> returns null.
     /// </summary>
     public async Task<TRuntime?> GetAsync(TSettings settings, CancellationToken cancellationToken = default)
@@ -101,14 +118,19 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
             SweepGraveyard();
 
             var key = ComputeAuthKey(settings);
-            Task? resetToAwait = null;
+            Task? waitFor = null;
+            PendingCreation? ownerReservation = null;
 
             await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
             try
             {
                 if (_activeReset is not null)
                 {
-                    resetToAwait = _activeReset.Task;
+                    waitFor = _activeReset.Task;
+                }
+                else if (_pendingCreation is not null)
+                {
+                    waitFor = _pendingCreation.Settled.Task;
                 }
                 else
                 {
@@ -125,15 +147,8 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
                         _cachedKey = null;
                     }
 
-                    var built = await CreateAsync(settings, cancellationToken).ConfigureAwait(false);
-                    if (built is null)
-                    {
-                        return null;
-                    }
-
-                    _cachedRuntime = built;
-                    _cachedKey = key;
-                    return built;
+                    ownerReservation = new PendingCreation(key);
+                    _pendingCreation = ownerReservation;
                 }
             }
             finally
@@ -141,7 +156,66 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
                 _gate.Release();
             }
 
-            await resetToAwait.WaitAsync(cancellationToken).ConfigureAwait(false);
+            if (ownerReservation is null)
+            {
+                await waitFor!.WaitAsync(cancellationToken).ConfigureAwait(false);
+                continue;
+            }
+
+            CreationOutcome outcome;
+            try
+            {
+                TRuntime? built = await CreateAsync(settings, cancellationToken).ConfigureAwait(false);
+                outcome = new CreationOutcome { Runtime = built };
+            }
+            catch (Exception exception)
+            {
+                outcome = new CreationOutcome { Failure = ExceptionDispatchInfo.Capture(exception) };
+            }
+
+            TaskCompletionSource? resetGeneration = null;
+            await _gate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                if (ReferenceEquals(_pendingCreation, ownerReservation))
+                {
+                    _pendingCreation = null;
+                }
+
+                resetGeneration = ownerReservation.ResetGeneration;
+                if (resetGeneration is null)
+                {
+                    if (outcome.Runtime is not null)
+                    {
+                        _cachedRuntime = outcome.Runtime;
+                        _cachedKey = ownerReservation.Key;
+                    }
+                }
+            }
+            finally
+            {
+                _gate.Release();
+            }
+
+            ownerReservation.Settled.TrySetResult(outcome);
+
+            if (outcome.Failure is not null)
+            {
+                outcome.Failure.Throw();
+            }
+
+            if (resetGeneration is not null)
+            {
+                if (outcome.Runtime is not null)
+                {
+                    await resetGeneration.Task.ConfigureAwait(false);
+                    continue;
+                }
+
+                return null;
+            }
+
+            return outcome.Runtime;
         }
     }
 
@@ -155,6 +229,7 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
     {
         Task? resetToAwait = null;
         TaskCompletionSource? resetGeneration = null;
+        PendingCreation? pendingCreation = null;
         TRuntime? current = null;
         var parkedRuntimes = new List<TRuntime>();
         Task[] dispatchedDisposals = Array.Empty<Task>();
@@ -183,6 +258,13 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
                     dispatchedDisposals = new Task[_dispatchedDisposals.Count];
                     _dispatchedDisposals.CopyTo(dispatchedDisposals);
                 }
+
+                pendingCreation = _pendingCreation;
+                if (pendingCreation is not null)
+                {
+                    _pendingCreation = null;
+                    pendingCreation.ResetGeneration = resetGeneration;
+                }
             }
         }
         finally
@@ -198,15 +280,17 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
 
         try
         {
-            if (current is not null)
+            Task disposalDrain = DrainDisposalsAsync(current, parkedRuntimes, dispatchedDisposals);
+            if (pendingCreation is not null)
             {
-                await DisposeBestEffortAsync(current).ConfigureAwait(false);
+                CreationOutcome lateOutcome = await pendingCreation.Settled.Task.ConfigureAwait(false);
+                if (lateOutcome.Runtime is not null)
+                {
+                    await DisposeBestEffortAsync(lateOutcome.Runtime).ConfigureAwait(false);
+                }
             }
-            foreach (var parked in parkedRuntimes)
-            {
-                await DisposeBestEffortAsync(parked).ConfigureAwait(false);
-            }
-            await Task.WhenAll(dispatchedDisposals).ConfigureAwait(false);
+
+            await disposalDrain.ConfigureAwait(false);
         }
         finally
         {
@@ -224,6 +308,22 @@ public abstract class HostBridgeRuntimeCache<TRuntime, TSettings>
             }
             resetGeneration!.TrySetResult();
         }
+    }
+
+    private static async Task DrainDisposalsAsync(
+        TRuntime? current,
+        IReadOnlyList<TRuntime> parkedRuntimes,
+        IReadOnlyList<Task> dispatchedDisposals)
+    {
+        if (current is not null)
+        {
+            await DisposeBestEffortAsync(current).ConfigureAwait(false);
+        }
+        foreach (TRuntime parked in parkedRuntimes)
+        {
+            await DisposeBestEffortAsync(parked).ConfigureAwait(false);
+        }
+        await Task.WhenAll(dispatchedDisposals).ConfigureAwait(false);
     }
 
     private void EnqueueWithBound(TRuntime runtime)

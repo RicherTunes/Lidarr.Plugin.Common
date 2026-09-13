@@ -40,6 +40,15 @@ Template to copy when drafting a release:
 
 ### Fixed
 
+- **Runtime creation no longer holds the cache gate.** `HostBridgeRuntimeCache`
+  now reserves one global creation, invokes and awaits the overridable factory
+  outside synchronization, and lets reset begin disposal while creation is in
+  flight. A reset claims an admitted late runtime exclusively, disposes it once,
+  and makes the successful owner retry against the new generation. Owner failure,
+  null, cancellation, follower cancellation, and existing disposal behavior are
+  preserved. The bounded H3 follow-up does not add factory timeouts or reentrant
+  factory support.
+
 - Legacy LLM body `Retry-After` parsing now uses invariant dot-decimal parsing
   and ignores nonfinite or unrepresentable durations. HTTP status mapping,
   supplied inner exceptions, explicit header precedence, and the existing
