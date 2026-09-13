@@ -38,6 +38,13 @@ Template to copy when drafting a release:
 
 ## [Unreleased]
 
+### Fixed
+
+- Legacy LLM body `Retry-After` parsing now uses invariant dot-decimal parsing
+  and ignores nonfinite or unrepresentable durations. HTTP status mapping,
+  supplied inner exceptions, explicit header precedence, and the existing
+  legacy token grammar remain unchanged.
+
 - **Effective SSE bounds.** Bounded `SseFramingReader` instances now stop oversized physical lines before retaining them, count cumulative `data:` payloads in bytes emitted by the configured encoding, and independently cap retained UTF-16 code units. Inserted multiline separators count toward both event limits, ignored metadata is physically bounded, diagnostics name their unit, and `maxEventSize: 0` remains the unlimited opt-out.
 
 ### Added
