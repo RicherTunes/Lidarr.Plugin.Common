@@ -49,6 +49,7 @@ Template to copy when drafting a release:
 - Empty or whitespace-only completion bodies, choice-less responses, missing completion content, and streams with no meaningful content are provider errors instead of quiet empty successes. Malformed and type-invalid non-empty completion payloads still surface their raw content for caller salvage.
 
 ### Fixed
+- **Host-bridge reset owns dispatched runtime disposal.** `HostBridgeRuntimeCache.ResetAsync` now waits for runtime disposals already dequeued by graveyard overflow or linger sweeping. Overlapping resets share one drain generation, and overlapping lookups wait for that explicit reset without making ordinary credential rotation block on background disposal.
 - **SSE cancellation and async-stream ownership.** `SseFramingReader` no longer probes `StreamReader.EndOfStream`, which could perform a synchronous read and silently stop on cancellation. It now awaits cancellation-aware line reads, preserves normal EOF handling for unterminated frames, and leaves the caller-owned stream open.
 - **OpenAI provider error boundaries preserve semantics without leaking configured credentials.** Direct or mapped provider failures retain subtype, retry metadata, and safe identity; unsafe inners are removed. Auth callback, stream-open, stream-read, and disposal errors are sanitized, caller cancellation remains unwrapped, and cleanup cannot replace a primary read failure.
 
