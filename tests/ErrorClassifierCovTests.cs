@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -609,6 +610,71 @@ namespace Lidarr.Plugin.Common.Tests
             // Assert - The regex \d+ matches "1" before the 'e'
             var rateLimitEx = Assert.IsType<RateLimitException>(result);
             Assert.Equal(TimeSpan.FromSeconds(1), rateLimitEx.RetryAfter);
+        }
+
+        [Fact]
+        public void MapHttpError_429_WithFiniteHugeRetryAfter_ReturnsRateLimitWithoutHint()
+        {
+            var responseBody = @"retry_after: 1.7976931348623157";
+
+            var result = LlmErrorMapper.MapHttpError("test-provider", 429, responseBody);
+
+            var rateLimitEx = Assert.IsType<RateLimitException>(result);
+            Assert.Equal("test-provider", rateLimitEx.ProviderId);
+            Assert.Equal(LlmErrorCode.RateLimited, rateLimitEx.ErrorCode);
+            Assert.Null(rateLimitEx.RetryAfter);
+        }
+
+        [Theory]
+        [InlineData(401, typeof(AuthenticationException), LlmErrorCode.AuthenticationFailed)]
+        [InlineData(503, typeof(ProviderException), LlmErrorCode.ProviderOverloaded)]
+        public void MapHttpError_HugeRetryAfter_PreservesNonRateLimitMappingAndInner(
+            int statusCode,
+            Type expectedExceptionType,
+            LlmErrorCode expectedErrorCode)
+        {
+            var responseBody = @"retry_after: 1.7976931348623157";
+            var inner = new InvalidOperationException("upstream failure");
+
+            var result = LlmErrorMapper.MapHttpError("test-provider", statusCode, responseBody, inner);
+
+            Assert.IsType(expectedExceptionType, result);
+            Assert.Equal("test-provider", result.ProviderId);
+            Assert.Equal(expectedErrorCode, result.ErrorCode);
+            Assert.Same(inner, result.InnerException);
+        }
+
+        [Fact]
+        public void MapHttpError_429_WithHundredsOfRetryAfterDigits_ReturnsRateLimitWithoutHint()
+        {
+            var responseBody = $"retry_after: {new string('9', 256)}";
+
+            var result = LlmErrorMapper.MapHttpError("test-provider", 429, responseBody);
+
+            var rateLimitEx = Assert.IsType<RateLimitException>(result);
+            Assert.Equal("test-provider", rateLimitEx.ProviderId);
+            Assert.Equal(LlmErrorCode.RateLimited, rateLimitEx.ErrorCode);
+            Assert.Null(rateLimitEx.RetryAfter);
+        }
+
+        [Fact]
+        public void MapHttpError_429_WithDotDecimalUsesInvariantCultureAndRestoresCulture()
+        {
+            var originalCulture = CultureInfo.CurrentCulture;
+            try
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo("de-DE");
+                var result = LlmErrorMapper.MapHttpError("test-provider", 429, @"retry_after: 1.5");
+
+                var rateLimitEx = Assert.IsType<RateLimitException>(result);
+                Assert.Equal(TimeSpan.FromSeconds(1.5), rateLimitEx.RetryAfter);
+            }
+            finally
+            {
+                CultureInfo.CurrentCulture = originalCulture;
+            }
+
+            Assert.Equal(originalCulture, CultureInfo.CurrentCulture);
         }
 
         #endregion
