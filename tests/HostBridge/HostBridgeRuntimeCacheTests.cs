@@ -531,7 +531,7 @@ public class HostBridgeRuntimeCacheTests : IDisposable
             ownerCancellation.Cancel();
 
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
-                async () => await owner.WaitAsync(TimeSpan.FromSeconds(10)));
+                async () => await owner!.WaitAsync(TimeSpan.FromSeconds(10)));
             ControlledRuntime? recovered = await follower.WaitAsync(TimeSpan.FromSeconds(10));
 
             Assert.NotNull(recovered);
@@ -564,7 +564,7 @@ public class HostBridgeRuntimeCacheTests : IDisposable
             Assert.False(owner!.IsCompleted);
 
             cache.ReleaseFirstB.TrySetResult();
-            Assert.NotNull(await owner.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.NotNull(await owner!.WaitAsync(TimeSpan.FromSeconds(10)));
         }
         finally
         {
@@ -593,7 +593,7 @@ public class HostBridgeRuntimeCacheTests : IDisposable
             Assert.False(differentKey!.IsCompleted);
 
             cache.ReleaseFirstB.TrySetResult();
-            ControlledRuntime? first = await owner.WaitAsync(TimeSpan.FromSeconds(10));
+            ControlledRuntime? first = await owner!.WaitAsync(TimeSpan.FromSeconds(10));
             ControlledRuntime? same = await sameKey.WaitAsync(TimeSpan.FromSeconds(10));
             ControlledRuntime? different = await differentKey.WaitAsync(TimeSpan.FromSeconds(10));
 
@@ -627,12 +627,12 @@ public class HostBridgeRuntimeCacheTests : IDisposable
 
             if (returnNull)
             {
-                Assert.Null(await owner.WaitAsync(TimeSpan.FromSeconds(10)));
+                Assert.Null(await owner!.WaitAsync(TimeSpan.FromSeconds(10)));
             }
             else
             {
                 await Assert.ThrowsAsync<InvalidOperationException>(
-                    async () => await owner.WaitAsync(TimeSpan.FromSeconds(10)));
+                    async () => await owner!.WaitAsync(TimeSpan.FromSeconds(10)));
             }
 
             Assert.NotNull(await follower.WaitAsync(TimeSpan.FromSeconds(10)));
@@ -641,6 +641,70 @@ public class HostBridgeRuntimeCacheTests : IDisposable
         {
             cache.ReleaseFirstB.TrySetResult();
             await AwaitCleanupAsync(cache, null, owner, follower);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ResetAsync_PendingFaultOrNullCreationDoesNotInheritOwnerOutcome(bool returnNull)
+    {
+        var cache = new OutcomeCreationCache(returnNull);
+        Task<ControlledRuntime?>? owner = null;
+        Task? reset = null;
+
+        try
+        {
+            owner = cache.GetAsync(new ControlledSettings("B"));
+            await cache.FirstBEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            reset = cache.ResetAsync();
+            cache.ReleaseFirstB.TrySetResult();
+
+            if (returnNull)
+            {
+                Assert.Null(await owner!.WaitAsync(TimeSpan.FromSeconds(10)));
+            }
+            else
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(
+                    async () => await owner!.WaitAsync(TimeSpan.FromSeconds(10)));
+            }
+
+            await reset.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.NotNull(await cache.GetAsync(new ControlledSettings("B")));
+        }
+        finally
+        {
+            cache.ReleaseFirstB.TrySetResult();
+            await AwaitCleanupAsync(cache, null, owner, reset);
+        }
+    }
+
+    [Fact]
+    public async Task ResetAsync_PendingOwnerCancellationCompletesAndAllowsRecovery()
+    {
+        var cache = new BlockedCreationCache();
+        using var ownerCancellation = new CancellationTokenSource();
+        Task<ControlledRuntime?>? owner = null;
+        Task? reset = null;
+
+        try
+        {
+            owner = cache.GetAsync(new ControlledSettings("B"), ownerCancellation.Token);
+            ControlledRuntime canceledRuntime = await cache.FirstBCreated.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            reset = cache.ResetAsync();
+            ownerCancellation.Cancel();
+
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                async () => await owner!.WaitAsync(TimeSpan.FromSeconds(10)));
+            await reset.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.NotNull(await cache.GetAsync(new ControlledSettings("B")));
+            Assert.Equal(1, canceledRuntime.DisposeCalls);
+        }
+        finally
+        {
+            cache.ReleaseFirstB.TrySetResult();
+            await AwaitCleanupAsync(cache, null, owner, reset);
         }
     }
 
