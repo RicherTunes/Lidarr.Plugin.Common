@@ -615,7 +615,7 @@ namespace Lidarr.Plugin.Common.Tests
         [Fact]
         public void MapHttpError_429_WithFiniteHugeRetryAfter_ReturnsRateLimitWithoutHint()
         {
-            var responseBody = @"retry_after: 1.7976931348623157";
+            var responseBody = @"retry_after: 1000000000000";
 
             var result = LlmErrorMapper.MapHttpError("test-provider", 429, responseBody);
 
@@ -633,7 +633,7 @@ namespace Lidarr.Plugin.Common.Tests
             Type expectedExceptionType,
             LlmErrorCode expectedErrorCode)
         {
-            var responseBody = @"retry_after: 1.7976931348623157";
+            var responseBody = @"retry_after: 1000000000000";
             var inner = new InvalidOperationException("upstream failure");
 
             var result = LlmErrorMapper.MapHttpError("test-provider", statusCode, responseBody, inner);
