@@ -20,6 +20,8 @@ public sealed class RetryBodyJsonCompatibilityTests
     [InlineData("{\"error\":{\"retry_after\":5}}")]
     [InlineData("{\"retry_after\":5,\"retry_after\":5}")]
     [InlineData("{\"retry_after\":5,\"retry-after\":5}")]
+    [InlineData("{\"retry_after\":5,\"retry_after\":6}")]
+    [InlineData("{\"retry_after\":5,\"retry-after\":6}")]
     [InlineData("{\"retry_after\":5")]
     [InlineData("{\"RETRY_AFTER\":5}")]
     [InlineData("{\"retryafter\":5}")]
@@ -53,6 +55,15 @@ public sealed class RetryBodyJsonCompatibilityTests
             + "\"}";
 
         Assert.Null(Map(body).RetryAfter);
+    }
+
+    [Fact]
+    public void ExactlyAtLimitInput_RemainsParseable()
+    {
+        var body = BuildExactSizeBody(LlmJsonSerializer.MaxJsonSize);
+
+        Assert.Equal(LlmJsonSerializer.MaxJsonSize, body.Length);
+        Assert.Equal(TimeSpan.FromSeconds(5), Map(body).RetryAfter);
     }
 
     [Fact]
@@ -94,5 +105,12 @@ public sealed class RetryBodyJsonCompatibilityTests
         }
 
         return body + "}";
+    }
+
+    private static string BuildExactSizeBody(int size)
+    {
+        const string prefix = "{\"retry_after\":5,\"padding\":\"";
+        const string suffix = "\"}";
+        return prefix + new string('x', size - prefix.Length - suffix.Length) + suffix;
     }
 }

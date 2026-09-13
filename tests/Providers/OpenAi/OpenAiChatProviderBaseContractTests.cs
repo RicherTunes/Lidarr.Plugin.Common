@@ -387,6 +387,25 @@ public sealed class OpenAiChatProviderBaseContractTests
     }
 
     [Fact]
+    public async Task CompleteAsync_PassesExactCompleteBodyToVirtualErrorHook()
+    {
+        var body = BodyWithHintAfterDisplayLimit(19);
+        string? observedBody = null;
+        var provider = new TestProvider(
+            new ScriptedTransport { Completion = new(429, body) },
+            errorMapper: (_, suppliedBody, _, _) =>
+            {
+                observedBody = suppliedBody;
+                return new RateLimitException("test", "mapped", TimeSpan.FromSeconds(19));
+            });
+
+        await Assert.ThrowsAsync<RateLimitException>(() =>
+            provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+
+        Assert.Equal(body, observedBody);
+    }
+
+    [Fact]
     public async Task CheckHealthAsync_PassesCompleteBodyToMappedErrorHook()
     {
         var body = BodyWithHintAfterDisplayLimit(23);
@@ -420,6 +439,27 @@ public sealed class OpenAiChatProviderBaseContractTests
         });
 
         Assert.Equal(TimeSpan.FromSeconds(29), error.RetryAfter);
+    }
+
+    [Fact]
+    public async Task StreamAsync_PassesExactCompleteBodyToVirtualErrorHook()
+    {
+        var body = BodyWithHintAfterDisplayLimit(31);
+        string? observedBody = null;
+        var provider = new TestProvider(
+            new ErrorStreamTransport(body),
+            errorMapper: (_, suppliedBody, _, _) =>
+            {
+                observedBody = suppliedBody;
+                return new RateLimitException("test", "mapped", TimeSpan.FromSeconds(31));
+            });
+
+        await Assert.ThrowsAsync<RateLimitException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+
+        Assert.Equal(body, observedBody);
     }
 
     [Fact]
