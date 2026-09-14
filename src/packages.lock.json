@@ -40,17 +40,17 @@
       },
       "Microsoft.AspNetCore.DataProtection": {
         "type": "Direct",
-        "requested": "[8.0.25, )",
-        "resolved": "8.0.25",
-        "contentHash": "BJqJsMW0aHNCsFUoNpPbbbcfcs79PB7gwrWn0FwqKFlr1TtgOIfEgyDVLLSWCgm3nRctM6uGquXnbYmgtWqssQ==",
+        "requested": "[8.0.31, )",
+        "resolved": "8.0.31",
+        "contentHash": "58NhPyAR+ej51qNarzHuE7z5T+QG/r6v6sq5HQF9PliI5vToGap1HOA55lOXbF2ey2DWX2DLz8/evwKCEPRmBg==",
         "dependencies": {
-          "Microsoft.AspNetCore.Cryptography.Internal": "8.0.25",
-          "Microsoft.AspNetCore.DataProtection.Abstractions": "8.0.25",
+          "Microsoft.AspNetCore.Cryptography.Internal": "8.0.31",
+          "Microsoft.AspNetCore.DataProtection.Abstractions": "8.0.31",
           "Microsoft.Extensions.DependencyInjection.Abstractions": "8.0.2",
           "Microsoft.Extensions.Hosting.Abstractions": "8.0.1",
           "Microsoft.Extensions.Logging.Abstractions": "8.0.3",
           "Microsoft.Extensions.Options": "8.0.2",
-          "System.Security.Cryptography.Xml": "8.0.2"
+          "System.Security.Cryptography.Xml": "8.0.4"
         }
       },
       "Microsoft.AspNetCore.DataProtection.Extensions": {
@@ -221,13 +221,13 @@
       },
       "Microsoft.AspNetCore.Cryptography.Internal": {
         "type": "Transitive",
-        "resolved": "8.0.25",
-        "contentHash": "IoE2tChwISkEiyv1Oq+C+xA87+3xME+xnmjw+r8OqrPVdzC5ZkQeAr+YybCpTIo6SZ7//gmGHQ+mp/Y6SUSCNA=="
+        "resolved": "8.0.31",
+        "contentHash": "CnnMYle9GDJJq0/PkfhAwfU6nEb/xUGAt26vPojvOlhSqmuNw+ocTbIVFnp5X2f5dHjaC/kzHdxzwn3h5ggjWA=="
       },
       "Microsoft.AspNetCore.DataProtection.Abstractions": {
         "type": "Transitive",
-        "resolved": "8.0.25",
-        "contentHash": "AFcaoXKeV5dWEXB1QAdN6EBp/kKqjAk3hYyhMjIFwcXXhystMQJaJMhsAI8hZIGJHXxtd4y0Yb6RjsbLcCoqTg=="
+        "resolved": "8.0.31",
+        "contentHash": "J+rHIknFUh6zPBiPpIE3+AbVzk/q/CnPdN+Ez91US7xMMJKaujljApmgtINIxEiAwUA0/054EuSC43Q83Kh8EQ=="
       },
       "Microsoft.Bcl.AsyncInterfaces": {
         "type": "Transitive",
