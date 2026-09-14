@@ -8,14 +8,24 @@ Candidate: test/retry-json-compatibility-20260913
 Common now resolves an LLM 429 retry hint from a strict root JSON object.
 The accepted property names are retry_after and retry-after; the value
 must be one JSON number. Equal aliases are rejected as duplicates, as are
-unequal aliases and duplicate properties. Parsing is bounded by the shared
-10 MiB JSON size and depth limits, and durations must be finite, non-negative,
-and representable by TimeSpan. A body that is not JSON retains the legacy
+unequal aliases and repeated supported retry aliases; duplicate unrelated
+properties are ignored. Parsing is bounded by the shared JSON size limit of
+10*1024*1024 UTF-16 characters (LlmJsonSerializer.MaxJsonSize, compared
+against the body's string length) and the shared depth limit, and durations
+must be finite, non-negative, and representable by TimeSpan. A body that is not JSON retains the legacy
 retry[-_]?after token grammar with invariant decimal parsing. JSON-shaped
 but invalid input fails closed.
 
 OpenAI completion, health transport errors, and streaming errors now pass the
-complete buffered body to the protected mapper hook. The mapper performs
+complete buffered body to the protected mapper hook. This is a semantic
+change to that protected MapHttpError hook: overrides now receive the
+complete buffered body where they previously received a truncated body,
+while the hook signature itself is unchanged. Consumer compatibility
+requirement: a derived provider overriding this hook must bound any details
+it retains from the body (for example quota details) and route generic
+fallback display through a full-body/bounded-display mapping, with genuine
+transport/helper regression coverage, before it adopts this Common version.
+The mapper performs
 semantic classification on that body and uses the existing truncation only
 for exception display text. Header-derived Retry-After remains authoritative.
 Public hook signatures, status mapping, inner exceptions, and provider request
