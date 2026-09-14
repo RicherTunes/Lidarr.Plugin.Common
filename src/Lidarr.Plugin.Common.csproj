@@ -163,7 +163,7 @@
 
   <!-- CLI Subprocess Runner -->
   <ItemGroup>
-    <PackageReference Include="CliWrap" Version="3.10.1" />
+    <PackageReference Include="CliWrap" Version="3.10.5" />
   </ItemGroup>
 </Project>
 
