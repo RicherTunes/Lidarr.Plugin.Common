@@ -17,6 +17,9 @@ public sealed class OpenAiChatProviderBaseContractTests
     private const string Endpoint = "https://chat.example.test/v1/chat/completions";
     private const string OkBody = "{\"choices\":[{\"message\":{\"content\":\"ok\"},\"finish_reason\":\"stop\"}]}";
 
+    private static string BodyWithHintAfterDisplayLimit(int seconds)
+        => "{\"message\":\"" + new string('x', 600) + "\",\"retry_after\":" + seconds + "}";
+
     [Fact]
     public async Task CompleteAsync_SendsThePinnedDefaultWireBody()
     {
@@ -369,6 +372,94 @@ public sealed class OpenAiChatProviderBaseContractTests
         var health = await provider.CheckHealthAsync();
         Assert.False(health.IsHealthy); Assert.Equal("503", health.ErrorCode);
         Assert.Equal("{\"model\":\"test-model\",\"messages\":[{\"role\":\"user\",\"content\":\"Reply with OK\"}],\"max_tokens\":5}", transport.LastCompletionRequest!.JsonBody);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_PassesCompleteBodyToDefaultErrorMapping()
+    {
+        var body = BodyWithHintAfterDisplayLimit(17);
+        var provider = new TestProvider(new ScriptedTransport { Completion = new(429, body) });
+
+        var error = await Assert.ThrowsAsync<RateLimitException>(() =>
+            provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+
+        Assert.Equal(TimeSpan.FromSeconds(17), error.RetryAfter);
+    }
+
+    [Fact]
+    public async Task CompleteAsync_PassesExactCompleteBodyToVirtualErrorHook()
+    {
+        var body = BodyWithHintAfterDisplayLimit(19);
+        string? observedBody = null;
+        var provider = new TestProvider(
+            new ScriptedTransport { Completion = new(429, body) },
+            errorMapper: (_, suppliedBody, _, _) =>
+            {
+                observedBody = suppliedBody;
+                return new RateLimitException("test", "mapped", TimeSpan.FromSeconds(19));
+            });
+
+        await Assert.ThrowsAsync<RateLimitException>(() =>
+            provider.CompleteAsync(new LlmRequest { Prompt = "hi" }));
+
+        Assert.Equal(body, observedBody);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_PassesCompleteBodyToMappedErrorHook()
+    {
+        var body = BodyWithHintAfterDisplayLimit(23);
+        string? observedBody = null;
+        var provider = new TestProvider(
+            new ScriptedTransport
+            {
+                Completion = new(503, body, TransportException: new InvalidOperationException("transport")),
+            },
+            errorMapper: (_, suppliedBody, _, _) =>
+            {
+                observedBody = suppliedBody;
+                return new ProviderException("test", LlmErrorCode.ProviderUnavailable, "mapped");
+            });
+
+        var health = await provider.CheckHealthAsync();
+
+        Assert.False(health.IsHealthy);
+        Assert.Equal(body, observedBody);
+    }
+
+    [Fact]
+    public async Task StreamAsync_PassesCompleteBodyToDefaultErrorMapping()
+    {
+        var body = BodyWithHintAfterDisplayLimit(29);
+        var provider = new TestProvider(new ErrorStreamTransport(body));
+
+        var error = await Assert.ThrowsAsync<RateLimitException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+
+        Assert.Equal(TimeSpan.FromSeconds(29), error.RetryAfter);
+    }
+
+    [Fact]
+    public async Task StreamAsync_PassesExactCompleteBodyToVirtualErrorHook()
+    {
+        var body = BodyWithHintAfterDisplayLimit(31);
+        string? observedBody = null;
+        var provider = new TestProvider(
+            new ErrorStreamTransport(body),
+            errorMapper: (_, suppliedBody, _, _) =>
+            {
+                observedBody = suppliedBody;
+                return new RateLimitException("test", "mapped", TimeSpan.FromSeconds(31));
+            });
+
+        await Assert.ThrowsAsync<RateLimitException>(async () =>
+        {
+            await foreach (var _ in provider.StreamAsync(new LlmRequest { Prompt = "hi" })!) { }
+        });
+
+        Assert.Equal(body, observedBody);
     }
 
     [Fact]
@@ -749,6 +840,15 @@ public sealed class OpenAiChatProviderBaseContractTests
             LastStreamRequest = request;
             return ValueTask.FromResult(new OpenAiChatStreamResponse(200, StreamContent is null ? Stream.Null : new MemoryStream(System.Text.Encoding.UTF8.GetBytes(StreamContent)), dispose: () => { StreamResponseDisposed = true; return ValueTask.CompletedTask; }));
         }
+    }
+
+    private sealed class ErrorStreamTransport(string body) : IOpenAiChatTransport
+    {
+        public ValueTask<OpenAiChatResponse> SendAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new OpenAiChatResponse(429, body));
+
+        public ValueTask<OpenAiChatStreamResponse> OpenStreamAsync(OpenAiChatRequest request, CancellationToken cancellationToken)
+            => ValueTask.FromResult(new OpenAiChatStreamResponse(429, Stream.Null, errorBody: body));
     }
 
     private sealed class CancellingTransport : IOpenAiChatTransport

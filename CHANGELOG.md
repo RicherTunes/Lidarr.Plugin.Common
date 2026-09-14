@@ -49,6 +49,13 @@ Template to copy when drafting a release:
   preserved. The bounded H3 follow-up does not add factory timeouts or reentrant
   factory support.
 
+- LLM 429 body hints now accept strict root JSON retry_after and
+  retry-after numeric aliases, including exponent notation, with bounded
+  size/depth, duplicate, type, finite-value, and representability checks.
+  Legacy token parsing remains the fallback for non-JSON bodies. OpenAI
+  adapters classify the complete response body while retaining bounded
+  exception display text; explicit Retry-After headers still take precedence.
+
 - Legacy LLM body `Retry-After` parsing now uses invariant dot-decimal parsing
   and ignores nonfinite or unrepresentable durations. HTTP status mapping,
   supplied inner exceptions, explicit header precedence, and the existing

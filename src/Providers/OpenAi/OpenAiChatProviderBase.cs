@@ -83,7 +83,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
                 return ProviderHealthResult.Healthy(stopwatch.Elapsed, ProviderId, "apiKey", _model);
             if (response.TransportException is null)
                 return ProviderHealthResult.Unhealthy($"HTTP {response.StatusCode}", stopwatch.Elapsed, ProviderId, "apiKey", _model, response.StatusCode.ToString());
-            throw MapSafeHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, response.TransportException);
+            throw MapSafeHttpError(response.StatusCode, response.Body, response.RetryAfter, response.TransportException);
         }
         catch (LlmProviderException exception)
         {
@@ -124,7 +124,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
             var response = await SendAsync(BuildRequestBody(request), requestTimeout, cancellationToken).ConfigureAwait(false);
             if (response.StatusCode != (int)HttpStatusCode.OK)
             {
-                throw MapSafeHttpError(response.StatusCode, Truncate(response.Body), response.RetryAfter, response.TransportException);
+                throw MapSafeHttpError(response.StatusCode, response.Body, response.RetryAfter, response.TransportException);
             }
 
             var result = ParseCompletion(response.Body ?? string.Empty);
@@ -161,7 +161,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
     protected virtual void AddCompletionRequestHeaders(IDictionary<string, string> headers) { }
     protected virtual void AddStreamingRequestHeaders(IDictionary<string, string> headers) { }
     protected virtual LlmProviderException MapHttpError(int statusCode, string? body, TimeSpan? retryAfter, Exception? inner)
-        => LlmErrorMapper.MapHttpError(ProviderId, statusCode, body, retryAfter, inner);
+        => LlmErrorMapper.MapHttpErrorWithBody(ProviderId, statusCode, body, Truncate(body), retryAfter, inner);
     protected virtual LlmResponse ParseCompletion(string content)
     {
         if (string.IsNullOrWhiteSpace(content)) throw InvalidResponse("The provider returned an empty completion response.");
@@ -234,7 +234,7 @@ public abstract class OpenAiChatProviderBase : ILlmProvider
         {
             if (response.StatusCode != (int)HttpStatusCode.OK)
             {
-                primaryError = SanitizeException(MapHttpError(response.StatusCode, Truncate(response.ErrorBody), response.RetryAfter, null));
+                primaryError = SanitizeException(MapHttpError(response.StatusCode, response.ErrorBody, response.RetryAfter, null));
                 reachedTerminalState = true;
             }
             else
